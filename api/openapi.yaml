@@ -1,0 +1,11 @@
+openapi: 3.0.3
+info:
+  title: Zyad Cloud API
+  version: 0.1.0
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy response

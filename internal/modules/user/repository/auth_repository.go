@@ -1,0 +1,444 @@
+package repository
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"zyad.cloud/internal/modules/user/service"
+	"zyad.cloud/internal/platform/database"
+)
+
+type AuthRepository struct {
+	db *database.Pool
+}
+
+func NewAuthRepository(db *database.Pool) *AuthRepository {
+	return &AuthRepository{db: db}
+}
+
+func (r *AuthRepository) FindLoginUserByIdentifier(ctx context.Context, identifier string) (service.LoginUser, error) {
+	identifier = strings.TrimSpace(identifier)
+
+	var user service.LoginUser
+	err := r.db.QueryRow(ctx, `
+		SELECT id, name, email, COALESCE(username, ''), COALESCE(password_hash, ''), status, deleted_at
+		FROM users
+		WHERE deleted_at IS NULL
+			AND (lower(email) = lower($1) OR lower(username) = lower($1))
+		LIMIT 1
+	`, identifier).Scan(
+		&user.ID,
+		&user.Name,
+		&user.Email,
+		&user.Username,
+		&user.PasswordHash,
+		&user.Status,
+		&user.DeletedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return service.LoginUser{}, service.ErrLoginUserNotFound
+		}
+		return service.LoginUser{}, err
+	}
+
+	roles, err := r.roleSlugs(ctx, user.ID)
+	if err != nil {
+		return service.LoginUser{}, err
+	}
+	permissions, err := r.permissionSlugs(ctx, user.ID)
+	if err != nil {
+		return service.LoginUser{}, err
+	}
+	user.Roles = roles
+	user.Permissions = permissions
+
+	return user, nil
+}
+
+func (r *AuthRepository) CreateSession(ctx context.Context, session service.NewSession) (string, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx)
+
+	var id string
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO sessions (
+			user_id,
+			refresh_token_hash,
+			device_name,
+			user_agent,
+			ip_address,
+			last_used_at,
+			expires_at,
+			created_at
+		)
+		VALUES ($1, $2, $3, $4, NULLIF($5, '')::inet, now(), $6, now())
+		RETURNING id
+	`, session.UserID, session.RefreshTokenHash, session.DeviceName, session.UserAgent, session.IPAddress, session.ExpiresAt).Scan(&id); err != nil {
+		return "", err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO refresh_tokens (session_id, user_id, token_hash, expires_at, created_at)
+		VALUES ($1, $2, $3, $4, now())
+	`, id, session.UserID, session.RefreshTokenHash, session.ExpiresAt); err != nil {
+		return "", err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+
+	return id, nil
+}
+
+func (r *AuthRepository) FindRefreshSessionByTokenHash(ctx context.Context, tokenHash string) (service.RefreshSession, error) {
+	var session service.RefreshSession
+	var tokenRevokedAt sql.NullTime
+	var tokenReplacedByID sql.NullString
+	var sessionRevokedAt sql.NullTime
+
+	err := r.db.QueryRow(ctx, `
+		SELECT
+			rt.id,
+			s.id,
+			u.id,
+			u.name,
+			u.email,
+			COALESCE(u.username, ''),
+			u.status,
+			rt.revoked_at,
+			rt.replaced_by_token_id::text,
+			s.revoked_at,
+			s.expires_at
+		FROM refresh_tokens rt
+		JOIN sessions s ON s.id = rt.session_id
+		JOIN users u ON u.id = rt.user_id
+		WHERE rt.token_hash = $1
+		LIMIT 1
+	`, tokenHash).Scan(
+		&session.TokenID,
+		&session.SessionID,
+		&session.UserID,
+		&session.Name,
+		&session.Email,
+		&session.Username,
+		&session.Status,
+		&tokenRevokedAt,
+		&tokenReplacedByID,
+		&sessionRevokedAt,
+		&session.SessionExpiresAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return service.RefreshSession{}, service.ErrRefreshTokenNotFound
+		}
+		return service.RefreshSession{}, err
+	}
+
+	if tokenRevokedAt.Valid {
+		session.TokenRevokedAt = &tokenRevokedAt.Time
+	}
+	if tokenReplacedByID.Valid {
+		session.TokenReplacedByID = tokenReplacedByID.String
+	}
+	if sessionRevokedAt.Valid {
+		session.SessionRevokedAt = &sessionRevokedAt.Time
+	}
+
+	roles, err := r.roleSlugs(ctx, session.UserID)
+	if err != nil {
+		return service.RefreshSession{}, err
+	}
+	permissions, err := r.permissionSlugs(ctx, session.UserID)
+	if err != nil {
+		return service.RefreshSession{}, err
+	}
+	session.Roles = roles
+	session.Permissions = permissions
+
+	return session, nil
+}
+
+func (r *AuthRepository) FindCurrentUser(ctx context.Context, userID string, sessionID string) (service.CurrentUser, error) {
+	var user service.CurrentUser
+	var emailVerifiedAt sql.NullTime
+	var phoneVerifiedAt sql.NullTime
+	var avatarURL sql.NullString
+	var bio sql.NullString
+	var jobTitle sql.NullString
+	var department sql.NullString
+	var company sql.NullString
+	var address sql.NullString
+	var timezoneValue sql.NullString
+	var language sql.NullString
+	var ipAddress sql.NullString
+	var lastUsedAt sql.NullTime
+	var revokedAt sql.NullTime
+
+	err := r.db.QueryRow(ctx, `
+		SELECT
+			u.id,
+			u.name,
+			u.email,
+			COALESCE(u.username, ''),
+			COALESCE(u.phone, ''),
+			u.status,
+			u.email_verified_at,
+			u.phone_verified_at,
+			p.avatar_url,
+			p.bio,
+			p.job_title,
+			p.department,
+			p.company,
+			p.address,
+			p.timezone,
+			p.language,
+			s.id,
+			COALESCE(s.device_name, ''),
+			s.ip_address::text,
+			s.last_used_at,
+			s.expires_at,
+			s.revoked_at
+		FROM users u
+		JOIN sessions s ON s.user_id = u.id
+		LEFT JOIN user_profiles p ON p.user_id = u.id
+		WHERE u.id = $1
+			AND s.id = $2
+			AND u.deleted_at IS NULL
+		LIMIT 1
+	`, userID, sessionID).Scan(
+		&user.ID,
+		&user.Name,
+		&user.Email,
+		&user.Username,
+		&user.Phone,
+		&user.Status,
+		&emailVerifiedAt,
+		&phoneVerifiedAt,
+		&avatarURL,
+		&bio,
+		&jobTitle,
+		&department,
+		&company,
+		&address,
+		&timezoneValue,
+		&language,
+		&user.Session.ID,
+		&user.Session.DeviceName,
+		&ipAddress,
+		&lastUsedAt,
+		&user.Session.ExpiresAt,
+		&revokedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return service.CurrentUser{}, service.ErrCurrentUserNotFound
+		}
+		return service.CurrentUser{}, err
+	}
+
+	if emailVerifiedAt.Valid {
+		user.EmailVerifiedAt = &emailVerifiedAt.Time
+	}
+	if phoneVerifiedAt.Valid {
+		user.PhoneVerifiedAt = &phoneVerifiedAt.Time
+	}
+	if avatarURL.Valid {
+		user.Profile.AvatarURL = avatarURL.String
+	}
+	if bio.Valid {
+		user.Profile.Bio = bio.String
+	}
+	if jobTitle.Valid {
+		user.Profile.JobTitle = jobTitle.String
+	}
+	if department.Valid {
+		user.Profile.Department = department.String
+	}
+	if company.Valid {
+		user.Profile.Company = company.String
+	}
+	if address.Valid {
+		user.Profile.Address = address.String
+	}
+	if timezoneValue.Valid {
+		user.Profile.Timezone = timezoneValue.String
+	}
+	if language.Valid {
+		user.Profile.Language = language.String
+	}
+	if ipAddress.Valid {
+		user.Session.IPAddress = ipAddress.String
+	}
+	if lastUsedAt.Valid {
+		user.Session.LastUsedAt = &lastUsedAt.Time
+	}
+	if revokedAt.Valid {
+		user.Session.RevokedAt = &revokedAt.Time
+	}
+
+	roles, err := r.roleSlugs(ctx, user.ID)
+	if err != nil {
+		return service.CurrentUser{}, err
+	}
+	permissions, err := r.permissionSlugs(ctx, user.ID)
+	if err != nil {
+		return service.CurrentUser{}, err
+	}
+	user.Roles = roles
+	user.Permissions = permissions
+
+	return user, nil
+}
+
+func (r *AuthRepository) RevokeSession(ctx context.Context, sessionID string, revokedAt time.Time) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE sessions
+		SET revoked_at = COALESCE(revoked_at, $2)
+		WHERE id = $1
+	`, sessionID, revokedAt)
+	return err
+}
+
+func (r *AuthRepository) RotateRefreshToken(ctx context.Context, rotation service.RefreshTokenRotation) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var newTokenID string
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO refresh_tokens (session_id, user_id, token_hash, expires_at, created_at)
+		VALUES ($1, $2, $3, $4, now())
+		RETURNING id
+	`, rotation.SessionID, rotation.UserID, rotation.NewTokenHash, rotation.NewTokenExpiresAt).Scan(&newTokenID); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE refresh_tokens
+		SET revoked_at = COALESCE(revoked_at, $2),
+			replaced_by_token_id = $3
+		WHERE id = $1
+	`, rotation.OldTokenID, rotation.RotatedAt, newTokenID); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE sessions
+		SET refresh_token_hash = $2,
+			last_used_at = $3,
+			expires_at = $4
+		WHERE id = $1
+	`, rotation.SessionID, rotation.NewTokenHash, rotation.RotatedAt, rotation.NewTokenExpiresAt); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+func (r *AuthRepository) UpdateLastLogin(ctx context.Context, userID string, at time.Time) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE users
+		SET last_login_at = $2, updated_at = now()
+		WHERE id = $1
+	`, userID, at)
+	return err
+}
+
+func (r *AuthRepository) RecordLoginHistory(ctx context.Context, history service.LoginHistoryRecord) error {
+	var userID any
+	if strings.TrimSpace(history.UserID) != "" {
+		userID = history.UserID
+	}
+
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO login_histories (
+			user_id,
+			identifier,
+			event,
+			success,
+			ip_address,
+			user_agent,
+			device_name,
+			reason,
+			created_at
+		)
+		VALUES ($1, $2, $3, $4, NULLIF($5, '')::inet, $6, $7, $8, now())
+	`, userID, history.Identifier, history.Event, history.Success, history.IPAddress, history.UserAgent, history.DeviceName, history.Reason)
+	return err
+}
+
+func (r *AuthRepository) roleSlugs(ctx context.Context, userID string) ([]string, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT DISTINCT COALESCE(NULLIF(r.slug, ''), r.role_name)
+		FROM user_roles ur
+		JOIN roles r ON r.id = ur.role_id
+		WHERE ur.user_id = $1
+		ORDER BY 1
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanStrings(rows)
+}
+
+func (r *AuthRepository) permissionSlugs(ctx context.Context, userID string) ([]string, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT DISTINCT permission_slug
+		FROM (
+			SELECT COALESCE(NULLIF(p.slug, ''), p.permission_name) AS permission_slug
+			FROM user_roles ur
+			JOIN role_permissions rp ON rp.role_id = ur.role_id
+			JOIN permissions p ON p.id = rp.permission_id
+			WHERE ur.user_id = $1
+			UNION
+			SELECT COALESCE(NULLIF(p.slug, ''), p.permission_name) AS permission_slug
+			FROM user_permissions up
+			JOIN permissions p ON p.id = up.permission_id
+			WHERE up.user_id = $1
+				AND up.effect = 'allow'
+			EXCEPT
+			SELECT COALESCE(NULLIF(p.slug, ''), p.permission_name) AS permission_slug
+			FROM user_permissions up
+			JOIN permissions p ON p.id = up.permission_id
+			WHERE up.user_id = $1
+				AND up.effect = 'deny'
+		) permissions
+		ORDER BY permission_slug
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanStrings(rows)
+}
+
+func scanStrings(rows pgx.Rows) ([]string, error) {
+	values := make([]string, 0)
+	for rows.Next() {
+		var value string
+		if err := rows.Scan(&value); err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("scan strings: %w", err)
+	}
+	return values, nil
+}

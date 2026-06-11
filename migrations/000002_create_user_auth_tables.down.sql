@@ -1,0 +1,10 @@
+DROP TABLE IF EXISTS audit_logs;
+DROP TABLE IF EXISTS login_histories;
+DROP TABLE IF EXISTS otp_codes;
+DROP TABLE IF EXISTS email_verification_tokens;
+DROP TABLE IF EXISTS password_reset_tokens;
+DROP TABLE IF EXISTS refresh_tokens;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS auth_identities;
+DROP TABLE IF EXISTS user_profiles;
+DROP TABLE IF EXISTS users;
