@@ -61,11 +61,35 @@ func newRouter(deps Dependencies) *gin.Engine {
 		})
 	})
 
-	if deps.PermissionHandler != nil {
-		deps.PermissionHandler.RegisterRoutes(api)
-	}
 	if deps.UserAuthHandler != nil {
 		deps.UserAuthHandler.RegisterRoutes(api)
+	}
+
+	protected := api.Group("")
+	protected.Use(middleware.Authenticate(deps.Authenticator))
+	if deps.UserAuthHandler != nil {
+		deps.UserAuthHandler.RegisterProtectedRoutes(protected)
+	}
+	if deps.UserHandler != nil {
+		deps.UserHandler.RegisterRoutes(protected)
+	}
+	if deps.PermissionHandler != nil {
+		deps.PermissionHandler.RegisterRoutes(protected)
+	}
+	if deps.NotificationTemplateHandler != nil {
+		deps.NotificationTemplateHandler.RegisterRoutes(protected)
+	}
+	if deps.NotificationVariableHandler != nil {
+		deps.NotificationVariableHandler.RegisterRoutes(protected)
+	}
+	if deps.NotificationLogHandler != nil {
+		deps.NotificationLogHandler.RegisterRoutes(protected)
+	}
+	if deps.NotificationPreferenceHandler != nil {
+		deps.NotificationPreferenceHandler.RegisterRoutes(protected)
+	}
+	if deps.NotificationHandler != nil {
+		deps.NotificationHandler.RegisterInternalRoutes(protected)
 	}
 
 	registerModuleRoutes(api)

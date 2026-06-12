@@ -58,14 +58,15 @@ type AppConfig struct {
 }
 
 type DatabaseConfig struct {
-	Type     string
-	Host     string
-	Port     int
-	Username string
-	Password string
-	Name     string
-	Schema   string
-	SSLMode  string
+	Type                  string
+	Host                  string
+	Port                  int
+	Username              string
+	Password              string
+	Name                  string
+	Schema                string
+	SSLMode               string
+	ConnectTimeoutSeconds int
 }
 
 type RedisConfig struct {
@@ -115,9 +116,11 @@ type MailConfig struct {
 }
 
 type NotificationConfig struct {
-	DefaultLocale string
-	ProviderMode  string
-	MaxAttempts   int
+	DefaultLocale         string
+	ProviderMode          string
+	MaxAttempts           int
+	WorkerIntervalSeconds int
+	WorkerBatchSize       int
 }
 
 type MikrotikConfig struct {

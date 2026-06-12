@@ -9,3 +9,1088 @@ paths:
       responses:
         "200":
           description: Healthy response
+  /api/v1/auth/reset-password:
+    post:
+      summary: Reset password using a one-time token
+      operationId: resetPassword
+      tags:
+        - Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "200":
+          description: Password reset successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "422":
+          description: Invalid token, password confirmation, or password policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/auth/change-password:
+    post:
+      summary: Change the authenticated user's password
+      operationId: changePassword
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "200":
+          description: Password changed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "401":
+          description: Access token or authenticated session is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Current password, confirmation, or password policy is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/admin/users:
+    post:
+      summary: Create a user
+      operationId: createUser
+      tags:
+        - Users
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDetailEnvelope"
+        "403":
+          description: Missing user.create permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Email or username already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid user data or role assignment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      summary: List users
+      operationId: listUsers
+      tags:
+        - Users
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive, pending, suspended, banned, deleted, invited]
+        - name: role
+          in: query
+          schema:
+            type: string
+        - name: organization_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: include_deleted
+          in: query
+          description: Requires user.restore permission when true.
+          schema:
+            type: boolean
+            default: false
+        - name: created_from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: created_to
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [name, email, status, created_at, updated_at]
+            default: created_at
+        - name: direction
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+      responses:
+        "200":
+          description: Users retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserListResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing user.read or user.restore permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid filter or pagination query
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/admin/users/{id}:
+    delete:
+      summary: Soft delete a user
+      operationId: deleteUser
+      tags:
+        - Users
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: User deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "403":
+          description: Missing user.delete permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found or already deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      summary: Update a user
+      operationId: updateUser
+      tags:
+        - Users
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserRequest"
+      responses:
+        "200":
+          description: User updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDetailEnvelope"
+        "403":
+          description: Missing user.update permission or status requires user.update_status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Email or username already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid or empty partial update
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      summary: Get user detail
+      operationId: getUser
+      tags:
+        - Users
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: include_deleted
+          in: query
+          description: Requires user.restore permission when true.
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: User retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDetailEnvelope"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing user.read or user.restore permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/admin/users/{id}/restore:
+    post:
+      summary: Restore a soft-deleted user
+      operationId: restoreUser
+      tags:
+        - Users
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: User restored successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDetailEnvelope"
+        "403":
+          description: Missing user.restore permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Deleted user not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Email or username conflicts with an active user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/admin/users/{id}/status:
+    patch:
+      summary: Update a user's status
+      operationId: updateUserStatus
+      tags:
+        - Users
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserStatusRequest"
+      responses:
+        "200":
+          description: User status updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDetailEnvelope"
+        "403":
+          description: Missing user.update_status permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid status or missing reason
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/admin/users/{id}/activate:
+    post:
+      summary: Activate a user
+      operationId: activateUser
+      tags:
+        - Users
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      responses:
+        "200":
+          description: User activated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDetailEnvelope"
+        "403":
+          description: Missing user.update_status permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/admin/users/{id}/suspend:
+    post:
+      summary: Suspend a user
+      operationId: suspendUser
+      tags:
+        - Users
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserStatusReasonRequest"
+      responses:
+        "200":
+          description: User suspended successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDetailEnvelope"
+        "403":
+          description: Missing user.update_status permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Reason is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/admin/users/{id}/ban:
+    post:
+      summary: Ban a user
+      operationId: banUser
+      tags:
+        - Users
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserStatusReasonRequest"
+      responses:
+        "200":
+          description: User banned successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDetailEnvelope"
+        "403":
+          description: Missing user.update_status permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Reason is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/admin/users/bulk-action:
+    post:
+      summary: Apply an action to multiple users
+      operationId: bulkUserAction
+      tags:
+        - Users
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkUserActionRequest"
+      responses:
+        "200":
+          description: Bulk action completed, including any per-user failures
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkUserActionEnvelope"
+        "403":
+          description: Missing permission required by the selected action
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid action, status, reason, or item count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  parameters:
+    UserID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ResetPasswordRequest:
+      type: object
+      required:
+        - token
+        - password
+        - password_confirmation
+      properties:
+        token:
+          type: string
+        password:
+          type: string
+          format: password
+        password_confirmation:
+          type: string
+          format: password
+    ChangePasswordRequest:
+      type: object
+      required:
+        - current_password
+        - new_password
+        - new_password_confirmation
+      properties:
+        current_password:
+          type: string
+          format: password
+        new_password:
+          type: string
+          format: password
+        new_password_confirmation:
+          type: string
+          format: password
+        logout_other_devices:
+          type: boolean
+          default: false
+    CreateUserRequest:
+      type: object
+      required:
+        - name
+        - email
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        username:
+          type: string
+        phone:
+          type: string
+        password:
+          type: string
+          format: password
+          description: When omitted, the user receives a one-time password setup link.
+        status:
+          type: string
+          enum: [active, inactive, pending, suspended, banned, invited]
+        profile:
+          $ref: "#/components/schemas/CreateUserProfile"
+        roles:
+          type: array
+          items:
+            $ref: "#/components/schemas/CreateUserRole"
+        send_invitation:
+          type: boolean
+          default: false
+    CreateUserProfile:
+      type: object
+      properties:
+        avatar_url:
+          type: string
+        bio:
+          type: string
+        job_title:
+          type: string
+        department:
+          type: string
+        company:
+          type: string
+        address:
+          type: string
+        timezone:
+          type: string
+        language:
+          type: string
+    CreateUserRole:
+      type: object
+      required:
+        - role_id
+      properties:
+        role_id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+          nullable: true
+    UpdateUserRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        username:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        avatar_url:
+          type: string
+          nullable: true
+        bio:
+          type: string
+          nullable: true
+        job_title:
+          type: string
+          nullable: true
+        department:
+          type: string
+          nullable: true
+        company:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        timezone:
+          type: string
+          nullable: true
+        language:
+          type: string
+          nullable: true
+    BulkUserActionRequest:
+      type: object
+      required:
+        - action
+        - user_ids
+      properties:
+        action:
+          type: string
+          enum: [delete, restore, update_status]
+        user_ids:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: string
+            format: uuid
+        payload:
+          type: object
+          properties:
+            status:
+              type: string
+              enum: [active, inactive, pending, suspended, banned, invited]
+            reason:
+              type: string
+              description: Required when status is suspended or banned.
+    BulkUserActionEnvelope:
+      type: object
+      required:
+        - success
+        - message
+        - data
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: bulk user action completed
+        data:
+          $ref: "#/components/schemas/BulkUserActionResponse"
+    BulkUserActionResponse:
+      type: object
+      required:
+        - action
+        - total
+        - succeeded
+        - failed
+        - results
+      properties:
+        action:
+          type: string
+        total:
+          type: integer
+        succeeded:
+          type: integer
+        failed:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/BulkUserActionResult"
+    BulkUserActionResult:
+      type: object
+      required:
+        - user_id
+        - success
+      properties:
+        user_id:
+          type: string
+        success:
+          type: boolean
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+    UpdateUserStatusRequest:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: [active, inactive, pending, suspended, banned, invited]
+        reason:
+          type: string
+          description: Required when status is suspended or banned.
+    UserStatusReasonRequest:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+    UserListItem:
+      type: object
+      required:
+        - id
+        - name
+        - email
+        - status
+        - roles
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        username:
+          type: string
+        phone:
+          type: string
+        status:
+          type: string
+        email_verified_at:
+          type: string
+          format: date-time
+          nullable: true
+        phone_verified_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_login_at:
+          type: string
+          format: date-time
+          nullable: true
+        roles:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+    UserListResponse:
+      type: object
+      required:
+        - success
+        - message
+        - data
+        - meta
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: users retrieved successfully
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserListItem"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+    UserDetailEnvelope:
+      type: object
+      required:
+        - success
+        - message
+        - data
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: user retrieved successfully
+        data:
+          $ref: "#/components/schemas/UserDetail"
+    UserDetail:
+      type: object
+      required:
+        - id
+        - name
+        - email
+        - status
+        - profile
+        - roles
+        - direct_permissions
+        - sessions_summary
+        - audit_summary
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        username:
+          type: string
+        phone:
+          type: string
+        status:
+          type: string
+        email_verified_at:
+          type: string
+          format: date-time
+          nullable: true
+        phone_verified_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_login_at:
+          type: string
+          format: date-time
+          nullable: true
+        profile:
+          type: object
+          properties:
+            avatar_url:
+              type: string
+            bio:
+              type: string
+            job_title:
+              type: string
+            department:
+              type: string
+            company:
+              type: string
+            address:
+              type: string
+            timezone:
+              type: string
+            language:
+              type: string
+        roles:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserRoleDetail"
+        direct_permissions:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserPermissionDetail"
+        sessions_summary:
+          $ref: "#/components/schemas/UserSessionSummary"
+        audit_summary:
+          $ref: "#/components/schemas/UserAuditSummary"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+    UserRoleDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        organization_id:
+          type: string
+          format: uuid
+        assigned_at:
+          type: string
+          format: date-time
+    UserPermissionDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        permission_id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        effect:
+          type: string
+          enum: [allow, deny]
+        organization_id:
+          type: string
+          format: uuid
+        assigned_at:
+          type: string
+          format: date-time
+    UserSessionSummary:
+      type: object
+      properties:
+        total:
+          type: integer
+        active:
+          type: integer
+        revoked:
+          type: integer
+        expired:
+          type: integer
+        last_active_at:
+          type: string
+          format: date-time
+          nullable: true
+    UserAuditSummary:
+      type: object
+      properties:
+        total:
+          type: integer
+        last_event:
+          type: string
+        last_event_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_actor_id:
+          type: string
+          format: uuid
+        last_ip_address:
+          type: string
+    PaginationMeta:
+      type: object
+      required:
+        - page
+        - per_page
+        - total
+        - total_pages
+      properties:
+        page:
+          type: integer
+        per_page:
+          type: integer
+        total:
+          type: integer
+          format: int64
+        total_pages:
+          type: integer
+    SuccessResponse:
+      type: object
+      required:
+        - success
+        - message
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: password reset successfully
+        data:
+          nullable: true
+    ErrorResponse:
+      type: object
+      required:
+        - success
+        - message
+        - error
+      properties:
+        success:
+          type: boolean
+          example: false
+        message:
+          type: string
+        error:
+          type: object
+          properties:
+            code:
+              type: string

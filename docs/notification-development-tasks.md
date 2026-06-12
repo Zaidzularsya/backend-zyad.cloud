@@ -58,8 +58,10 @@ Notification umum:
 
 ```env
 NOTIFICATION_DEFAULT_LOCALE=id-ID
-NOTIFICATION_PROVIDER_MODE=noop
+NOTIFICATION_PROVIDER_MODE=mail
 NOTIFICATION_MAX_ATTEMPTS=3
+NOTIFICATION_WORKER_INTERVAL_SECONDS=10
+NOTIFICATION_WORKER_BATCH_SIZE=20
 ```
 
 WhatsApp:
@@ -400,7 +402,7 @@ Scope:
 
 - Buat mailer interface.
 - Tambahkan noop mailer.
-- SMTP implementation menyusul.
+- Tambahkan SMTP implementation dengan fallback noop saat `MAIL_HOST` kosong. `done`
 
 Acceptance criteria:
 

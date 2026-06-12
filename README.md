@@ -148,6 +148,64 @@ backend-go/
 
 ---
 
+## 🧪 Development Commands
+
+### Unit Test
+
+Jalankan test biasa tanpa kebutuhan database:
+
+```bash
+go test ./...
+```
+
+### Integration Test Database
+
+Integration test database bersifat opt-in dan hanya berjalan dengan build tag `integration`. Pastikan `.env` berisi config test database terpisah, bukan database development/production:
+
+```env
+TEST_DB_TYPE=postgres
+TEST_DB_HOST=localhost
+TEST_DB_PORT=5432
+TEST_DB_USERNAME=postgres
+TEST_DB_PASSWORD=postgres
+TEST_DB_NAME=zyad_cloud_test
+TEST_DB_SCHEMA=public
+TEST_DB_SSL=disable
+TEST_DB_CONNECT_TIMEOUT_SECONDS=5
+```
+
+Database test wajib mengandung kata `test` pada `TEST_DB_NAME`. Helper test akan menjalankan migration dan melakukan cleanup table notification dengan `TRUNCATE ... CASCADE`.
+
+Jalankan semua integration test notification repository:
+
+```bash
+go test -tags=integration ./internal/core/notification/repository
+```
+
+Untuk compile-check integration test tanpa menjalankan test yang menyentuh database:
+
+```bash
+go test -tags=integration -run '^$' ./internal/core/notification/repository
+```
+
+### Notification Worker
+
+Jalankan satu batch outbox dan retry notification:
+
+```bash
+go run ./cmd/worker -once
+```
+
+Jalankan worker loop:
+
+```bash
+go run ./cmd/worker
+```
+
+Worker memakai env `NOTIFICATION_WORKER_INTERVAL_SECONDS` dan `NOTIFICATION_WORKER_BATCH_SIZE`. Default worker hanya mendaftarkan email dispatcher; WhatsApp tidak diproses worker sampai provider WhatsApp tersedia. Email akan memakai SMTP saat `MAIL_HOST` terisi, dan otomatis fallback ke `noop` saat `MAIL_HOST` kosong untuk local test.
+
+---
+
 ## 💡 Ide Tambahan & Peningkatan (Value-Added Suggestions)
 
 Berikut adalah beberapa rekomendasi fitur dan teknologi tambahan untuk meningkatkan nilai jual platform Anda:

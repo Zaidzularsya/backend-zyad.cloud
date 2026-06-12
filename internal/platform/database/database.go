@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"time"
 
 	"zyad.cloud/internal/config"
 
@@ -21,9 +22,17 @@ func Connect(ctx context.Context, cfg config.DatabaseConfig, logger *slog.Logger
 	if err != nil {
 		return nil, err
 	}
+	if cfg.ConnectTimeoutSeconds <= 0 {
+		cfg.ConnectTimeoutSeconds = 5
+	}
+	poolCfg.ConnConfig.ConnectTimeout = time.Duration(cfg.ConnectTimeoutSeconds) * time.Second
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
+		return nil, err
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
 		return nil, err
 	}
 

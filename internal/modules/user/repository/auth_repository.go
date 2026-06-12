@@ -62,6 +62,45 @@ func (r *AuthRepository) FindLoginUserByIdentifier(ctx context.Context, identifi
 	return user, nil
 }
 
+func (r *AuthRepository) FindPasswordResetUserByEmail(ctx context.Context, email string) (service.PasswordResetUser, error) {
+	email = strings.TrimSpace(email)
+
+	var user service.PasswordResetUser
+	err := r.db.QueryRow(ctx, `
+		SELECT id, name, email, status
+		FROM users
+		WHERE deleted_at IS NULL
+			AND lower(email) = lower($1)
+		LIMIT 1
+	`, email).Scan(&user.ID, &user.Name, &user.Email, &user.Status)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return service.PasswordResetUser{}, service.ErrPasswordResetUserNotFound
+		}
+		return service.PasswordResetUser{}, err
+	}
+
+	return user, nil
+}
+
+func (r *AuthRepository) FindPasswordChangeUser(ctx context.Context, userID string) (service.PasswordChangeUser, error) {
+	var user service.PasswordChangeUser
+	err := r.db.QueryRow(ctx, `
+		SELECT id, name, email, COALESCE(password_hash, '')
+		FROM users
+		WHERE id = $1
+			AND deleted_at IS NULL
+		LIMIT 1
+	`, userID).Scan(&user.ID, &user.Name, &user.Email, &user.PasswordHash)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return service.PasswordChangeUser{}, service.ErrPasswordChangeUserNotFound
+		}
+		return service.PasswordChangeUser{}, err
+	}
+	return user, nil
+}
+
 func (r *AuthRepository) CreateSession(ctx context.Context, session service.NewSession) (string, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -99,6 +138,185 @@ func (r *AuthRepository) CreateSession(ctx context.Context, session service.NewS
 	}
 
 	return id, nil
+}
+
+func (r *AuthRepository) CreatePasswordResetToken(ctx context.Context, token service.NewPasswordResetToken) error {
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO password_reset_tokens (
+			user_id,
+			token_hash,
+			expires_at,
+			created_at
+		)
+		VALUES ($1, $2, $3, now())
+	`, token.UserID, token.TokenHash, token.ExpiresAt)
+	return err
+}
+
+func (r *AuthRepository) FindPasswordResetTokenByHash(ctx context.Context, tokenHash string) (service.PasswordResetToken, error) {
+	var token service.PasswordResetToken
+	var usedAt sql.NullTime
+	err := r.db.QueryRow(ctx, `
+		SELECT id, user_id, expires_at, used_at
+		FROM password_reset_tokens
+		WHERE token_hash = $1
+		LIMIT 1
+	`, tokenHash).Scan(&token.ID, &token.UserID, &token.ExpiresAt, &usedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return service.PasswordResetToken{}, service.ErrPasswordResetTokenNotFound
+		}
+		return service.PasswordResetToken{}, err
+	}
+	if usedAt.Valid {
+		token.UsedAt = &usedAt.Time
+	}
+	return token, nil
+}
+
+func (r *AuthRepository) CompletePasswordReset(
+	ctx context.Context,
+	tokenHash string,
+	passwordHash string,
+	usedAt time.Time,
+) (service.PasswordResetUser, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return service.PasswordResetUser{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var tokenID string
+	var expiresAt time.Time
+	var existingUsedAt sql.NullTime
+	var user service.PasswordResetUser
+	err = tx.QueryRow(ctx, `
+		SELECT prt.id, prt.user_id, prt.expires_at, prt.used_at, u.name, u.email, u.status
+		FROM password_reset_tokens prt
+		JOIN users u ON u.id = prt.user_id
+		WHERE prt.token_hash = $1
+			AND u.deleted_at IS NULL
+		LIMIT 1
+		FOR UPDATE OF prt, u
+	`, tokenHash).Scan(
+		&tokenID,
+		&user.ID,
+		&expiresAt,
+		&existingUsedAt,
+		&user.Name,
+		&user.Email,
+		&user.Status,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return service.PasswordResetUser{}, service.ErrPasswordResetTokenNotFound
+		}
+		return service.PasswordResetUser{}, err
+	}
+	if existingUsedAt.Valid || !expiresAt.After(usedAt) {
+		return service.PasswordResetUser{}, service.ErrPasswordResetTokenNotFound
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE users
+		SET password_hash = $2, updated_at = $3
+		WHERE id = $1
+	`, user.ID, passwordHash, usedAt); err != nil {
+		return service.PasswordResetUser{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE password_reset_tokens
+		SET used_at = $2
+		WHERE id = $1 AND used_at IS NULL
+	`, tokenID, usedAt); err != nil {
+		return service.PasswordResetUser{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE sessions
+		SET revoked_at = COALESCE(revoked_at, $2)
+		WHERE user_id = $1
+	`, user.ID, usedAt); err != nil {
+		return service.PasswordResetUser{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE refresh_tokens
+		SET revoked_at = COALESCE(revoked_at, $2)
+		WHERE user_id = $1
+	`, user.ID, usedAt); err != nil {
+		return service.PasswordResetUser{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return service.PasswordResetUser{}, err
+	}
+	return user, nil
+}
+
+func (r *AuthRepository) ChangePassword(ctx context.Context, change service.PasswordChange) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE users
+		SET password_hash = $2, updated_at = $3
+		WHERE id = $1
+			AND deleted_at IS NULL
+	`, change.UserID, change.PasswordHash, change.ChangedAt); err != nil {
+		return err
+	}
+
+	if change.LogoutOtherDevices {
+		if _, err := tx.Exec(ctx, `
+			UPDATE sessions
+			SET revoked_at = COALESCE(revoked_at, $3)
+			WHERE user_id = $1
+				AND id <> $2
+		`, change.UserID, change.CurrentSessionID, change.ChangedAt); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+			UPDATE refresh_tokens
+			SET revoked_at = COALESCE(revoked_at, $3)
+			WHERE user_id = $1
+				AND session_id <> $2
+		`, change.UserID, change.CurrentSessionID, change.ChangedAt); err != nil {
+			return err
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO audit_logs (
+			module,
+			event,
+			actor_user_id,
+			target_user_id,
+			target_type,
+			target_id,
+			metadata,
+			ip_address,
+			user_agent,
+			created_at
+		)
+		VALUES (
+			'user',
+			'password_changed',
+			$1,
+			$1,
+			'user',
+			$1,
+			jsonb_build_object('logout_other_devices', $2::boolean),
+			NULLIF($3, '')::inet,
+			$4,
+			$5
+		)
+	`, change.UserID, change.LogoutOtherDevices, change.IPAddress, change.UserAgent, change.ChangedAt); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }
 
 func (r *AuthRepository) FindRefreshSessionByTokenHash(ctx context.Context, tokenHash string) (service.RefreshSession, error) {

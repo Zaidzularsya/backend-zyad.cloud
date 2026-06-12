@@ -8,6 +8,13 @@ import (
 	"time"
 
 	"zyad.cloud/internal/config"
+	notificationdispatcher "zyad.cloud/internal/core/notification/dispatcher"
+	"zyad.cloud/internal/core/notification/domain"
+	notificationhandler "zyad.cloud/internal/core/notification/handler"
+	notificationpublisher "zyad.cloud/internal/core/notification/publisher"
+	notificationrepo "zyad.cloud/internal/core/notification/repository"
+	notificationservice "zyad.cloud/internal/core/notification/service"
+	notificationtemplate "zyad.cloud/internal/core/notification/template"
 	permissionhandler "zyad.cloud/internal/core/permission/handler"
 	permissionrepo "zyad.cloud/internal/core/permission/repository"
 	permissionservice "zyad.cloud/internal/core/permission/service"
@@ -16,7 +23,9 @@ import (
 	userservice "zyad.cloud/internal/modules/user/service"
 	"zyad.cloud/internal/platform/database"
 	"zyad.cloud/internal/platform/logger"
+	"zyad.cloud/internal/platform/mail"
 	redisplatform "zyad.cloud/internal/platform/redis"
+	"zyad.cloud/internal/platform/whatsapp"
 )
 
 type App struct {
@@ -52,20 +61,60 @@ func New(ctx context.Context) (*App, error) {
 	permService := permissionservice.New(permRepo)
 	permHandler := permissionhandler.New(permService)
 
+	templateRepo := notificationrepo.NewTemplateRepository(db)
+	templateRegistry := notificationtemplate.NewVariableRegistry()
+	templateValidator := notificationtemplate.NewValidator(templateRegistry)
+	templateRenderer := notificationtemplate.NewRenderer(templateRegistry)
+	templateService := notificationservice.NewTemplateService(templateRepo, templateValidator, templateRenderer)
+	templateHandler := notificationhandler.NewTemplateHandler(templateService, permService)
+	variableHandler := notificationhandler.NewVariableHandler(templateRegistry, permService)
+	logRepo := notificationrepo.NewNotificationLogRepository(db)
+	preferenceRepo := notificationrepo.NewPreferenceRepository(db)
+	outboxRepo := notificationrepo.NewOutboxRepository(db)
+	preferenceService := notificationservice.NewPreferenceService(preferenceRepo)
+	notificationService := notificationservice.NewNotificationService(
+		templateRepo,
+		logRepo,
+		preferenceRepo,
+		templateRenderer,
+		notificationdispatcher.NewEmailDispatcher(mail.NewMailerFromConfig(cfg.Mail)),
+		notificationdispatcher.NewWhatsAppDispatcher(whatsapp.NewNoopClient()),
+		notificationdispatcher.NewNoopDispatcher(domain.ChannelInApp),
+		notificationdispatcher.NewNoopDispatcher(domain.ChannelDiscord),
+	)
+	notificationHandler := notificationhandler.NewNotificationHandler(notificationService)
+	logHandler := notificationhandler.NewLogHandler(notificationService, permService)
+	preferenceHandler := notificationhandler.NewPreferenceHandler(preferenceService, permService)
+
 	authRepo := userrepo.NewAuthRepository(db)
 	authService, err := userservice.NewAuthService(authRepo, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("create auth service: %w", err)
 	}
+	authService.SetNotificationPublisher(notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts))
 	authHandler := userhandler.NewAuthHandler(authService)
+	userRepo := userrepo.NewUserRepository(db)
+	userService := userservice.NewUserService(userRepo)
+	if err := userService.Configure(cfg); err != nil {
+		return nil, fmt.Errorf("configure user service: %w", err)
+	}
+	userService.SetNotificationPublisher(notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts))
+	userHandler := userhandler.NewUserHandler(userService, permService)
 
 	router := newRouter(Dependencies{
-		Config:            cfg,
-		Logger:            log,
-		DB:                db,
-		Redis:             redisClient,
-		PermissionHandler: permHandler,
-		UserAuthHandler:   authHandler,
+		Config:                        cfg,
+		Logger:                        log,
+		DB:                            db,
+		Redis:                         redisClient,
+		NotificationHandler:           notificationHandler,
+		NotificationLogHandler:        logHandler,
+		NotificationPreferenceHandler: preferenceHandler,
+		NotificationTemplateHandler:   templateHandler,
+		NotificationVariableHandler:   variableHandler,
+		PermissionHandler:             permHandler,
+		UserAuthHandler:               authHandler,
+		UserHandler:                   userHandler,
+		Authenticator:                 authService,
 	})
 
 	server := &http.Server{

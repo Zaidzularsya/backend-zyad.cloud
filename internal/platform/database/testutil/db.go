@@ -51,13 +51,22 @@ func CleanupNotificationTables(t *testing.T, ctx context.Context, db *database.P
 
 	_, err := db.Exec(ctx, `
 		TRUNCATE
+			notification_outbox_events,
 			notification_logs,
-			notification_preferences,
-			notification_templates
+			notification_preferences
 		RESTART IDENTITY CASCADE
 	`)
 	if err != nil {
 		t.Fatalf("cleanup notification tables: %v", err)
+	}
+
+	_, err = db.Exec(ctx, `
+		DELETE FROM notification_templates
+		WHERE is_system = false
+			OR deleted_at IS NOT NULL
+	`)
+	if err != nil {
+		t.Fatalf("cleanup notification template test rows: %v", err)
 	}
 }
 

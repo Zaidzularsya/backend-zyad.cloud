@@ -257,8 +257,7 @@ func (r *NotificationLogRepository) MarkProcessing(ctx context.Context, id strin
 		UPDATE notification_logs
 		SET status = 'processing', updated_at = now()
 		WHERE id = $1
-			AND status IN ('pending', 'failed')
-			AND attempts < max_attempts
+			AND status IN ('pending', 'failed', 'dead')
 	`, id)
 }
 
@@ -308,6 +307,20 @@ func (r *NotificationLogRepository) MarkDead(ctx context.Context, id string, err
 			failed_at = COALESCE(failed_at, now()),
 			updated_at = now()
 		WHERE id = $1
+	`, id, errorMessage)
+}
+
+func (r *NotificationLogRepository) MarkCancelled(ctx context.Context, id string, errorMessage string) error {
+	return r.updateStatus(ctx, id, `
+		UPDATE notification_logs
+		SET
+			status = 'cancelled',
+			next_retry_at = NULL,
+			error_message = NULLIF($2, ''),
+			cancelled_at = now(),
+			updated_at = now()
+		WHERE id = $1
+			AND status = 'pending'
 	`, id, errorMessage)
 }
 

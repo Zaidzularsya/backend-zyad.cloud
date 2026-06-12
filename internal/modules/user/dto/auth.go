@@ -64,6 +64,32 @@ type RefreshTokenRequest struct {
 	RefreshToken string `json:"refresh_token" binding:"required"`
 }
 
+type ForgotPasswordRequest struct {
+	Email string `json:"email" binding:"required,email"`
+}
+
+type ValidateResetTokenRequest struct {
+	Token string `json:"token" binding:"required"`
+}
+
+type ValidateResetTokenResponse struct {
+	Valid     bool   `json:"valid"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+type ResetPasswordRequest struct {
+	Token                string `json:"token" binding:"required"`
+	Password             string `json:"password" binding:"required"`
+	PasswordConfirmation string `json:"password_confirmation" binding:"required"`
+}
+
+type ChangePasswordRequest struct {
+	CurrentPassword         string `json:"current_password" binding:"required"`
+	NewPassword             string `json:"new_password" binding:"required"`
+	NewPasswordConfirmation string `json:"new_password_confirmation" binding:"required"`
+	LogoutOtherDevices      bool   `json:"logout_other_devices"`
+}
+
 type TokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`

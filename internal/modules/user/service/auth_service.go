@@ -5,12 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"zyad.cloud/internal/config"
 	coreauth "zyad.cloud/internal/core/auth"
 	coreerrors "zyad.cloud/internal/core/errors"
+	"zyad.cloud/internal/core/middleware"
+	notificationdomain "zyad.cloud/internal/core/notification/domain"
+	notificationpublisher "zyad.cloud/internal/core/notification/publisher"
 	"zyad.cloud/internal/modules/user/dto"
 	"zyad.cloud/internal/modules/user/model"
 )
@@ -18,16 +22,32 @@ import (
 var ErrLoginUserNotFound = errors.New("login user not found")
 var ErrRefreshTokenNotFound = errors.New("refresh token not found")
 var ErrCurrentUserNotFound = errors.New("current user not found")
+var ErrPasswordResetUserNotFound = errors.New("password reset user not found")
+var ErrPasswordResetTokenNotFound = errors.New("password reset token not found")
+var ErrPasswordChangeUserNotFound = errors.New("password change user not found")
+
+const passwordResetRequestedEvent = "auth.password_reset_requested"
+const passwordChangedEvent = "auth.password_changed"
 
 type LoginRepository interface {
 	FindLoginUserByIdentifier(ctx context.Context, identifier string) (LoginUser, error)
+	FindPasswordResetUserByEmail(ctx context.Context, email string) (PasswordResetUser, error)
+	FindPasswordResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error)
+	FindPasswordChangeUser(ctx context.Context, userID string) (PasswordChangeUser, error)
 	FindRefreshSessionByTokenHash(ctx context.Context, tokenHash string) (RefreshSession, error)
 	FindCurrentUser(ctx context.Context, userID string, sessionID string) (CurrentUser, error)
 	CreateSession(ctx context.Context, session NewSession) (string, error)
+	CreatePasswordResetToken(ctx context.Context, token NewPasswordResetToken) error
+	CompletePasswordReset(ctx context.Context, tokenHash string, passwordHash string, usedAt time.Time) (PasswordResetUser, error)
+	ChangePassword(ctx context.Context, change PasswordChange) error
 	RevokeSession(ctx context.Context, sessionID string, revokedAt time.Time) error
 	RotateRefreshToken(ctx context.Context, rotation RefreshTokenRotation) error
 	UpdateLastLogin(ctx context.Context, userID string, at time.Time) error
 	RecordLoginHistory(ctx context.Context, history LoginHistoryRecord) error
+}
+
+type NotificationEventPublisher interface {
+	Publish(ctx context.Context, event notificationpublisher.Event) (notificationdomain.OutboxEvent, error)
 }
 
 type LoginUser struct {
@@ -49,6 +69,43 @@ type NewSession struct {
 	UserAgent        string
 	IPAddress        string
 	ExpiresAt        time.Time
+}
+
+type PasswordResetUser struct {
+	ID     string
+	Name   string
+	Email  string
+	Status model.UserStatus
+}
+
+type PasswordChangeUser struct {
+	ID           string
+	Name         string
+	Email        string
+	PasswordHash string
+}
+
+type PasswordChange struct {
+	UserID             string
+	CurrentSessionID   string
+	PasswordHash       string
+	LogoutOtherDevices bool
+	ChangedAt          time.Time
+	IPAddress          string
+	UserAgent          string
+}
+
+type NewPasswordResetToken struct {
+	UserID    string
+	TokenHash string
+	ExpiresAt time.Time
+}
+
+type PasswordResetToken struct {
+	ID        string
+	UserID    string
+	ExpiresAt time.Time
+	UsedAt    *time.Time
 }
 
 type RefreshSession struct {
@@ -123,13 +180,20 @@ type CurrentSession struct {
 }
 
 type AuthService struct {
-	repo                LoginRepository
-	accessTokenManager  *coreauth.TokenManager
-	refreshTokenManager *coreauth.TokenManager
-	accessTTL           time.Duration
-	refreshTTL          time.Duration
-	rememberMeTTL       time.Duration
-	now                 func() time.Time
+	repo                  LoginRepository
+	notificationPublisher NotificationEventPublisher
+	accessTokenManager    *coreauth.TokenManager
+	refreshTokenManager   *coreauth.TokenManager
+	accessTTL             time.Duration
+	refreshTTL            time.Duration
+	rememberMeTTL         time.Duration
+	resetTokenTTL         time.Duration
+	passwordMinLength     int
+	appName               string
+	frontendURL           string
+	notificationLocale    string
+	notificationAttempts  int
+	now                   func() time.Time
 }
 
 func NewAuthService(repo LoginRepository, cfg config.Config) (*AuthService, error) {
@@ -154,16 +218,30 @@ func NewAuthService(repo LoginRepository, cfg config.Config) (*AuthService, erro
 	if err != nil {
 		return nil, fmt.Errorf("parse remember me refresh token ttl: %w", err)
 	}
+	resetTokenTTL, err := parseConfigDuration(cfg.Auth.ResetTokenExpiresIn)
+	if err != nil {
+		return nil, fmt.Errorf("parse reset token ttl: %w", err)
+	}
 
 	return &AuthService{
-		repo:                repo,
-		accessTokenManager:  accessManager,
-		refreshTokenManager: refreshManager,
-		accessTTL:           accessTTL,
-		refreshTTL:          refreshTTL,
-		rememberMeTTL:       rememberMeTTL,
-		now:                 time.Now,
+		repo:                 repo,
+		accessTokenManager:   accessManager,
+		refreshTokenManager:  refreshManager,
+		accessTTL:            accessTTL,
+		refreshTTL:           refreshTTL,
+		rememberMeTTL:        rememberMeTTL,
+		resetTokenTTL:        resetTokenTTL,
+		passwordMinLength:    cfg.Auth.PasswordMinLength,
+		appName:              cfg.App.Name,
+		frontendURL:          cfg.App.FrontendURL,
+		notificationLocale:   cfg.Notification.DefaultLocale,
+		notificationAttempts: cfg.Notification.MaxAttempts,
+		now:                  time.Now,
 	}, nil
+}
+
+func (s *AuthService) SetNotificationPublisher(publisher NotificationEventPublisher) {
+	s.notificationPublisher = publisher
 }
 
 func (s *AuthService) Login(ctx context.Context, req dto.LoginRequest, metadata LoginHistoryRecord) (dto.LoginResponse, error) {
@@ -402,34 +480,271 @@ func (s *AuthService) RefreshToken(ctx context.Context, req dto.RefreshTokenRequ
 	}, nil
 }
 
-func (s *AuthService) CurrentUser(ctx context.Context, accessToken string) (dto.CurrentUserResponse, error) {
-	claims, err := s.accessTokenManager.Parse(strings.TrimSpace(accessToken))
-	if err != nil {
-		return dto.CurrentUserResponse{}, coreerrors.New("UNAUTHORIZED", "invalid access token", http.StatusUnauthorized)
-	}
-	if claims.TokenType != coreauth.TokenTypeAccess || claims.UserID == "" || claims.SessionID == "" {
-		return dto.CurrentUserResponse{}, coreerrors.New("UNAUTHORIZED", "invalid access token", http.StatusUnauthorized)
+func (s *AuthService) ForgotPassword(ctx context.Context, req dto.ForgotPasswordRequest, _ LoginHistoryRecord) error {
+	email := strings.TrimSpace(strings.ToLower(req.Email))
+	if email == "" {
+		return coreerrors.New("VALIDATION_ERROR", "email is required", http.StatusUnprocessableEntity)
 	}
 
-	currentUser, err := s.repo.FindCurrentUser(ctx, claims.UserID, claims.SessionID)
+	user, err := s.repo.FindPasswordResetUserByEmail(ctx, email)
 	if err != nil {
-		if errors.Is(err, ErrCurrentUserNotFound) {
-			return dto.CurrentUserResponse{}, coreerrors.New("UNAUTHORIZED", "current user session is not active", http.StatusUnauthorized)
+		if errors.Is(err, ErrPasswordResetUserNotFound) {
+			return nil
 		}
-		return dto.CurrentUserResponse{}, coreerrors.Wrap("AUTH_CURRENT_USER_FAILED", "failed to get current user", http.StatusInternalServerError, err)
+		return coreerrors.Wrap("AUTH_FORGOT_PASSWORD_FAILED", "failed to request password reset", http.StatusInternalServerError, err)
 	}
-	if currentUser.Session.RevokedAt != nil || !currentUser.Session.ExpiresAt.After(s.now().UTC()) {
-		return dto.CurrentUserResponse{}, coreerrors.New("UNAUTHORIZED", "current user session is not active", http.StatusUnauthorized)
+
+	if !user.Status.CanLogin() {
+		return nil
 	}
-	if currentUser.Status != model.UserStatusDeleted && !currentUser.Status.IsValid() {
-		return dto.CurrentUserResponse{}, coreerrors.New("AUTH_ACCOUNT_INACTIVE", "account is not active", http.StatusForbidden)
+
+	token, err := coreauth.NewRandomToken(32)
+	if err != nil {
+		return coreerrors.Wrap("AUTH_RESET_TOKEN_CREATE_FAILED", "failed to create reset token", http.StatusInternalServerError, err)
+	}
+
+	expiresAt := s.now().UTC().Add(s.resetTokenTTL)
+	if err := s.repo.CreatePasswordResetToken(ctx, NewPasswordResetToken{
+		UserID:    user.ID,
+		TokenHash: coreauth.HashToken(token),
+		ExpiresAt: expiresAt,
+	}); err != nil {
+		return coreerrors.Wrap("AUTH_RESET_TOKEN_STORE_FAILED", "failed to store reset token", http.StatusInternalServerError, err)
+	}
+
+	if s.notificationPublisher == nil {
+		return nil
+	}
+
+	_, err = s.notificationPublisher.Publish(ctx, notificationpublisher.Event{
+		Type:   passwordResetRequestedEvent,
+		UserID: user.ID,
+		Recipient: notificationdomain.NotificationRecipient{
+			Type:   "user",
+			UserID: user.ID,
+			Name:   user.Name,
+			Email:  user.Email,
+		},
+		Payload: map[string]any{
+			"app_name":   firstNonEmpty(s.appName, "Zyad Cloud"),
+			"user_id":    user.ID,
+			"user_name":  user.Name,
+			"user_email": user.Email,
+			"email":      user.Email,
+			"reset_url":  s.resetPasswordURL(token),
+			"expired_at": expiresAt.Format(time.RFC3339),
+		},
+		Locale:      s.notificationLocale,
+		MaxAttempts: s.notificationAttempts,
+	})
+	if err != nil {
+		return coreerrors.Wrap("AUTH_RESET_NOTIFICATION_FAILED", "failed to queue reset notification", http.StatusInternalServerError, err)
+	}
+
+	return nil
+}
+
+func (s *AuthService) ValidateResetToken(ctx context.Context, req dto.ValidateResetTokenRequest) (dto.ValidateResetTokenResponse, error) {
+	token := strings.TrimSpace(req.Token)
+	if token == "" {
+		return dto.ValidateResetTokenResponse{}, coreerrors.New("VALIDATION_ERROR", "token is required", http.StatusUnprocessableEntity)
+	}
+
+	resetToken, err := s.repo.FindPasswordResetTokenByHash(ctx, coreauth.HashToken(token))
+	if err != nil {
+		if errors.Is(err, ErrPasswordResetTokenNotFound) {
+			return dto.ValidateResetTokenResponse{}, resetTokenInvalidError()
+		}
+		return dto.ValidateResetTokenResponse{}, coreerrors.Wrap("AUTH_RESET_TOKEN_VALIDATE_FAILED", "failed to validate reset token", http.StatusInternalServerError, err)
+	}
+
+	if resetToken.UsedAt != nil || !resetToken.ExpiresAt.After(s.now().UTC()) {
+		return dto.ValidateResetTokenResponse{}, resetTokenInvalidError()
+	}
+
+	return dto.ValidateResetTokenResponse{
+		Valid:     true,
+		ExpiresAt: resetToken.ExpiresAt.UTC().Format(time.RFC3339),
+	}, nil
+}
+
+func (s *AuthService) ResetPassword(ctx context.Context, req dto.ResetPasswordRequest) error {
+	token := strings.TrimSpace(req.Token)
+	if token == "" || req.Password == "" || req.PasswordConfirmation == "" {
+		return coreerrors.New("VALIDATION_ERROR", "token, password, and password confirmation are required", http.StatusUnprocessableEntity)
+	}
+	if req.Password != req.PasswordConfirmation {
+		return coreerrors.New("AUTH_PASSWORD_CONFIRMATION_MISMATCH", "password confirmation does not match", http.StatusUnprocessableEntity)
+	}
+	if len(req.Password) < s.passwordMinLength {
+		return coreerrors.New(
+			"AUTH_PASSWORD_POLICY_FAILED",
+			fmt.Sprintf("password must be at least %d characters", s.passwordMinLength),
+			http.StatusUnprocessableEntity,
+		)
+	}
+
+	passwordHash, err := coreauth.HashPassword(req.Password)
+	if err != nil {
+		return coreerrors.Wrap("AUTH_PASSWORD_HASH_FAILED", "failed to hash password", http.StatusInternalServerError, err)
+	}
+
+	changedAt := s.now().UTC()
+	user, err := s.repo.CompletePasswordReset(ctx, coreauth.HashToken(token), passwordHash, changedAt)
+	if err != nil {
+		if errors.Is(err, ErrPasswordResetTokenNotFound) {
+			return resetTokenInvalidError()
+		}
+		return coreerrors.Wrap("AUTH_RESET_PASSWORD_FAILED", "failed to reset password", http.StatusInternalServerError, err)
+	}
+
+	// The password reset is already committed, so a queue failure must not
+	// make the client retry with a token that has been consumed.
+	s.publishPasswordChanged(ctx, user.ID, user.Name, user.Email, changedAt)
+
+	return nil
+}
+
+func (s *AuthService) ChangePassword(
+	ctx context.Context,
+	userID string,
+	sessionID string,
+	req dto.ChangePasswordRequest,
+	metadata LoginHistoryRecord,
+) error {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(sessionID) == "" {
+		return coreerrors.New("UNAUTHORIZED", "authenticated user is required", http.StatusUnauthorized)
+	}
+	if req.CurrentPassword == "" || req.NewPassword == "" || req.NewPasswordConfirmation == "" {
+		return coreerrors.New(
+			"VALIDATION_ERROR",
+			"current password, new password, and new password confirmation are required",
+			http.StatusUnprocessableEntity,
+		)
+	}
+	if req.NewPassword != req.NewPasswordConfirmation {
+		return coreerrors.New("AUTH_PASSWORD_CONFIRMATION_MISMATCH", "password confirmation does not match", http.StatusUnprocessableEntity)
+	}
+	if len(req.NewPassword) < s.passwordMinLength {
+		return coreerrors.New(
+			"AUTH_PASSWORD_POLICY_FAILED",
+			fmt.Sprintf("password must be at least %d characters", s.passwordMinLength),
+			http.StatusUnprocessableEntity,
+		)
+	}
+
+	user, err := s.repo.FindPasswordChangeUser(ctx, userID)
+	if err != nil {
+		if errors.Is(err, ErrPasswordChangeUserNotFound) {
+			return coreerrors.New("UNAUTHORIZED", "authenticated user is not available", http.StatusUnauthorized)
+		}
+		return coreerrors.Wrap("AUTH_CHANGE_PASSWORD_FAILED", "failed to change password", http.StatusInternalServerError, err)
+	}
+	if !coreauth.VerifyPassword(req.CurrentPassword, user.PasswordHash) {
+		return coreerrors.New("AUTH_CURRENT_PASSWORD_INVALID", "current password is invalid", http.StatusUnprocessableEntity)
+	}
+
+	passwordHash, err := coreauth.HashPassword(req.NewPassword)
+	if err != nil {
+		return coreerrors.Wrap("AUTH_PASSWORD_HASH_FAILED", "failed to hash password", http.StatusInternalServerError, err)
+	}
+
+	changedAt := s.now().UTC()
+	if err := s.repo.ChangePassword(ctx, PasswordChange{
+		UserID:             user.ID,
+		CurrentSessionID:   sessionID,
+		PasswordHash:       passwordHash,
+		LogoutOtherDevices: req.LogoutOtherDevices,
+		ChangedAt:          changedAt,
+		IPAddress:          metadata.IPAddress,
+		UserAgent:          metadata.UserAgent,
+	}); err != nil {
+		return coreerrors.Wrap("AUTH_CHANGE_PASSWORD_FAILED", "failed to change password", http.StatusInternalServerError, err)
+	}
+
+	s.publishPasswordChanged(ctx, user.ID, user.Name, user.Email, changedAt)
+	return nil
+}
+
+func (s *AuthService) CurrentUser(ctx context.Context, accessToken string) (dto.CurrentUserResponse, error) {
+	currentUser, err := s.currentUserFromAccessToken(ctx, accessToken)
+	if err != nil {
+		return dto.CurrentUserResponse{}, err
 	}
 
 	return currentUserResponse(currentUser), nil
 }
 
+func (s *AuthService) AuthenticateAccessToken(ctx context.Context, accessToken string) (middleware.AuthenticatedUser, error) {
+	currentUser, err := s.currentUserFromAccessToken(ctx, accessToken)
+	if err != nil {
+		return middleware.AuthenticatedUser{}, err
+	}
+
+	return middleware.AuthenticatedUser{
+		ID:          currentUser.ID,
+		SessionID:   currentUser.Session.ID,
+		Status:      string(currentUser.Status),
+		Roles:       currentUser.Roles,
+		Permissions: currentUser.Permissions,
+	}, nil
+}
+
+func (s *AuthService) currentUserFromAccessToken(ctx context.Context, accessToken string) (CurrentUser, error) {
+	claims, err := s.accessTokenManager.Parse(strings.TrimSpace(accessToken))
+	if err != nil {
+		return CurrentUser{}, coreerrors.New("UNAUTHORIZED", "invalid access token", http.StatusUnauthorized)
+	}
+	if claims.TokenType != coreauth.TokenTypeAccess || claims.UserID == "" || claims.SessionID == "" {
+		return CurrentUser{}, coreerrors.New("UNAUTHORIZED", "invalid access token", http.StatusUnauthorized)
+	}
+
+	currentUser, err := s.repo.FindCurrentUser(ctx, claims.UserID, claims.SessionID)
+	if err != nil {
+		if errors.Is(err, ErrCurrentUserNotFound) {
+			return CurrentUser{}, coreerrors.New("UNAUTHORIZED", "current user session is not active", http.StatusUnauthorized)
+		}
+		return CurrentUser{}, coreerrors.Wrap("AUTH_CURRENT_USER_FAILED", "failed to get current user", http.StatusInternalServerError, err)
+	}
+	if currentUser.Session.RevokedAt != nil || !currentUser.Session.ExpiresAt.After(s.now().UTC()) {
+		return CurrentUser{}, coreerrors.New("UNAUTHORIZED", "current user session is not active", http.StatusUnauthorized)
+	}
+	if !currentUser.Status.CanLogin() {
+		return CurrentUser{}, inactiveUserError(currentUser.Status)
+	}
+
+	return currentUser, nil
+}
+
 func (s *AuthService) recordLoginAttempt(ctx context.Context, history LoginHistoryRecord) {
 	_ = s.repo.RecordLoginHistory(ctx, history)
+}
+
+func (s *AuthService) publishPasswordChanged(ctx context.Context, userID string, name string, email string, changedAt time.Time) {
+	if s.notificationPublisher == nil {
+		return
+	}
+
+	_, _ = s.notificationPublisher.Publish(ctx, notificationpublisher.Event{
+		Type:   passwordChangedEvent,
+		UserID: userID,
+		Recipient: notificationdomain.NotificationRecipient{
+			Type:   "user",
+			UserID: userID,
+			Name:   name,
+			Email:  email,
+		},
+		Payload: map[string]any{
+			"app_name":   firstNonEmpty(s.appName, "Zyad Cloud"),
+			"user_id":    userID,
+			"user_name":  name,
+			"user_email": email,
+			"email":      email,
+			"changed_at": changedAt.Format(time.RFC3339),
+		},
+		Locale:      s.notificationLocale,
+		MaxAttempts: s.notificationAttempts,
+	})
 }
 
 func userCanLogin(user LoginUser) bool {
@@ -449,6 +764,10 @@ func inactiveUserError(status model.UserStatus) error {
 	default:
 		return coreerrors.New("AUTH_ACCOUNT_INACTIVE", "account is not active", http.StatusForbidden)
 	}
+}
+
+func resetTokenInvalidError() error {
+	return coreerrors.New("AUTH_RESET_TOKEN_INVALID", "reset token is invalid or expired", http.StatusUnprocessableEntity)
 }
 
 func parseConfigDuration(value string) (time.Duration, error) {
@@ -474,6 +793,14 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func (s *AuthService) resetPasswordURL(token string) string {
+	base := strings.TrimRight(strings.TrimSpace(s.frontendURL), "/")
+	if base == "" {
+		base = "http://localhost:3001"
+	}
+	return base + "/reset-password?token=" + url.QueryEscape(token)
 }
 
 func currentUserResponse(user CurrentUser) dto.CurrentUserResponse {

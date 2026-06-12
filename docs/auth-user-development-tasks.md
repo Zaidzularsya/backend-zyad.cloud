@@ -230,58 +230,64 @@ Acceptance criteria:
 
 Scope:
 
-- `POST /auth/forgot-password`
-- Generate reset token sekali pakai.
-- Simpan hash token.
-- Kirim link reset memakai `APP_FRONTEND_URL`.
-- Rate limit per email dan IP.
+- `POST /auth/forgot-password` `done`
+- Generate reset token sekali pakai. `done`
+- Simpan hash token. `done`
+- Kirim link reset memakai `APP_FRONTEND_URL`. `done via notification outbox auth.password_reset_requested`
+- Rate limit per email dan IP. `deferred to AUTH-0307`
 
 Acceptance criteria:
 
-- Response tidak membocorkan apakah email terdaftar.
-- Token punya expiry.
+- Response tidak membocorkan apakah email terdaftar. `done`
+- Token punya expiry. `done`
 
 ### AUTH-0106: Validate Reset Token
 
 Scope:
 
-- `POST /auth/reset-password/validate`
-- Validasi token belum expired dan belum used.
+- `POST /auth/reset-password/validate` `done`
+- Validasi token belum expired dan belum used. `done`
 
 Acceptance criteria:
 
-- Frontend bisa menentukan apakah halaman reset boleh lanjut.
+- Frontend bisa menentukan apakah halaman reset boleh lanjut. `done`
 
 ### AUTH-0107: Reset Password
 
 Scope:
 
-- `POST /auth/reset-password`
-- Validasi token.
-- Update password hash.
-- Tandai token used.
-- Revoke semua session user.
-- Kirim notifikasi password changed.
+- `POST /auth/reset-password` `done`
+- Validasi token. `done`
+- Update password hash. `done`
+- Tandai token used. `done`
+- Revoke semua session user. `done`
+- Kirim notifikasi password changed. `done via notification outbox auth.password_changed`
 
 Acceptance criteria:
 
-- Token tidak bisa dipakai ulang.
-- Password lama tidak lagi valid.
+- Token tidak bisa dipakai ulang. `done via row lock and atomic token consumption`
+- Password lama tidak lagi valid. `done`
 
 ### AUTH-0108: Change Password
 
 Scope:
 
-- `POST /auth/change-password`
-- Butuh user login.
-- Require current password.
-- Terapkan password policy.
-- Opsional force logout other devices.
+- `POST /auth/change-password` `done`
+- Butuh user login. `done via protected auth middleware`
+- Require current password. `done`
+- Terapkan password policy. `done via AUTH_PASSWORD_MIN_LENGTH`
+- Opsional force logout other devices. `done`
 
 Acceptance criteria:
 
-- Current session tetap aktif jika policy mengizinkan.
-- Device lain bisa dicabut sesuai request.
+- Current session tetap aktif jika policy mengizinkan. `done`
+- Device lain bisa dicabut sesuai request. `done`
+
+Notes:
+
+- Password history tetap `deferred`; tidak ada tabel atau dependency baru pada task ini.
+- Perubahan password mencatat audit event `password_changed`.
+- Notifikasi memakai event outbox `auth.password_changed` secara best effort.
 
 ## Phase 2 - User Management and RBAC
 
@@ -289,94 +295,143 @@ Acceptance criteria:
 
 Scope:
 
-- `GET /admin/users`
-- Filter by status, search, role, organization, created date, deleted state.
-- Pagination dan sorting.
+- `GET /admin/users` `done`
+- Filter by status, search, role, organization, created date, deleted state. `done`
+- Pagination dan sorting. `done`
 
 Acceptance criteria:
 
-- Response memakai metadata pagination.
-- Query tidak mengembalikan `password_hash`.
+- Response memakai metadata pagination. `done`
+- Query tidak mengembalikan `password_hash`. `done`
+
+Notes:
+
+- Endpoint membutuhkan permission `user.read`.
+- `include_deleted=true` membutuhkan permission tambahan `user.restore`.
+- Sorting dibatasi ke allowlist `name`, `email`, `status`, `created_at`, dan `updated_at`.
 
 ### USER-0202: Admin Detail User
 
 Scope:
 
-- `GET /admin/users/:id`
-- Return user, profile, roles, direct permissions, sessions summary, dan audit summary.
+- `GET /admin/users/:id` `done`
+- Return user, profile, roles, direct permissions, sessions summary, dan audit summary. `done`
 
 Acceptance criteria:
 
-- 404 untuk user tidak ditemukan.
-- Deleted user hanya terlihat jika filter/permission mengizinkan.
+- 404 untuk user tidak ditemukan. `done`
+- Deleted user hanya terlihat jika filter/permission mengizinkan. `done`
+
+Notes:
+
+- Endpoint membutuhkan permission `user.read`.
+- Soft-deleted user hanya dapat dilihat melalui `include_deleted=true` dengan permission tambahan `user.restore`.
+- `direct_permissions` tidak mencakup effective permission yang berasal dari role.
 
 ### USER-0203: Admin Create User
 
 Scope:
 
-- `POST /admin/users`
-- Admin membuat user dengan email, username, phone, profile, status, roles, dan optional temporary password.
-- Jika password tidak dikirim, generate invite atau reset link.
+- `POST /admin/users` `done`
+- Admin membuat user dengan email, username, phone, profile, status, roles, dan optional temporary password. `done`
+- Jika password tidak dikirim, generate invite atau reset link. `done`
 
 Acceptance criteria:
 
-- Email dan username unik.
-- Role assignment valid.
-- Audit log tercatat.
+- Email dan username unik. `done`
+- Role assignment valid. `done`
+- Audit log tercatat. `done`
+
+Notes:
+
+- Endpoint membutuhkan permission `user.create`.
+- Pembuatan user, profile, local identity, role, setup token, dan audit dilakukan dalam satu transaction.
+- User tanpa password memakai `password_reset_tokens` sebagai one-time setup link dan event outbox `user.invited`; tabel invitation khusus tetap menjadi scope `AUTH-0402`.
 
 ### USER-0204: Admin Update User
 
 Scope:
 
-- `PATCH /admin/users/:id`
-- Update identity aman dan profile.
-- Email/phone change dapat mengubah verified state sesuai policy.
+- `PATCH /admin/users/:id` `done`
+- Update identity aman dan profile. `done`
+- Email/phone change dapat mengubah verified state sesuai policy. `done`
 
 Acceptance criteria:
 
-- Partial update.
-- Field sensitif punya permission khusus.
+- Partial update. `done`
+- Field sensitif punya permission khusus. `done`
+
+Notes:
+
+- Endpoint membutuhkan permission `user.update`.
+- Perubahan email atau phone mereset verified timestamp masing-masing.
+- Perubahan status ditolak dan harus menggunakan endpoint status dengan permission `user.update_status` pada USER-0207.
+- Identity, local auth identity, profile, dan audit event `user_updated` diperbarui dalam satu transaction.
 
 ### USER-0205: Soft Delete and Restore User
 
 Scope:
 
-- `DELETE /admin/users/:id`
-- `POST /admin/users/:id/restore`
-- Soft delete user.
-- Revoke session saat delete.
+- `DELETE /admin/users/:id` `done`
+- `POST /admin/users/:id/restore` `done`
+- Soft delete user. `done`
+- Revoke session saat delete. `done`
 
 Acceptance criteria:
 
-- User soft deleted tidak bisa login.
-- Restore mengembalikan status sesuai policy.
+- User soft deleted tidak bisa login. `done`
+- Restore mengembalikan status sesuai policy. `done`
+
+Notes:
+
+- Delete membutuhkan permission `user.delete`; restore membutuhkan `user.restore`.
+- Delete mengubah status ke `deleted`, mengisi `deleted_at`, serta mencabut session dan refresh token dalam satu transaction.
+- Restore memakai status sebelum delete dari audit metadata; data lama tanpa metadata dipulihkan sebagai `inactive`.
+- Session dan refresh token lama tetap revoked setelah restore.
+- Audit event yang dicatat adalah `user_deleted` dan `user_restored`.
 
 ### USER-0206: Bulk Action
 
 Scope:
 
-- `POST /admin/users/bulk-action`
-- Bulk delete dan bulk update status.
+- `POST /admin/users/bulk-action` `done`
+- Bulk delete dan bulk update status. `done`
 
 Acceptance criteria:
 
-- Validasi jumlah maksimal item per request.
-- Partial failure dilaporkan secara terstruktur.
+- Validasi jumlah maksimal item per request. `done`
+- Partial failure dilaporkan secara terstruktur. `done`
+
+Notes:
+
+- Maksimal `100` user per request.
+- Action `delete`, `restore`, dan `update_status` masing-masing membutuhkan permission `user.delete`, `user.restore`, dan `user.update_status`.
+- Response HTTP `200` memuat total `succeeded`, `failed`, serta result/error per user.
+- Duplicate atau invalid user ID dilaporkan sebagai kegagalan item tanpa membatalkan item lain.
+- Status `suspended` dan `banned` membutuhkan reason; perubahan status mencatat audit `user_status_changed`.
 
 ### USER-0207: User Status Management
 
 Scope:
 
-- `PATCH /admin/users/:id/status`
-- `POST /admin/users/:id/activate`
-- `POST /admin/users/:id/suspend`
-- `POST /admin/users/:id/ban`
-- Simpan alasan status untuk suspend dan ban.
+- `PATCH /admin/users/:id/status` `done`
+- `POST /admin/users/:id/activate` `done`
+- `POST /admin/users/:id/suspend` `done`
+- `POST /admin/users/:id/ban` `done`
+- Simpan alasan status untuk suspend dan ban. `done`
 
 Acceptance criteria:
 
-- Suspended dan banned user tidak bisa login.
-- Audit log mencatat actor, status lama, status baru, dan alasan.
+- Suspended dan banned user tidak bisa login. `done`
+- Audit log mencatat actor, status lama, status baru, dan alasan. `done`
+
+Notes:
+
+- Seluruh endpoint membutuhkan permission `user.update_status`.
+- Generic status endpoint menerima `active`, `inactive`, `pending`, `suspended`, `banned`, dan `invited`; status `deleted` hanya melalui soft delete.
+- `suspended` dan `banned` membutuhkan reason.
+- Login, refresh token, dan access-token authentication selalu membaca status database sehingga user nonaktif langsung ditolak.
+- Audit event `user_status_changed` menyimpan actor, previous status, new status, dan reason.
 
 ### USER-0208: Self Profile
 
@@ -457,10 +512,10 @@ Acceptance criteria:
 
 Scope:
 
-- Auth middleware membaca claims.
-- Active user middleware cek status.
-- Permission middleware cek permission efektif.
-- Role middleware tersedia untuk guard role khusus.
+- Auth middleware membaca claims. `done`
+- Active user middleware cek status. `done via AuthService.AuthenticateAccessToken`
+- Permission middleware cek permission efektif. `done`
+- Role middleware tersedia untuk guard role khusus. `done`
 
 Acceptance criteria:
 

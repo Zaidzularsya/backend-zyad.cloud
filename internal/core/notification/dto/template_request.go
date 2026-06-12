@@ -16,11 +16,11 @@ type CreateTemplateRequest struct {
 }
 
 type UpdateTemplateRequest struct {
-	Name               string         `json:"name" binding:"omitempty,min=3,max=150"`
-	Description        string         `json:"description" binding:"max=1000"`
-	Locale             string         `json:"locale" binding:"omitempty,max=20"`
-	SubjectTemplate    string         `json:"subject_template"`
-	BodyTemplate       string         `json:"body_template" binding:"omitempty"`
+	Name               *string        `json:"name" binding:"omitempty,min=3,max=150"`
+	Description        *string        `json:"description" binding:"omitempty,max=1000"`
+	Locale             *string        `json:"locale" binding:"omitempty,max=20"`
+	SubjectTemplate    *string        `json:"subject_template"`
+	BodyTemplate       *string        `json:"body_template" binding:"omitempty"`
 	AvailableVariables []VariableItem `json:"available_variables"`
 	SamplePayload      map[string]any `json:"sample_payload"`
 	IsActive           *bool          `json:"is_active"`

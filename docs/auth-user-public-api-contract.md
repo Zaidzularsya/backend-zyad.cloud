@@ -80,6 +80,9 @@ Refresh token dikirim melalui request body atau secure http-only cookie sesuai k
 | `AUTH_TOKEN_EXPIRED` | 401 | Token expired |
 | `AUTH_TOKEN_REVOKED` | 401 | Token sudah dicabut |
 | `AUTH_RESET_TOKEN_INVALID` | 422 | Reset token invalid |
+| `AUTH_CURRENT_PASSWORD_INVALID` | 422 | Current password salah |
+| `AUTH_PASSWORD_CONFIRMATION_MISMATCH` | 422 | Konfirmasi password tidak sama |
+| `AUTH_PASSWORD_POLICY_FAILED` | 422 | Password tidak memenuhi policy |
 | `AUTH_OTP_INVALID` | 422 | OTP invalid |
 
 ## Auth API
@@ -278,6 +281,19 @@ Request:
 }
 ```
 
+Efek sukses:
+
+- Password disimpan sebagai hash baru.
+- Reset token ditandai sudah digunakan dan tidak dapat dipakai ulang.
+- Semua session dan refresh token user dicabut.
+- Event notifikasi `auth.password_changed` dimasukkan ke outbox secara best effort.
+
+Error khusus:
+
+- `AUTH_RESET_TOKEN_INVALID` jika token tidak ditemukan, kedaluwarsa, atau sudah digunakan.
+- `AUTH_PASSWORD_CONFIRMATION_MISMATCH` jika konfirmasi password berbeda.
+- `AUTH_PASSWORD_POLICY_FAILED` jika password tidak memenuhi minimum length dari config.
+
 ### POST /auth/change-password
 
 Auth: required.
@@ -292,6 +308,20 @@ Request:
   "logout_other_devices": true
 }
 ```
+
+Efek sukses:
+
+- Password disimpan sebagai hash baru.
+- Current session tetap aktif.
+- Bila `logout_other_devices=true`, seluruh session dan refresh token selain current session dicabut.
+- Audit event `password_changed` dicatat tanpa menyimpan password.
+- Event notifikasi `auth.password_changed` dimasukkan ke outbox secara best effort.
+
+Error khusus:
+
+- `AUTH_CURRENT_PASSWORD_INVALID` jika current password salah.
+- `AUTH_PASSWORD_CONFIRMATION_MISMATCH` jika konfirmasi password baru berbeda.
+- `AUTH_PASSWORD_POLICY_FAILED` jika password baru tidak memenuhi minimum length dari config.
 
 ### GET /auth/sessions
 
@@ -411,12 +441,132 @@ Query:
 | `role` | string | no | Role slug |
 | `organization_id` | uuid | no | Untuk multi organization |
 | `include_deleted` | boolean | no | Butuh permission khusus |
+| `created_from` | date | no | Format `YYYY-MM-DD`, inclusive |
+| `created_to` | date | no | Format `YYYY-MM-DD`, inclusive |
 | `sort` | string | no | Example `created_at` |
 | `direction` | string | no | `asc` atau `desc` |
+
+Allowed `sort`:
+
+- `name`
+- `email`
+- `status`
+- `created_at`
+- `updated_at`
+
+`include_deleted=true` membutuhkan permission tambahan `user.restore`.
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "users retrieved successfully",
+  "data": [
+    {
+      "id": "uuid",
+      "name": "Jane Doe",
+      "email": "jane@example.com",
+      "username": "jane",
+      "phone": "+628123456789",
+      "status": "active",
+      "email_verified_at": "2026-06-01T00:00:00Z",
+      "phone_verified_at": null,
+      "last_login_at": "2026-06-12T08:00:00Z",
+      "roles": ["admin"],
+      "created_at": "2026-06-01T00:00:00Z",
+      "updated_at": "2026-06-12T08:00:00Z",
+      "deleted_at": null
+    }
+  ],
+  "meta": {
+    "page": 1,
+    "per_page": 20,
+    "total": 1,
+    "total_pages": 1
+  }
+}
+```
+
+Response tidak mengandung `password_hash`.
 
 ### GET /admin/users/:id
 
 Permission: `user.read`
+
+Query:
+
+| Name | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `include_deleted` | boolean | no | Default `false`; jika `true` membutuhkan `user.restore` |
+
+Response data:
+
+```json
+{
+  "id": "uuid",
+  "name": "Jane Doe",
+  "email": "jane@example.com",
+  "username": "jane",
+  "phone": "+628123456789",
+  "status": "active",
+  "email_verified_at": "2026-06-01T00:00:00Z",
+  "phone_verified_at": null,
+  "last_login_at": "2026-06-12T08:00:00Z",
+  "profile": {
+    "avatar_url": "",
+    "bio": "Administrator account",
+    "job_title": "Administrator",
+    "department": "IT",
+    "company": "Zyad Cloud",
+    "address": "Jakarta",
+    "timezone": "Asia/Jakarta",
+    "language": "id"
+  },
+  "roles": [
+    {
+      "id": "uuid",
+      "name": "Admin",
+      "slug": "admin",
+      "organization_id": "",
+      "assigned_at": "2026-06-01T00:00:00Z"
+    }
+  ],
+  "direct_permissions": [
+    {
+      "id": "uuid",
+      "permission_id": "uuid",
+      "slug": "user.read",
+      "effect": "allow",
+      "organization_id": "",
+      "assigned_at": "2026-06-01T00:00:00Z"
+    }
+  ],
+  "sessions_summary": {
+    "total": 3,
+    "active": 1,
+    "revoked": 1,
+    "expired": 1,
+    "last_active_at": "2026-06-12T08:00:00Z"
+  },
+  "audit_summary": {
+    "total": 10,
+    "last_event": "password_changed",
+    "last_event_at": "2026-06-12T08:00:00Z",
+    "last_actor_id": "uuid",
+    "last_ip_address": "127.0.0.1"
+  },
+  "created_at": "2026-06-01T00:00:00Z",
+  "updated_at": "2026-06-12T08:00:00Z",
+  "deleted_at": null
+}
+```
+
+`direct_permissions` hanya berisi assignment langsung pada user. Effective permission dari role tetap dihitung melalui permission service.
+
+Error:
+
+- `USER_NOT_FOUND` dengan HTTP `404` jika user tidak ditemukan atau soft-deleted tanpa akses `include_deleted`.
 
 ### POST /admin/users
 
@@ -442,6 +592,15 @@ Request:
 }
 ```
 
+Response `201` memakai struktur detail user yang sama dengan `GET /admin/users/:id`.
+
+Notes:
+
+- Jika `password` tidak dikirim, status default menjadi `invited` dan sistem mengirim one-time password setup link.
+- Jika `send_invitation=true`, setup link juga dibuat saat temporary password disediakan.
+- Error `USER_EMAIL_ALREADY_EXISTS` atau `USER_USERNAME_ALREADY_EXISTS` memakai HTTP `409`.
+- Error `USER_ROLE_NOT_FOUND` memakai HTTP `422`.
+
 ### PATCH /admin/users/:id
 
 Permission: `user.update`
@@ -451,11 +610,22 @@ Request accepts partial fields:
 ```json
 {
   "name": "Jane Updated",
+  "email": "jane.updated@example.com",
+  "username": "jane.updated",
   "phone": "+628987654321",
   "job_title": "Senior Editor",
   "department": "Content"
 }
 ```
+
+Semua field bersifat optional, tetapi minimal satu field harus dikirim. Field profile dapat dikosongkan dengan mengirim string kosong.
+
+Notes:
+
+- Perubahan email mereset `email_verified_at`.
+- Perubahan phone mereset `phone_verified_at`.
+- `status` tidak dapat diubah melalui endpoint ini; gunakan endpoint status yang membutuhkan permission `user.update_status`.
+- Error uniqueness menggunakan `USER_EMAIL_ALREADY_EXISTS` atau `USER_USERNAME_ALREADY_EXISTS` dengan HTTP `409`.
 
 ### DELETE /admin/users/:id
 
@@ -463,9 +633,15 @@ Permission: `user.delete`
 
 Soft delete user.
 
+Delete mengubah status menjadi `deleted`, mengisi `deleted_at`, serta mencabut seluruh session dan refresh token user.
+
 ### POST /admin/users/:id/restore
 
 Permission: `user.restore`
+
+Response `200` memakai struktur detail user. Status sebelum delete dipulihkan dari audit metadata; fallback untuk data lama adalah `inactive`. Session lama tetap revoked.
+
+Error `USER_EMAIL_ALREADY_EXISTS` atau `USER_USERNAME_ALREADY_EXISTS` memakai HTTP `409` jika identity user sudah dipakai user aktif lain saat restore.
 
 ### POST /admin/users/bulk-action
 
@@ -489,6 +665,39 @@ Allowed action:
 - `delete`
 - `restore`
 - `update_status`
+
+Maksimal `100` user ID per request. Permission mengikuti action:
+
+- `delete`: `user.delete`
+- `restore`: `user.restore`
+- `update_status`: `user.update_status`
+
+Status `suspended` dan `banned` membutuhkan `payload.reason`.
+
+Response `200` tetap digunakan saat sebagian item gagal:
+
+```json
+{
+  "action": "delete",
+  "total": 2,
+  "succeeded": 1,
+  "failed": 1,
+  "results": [
+    {
+      "user_id": "uuid-1",
+      "success": true
+    },
+    {
+      "user_id": "uuid-2",
+      "success": false,
+      "error": {
+        "code": "USER_NOT_FOUND",
+        "message": "user not found"
+      }
+    }
+  ]
+}
+```
 
 ### PATCH /admin/users/:id/status
 
@@ -530,6 +739,16 @@ Request:
   "reason": "Permanent policy violation"
 }
 ```
+
+Semua endpoint status membutuhkan permission `user.update_status` dan mengembalikan detail user terbaru.
+
+Rules:
+
+- Generic endpoint menerima `active`, `inactive`, `pending`, `suspended`, `banned`, dan `invited`.
+- Status `deleted` hanya dapat diterapkan melalui endpoint soft delete.
+- `suspended` dan `banned` membutuhkan `reason`.
+- User dengan status selain `active` ditolak saat login, refresh token, dan access-token authentication.
+- Setiap perubahan mencatat actor, status lama, status baru, dan reason pada audit log.
 
 ### GET /admin/users/:id/roles
 

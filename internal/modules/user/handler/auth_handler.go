@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"net/http"
 	"strings"
 
 	coreerrors "zyad.cloud/internal/core/errors"
 	corehttp "zyad.cloud/internal/core/http"
+	"zyad.cloud/internal/core/middleware"
 	"zyad.cloud/internal/modules/user/dto"
 	"zyad.cloud/internal/modules/user/service"
 
@@ -23,7 +25,14 @@ func (h *AuthHandler) RegisterRoutes(router gin.IRoutes) {
 	router.POST("/auth/login", h.Login)
 	router.POST("/auth/logout", h.Logout)
 	router.POST("/auth/refresh-token", h.RefreshToken)
+	router.POST("/auth/forgot-password", h.ForgotPassword)
+	router.POST("/auth/reset-password/validate", h.ValidateResetToken)
+	router.POST("/auth/reset-password", h.ResetPassword)
 	router.GET("/auth/me", h.CurrentUser)
+}
+
+func (h *AuthHandler) RegisterProtectedRoutes(router gin.IRoutes) {
+	router.POST("/auth/change-password", h.ChangePassword)
 }
 
 func (h *AuthHandler) Login(c *gin.Context) {
@@ -81,6 +90,79 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 	}
 
 	corehttp.OK(c, "token refreshed successfully", result)
+}
+
+func (h *AuthHandler) ForgotPassword(c *gin.Context) {
+	var req dto.ForgotPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), 422))
+		return
+	}
+
+	if err := h.service.ForgotPassword(c.Request.Context(), req, service.LoginHistoryRecord{
+		IPAddress: c.ClientIP(),
+		UserAgent: c.Request.UserAgent(),
+	}); err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+
+	corehttp.OK(c, "if the email is registered, password reset instructions will be sent", nil)
+}
+
+func (h *AuthHandler) ValidateResetToken(c *gin.Context) {
+	var req dto.ValidateResetTokenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), 422))
+		return
+	}
+
+	result, err := h.service.ValidateResetToken(c.Request.Context(), req)
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+
+	corehttp.OK(c, "reset token is valid", result)
+}
+
+func (h *AuthHandler) ResetPassword(c *gin.Context) {
+	var req dto.ResetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), 422))
+		return
+	}
+
+	if err := h.service.ResetPassword(c.Request.Context(), req); err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+
+	corehttp.OK(c, "password reset successfully", nil)
+}
+
+func (h *AuthHandler) ChangePassword(c *gin.Context) {
+	user, ok := middleware.AuthenticatedUserFromContext(c)
+	if !ok || user.ID == "" || user.SessionID == "" {
+		corehttp.Fail(c, coreerrors.New("UNAUTHORIZED", "authenticated user is required", http.StatusUnauthorized))
+		return
+	}
+
+	var req dto.ChangePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		return
+	}
+
+	if err := h.service.ChangePassword(c.Request.Context(), user.ID, user.SessionID, req, service.LoginHistoryRecord{
+		IPAddress: c.ClientIP(),
+		UserAgent: c.Request.UserAgent(),
+	}); err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+
+	corehttp.OK(c, "password changed successfully", nil)
 }
 
 func (h *AuthHandler) CurrentUser(c *gin.Context) {

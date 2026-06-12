@@ -24,14 +24,15 @@ func LoadApp() AppConfig {
 
 func LoadDatabase() DatabaseConfig {
 	return DatabaseConfig{
-		Type:     getEnv("DB_TYPE", "postgres"),
-		Host:     getEnv("DB_HOST", "localhost"),
-		Port:     getEnvInt("DB_PORT", 5432),
-		Username: getEnv("DB_USERNAME", "postgres"),
-		Password: getEnv("DB_PASSWORD", "postgres"),
-		Name:     getEnv("DB_NAME", "zyad_cloud"),
-		Schema:   getEnv("DB_SCHEMA", "public"),
-		SSLMode:  getEnv("DB_SSL", "disable"),
+		Type:                  getEnv("DB_TYPE", "postgres"),
+		Host:                  getEnv("DB_HOST", "localhost"),
+		Port:                  getEnvInt("DB_PORT", 5432),
+		Username:              getEnv("DB_USERNAME", "postgres"),
+		Password:              getEnv("DB_PASSWORD", "postgres"),
+		Name:                  getEnv("DB_NAME", "zyad_cloud"),
+		Schema:                getEnv("DB_SCHEMA", "public"),
+		SSLMode:               getEnv("DB_SSL", "disable"),
+		ConnectTimeoutSeconds: getEnvInt("DB_CONNECT_TIMEOUT_SECONDS", 5),
 	}
 }
 
@@ -41,14 +42,15 @@ func LoadTestDatabase() DatabaseConfig {
 	})
 
 	return DatabaseConfig{
-		Type:     getEnv("TEST_DB_TYPE", "postgres"),
-		Host:     getEnv("TEST_DB_HOST", "localhost"),
-		Port:     getEnvInt("TEST_DB_PORT", 5432),
-		Username: getEnv("TEST_DB_USERNAME", "postgres"),
-		Password: getEnv("TEST_DB_PASSWORD", "postgres"),
-		Name:     getEnv("TEST_DB_NAME", "zyad_cloud_test"),
-		Schema:   getEnv("TEST_DB_SCHEMA", "public"),
-		SSLMode:  getEnv("TEST_DB_SSL", "disable"),
+		Type:                  getEnv("TEST_DB_TYPE", "postgres"),
+		Host:                  getEnv("TEST_DB_HOST", "localhost"),
+		Port:                  getEnvInt("TEST_DB_PORT", 5432),
+		Username:              getEnv("TEST_DB_USERNAME", "postgres"),
+		Password:              getEnv("TEST_DB_PASSWORD", "postgres"),
+		Name:                  getEnv("TEST_DB_NAME", "zyad_cloud_test"),
+		Schema:                getEnv("TEST_DB_SCHEMA", "public"),
+		SSLMode:               getEnv("TEST_DB_SSL", "disable"),
+		ConnectTimeoutSeconds: getEnvInt("TEST_DB_CONNECT_TIMEOUT_SECONDS", getEnvInt("DB_CONNECT_TIMEOUT_SECONDS", 5)),
 	}
 }
 
@@ -110,9 +112,11 @@ func LoadMail() MailConfig {
 
 func LoadNotification() NotificationConfig {
 	return NotificationConfig{
-		DefaultLocale: getEnv("NOTIFICATION_DEFAULT_LOCALE", "id-ID"),
-		ProviderMode:  getEnv("NOTIFICATION_PROVIDER_MODE", "noop"),
-		MaxAttempts:   getEnvInt("NOTIFICATION_MAX_ATTEMPTS", 3),
+		DefaultLocale:         getEnv("NOTIFICATION_DEFAULT_LOCALE", "id-ID"),
+		ProviderMode:          getEnv("NOTIFICATION_PROVIDER_MODE", "mail"),
+		MaxAttempts:           getEnvInt("NOTIFICATION_MAX_ATTEMPTS", 3),
+		WorkerIntervalSeconds: getEnvInt("NOTIFICATION_WORKER_INTERVAL_SECONDS", 10),
+		WorkerBatchSize:       getEnvInt("NOTIFICATION_WORKER_BATCH_SIZE", 20),
 	}
 }
 
