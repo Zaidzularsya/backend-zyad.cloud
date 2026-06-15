@@ -7,6 +7,7 @@ import (
 	"zyad.cloud/internal/core/middleware"
 	notificationhandler "zyad.cloud/internal/core/notification/handler"
 	permissionhandler "zyad.cloud/internal/core/permission/handler"
+	organizationhandler "zyad.cloud/internal/modules/organization/handler"
 	userhandler "zyad.cloud/internal/modules/user/handler"
 	pgdatabase "zyad.cloud/internal/platform/database"
 	"zyad.cloud/internal/platform/redis"
@@ -23,7 +24,10 @@ type Dependencies struct {
 	NotificationTemplateHandler   *notificationhandler.TemplateHandler
 	NotificationVariableHandler   *notificationhandler.VariableHandler
 	PermissionHandler             *permissionhandler.Handler
+	OrganizationSwitchHandler     *organizationhandler.SwitchHandler
 	UserAuthHandler               *userhandler.AuthHandler
 	UserHandler                   *userhandler.UserHandler
 	Authenticator                 middleware.AccessTokenAuthenticator
+	OrganizationResolver          middleware.AuthenticatedOrganizationResolver
+	PublicHostResolver            middleware.PublicHostResolver
 }

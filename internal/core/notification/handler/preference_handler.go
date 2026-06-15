@@ -35,7 +35,7 @@ func (h *PreferenceHandler) RegisterRoutes(router *gin.RouterGroup) {
 	users.GET("", h.ensureService(), h.GetMyPreferences)
 	users.PATCH("", h.ensureService(), h.UpdateMyPreferences)
 
-	admin := router.Group("/admin/users/:userId/notification-preferences")
+	admin := router.Group("/admin/users/:id/notification-preferences")
 	admin.GET("", h.ensureService(), h.require("notification_preference.read"), h.GetUserPreferences)
 	admin.PATCH("", h.ensureService(), h.require("notification_preference.manage"), h.UpdateUserPreferences)
 }
@@ -79,7 +79,7 @@ func (h *PreferenceHandler) UpdateMyPreferences(c *gin.Context) {
 }
 
 func (h *PreferenceHandler) GetUserPreferences(c *gin.Context) {
-	preferences, err := h.service.GetUserPreferences(c.Request.Context(), c.Param("userId"), c.Query("organization_id"))
+	preferences, err := h.service.GetUserPreferences(c.Request.Context(), c.Param("id"), c.Query("organization_id"))
 	if err != nil {
 		corehttp.Fail(c, err)
 		return
@@ -95,7 +95,7 @@ func (h *PreferenceHandler) UpdateUserPreferences(c *gin.Context) {
 		return
 	}
 
-	preferences, err := h.service.UpdateUserPreferences(c.Request.Context(), c.Param("userId"), c.Query("organization_id"), req)
+	preferences, err := h.service.UpdateUserPreferences(c.Request.Context(), c.Param("id"), c.Query("organization_id"), req)
 	if err != nil {
 		corehttp.Fail(c, err)
 		return

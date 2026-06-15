@@ -113,7 +113,7 @@ func SeedSuperAdmin(ctx context.Context, db *database.Pool, cfg config.SeedAdmin
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO user_roles (user_id, role_id, assigned_by, assigned_at)
 		VALUES ($1, $2, $1, now())
-		ON CONFLICT (user_id, role_id) DO UPDATE
+		ON CONFLICT (user_id, role_id) WHERE organization_id IS NULL DO UPDATE
 		SET assigned_by = EXCLUDED.assigned_by, assigned_at = EXCLUDED.assigned_at
 	`, userID, roleID); err != nil {
 		return Result{}, fmt.Errorf("assign seed role to seed admin: %w", err)

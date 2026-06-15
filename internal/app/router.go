@@ -9,13 +9,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func newRouter(deps Dependencies) *gin.Engine {
+func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.Config.App.Env == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
 	router := gin.New()
+	if err := router.SetTrustedProxies(deps.Config.MultiTenant.TrustedProxyCIDRs); err != nil {
+		return nil, err
+	}
 	router.Use(
+		middleware.CORS(),
 		middleware.RequestID(),
 		middleware.Recovery(deps.Logger),
 		gin.Logger(),
@@ -66,12 +70,18 @@ func newRouter(deps Dependencies) *gin.Engine {
 	}
 
 	protected := api.Group("")
-	protected.Use(middleware.Authenticate(deps.Authenticator))
+	protected.Use(
+		middleware.Authenticate(deps.Authenticator),
+		middleware.ResolveAuthenticatedOrganization(deps.OrganizationResolver),
+	)
 	if deps.UserAuthHandler != nil {
 		deps.UserAuthHandler.RegisterProtectedRoutes(protected)
 	}
 	if deps.UserHandler != nil {
 		deps.UserHandler.RegisterRoutes(protected)
+	}
+	if deps.OrganizationSwitchHandler != nil {
+		deps.OrganizationSwitchHandler.RegisterRoutes(protected)
 	}
 	if deps.PermissionHandler != nil {
 		deps.PermissionHandler.RegisterRoutes(protected)
@@ -92,6 +102,21 @@ func newRouter(deps Dependencies) *gin.Engine {
 		deps.NotificationHandler.RegisterInternalRoutes(protected)
 	}
 
-	registerModuleRoutes(api)
-	return router
+	publicTenantMiddleware, err := middleware.ResolvePublicOrganization(
+		deps.PublicHostResolver,
+		middleware.PublicHostOptions{
+			TrustForwardedHost: deps.Config.MultiTenant.TrustForwardedHost,
+			TrustedProxyCIDRs:  deps.Config.MultiTenant.TrustedProxyCIDRs,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	publicModules := api.Group("")
+	publicModules.Use(
+		publicTenantMiddleware,
+		middleware.RequireActiveTenant(),
+	)
+	registerModuleRoutes(publicModules)
+	return router, nil
 }

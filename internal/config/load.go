@@ -98,6 +98,22 @@ func LoadHTTP() HTTPConfig {
 	}
 }
 
+func LoadMultiTenant() MultiTenantConfig {
+	return MultiTenantConfig{
+		PlatformOrganizationID:   getEnv("PLATFORM_ORGANIZATION_ID", getEnv("APP_ORGANIZATION_ID", "")),
+		PlatformOrganizationSlug: getEnv("PLATFORM_ORGANIZATION_SLUG", "zyad-cloud"),
+		PlatformOrganizationName: getEnv("PLATFORM_ORGANIZATION_NAME", "Zyad Cloud"),
+		PlatformPrimaryDomain:    normalizeDomain(getEnv("PLATFORM_PRIMARY_DOMAIN", "")),
+		ReservedSubdomains: normalizeList(getEnvList(
+			"PLATFORM_RESERVED_SUBDOMAINS",
+			[]string{"www", "api", "app", "admin"},
+		)),
+		TrustedProxyCIDRs:    getEnvList("TRUSTED_PROXY_CIDRS", nil),
+		TrustForwardedHost:   getEnvBool("TRUST_FORWARDED_HOST", false),
+		DefaultDataPlacement: strings.ToLower(getEnv("TENANT_DEFAULT_DATA_PLACEMENT", "shared")),
+	}
+}
+
 func LoadMail() MailConfig {
 	return MailConfig{
 		Host:     getEnv("MAIL_HOST", ""),
@@ -202,6 +218,43 @@ func getEnvBool(key string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+func getEnvList(key string, fallback []string) []string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return append([]string(nil), fallback...)
+	}
+
+	items := strings.Split(value, ",")
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if item = strings.TrimSpace(item); item != "" {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func normalizeDomain(value string) string {
+	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(value)), ".")
+}
+
+func normalizeList(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = normalizeDomain(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 func loadDotEnv(path string) error {

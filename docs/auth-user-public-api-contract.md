@@ -896,6 +896,8 @@ Permission: `permission.read`
 
 Auth: required.
 
+Response contains active organization memberships and an `is_current` marker derived from the authenticated session snapshot.
+
 ### POST /users/me/switch-organization
 
 Auth: required.
@@ -907,6 +909,8 @@ Request:
   "organization_id": "uuid"
 }
 ```
+
+The selected organization must be active and have an active membership for the authenticated user. The switch updates only the current session and is effective on the next request. Tokens are not rotated because organization identity is not stored in the current JWT claims.
 
 ### GET /admin/organizations/:id/users
 

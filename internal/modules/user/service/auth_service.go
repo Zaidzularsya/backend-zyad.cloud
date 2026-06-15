@@ -25,9 +25,13 @@ var ErrCurrentUserNotFound = errors.New("current user not found")
 var ErrPasswordResetUserNotFound = errors.New("password reset user not found")
 var ErrPasswordResetTokenNotFound = errors.New("password reset token not found")
 var ErrPasswordChangeUserNotFound = errors.New("password change user not found")
+var ErrSessionNotFound = errors.New("session not found")
+var ErrEmailVerificationTokenNotFound = errors.New("email verification token not found")
+var ErrEmailAlreadyVerified = errors.New("email already verified")
 
 const passwordResetRequestedEvent = "auth.password_reset_requested"
 const passwordChangedEvent = "auth.password_changed"
+const emailVerificationRequestedEvent = "auth.email_verification"
 
 type LoginRepository interface {
 	FindLoginUserByIdentifier(ctx context.Context, identifier string) (LoginUser, error)
@@ -44,6 +48,13 @@ type LoginRepository interface {
 	RotateRefreshToken(ctx context.Context, rotation RefreshTokenRotation) error
 	UpdateLastLogin(ctx context.Context, userID string, at time.Time) error
 	RecordLoginHistory(ctx context.Context, history LoginHistoryRecord) error
+	ListSessions(ctx context.Context, userID string) ([]CurrentSession, error)
+	RevokeUserSession(ctx context.Context, sessionID string, userID string, revokedAt time.Time) error
+	RevokeAllSessions(ctx context.Context, userID string, excludeSessionID string, revokedAt time.Time) error
+	CreateEmailVerificationToken(ctx context.Context, token NewEmailVerificationToken) error
+	FindEmailVerificationTokenByHash(ctx context.Context, tokenHash string) (EmailVerificationToken, error)
+	CompleteEmailVerification(ctx context.Context, tokenHash string, verifiedAt time.Time) (EmailVerificationUser, error)
+	FindEmailVerificationUserByEmail(ctx context.Context, email string) (EmailVerificationTargetUser, error)
 }
 
 type NotificationEventPublisher interface {
@@ -107,6 +118,38 @@ type PasswordResetToken struct {
 	ExpiresAt time.Time
 	UsedAt    *time.Time
 }
+
+type NewEmailVerificationToken struct {
+	UserID    string
+	Email     string
+	TokenHash string
+	ExpiresAt time.Time
+}
+
+type EmailVerificationToken struct {
+	ID        string
+	UserID    string
+	Email     string
+	TokenHash string
+	ExpiresAt time.Time
+	UsedAt    *time.Time
+}
+
+type EmailVerificationUser struct {
+	ID    string
+	Name  string
+	Email string
+}
+
+type EmailVerificationTargetUser struct {
+	ID              string
+	Name            string
+	Email           string
+	Status          model.UserStatus
+	EmailVerifiedAt *time.Time
+}
+
+
 
 type RefreshSession struct {
 	TokenID           string
@@ -174,6 +217,7 @@ type CurrentSession struct {
 	ID         string
 	DeviceName string
 	IPAddress  string
+	UserAgent  string
 	LastUsedAt *time.Time
 	ExpiresAt  time.Time
 	RevokedAt  *time.Time
@@ -188,6 +232,7 @@ type AuthService struct {
 	refreshTTL            time.Duration
 	rememberMeTTL         time.Duration
 	resetTokenTTL         time.Duration
+	verificationTokenTTL  time.Duration
 	passwordMinLength     int
 	appName               string
 	frontendURL           string
@@ -222,6 +267,10 @@ func NewAuthService(repo LoginRepository, cfg config.Config) (*AuthService, erro
 	if err != nil {
 		return nil, fmt.Errorf("parse reset token ttl: %w", err)
 	}
+	verificationTokenTTL, err := parseConfigDuration(cfg.Auth.VerificationTokenExpiresIn)
+	if err != nil {
+		return nil, fmt.Errorf("parse verification token ttl: %w", err)
+	}
 
 	return &AuthService{
 		repo:                 repo,
@@ -231,6 +280,7 @@ func NewAuthService(repo LoginRepository, cfg config.Config) (*AuthService, erro
 		refreshTTL:           refreshTTL,
 		rememberMeTTL:        rememberMeTTL,
 		resetTokenTTL:        resetTokenTTL,
+		verificationTokenTTL: verificationTokenTTL,
 		passwordMinLength:    cfg.Auth.PasswordMinLength,
 		appName:              cfg.App.Name,
 		frontendURL:          cfg.App.FrontendURL,
@@ -843,3 +893,151 @@ func timeStringPtr(value *time.Time) *string {
 	formatted := value.UTC().Format(time.RFC3339)
 	return &formatted
 }
+
+func (s *AuthService) ListSessions(ctx context.Context, userID string) ([]CurrentSession, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, coreerrors.New("VALIDATION_ERROR", "user_id is required", http.StatusUnprocessableEntity)
+	}
+
+	sessions, err := s.repo.ListSessions(ctx, userID)
+	if err != nil {
+		return nil, coreerrors.Wrap("AUTH_SESSION_LIST_FAILED", "failed to list sessions", http.StatusInternalServerError, err)
+	}
+	return sessions, nil
+}
+
+func (s *AuthService) RevokeSession(ctx context.Context, sessionID string, userID string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	userID = strings.TrimSpace(userID)
+	if sessionID == "" || userID == "" {
+		return coreerrors.New("VALIDATION_ERROR", "session_id and user_id are required", http.StatusUnprocessableEntity)
+	}
+
+	now := s.now().UTC()
+	err := s.repo.RevokeUserSession(ctx, sessionID, userID, now)
+	if err != nil {
+		if errors.Is(err, ErrSessionNotFound) {
+			return coreerrors.New("AUTH_SESSION_NOT_FOUND", "session not found or already revoked", http.StatusNotFound)
+		}
+		return coreerrors.Wrap("AUTH_SESSION_REVOKE_FAILED", "failed to revoke session", http.StatusInternalServerError, err)
+	}
+	return nil
+}
+
+func (s *AuthService) LogoutAll(ctx context.Context, userID string, excludeSessionID string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return coreerrors.New("VALIDATION_ERROR", "user_id is required", http.StatusUnprocessableEntity)
+	}
+
+	now := s.now().UTC()
+	err := s.repo.RevokeAllSessions(ctx, userID, excludeSessionID, now)
+	if err != nil {
+		return coreerrors.Wrap("AUTH_LOGOUT_ALL_FAILED", "failed to revoke sessions", http.StatusInternalServerError, err)
+	}
+	return nil
+}
+
+func (s *AuthService) VerifyEmail(ctx context.Context, req dto.VerifyEmailRequest) error {
+	token := strings.TrimSpace(req.Token)
+	if token == "" {
+		return coreerrors.New("VALIDATION_ERROR", "token is required", http.StatusUnprocessableEntity)
+	}
+
+	tokenHash := coreauth.HashToken(token)
+	now := s.now().UTC()
+
+	_, err := s.repo.CompleteEmailVerification(ctx, tokenHash, now)
+	if err != nil {
+		if errors.Is(err, ErrEmailVerificationTokenNotFound) {
+			return coreerrors.New("AUTH_VERIFY_TOKEN_INVALID", "verification token is invalid or expired", http.StatusUnprocessableEntity)
+		}
+		return coreerrors.Wrap("AUTH_VERIFY_EMAIL_FAILED", "failed to verify email", http.StatusInternalServerError, err)
+	}
+
+	return nil
+}
+
+func (s *AuthService) ResendVerificationEmail(ctx context.Context, req dto.ResendVerificationEmailRequest) error {
+	email := strings.TrimSpace(strings.ToLower(req.Email))
+	if email == "" {
+		return coreerrors.New("VALIDATION_ERROR", "email is required", http.StatusUnprocessableEntity)
+	}
+
+	user, err := s.repo.FindEmailVerificationUserByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, ErrLoginUserNotFound) {
+			// Generic success response to avoid user enumeration
+			return nil
+		}
+		return coreerrors.Wrap("AUTH_RESEND_VERIFICATION_FAILED", "failed to resend verification email", http.StatusInternalServerError, err)
+	}
+
+	if user.EmailVerifiedAt != nil || user.Status == model.UserStatusActive {
+		return coreerrors.New("AUTH_EMAIL_ALREADY_VERIFIED", "email is already verified", http.StatusConflict)
+	}
+
+	if user.Status == model.UserStatusSuspended || user.Status == model.UserStatusBanned || user.Status == model.UserStatusDeleted {
+		// Generic success response to avoid exposing disabled user details
+		return nil
+	}
+
+	token, err := coreauth.NewRandomToken(32)
+	if err != nil {
+		return coreerrors.Wrap("AUTH_VERIFY_TOKEN_CREATE_FAILED", "failed to create verification token", http.StatusInternalServerError, err)
+	}
+
+	tokenHash := coreauth.HashToken(token)
+	expiresAt := s.now().UTC().Add(s.verificationTokenTTL)
+
+	if err := s.repo.CreateEmailVerificationToken(ctx, NewEmailVerificationToken{
+		UserID:    user.ID,
+		Email:     user.Email,
+		TokenHash: tokenHash,
+		ExpiresAt: expiresAt,
+	}); err != nil {
+		return coreerrors.Wrap("AUTH_VERIFY_TOKEN_STORE_FAILED", "failed to store verification token", http.StatusInternalServerError, err)
+	}
+
+	if s.notificationPublisher == nil {
+		return nil
+	}
+
+	_, err = s.notificationPublisher.Publish(ctx, notificationpublisher.Event{
+		Type:   emailVerificationRequestedEvent,
+		UserID: user.ID,
+		Recipient: notificationdomain.NotificationRecipient{
+			Type:   "user",
+			UserID: user.ID,
+			Name:   user.Name,
+			Email:  user.Email,
+		},
+		Payload: map[string]any{
+			"app_name":         firstNonEmpty(s.appName, "Zyad Cloud"),
+			"user_id":          user.ID,
+			"user_name":        user.Name,
+			"user_email":       user.Email,
+			"email":            user.Email,
+			"verification_url": s.emailVerificationURL(token),
+			"expired_at":       expiresAt.Format(time.RFC3339),
+		},
+		Locale:      s.notificationLocale,
+		MaxAttempts: s.notificationAttempts,
+	})
+	if err != nil {
+		return coreerrors.Wrap("AUTH_VERIFY_NOTIFICATION_FAILED", "failed to queue verification notification", http.StatusInternalServerError, err)
+	}
+
+	return nil
+}
+
+func (s *AuthService) emailVerificationURL(token string) string {
+	base := strings.TrimRight(strings.TrimSpace(s.frontendURL), "/")
+	if base == "" {
+		base = "http://localhost:3001"
+	}
+	return base + "/verify-email?token=" + url.QueryEscape(token)
+}
+
+

@@ -29,10 +29,15 @@ func (h *AuthHandler) RegisterRoutes(router gin.IRoutes) {
 	router.POST("/auth/reset-password/validate", h.ValidateResetToken)
 	router.POST("/auth/reset-password", h.ResetPassword)
 	router.GET("/auth/me", h.CurrentUser)
+	router.POST("/auth/verify-email", h.VerifyEmail)
+	router.POST("/auth/resend-verification-email", h.ResendVerificationEmail)
 }
 
 func (h *AuthHandler) RegisterProtectedRoutes(router gin.IRoutes) {
 	router.POST("/auth/change-password", h.ChangePassword)
+	router.GET("/auth/sessions", h.ListSessions)
+	router.DELETE("/auth/sessions/:id", h.RevokeSession)
+	router.POST("/auth/logout-all", h.LogoutAll)
 }
 
 func (h *AuthHandler) Login(c *gin.Context) {
@@ -188,3 +193,109 @@ func bearerToken(header string) string {
 	}
 	return strings.TrimSpace(token)
 }
+
+func (h *AuthHandler) ListSessions(c *gin.Context) {
+	user, ok := middleware.AuthenticatedUserFromContext(c)
+	if !ok || user.ID == "" {
+		corehttp.Fail(c, coreerrors.New("UNAUTHORIZED", "authenticated user is required", http.StatusUnauthorized))
+		return
+	}
+
+	sessions, err := h.service.ListSessions(c.Request.Context(), user.ID)
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+
+	responses := make([]dto.SessionResponse, 0, len(sessions))
+	for _, s := range sessions {
+		var lastUsedAtStr *string
+		if s.LastUsedAt != nil {
+			formatted := s.LastUsedAt.UTC().Format("2006-01-02T15:04:05Z")
+			lastUsedAtStr = &formatted
+		}
+
+		responses = append(responses, dto.SessionResponse{
+			ID:         s.ID,
+			DeviceName: s.DeviceName,
+			IPAddress:  s.IPAddress,
+			LastUsedAt: lastUsedAtStr,
+			ExpiresAt:  s.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z"),
+			IsCurrent:  s.ID == user.SessionID,
+		})
+	}
+
+	corehttp.OK(c, "sessions retrieved successfully", responses)
+}
+
+func (h *AuthHandler) RevokeSession(c *gin.Context) {
+	user, ok := middleware.AuthenticatedUserFromContext(c)
+	if !ok || user.ID == "" {
+		corehttp.Fail(c, coreerrors.New("UNAUTHORIZED", "authenticated user is required", http.StatusUnauthorized))
+		return
+	}
+
+	sessionID := c.Param("id")
+	if err := h.service.RevokeSession(c.Request.Context(), sessionID, user.ID); err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+
+	corehttp.OK(c, "session revoked successfully", nil)
+}
+
+func (h *AuthHandler) LogoutAll(c *gin.Context) {
+	user, ok := middleware.AuthenticatedUserFromContext(c)
+	if !ok || user.ID == "" {
+		corehttp.Fail(c, coreerrors.New("UNAUTHORIZED", "authenticated user is required", http.StatusUnauthorized))
+		return
+	}
+
+	var req dto.LogoutAllRequest
+	// We bind JSON but make it optional to parse (default to false if not provided)
+	_ = c.ShouldBindJSON(&req)
+
+	excludeSessionID := ""
+	if req.ExcludeCurrent {
+		excludeSessionID = user.SessionID
+	}
+
+	if err := h.service.LogoutAll(c.Request.Context(), user.ID, excludeSessionID); err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+
+	corehttp.OK(c, "logout all sessions successfully", nil)
+}
+
+func (h *AuthHandler) VerifyEmail(c *gin.Context) {
+	var req dto.VerifyEmailRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		return
+	}
+
+	if err := h.service.VerifyEmail(c.Request.Context(), req); err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+
+	corehttp.OK(c, "email verified successfully", nil)
+}
+
+func (h *AuthHandler) ResendVerificationEmail(c *gin.Context) {
+	var req dto.ResendVerificationEmailRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		return
+	}
+
+	if err := h.service.ResendVerificationEmail(c.Request.Context(), req); err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+
+	corehttp.OK(c, "if the email is pending verification, a verification email has been sent", nil)
+}
+
+

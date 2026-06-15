@@ -596,6 +596,118 @@ func insertListUser(
 	return id
 }
 
+func TestUserRepositoryListLoginHistoriesAndAuditLogsIntegration(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	repo := NewUserRepository(db)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	suffix := time.Now().UnixNano()
+	userID := insertListUser(t, ctx, db, fmt.Sprintf("audit-list-%d@example.test", suffix), "Audit List User", model.UserStatusActive, nil)
+
+	// Insert test login histories
+	if _, err := db.Exec(ctx, `
+		INSERT INTO login_histories (user_id, identifier, event, success, ip_address, user_agent, device_name, reason, created_at)
+		VALUES 
+		($1, $2, 'login', true, '127.0.0.1', 'Mozilla/5.0', 'Desktop', '', now() - interval '2 days'),
+		($1, $2, 'failed_login', false, '192.168.1.1', 'Chrome', 'Mobile', 'Invalid credentials', now() - interval '1 day')
+	`, userID, fmt.Sprintf("audit-list-%d", suffix)); err != nil {
+		t.Fatalf("insert login histories: %v", err)
+	}
+
+	// Insert test audit logs
+	if _, err := db.Exec(ctx, `
+		INSERT INTO audit_logs (module, event, actor_user_id, target_user_id, target_type, target_id, metadata, ip_address, user_agent, created_at)
+		VALUES 
+		('user', 'user_created', $1, $1, 'user', $1, '{"test": "create"}'::jsonb, '127.0.0.1', 'Mozilla/5.0', now() - interval '2 days'),
+		('user', 'user_updated', $1, $1, 'user', $1, '{"test": "update"}'::jsonb, '192.168.1.1', 'Chrome', now() - interval '1 day')
+	`, userID); err != nil {
+		t.Fatalf("insert audit logs: %v", err)
+	}
+
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		if _, err := db.Exec(cleanupCtx, `DELETE FROM login_histories WHERE user_id = $1`, userID); err != nil {
+			t.Errorf("cleanup login histories: %v", err)
+		}
+		if _, err := db.Exec(cleanupCtx, `DELETE FROM audit_logs WHERE target_user_id = $1 OR actor_user_id = $1`, userID); err != nil {
+			t.Errorf("cleanup audit logs: %v", err)
+		}
+		if _, err := db.Exec(cleanupCtx, `DELETE FROM users WHERE id = $1`, userID); err != nil {
+			t.Errorf("cleanup users: %v", err)
+		}
+	})
+
+	t.Run("ListLoginHistories global", func(t *testing.T) {
+		histories, total, err := repo.ListLoginHistories(ctx, service.LoginHistoryFilter{
+			Page:      1,
+			PerPage:   10,
+			Sort:      "created_at",
+			Direction: "desc",
+		})
+		if err != nil {
+			t.Fatalf("ListLoginHistories() error = %v", err)
+		}
+		if total < 2 || len(histories) < 2 {
+			t.Fatalf("histories count = %d (want >= 2)", total)
+		}
+	})
+
+	t.Run("ListLoginHistories filter user_id", func(t *testing.T) {
+		histories, total, err := repo.ListLoginHistories(ctx, service.LoginHistoryFilter{
+			Page:      1,
+			PerPage:   10,
+			UserID:    userID,
+			Sort:      "created_at",
+			Direction: "desc",
+		})
+		if err != nil {
+			t.Fatalf("ListLoginHistories() error = %v", err)
+		}
+		if total != 2 || len(histories) != 2 {
+			t.Fatalf("histories count = %d (want 2)", total)
+		}
+		if histories[0].Event != "failed_login" || histories[1].Event != "login" {
+			t.Fatalf("unexpected order or events: %#v", histories)
+		}
+	})
+
+	t.Run("ListAuditLogs global", func(t *testing.T) {
+		logs, total, err := repo.ListAuditLogs(ctx, service.AuditLogFilter{
+			Page:      1,
+			PerPage:   10,
+			Sort:      "created_at",
+			Direction: "desc",
+		})
+		if err != nil {
+			t.Fatalf("ListAuditLogs() error = %v", err)
+		}
+		if total < 2 || len(logs) < 2 {
+			t.Fatalf("logs count = %d (want >= 2)", total)
+		}
+	})
+
+	t.Run("ListAuditLogs filter target_user_id", func(t *testing.T) {
+		logs, total, err := repo.ListAuditLogs(ctx, service.AuditLogFilter{
+			Page:         1,
+			PerPage:      10,
+			TargetUserID: userID,
+			Sort:         "created_at",
+			Direction:    "desc",
+		})
+		if err != nil {
+			t.Fatalf("ListAuditLogs() error = %v", err)
+		}
+		if total != 2 || len(logs) != 2 {
+			t.Fatalf("logs count = %d (want 2)", total)
+		}
+		if logs[0].Event != "user_updated" || logs[1].Event != "user_created" {
+			t.Fatalf("unexpected order or events: %#v", logs)
+		}
+	})
+}
+
 func insertDetailSession(
 	t *testing.T,
 	ctx context.Context,

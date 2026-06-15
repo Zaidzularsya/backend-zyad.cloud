@@ -13,6 +13,7 @@ type Config struct {
 	SeedAdmin    SeedAdminConfig
 	Notification NotificationConfig
 	HTTP         HTTPConfig
+	MultiTenant  MultiTenantConfig
 	Mail         MailConfig
 	Mikrotik     MikrotikConfig
 	Xendit       XenditConfig
@@ -36,6 +37,7 @@ func Load() Config {
 		SeedAdmin:    LoadSeedAdmin(),
 		Notification: LoadNotification(),
 		HTTP:         LoadHTTP(),
+		MultiTenant:  LoadMultiTenant(),
 		Mail:         LoadMail(),
 		Mikrotik:     LoadMikrotik(),
 		Xendit:       LoadXendit(),
@@ -103,6 +105,17 @@ type HTTPConfig struct {
 	ReadTimeoutSeconds  int
 	WriteTimeoutSeconds int
 	IdleTimeoutSeconds  int
+}
+
+type MultiTenantConfig struct {
+	PlatformOrganizationID   string
+	PlatformOrganizationSlug string
+	PlatformOrganizationName string
+	PlatformPrimaryDomain    string
+	ReservedSubdomains       []string
+	TrustedProxyCIDRs        []string
+	TrustForwardedHost       bool
+	DefaultDataPlacement     string
 }
 
 type MailConfig struct {

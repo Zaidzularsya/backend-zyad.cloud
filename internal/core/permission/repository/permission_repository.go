@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"zyad.cloud/internal/core/permission/domain"
@@ -16,11 +18,13 @@ func New(db *database.Pool) *Repository {
 	return &Repository{db: db}
 }
 
+// === PERMISSION CRUD ===
+
 func (r *Repository) ListPermissions(ctx context.Context) ([]domain.Permission, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id, permission_name, COALESCE(description, ''), COALESCE(module_id::text, ''), created_at, updated_at
+		SELECT id, name, slug, module, action, COALESCE(description, ''), created_at, updated_at
 		FROM permissions
-		ORDER BY permission_name
+		ORDER BY slug
 	`)
 	if err != nil {
 		return nil, err
@@ -29,176 +33,83 @@ func (r *Repository) ListPermissions(ctx context.Context) ([]domain.Permission, 
 
 	permissions := make([]domain.Permission, 0)
 	for rows.Next() {
-		var permission domain.Permission
+		var p domain.Permission
+		var createdAt, updatedAt *time.Time
 		if err := rows.Scan(
-			&permission.ID,
-			&permission.Name,
-			&permission.Description,
-			&permission.ModuleID,
-			&permission.CreatedAt,
-			&permission.UpdatedAt,
+			&p.ID,
+			&p.Name,
+			&p.Slug,
+			&p.Module,
+			&p.Action,
+			&p.Description,
+			&createdAt,
+			&updatedAt,
 		); err != nil {
 			return nil, err
 		}
-		permissions = append(permissions, permission)
+		p.CreatedAt = createdAt
+		p.UpdatedAt = updatedAt
+		p.ModuleID = "" // Deprecated field in schema normalization
+		permissions = append(permissions, p)
 	}
 
 	return permissions, rows.Err()
 }
 
-func (r *Repository) GetRolePermissions(ctx context.Context, roleName string) (domain.Role, error) {
-	var role domain.Role
-	if err := r.db.QueryRow(ctx, `
-		SELECT id, role_name, COALESCE(description, ''), created_at, updated_at
-		FROM roles
-		WHERE role_name = $1
-	`, roleName).Scan(
-		&role.ID,
-		&role.Name,
-		&role.Description,
-		&role.CreatedAt,
-		&role.UpdatedAt,
-	); err != nil {
-		return domain.Role{}, err
-	}
-
-	rows, err := r.db.Query(ctx, `
-		SELECT
-			p.id,
-			p.permission_name,
-			COALESCE(p.description, ''),
-			COALESCE(p.module_id::text, ''),
-			p.created_at,
-			p.updated_at
-		FROM role_permissions rp
-		JOIN permissions p ON p.id = rp.permission_id
-		JOIN roles r ON r.id = rp.role_id
-		WHERE r.role_name = $1
-		ORDER BY p.permission_name
-	`, roleName)
-	if err != nil {
-		return domain.Role{}, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var permission domain.Permission
-		if err := rows.Scan(
-			&permission.ID,
-			&permission.Name,
-			&permission.Description,
-			&permission.ModuleID,
-			&permission.CreatedAt,
-			&permission.UpdatedAt,
-		); err != nil {
-			return domain.Role{}, err
-		}
-		role.Permissions = append(role.Permissions, permission)
-	}
-
-	if err := rows.Err(); err != nil {
-		return domain.Role{}, err
-	}
-
-	return role, nil
-}
-
-func (r *Repository) GetUserPermissions(ctx context.Context, userID string) (domain.UserPermissionSet, error) {
-	rows, err := r.db.Query(ctx, `
-		SELECT DISTINCT
-			r.role_name,
-			p.id,
-			p.permission_name,
-			COALESCE(p.description, ''),
-			COALESCE(p.module_id::text, ''),
-			p.created_at,
-			p.updated_at
-		FROM user_roles ur
-		JOIN roles r ON r.id = ur.role_id
-		JOIN role_permissions rp ON rp.role_id = r.id
-		JOIN permissions p ON p.id = rp.permission_id
-		WHERE ur.user_id = $1
-		ORDER BY r.role_name, p.permission_name
-	`, userID)
-	if err != nil {
-		return domain.UserPermissionSet{}, err
-	}
-	defer rows.Close()
-
-	result := domain.UserPermissionSet{UserID: userID}
-	roleNames := map[string]struct{}{}
-	permissionNames := map[string]struct{}{}
-
-	for rows.Next() {
-		var roleName string
-		var permission domain.Permission
-		if err := rows.Scan(
-			&roleName,
-			&permission.ID,
-			&permission.Name,
-			&permission.Description,
-			&permission.ModuleID,
-			&permission.CreatedAt,
-			&permission.UpdatedAt,
-		); err != nil {
-			return domain.UserPermissionSet{}, err
-		}
-
-		if _, ok := roleNames[roleName]; !ok {
-			roleNames[roleName] = struct{}{}
-			result.RoleNames = append(result.RoleNames, roleName)
-		}
-		if _, ok := permissionNames[permission.Name]; !ok {
-			permissionNames[permission.Name] = struct{}{}
-			result.Permissions = append(result.Permissions, permission)
-		}
-	}
-
-	return result, rows.Err()
-}
-
 func (r *Repository) GetPermissionByID(ctx context.Context, id string) (domain.Permission, error) {
-	var permission domain.Permission
+	var p domain.Permission
+	var createdAt, updatedAt *time.Time
 	err := r.db.QueryRow(ctx, `
-		SELECT id, permission_name, COALESCE(description, ''), COALESCE(module_id::text, ''), created_at, updated_at
+		SELECT id, name, slug, module, action, COALESCE(description, ''), created_at, updated_at
 		FROM permissions
 		WHERE id = $1
 	`, id).Scan(
-		&permission.ID,
-		&permission.Name,
-		&permission.Description,
-		&permission.ModuleID,
-		&permission.CreatedAt,
-		&permission.UpdatedAt,
+		&p.ID,
+		&p.Name,
+		&p.Slug,
+		&p.Module,
+		&p.Action,
+		&p.Description,
+		&createdAt,
+		&updatedAt,
 	)
-	return permission, err
+	if err != nil {
+		return domain.Permission{}, err
+	}
+	p.CreatedAt = createdAt
+	p.UpdatedAt = updatedAt
+	return p, nil
 }
 
 func (r *Repository) CreatePermission(ctx context.Context, p *domain.Permission) error {
-	var moduleID *string
-	if p.ModuleID != "" {
-		moduleID = &p.ModuleID
-	}
-
-	return r.db.QueryRow(ctx, `
-		INSERT INTO permissions (permission_name, description, module_id, created_at, updated_at)
-		VALUES ($1, $2, $3, now(), now())
+	var createdAt, updatedAt time.Time
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO permissions (name, slug, module, action, permission_name, description, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $2, $5, now(), now())
 		RETURNING id, created_at, updated_at
-	`, p.Name, p.Description, moduleID).Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt)
+	`, p.Name, p.Slug, p.Module, p.Action, p.Description).Scan(&p.ID, &createdAt, &updatedAt)
+	if err != nil {
+		return err
+	}
+	p.CreatedAt = &createdAt
+	p.UpdatedAt = &updatedAt
+	return nil
 }
 
 func (r *Repository) UpdatePermission(ctx context.Context, id string, p *domain.Permission) error {
-	var moduleID *string
-	if p.ModuleID != "" {
-		moduleID = &p.ModuleID
-	}
-
-	return r.db.QueryRow(ctx, `
+	var createdAt, updatedAt time.Time
+	err := r.db.QueryRow(ctx, `
 		UPDATE permissions
-		SET description = $1, module_id = $2, updated_at = now()
-		WHERE id = $3
-		RETURNING permission_name, created_at, updated_at
-	`, p.Description, moduleID, id).Scan(&p.Name, &p.CreatedAt, &p.UpdatedAt)
+		SET name = $1, slug = $2, module = $3, action = $4, permission_name = $2, description = $5, updated_at = now()
+		WHERE id = $6
+		RETURNING created_at, updated_at
+	`, p.Name, p.Slug, p.Module, p.Action, p.Description, id).Scan(&createdAt, &updatedAt)
+	if err != nil {
+		return err
+	}
+	p.CreatedAt = &createdAt
+	p.UpdatedAt = &updatedAt
+	return nil
 }
 
 func (r *Repository) DeletePermission(ctx context.Context, id string) error {
@@ -214,51 +125,13 @@ func (r *Repository) DeletePermission(ctx context.Context, id string) error {
 	return nil
 }
 
-func (r *Repository) GetRoleByID(ctx context.Context, id string) (domain.Role, error) {
-	var role domain.Role
-	err := r.db.QueryRow(ctx, `
-		SELECT id, role_name, COALESCE(description, ''), created_at, updated_at
-		FROM roles
-		WHERE id = $1
-	`, id).Scan(
-		&role.ID,
-		&role.Name,
-		&role.Description,
-		&role.CreatedAt,
-		&role.UpdatedAt,
-	)
-	if err != nil {
-		return domain.Role{}, err
-	}
-
-	rows, err := r.db.Query(ctx, `
-		SELECT p.id, p.permission_name, COALESCE(p.description, ''), COALESCE(p.module_id::text, ''), p.created_at, p.updated_at
-		FROM role_permissions rp
-		JOIN permissions p ON p.id = rp.permission_id
-		WHERE rp.role_id = $1
-		ORDER BY p.permission_name
-	`, id)
-	if err != nil {
-		return domain.Role{}, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var p domain.Permission
-		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.ModuleID, &p.CreatedAt, &p.UpdatedAt); err != nil {
-			return domain.Role{}, err
-		}
-		role.Permissions = append(role.Permissions, p)
-	}
-
-	return role, rows.Err()
-}
+// === ROLE CRUD ===
 
 func (r *Repository) ListRoles(ctx context.Context) ([]domain.Role, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id, role_name, COALESCE(description, ''), created_at, updated_at
+		SELECT id, role_name, slug, COALESCE(description, ''), is_system, created_at, updated_at
 		FROM roles
-		ORDER BY role_name
+		ORDER BY slug
 	`)
 	if err != nil {
 		return nil, err
@@ -268,36 +141,174 @@ func (r *Repository) ListRoles(ctx context.Context) ([]domain.Role, error) {
 	roles := make([]domain.Role, 0)
 	for rows.Next() {
 		var role domain.Role
+		var createdAt, updatedAt *time.Time
 		if err := rows.Scan(
 			&role.ID,
 			&role.Name,
+			&role.Slug,
 			&role.Description,
-			&role.CreatedAt,
-			&role.UpdatedAt,
+			&role.IsSystem,
+			&createdAt,
+			&updatedAt,
 		); err != nil {
 			return nil, err
 		}
+		role.CreatedAt = createdAt
+		role.UpdatedAt = updatedAt
 		roles = append(roles, role)
 	}
 
 	return roles, rows.Err()
 }
 
+func (r *Repository) GetRoleByID(ctx context.Context, id string) (domain.Role, error) {
+	var role domain.Role
+	var createdAt, updatedAt *time.Time
+	err := r.db.QueryRow(ctx, `
+		SELECT id, role_name, slug, COALESCE(description, ''), is_system, created_at, updated_at
+		FROM roles
+		WHERE id = $1
+	`, id).Scan(
+		&role.ID,
+		&role.Name,
+		&role.Slug,
+		&role.Description,
+		&role.IsSystem,
+		&createdAt,
+		&updatedAt,
+	)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	role.CreatedAt = createdAt
+	role.UpdatedAt = updatedAt
+
+	// Load role permissions mapping
+	rows, err := r.db.Query(ctx, `
+		SELECT p.id, p.name, p.slug, p.module, p.action, COALESCE(p.description, ''), p.created_at, p.updated_at
+		FROM role_permissions rp
+		JOIN permissions p ON p.id = rp.permission_id
+		WHERE rp.role_id = $1
+		ORDER BY p.slug
+	`, id)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var p domain.Permission
+		var pCreatedAt, pUpdatedAt *time.Time
+		if err := rows.Scan(&p.ID, &p.Name, &p.Slug, &p.Module, &p.Action, &p.Description, &pCreatedAt, &pUpdatedAt); err != nil {
+			return domain.Role{}, err
+		}
+		p.CreatedAt = pCreatedAt
+		p.UpdatedAt = pUpdatedAt
+		role.Permissions = append(role.Permissions, p)
+	}
+
+	return role, rows.Err()
+}
+
+func (r *Repository) GetRolePermissions(ctx context.Context, roleName string) (domain.Role, error) {
+	var role domain.Role
+	var createdAt, updatedAt *time.Time
+	err := r.db.QueryRow(ctx, `
+		SELECT id, role_name, slug, COALESCE(description, ''), is_system, created_at, updated_at
+		FROM roles
+		WHERE role_name = $1 OR slug = $1
+	`, roleName).Scan(
+		&role.ID,
+		&role.Name,
+		&role.Slug,
+		&role.Description,
+		&role.IsSystem,
+		&createdAt,
+		&updatedAt,
+	)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	role.CreatedAt = createdAt
+	role.UpdatedAt = updatedAt
+
+	rows, err := r.db.Query(ctx, `
+		SELECT
+			p.id,
+			p.name,
+			p.slug,
+			p.module,
+			p.action,
+			COALESCE(p.description, ''),
+			p.created_at,
+			p.updated_at
+		FROM role_permissions rp
+		JOIN permissions p ON p.id = rp.permission_id
+		JOIN roles r ON r.id = rp.role_id
+		WHERE r.id = $1
+		ORDER BY p.slug
+	`, role.ID)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var p domain.Permission
+		var pCreatedAt, pUpdatedAt *time.Time
+		if err := rows.Scan(
+			&p.ID,
+			&p.Name,
+			&p.Slug,
+			&p.Module,
+			&p.Action,
+			&p.Description,
+			&pCreatedAt,
+			&pUpdatedAt,
+		); err != nil {
+			return domain.Role{}, err
+		}
+		p.CreatedAt = pCreatedAt
+		p.UpdatedAt = pUpdatedAt
+		role.Permissions = append(role.Permissions, p)
+	}
+
+	if err := rows.Err(); err != nil {
+		return domain.Role{}, err
+	}
+
+	return role, nil
+}
+
 func (r *Repository) CreateRole(ctx context.Context, role *domain.Role) error {
-	return r.db.QueryRow(ctx, `
-		INSERT INTO roles (role_name, description, created_at, updated_at)
-		VALUES ($1, $2, now(), now())
+	var createdAt, updatedAt time.Time
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO roles (role_name, slug, description, is_system, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, now(), now())
 		RETURNING id, created_at, updated_at
-	`, role.Name, role.Description).Scan(&role.ID, &role.CreatedAt, &role.UpdatedAt)
+	`, role.Name, role.Slug, role.Description, role.IsSystem).Scan(&role.ID, &createdAt, &updatedAt)
+	if err != nil {
+		return err
+	}
+	role.CreatedAt = &createdAt
+	role.UpdatedAt = &updatedAt
+	return nil
 }
 
 func (r *Repository) UpdateRole(ctx context.Context, id string, role *domain.Role) error {
-	return r.db.QueryRow(ctx, `
+	var createdAt, updatedAt time.Time
+	err := r.db.QueryRow(ctx, `
 		UPDATE roles
-		SET description = $1, updated_at = now()
-		WHERE id = $2
-		RETURNING role_name, created_at, updated_at
-	`, role.Description, id).Scan(&role.Name, &role.CreatedAt, &role.UpdatedAt)
+		SET role_name = $1, slug = $2, description = $3, updated_at = now()
+		WHERE id = $4
+		RETURNING is_system, created_at, updated_at
+	`, role.Name, role.Slug, role.Description, id).Scan(&role.IsSystem, &createdAt, &updatedAt)
+	if err != nil {
+		return err
+	}
+	role.CreatedAt = &createdAt
+	role.UpdatedAt = &updatedAt
+	return nil
 }
 
 func (r *Repository) DeleteRole(ctx context.Context, id string) error {
@@ -311,6 +322,35 @@ func (r *Repository) DeleteRole(ctx context.Context, id string) error {
 		return pgx.ErrNoRows
 	}
 	return nil
+}
+
+// === ROLE PERMISSION MAPPINGS ===
+
+func (r *Repository) GetRolePermissionsByID(ctx context.Context, roleID string) ([]domain.Permission, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT p.id, p.name, p.slug, p.module, p.action, COALESCE(p.description, ''), p.created_at, p.updated_at
+		FROM role_permissions rp
+		JOIN permissions p ON p.id = rp.permission_id
+		WHERE rp.role_id = $1
+		ORDER BY p.slug
+	`, roleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	permissions := make([]domain.Permission, 0)
+	for rows.Next() {
+		var p domain.Permission
+		var createdAt, updatedAt *time.Time
+		if err := rows.Scan(&p.ID, &p.Name, &p.Slug, &p.Module, &p.Action, &p.Description, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		p.CreatedAt = createdAt
+		p.UpdatedAt = updatedAt
+		permissions = append(permissions, p)
+	}
+	return permissions, rows.Err()
 }
 
 func (r *Repository) AssignPermissions(ctx context.Context, roleID string, permissionIDs []string) error {
@@ -334,6 +374,16 @@ func (r *Repository) AssignPermissions(ctx context.Context, roleID string, permi
 	return tx.Commit(ctx)
 }
 
+func (r *Repository) AssignRolePermission(ctx context.Context, roleID string, permID string, scope string) error {
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO role_permissions (role_id, permission_id, scope, granted_at)
+		VALUES ($1, $2, $3, now())
+		ON CONFLICT (role_id, permission_id) DO UPDATE
+		SET scope = EXCLUDED.scope, granted_at = now()
+	`, roleID, permID, scope)
+	return err
+}
+
 func (r *Repository) RevokePermissions(ctx context.Context, roleID string, permissionIDs []string) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -354,6 +404,83 @@ func (r *Repository) RevokePermissions(ctx context.Context, roleID string, permi
 	return tx.Commit(ctx)
 }
 
+func (r *Repository) RevokeRolePermission(ctx context.Context, roleID string, permID string) error {
+	res, err := r.db.Exec(ctx, `
+		DELETE FROM role_permissions WHERE role_id = $1 AND permission_id = $2
+	`, roleID, permID)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+// === USER ROLE MAPPINGS ===
+
+func (r *Repository) ListUserRoles(ctx context.Context, userID string) ([]domain.UserRole, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT ur.id, ur.user_id, ur.role_id, r.slug, ur.organization_id, ur.assigned_by, ur.assigned_at
+		FROM user_roles ur
+		JOIN roles r ON r.id = ur.role_id
+		WHERE ur.user_id = $1
+		ORDER BY r.slug
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	roles := make([]domain.UserRole, 0)
+	for rows.Next() {
+		var ur domain.UserRole
+		var orgID, assignedBy *string
+		if err := rows.Scan(
+			&ur.ID,
+			&ur.UserID,
+			&ur.RoleID,
+			&ur.RoleSlug,
+			&orgID,
+			&assignedBy,
+			&ur.AssignedAt,
+		); err != nil {
+			return nil, err
+		}
+		ur.OrganizationID = orgID
+		ur.AssignedBy = assignedBy
+		roles = append(roles, ur)
+	}
+	return roles, rows.Err()
+}
+
+func (r *Repository) AssignUserRole(ctx context.Context, userID string, roleID string, orgID *string, assignedBy string) error {
+	var assignedByPtr *string
+	if assignedBy != "" {
+		assignedByPtr = &assignedBy
+	}
+
+	query := `
+		INSERT INTO user_roles (id, user_id, role_id, organization_id, assigned_by, assigned_at)
+		VALUES (gen_random_uuid(), $1, $2, NULL, $3, now())
+		ON CONFLICT (user_id, role_id) WHERE organization_id IS NULL
+		DO UPDATE SET assigned_by = EXCLUDED.assigned_by, assigned_at = now()
+	`
+	args := []any{userID, roleID, assignedByPtr}
+	if orgID != nil {
+		query = `
+			INSERT INTO user_roles (id, user_id, role_id, organization_id, assigned_by, assigned_at)
+			VALUES (gen_random_uuid(), $1, $2, $3, $4, now())
+			ON CONFLICT (user_id, role_id, organization_id) WHERE organization_id IS NOT NULL
+			DO UPDATE SET assigned_by = EXCLUDED.assigned_by, assigned_at = now()
+		`
+		args = []any{userID, roleID, orgID, assignedByPtr}
+	}
+
+	_, err := r.db.Exec(ctx, query, args...)
+	return err
+}
+
 func (r *Repository) AssignUserRoles(ctx context.Context, userID string, roleIDs []string) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -363,9 +490,9 @@ func (r *Repository) AssignUserRoles(ctx context.Context, userID string, roleIDs
 
 	for _, roleID := range roleIDs {
 		_, err := tx.Exec(ctx, `
-			INSERT INTO user_roles (user_id, role_id, assigned_at)
-			VALUES ($1, $2, now())
-			ON CONFLICT (user_id, role_id) DO NOTHING
+			INSERT INTO user_roles (id, user_id, role_id, assigned_at)
+			VALUES (gen_random_uuid(), $1, $2, now())
+			ON CONFLICT (user_id, role_id) WHERE organization_id IS NULL DO NOTHING
 		`, userID, roleID)
 		if err != nil {
 			return err
@@ -373,6 +500,19 @@ func (r *Repository) AssignUserRoles(ctx context.Context, userID string, roleIDs
 	}
 
 	return tx.Commit(ctx)
+}
+
+func (r *Repository) RevokeUserRole(ctx context.Context, userID string, roleID string) error {
+	res, err := r.db.Exec(ctx, `
+		DELETE FROM user_roles WHERE user_id = $1 AND role_id = $2
+	`, userID, roleID)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }
 
 func (r *Repository) RevokeUserRoles(ctx context.Context, userID string, roleIDs []string) error {
@@ -395,3 +535,286 @@ func (r *Repository) RevokeUserRoles(ctx context.Context, userID string, roleIDs
 	return tx.Commit(ctx)
 }
 
+// === USER DIRECT PERMISSION MAPPINGS ===
+
+func (r *Repository) ListUserPermissions(ctx context.Context, userID string) ([]domain.UserPermission, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT up.id, up.user_id, up.permission_id, p.slug, up.organization_id, up.effect, up.assigned_by, up.assigned_at, up.created_at
+		FROM user_permissions up
+		JOIN permissions p ON p.id = up.permission_id
+		WHERE up.user_id = $1
+		ORDER BY p.slug
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	permissions := make([]domain.UserPermission, 0)
+	for rows.Next() {
+		var up domain.UserPermission
+		var orgID, assignedBy *string
+		if err := rows.Scan(
+			&up.ID,
+			&up.UserID,
+			&up.PermissionID,
+			&up.PermissionSlug,
+			&orgID,
+			&up.Effect,
+			&assignedBy,
+			&up.AssignedAt,
+			&up.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		up.OrganizationID = orgID
+		up.AssignedBy = assignedBy
+		permissions = append(permissions, up)
+	}
+	return permissions, rows.Err()
+}
+
+func (r *Repository) AssignUserPermission(ctx context.Context, userID string, permID string, effect string, orgID *string, assignedBy string) error {
+	var assignedByPtr *string
+	if assignedBy != "" {
+		assignedByPtr = &assignedBy
+	}
+
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// Check if record exists under global or organization-specific context
+	var existingID string
+	var queryErr error
+	if orgID == nil {
+		queryErr = tx.QueryRow(ctx, `
+			SELECT id FROM user_permissions
+			WHERE user_id = $1 AND permission_id = $2 AND organization_id IS NULL
+		`, userID, permID).Scan(&existingID)
+	} else {
+		queryErr = tx.QueryRow(ctx, `
+			SELECT id FROM user_permissions
+			WHERE user_id = $1 AND permission_id = $2 AND organization_id = $3
+		`, userID, permID, *orgID).Scan(&existingID)
+	}
+
+	if queryErr != nil && !errors.Is(queryErr, pgx.ErrNoRows) {
+		return queryErr
+	}
+
+	if errors.Is(queryErr, pgx.ErrNoRows) {
+		// INSERT
+		_, err = tx.Exec(ctx, `
+			INSERT INTO user_permissions (id, user_id, permission_id, organization_id, effect, assigned_by, assigned_at, created_at)
+			VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, now(), now())
+		`, userID, permID, orgID, effect, assignedByPtr)
+	} else {
+		// UPDATE
+		_, err = tx.Exec(ctx, `
+			UPDATE user_permissions
+			SET effect = $1, assigned_by = $2, assigned_at = now()
+			WHERE id = $3
+		`, effect, assignedByPtr, existingID)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+func (r *Repository) RevokeUserPermission(ctx context.Context, userID string, permID string) error {
+	res, err := r.db.Exec(ctx, `
+		DELETE FROM user_permissions WHERE user_id = $1 AND permission_id = $2
+	`, userID, permID)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
+}
+
+// === EFFECTIVE PERMISSIONS EVALUATION ===
+
+func (r *Repository) GetUserPermissions(ctx context.Context, userID string) (domain.UserPermissionSet, error) {
+	return r.getUserPermissions(ctx, userID, "")
+}
+
+func (r *Repository) GetUserOrganizationPermissions(
+	ctx context.Context,
+	userID string,
+	organizationID string,
+) (domain.UserPermissionSet, error) {
+	return r.getUserPermissions(ctx, userID, organizationID)
+}
+
+func (r *Repository) getUserPermissions(
+	ctx context.Context,
+	userID string,
+	organizationID string,
+) (domain.UserPermissionSet, error) {
+	// Query 1: Get permissions granted via roles
+	roleRows, err := r.db.Query(ctx, `
+		SELECT DISTINCT
+			r.role_name,
+			p.id,
+			p.name,
+			p.slug,
+			p.module,
+			p.action,
+			COALESCE(p.description, ''),
+			p.created_at,
+			p.updated_at
+		FROM user_roles ur
+		JOIN roles r ON r.id = ur.role_id
+		JOIN role_permissions rp ON rp.role_id = r.id
+		JOIN permissions p ON p.id = rp.permission_id
+		WHERE ur.user_id = $1
+			AND (
+				(NULLIF($2, '')::uuid IS NULL AND ur.organization_id IS NULL)
+				OR ur.organization_id = NULLIF($2, '')::uuid
+			)
+		ORDER BY r.role_name, p.slug
+	`, userID, organizationID)
+	if err != nil {
+		return domain.UserPermissionSet{}, err
+	}
+	defer roleRows.Close()
+
+	roleNames := make([]string, 0)
+	roleNamesMap := make(map[string]struct{})
+	effectivePerms := make(map[string]domain.Permission)
+
+	for roleRows.Next() {
+		var roleName string
+		var p domain.Permission
+		var createdAt, updatedAt *time.Time
+		if err := roleRows.Scan(
+			&roleName,
+			&p.ID,
+			&p.Name,
+			&p.Slug,
+			&p.Module,
+			&p.Action,
+			&p.Description,
+			&createdAt,
+			&updatedAt,
+		); err != nil {
+			return domain.UserPermissionSet{}, err
+		}
+		p.CreatedAt = createdAt
+		p.UpdatedAt = updatedAt
+
+		if _, exists := roleNamesMap[roleName]; !exists {
+			roleNamesMap[roleName] = struct{}{}
+			roleNames = append(roleNames, roleName)
+		}
+		// Role permissions are implicitly "allow"
+		effectivePerms[p.Slug] = p
+	}
+
+	if err := roleRows.Err(); err != nil {
+		return domain.UserPermissionSet{}, err
+	}
+
+	// Query 2: Get direct permissions with overrides
+	directRows, err := r.db.Query(ctx, `
+		SELECT
+			p.id,
+			p.name,
+			p.slug,
+			p.module,
+			p.action,
+			COALESCE(p.description, ''),
+			up.effect,
+			p.created_at,
+			p.updated_at
+		FROM user_permissions up
+		JOIN permissions p ON p.id = up.permission_id
+		WHERE up.user_id = $1
+			AND (
+				(NULLIF($2, '')::uuid IS NULL AND up.organization_id IS NULL)
+				OR up.organization_id = NULLIF($2, '')::uuid
+			)
+		ORDER BY p.slug
+	`, userID, organizationID)
+	if err != nil {
+		return domain.UserPermissionSet{}, err
+	}
+	defer directRows.Close()
+
+	for directRows.Next() {
+		var p domain.Permission
+		var effect string
+		var createdAt, updatedAt *time.Time
+		if err := directRows.Scan(
+			&p.ID,
+			&p.Name,
+			&p.Slug,
+			&p.Module,
+			&p.Action,
+			&p.Description,
+			&effect,
+			&createdAt,
+			&updatedAt,
+		); err != nil {
+			return domain.UserPermissionSet{}, err
+		}
+		p.CreatedAt = createdAt
+		p.UpdatedAt = updatedAt
+
+		if effect == "deny" {
+			delete(effectivePerms, p.Slug)
+		} else if effect == "allow" {
+			effectivePerms[p.Slug] = p
+		}
+	}
+
+	if err := directRows.Err(); err != nil {
+		return domain.UserPermissionSet{}, err
+	}
+
+	// Assemble final list of permissions
+	result := domain.UserPermissionSet{
+		UserID:      userID,
+		RoleNames:   roleNames,
+		Permissions: make([]domain.Permission, 0, len(effectivePerms)),
+	}
+	for _, p := range effectivePerms {
+		result.Permissions = append(result.Permissions, p)
+	}
+
+	return result, nil
+}
+
+// === MATRIX SUPPORT ===
+
+func (r *Repository) ListRolePermissionsMatrix(ctx context.Context) (map[string]map[string]string, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT role_id, permission_id, scope
+		FROM role_permissions
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	matrix := make(map[string]map[string]string)
+	for rows.Next() {
+		var roleID, permID, scope string
+		if err := rows.Scan(&roleID, &permID, &scope); err != nil {
+			return nil, err
+		}
+		if _, ok := matrix[roleID]; !ok {
+			matrix[roleID] = make(map[string]string)
+		}
+		matrix[roleID][permID] = scope
+	}
+	return matrix, rows.Err()
+}

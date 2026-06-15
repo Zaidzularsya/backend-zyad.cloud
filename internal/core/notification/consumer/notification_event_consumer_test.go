@@ -7,6 +7,7 @@ import (
 
 	"zyad.cloud/internal/core/notification/domain"
 	"zyad.cloud/internal/core/notification/service"
+	coretenant "zyad.cloud/internal/core/tenant"
 )
 
 func TestNotificationEventConsumerConsumesKnownEvent(t *testing.T) {
@@ -96,14 +97,18 @@ func TestNotificationEventConsumerCapturesSenderError(t *testing.T) {
 }
 
 type fakeSender struct {
-	err           error
-	calls         int
-	notifications []domain.Notification
+	err                  error
+	calls                int
+	notifications        []domain.Notification
+	tenantOrganizationID string
 }
 
-func (s *fakeSender) SendByTemplate(_ context.Context, notification domain.Notification) (domain.NotificationLog, error) {
+func (s *fakeSender) SendByTemplate(ctx context.Context, notification domain.Notification) (domain.NotificationLog, error) {
 	s.calls++
 	s.notifications = append(s.notifications, notification)
+	if tenantContext, ok := coretenant.FromContext(ctx); ok {
+		s.tenantOrganizationID = tenantContext.OrganizationID()
+	}
 	if s.err != nil {
 		return domain.NotificationLog{}, s.err
 	}

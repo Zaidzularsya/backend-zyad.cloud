@@ -34,10 +34,68 @@ func TestValidateForAppRejectsMatchingProductionAuthSecrets(t *testing.T) {
 			Secret:        secret,
 			RefreshSecret: secret,
 		},
+		MultiTenant: validProductionMultiTenantConfig(),
 	}
 
 	if err := cfg.ValidateForApp(); err == nil {
 		t.Fatal("expected matching production auth secrets to be invalid")
+	}
+}
+
+func TestValidateForAppRequiresProductionMultiTenantConfig(t *testing.T) {
+	cfg := Config{
+		App: AppConfig{Env: "production"},
+		Auth: AuthConfig{
+			Secret:        "12345678901234567890123456789012",
+			RefreshSecret: "abcdefghijklmnopqrstuvwxyz123456",
+		},
+	}
+
+	if err := cfg.ValidateForApp(); err == nil {
+		t.Fatal("expected missing production multi-tenant config to be invalid")
+	}
+}
+
+func TestMultiTenantConfigRejectsForwardedHostWithoutTrustedProxy(t *testing.T) {
+	cfg := MultiTenantConfig{
+		DefaultDataPlacement: "shared",
+		TrustForwardedHost:   true,
+	}
+
+	if err := cfg.validate("development"); err == nil {
+		t.Fatal("expected forwarded host without trusted proxy to be invalid")
+	}
+}
+
+func TestMultiTenantConfigRejectsInvalidTrustedProxyCIDR(t *testing.T) {
+	cfg := MultiTenantConfig{
+		DefaultDataPlacement: "shared",
+		TrustedProxyCIDRs:    []string{"not-a-cidr"},
+	}
+
+	if err := cfg.validate("development"); err == nil {
+		t.Fatal("expected invalid trusted proxy CIDR to be rejected")
+	}
+}
+
+func TestMultiTenantConfigAcceptsValidProductionConfig(t *testing.T) {
+	cfg := validProductionMultiTenantConfig()
+	cfg.TrustForwardedHost = true
+	cfg.TrustedProxyCIDRs = []string{"10.0.0.0/8", "2001:db8::/32"}
+
+	if err := cfg.validate("production"); err != nil {
+		t.Fatalf("expected production multi-tenant config to be valid, got %v", err)
+	}
+}
+
+func validProductionMultiTenantConfig() MultiTenantConfig {
+	return MultiTenantConfig{
+		PlatformOrganizationID:   "00000000-0000-0000-0000-000000000001",
+		PlatformOrganizationSlug: "zyad-cloud",
+		PlatformOrganizationName: "Zyad Cloud",
+		PlatformPrimaryDomain:    "zyad.cloud",
+		ReservedSubdomains:       []string{"www", "api", "app", "admin"},
+		DefaultDataPlacement:     "shared",
 	}
 }
 

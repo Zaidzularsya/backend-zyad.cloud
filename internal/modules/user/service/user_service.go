@@ -39,6 +39,8 @@ type UserListRepository interface {
 	DeleteUser(ctx context.Context, userID string, metadata UserLifecycleMetadata, deletedAt time.Time) error
 	RestoreUser(ctx context.Context, userID string, metadata UserLifecycleMetadata, restoredAt time.Time) error
 	UpdateUserStatus(ctx context.Context, change UserStatusChange) error
+	ListLoginHistories(ctx context.Context, filter LoginHistoryFilter) ([]model.LoginHistory, int64, error)
+	ListAuditLogs(ctx context.Context, filter AuditLogFilter) ([]model.AuditLog, int64, error)
 }
 
 type UserListFilter struct {
@@ -50,6 +52,37 @@ type UserListFilter struct {
 	Role           string
 	OrganizationID string
 	IncludeDeleted bool
+	CreatedFrom    *time.Time
+	CreatedTo      *time.Time
+	Sort           string
+	Direction      string
+}
+
+type LoginHistoryFilter struct {
+	Page        int
+	PerPage     int
+	Offset      int
+	UserID      string
+	Event       string
+	Success     *bool
+	IPAddress   string
+	Search      string
+	CreatedFrom *time.Time
+	CreatedTo   *time.Time
+	Sort        string
+	Direction   string
+}
+
+type AuditLogFilter struct {
+	Page           int
+	PerPage        int
+	Offset         int
+	OrganizationID string
+	Module         string
+	Event          string
+	ActorUserID    string
+	TargetUserID   string
+	Search         string
 	CreatedFrom    *time.Time
 	CreatedTo      *time.Time
 	Sort           string
@@ -564,6 +597,30 @@ func (s *UserService) ChangeUserStatus(ctx context.Context, userID string, req d
 	return s.GetUser(ctx, userID, false)
 }
 
+func (s *UserService) GetSelfProfile(ctx context.Context, userID string) (dto.UserDetailResponse, error) {
+	return s.GetUser(ctx, userID, false)
+}
+
+func (s *UserService) UpdateSelfProfile(ctx context.Context, userID string, req dto.UpdateProfileRequest, metadata UpdateUserMetadata) (dto.UserDetailResponse, error) {
+	return s.UpdateUser(ctx, userID, dto.UpdateUserRequest{
+		Name:       req.Name,
+		Phone:      req.Phone,
+		Bio:        req.Bio,
+		JobTitle:   req.JobTitle,
+		Department: req.Department,
+		Company:    req.Company,
+		Address:    req.Address,
+		Timezone:   req.Timezone,
+		Language:   req.Language,
+	}, metadata)
+}
+
+func (s *UserService) UpdateSelfAvatar(ctx context.Context, userID string, req dto.UpdateAvatarRequest, metadata UpdateUserMetadata) (dto.UserDetailResponse, error) {
+	return s.UpdateUser(ctx, userID, dto.UpdateUserRequest{
+		AvatarURL: &req.AvatarURL,
+	}, metadata)
+}
+
 func normalizeStatusChange(rawStatus string, rawReason string) (model.UserStatus, string, error) {
 	status := model.UserStatus(strings.TrimSpace(rawStatus))
 	reason := strings.TrimSpace(rawReason)
@@ -889,4 +946,248 @@ func formatTimePtr(value *time.Time) *string {
 	}
 	formatted := value.UTC().Format(time.RFC3339)
 	return &formatted
+}
+
+func (s *UserService) ListLoginHistories(ctx context.Context, query dto.LoginHistoryQuery) ([]dto.LoginHistoryResponse, dto.PaginationMeta, error) {
+	filter, err := normalizeLoginHistoryQuery(query)
+	if err != nil {
+		return nil, dto.PaginationMeta{}, err
+	}
+
+	records, total, err := s.repo.ListLoginHistories(ctx, filter)
+	if err != nil {
+		return nil, dto.PaginationMeta{}, coreerrors.Wrap("LOGIN_HISTORIES_FAILED", "failed to list login histories", http.StatusInternalServerError, err)
+	}
+
+	items := make([]dto.LoginHistoryResponse, 0, len(records))
+	for _, r := range records {
+		var userIDPtr *string
+		if r.UserID != "" {
+			val := r.UserID
+			userIDPtr = &val
+		}
+		items = append(items, dto.LoginHistoryResponse{
+			ID:         r.ID,
+			UserID:     userIDPtr,
+			Identifier: r.Identifier,
+			Event:      string(r.Event),
+			Success:    r.Success,
+			IPAddress:  r.IPAddress,
+			UserAgent:  r.UserAgent,
+			DeviceName: r.DeviceName,
+			Reason:     r.Reason,
+			CreatedAt:  r.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+
+	totalPages := 0
+	if total > 0 {
+		totalPages = int((total + int64(filter.PerPage) - 1) / int64(filter.PerPage))
+	}
+	return items, dto.PaginationMeta{
+		Page:       filter.Page,
+		PerPage:    filter.PerPage,
+		Total:      total,
+		TotalPages: totalPages,
+	}, nil
+}
+
+func (s *UserService) ListAuditLogs(ctx context.Context, query dto.AuditLogQuery) ([]dto.AuditLogResponse, dto.PaginationMeta, error) {
+	filter, err := normalizeAuditLogQuery(query)
+	if err != nil {
+		return nil, dto.PaginationMeta{}, err
+	}
+
+	records, total, err := s.repo.ListAuditLogs(ctx, filter)
+	if err != nil {
+		return nil, dto.PaginationMeta{}, coreerrors.Wrap("AUDIT_LOGS_FAILED", "failed to list audit logs", http.StatusInternalServerError, err)
+	}
+
+	items := make([]dto.AuditLogResponse, 0, len(records))
+	for _, r := range records {
+		items = append(items, dto.AuditLogResponse{
+			ID:                     r.ID,
+			Module:                 r.Module,
+			Event:                  r.Event,
+			OrganizationID:         optionalString(r.OrganizationID),
+			MembershipID:           optionalString(r.MembershipID),
+			SessionID:              optionalString(r.SessionID),
+			ActorUserID:            optionalString(r.ActorUserID),
+			OperatorUserID:         optionalString(r.OperatorUserID),
+			EffectiveUserID:        optionalString(r.EffectiveUserID),
+			ImpersonationSessionID: optionalString(r.ImpersonationSessionID),
+			ResolutionSource:       r.ResolutionSource,
+			RequestID:              r.RequestID,
+			TargetUserID:           optionalString(r.TargetUserID),
+			TargetType:             r.TargetType,
+			TargetID:               optionalString(r.TargetID),
+			Metadata:               r.Metadata,
+			IPAddress:              r.IPAddress,
+			UserAgent:              r.UserAgent,
+			CreatedAt:              r.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+
+	totalPages := 0
+	if total > 0 {
+		totalPages = int((total + int64(filter.PerPage) - 1) / int64(filter.PerPage))
+	}
+	return items, dto.PaginationMeta{
+		Page:       filter.Page,
+		PerPage:    filter.PerPage,
+		Total:      total,
+		TotalPages: totalPages,
+	}, nil
+}
+
+func normalizeLoginHistoryQuery(query dto.LoginHistoryQuery) (LoginHistoryFilter, error) {
+	page := query.Page
+	if page <= 0 {
+		page = 1
+	}
+	perPage := query.PerPage
+	if perPage <= 0 {
+		perPage = 20
+	}
+	if perPage > 100 {
+		return LoginHistoryFilter{}, validationError("per_page must not exceed 100")
+	}
+
+	sort := strings.TrimSpace(query.Sort)
+	if sort == "" {
+		sort = "created_at"
+	}
+	switch sort {
+	case "created_at":
+	default:
+		return LoginHistoryFilter{}, validationError("sort is invalid")
+	}
+
+	direction := strings.ToLower(strings.TrimSpace(query.Direction))
+	if direction == "" {
+		direction = "desc"
+	}
+	if direction != "asc" && direction != "desc" {
+		return LoginHistoryFilter{}, validationError("direction must be asc or desc")
+	}
+
+	createdFrom, err := parseDateFilter(query.CreatedFrom)
+	if err != nil {
+		return LoginHistoryFilter{}, validationError("created_from must use YYYY-MM-DD")
+	}
+	createdTo, err := parseDateFilter(query.CreatedTo)
+	if err != nil {
+		return LoginHistoryFilter{}, validationError("created_to must use YYYY-MM-DD")
+	}
+	if createdFrom != nil && createdTo != nil && createdTo.Before(*createdFrom) {
+		return LoginHistoryFilter{}, validationError("created_to must not be before created_from")
+	}
+
+	userID := strings.TrimSpace(query.UserID)
+	if userID != "" {
+		if !validUUID(userID) {
+			return LoginHistoryFilter{}, validationError("user_id must be a valid UUID")
+		}
+	}
+
+	return LoginHistoryFilter{
+		Page:        page,
+		PerPage:     perPage,
+		Offset:      (page - 1) * perPage,
+		UserID:      userID,
+		Event:       strings.TrimSpace(query.Event),
+		Success:     query.Success,
+		IPAddress:   strings.TrimSpace(query.IPAddress),
+		Search:      strings.TrimSpace(query.Search),
+		CreatedFrom: createdFrom,
+		CreatedTo:   createdTo,
+		Sort:        sort,
+		Direction:   direction,
+	}, nil
+}
+
+func normalizeAuditLogQuery(query dto.AuditLogQuery) (AuditLogFilter, error) {
+	page := query.Page
+	if page <= 0 {
+		page = 1
+	}
+	perPage := query.PerPage
+	if perPage <= 0 {
+		perPage = 20
+	}
+	if perPage > 100 {
+		return AuditLogFilter{}, validationError("per_page must not exceed 100")
+	}
+
+	sort := strings.TrimSpace(query.Sort)
+	if sort == "" {
+		sort = "created_at"
+	}
+	switch sort {
+	case "created_at":
+	default:
+		return AuditLogFilter{}, validationError("sort is invalid")
+	}
+
+	direction := strings.ToLower(strings.TrimSpace(query.Direction))
+	if direction == "" {
+		direction = "desc"
+	}
+	if direction != "asc" && direction != "desc" {
+		return AuditLogFilter{}, validationError("direction must be asc or desc")
+	}
+
+	createdFrom, err := parseDateFilter(query.CreatedFrom)
+	if err != nil {
+		return AuditLogFilter{}, validationError("created_from must use YYYY-MM-DD")
+	}
+	createdTo, err := parseDateFilter(query.CreatedTo)
+	if err != nil {
+		return AuditLogFilter{}, validationError("created_to must use YYYY-MM-DD")
+	}
+	if createdFrom != nil && createdTo != nil && createdTo.Before(*createdFrom) {
+		return AuditLogFilter{}, validationError("created_to must not be before created_from")
+	}
+
+	actorUserID := strings.TrimSpace(query.ActorUserID)
+	if actorUserID != "" {
+		if !validUUID(actorUserID) {
+			return AuditLogFilter{}, validationError("actor_user_id must be a valid UUID")
+		}
+	}
+
+	targetUserID := strings.TrimSpace(query.TargetUserID)
+	if targetUserID != "" {
+		if !validUUID(targetUserID) {
+			return AuditLogFilter{}, validationError("target_user_id must be a valid UUID")
+		}
+	}
+
+	organizationID := strings.TrimSpace(query.OrganizationID)
+	if organizationID != "" && !validUUID(organizationID) {
+		return AuditLogFilter{}, validationError("organization_id must be a valid UUID")
+	}
+
+	return AuditLogFilter{
+		Page:           page,
+		PerPage:        perPage,
+		Offset:         (page - 1) * perPage,
+		OrganizationID: organizationID,
+		Module:         strings.TrimSpace(query.Module),
+		Event:          strings.TrimSpace(query.Event),
+		ActorUserID:    actorUserID,
+		TargetUserID:   targetUserID,
+		Search:         strings.TrimSpace(query.Search),
+		CreatedFrom:    createdFrom,
+		CreatedTo:      createdTo,
+		Sort:           sort,
+		Direction:      direction,
+	}, nil
+}
+
+func optionalString(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }

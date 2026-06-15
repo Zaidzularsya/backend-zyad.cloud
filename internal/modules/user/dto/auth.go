@@ -96,3 +96,27 @@ type TokenResponse struct {
 	TokenType    string `json:"token_type"`
 	ExpiresIn    int64  `json:"expires_in"`
 }
+
+type SessionResponse struct {
+	ID         string  `json:"id"`
+	DeviceName string  `json:"device_name,omitempty"`
+	IPAddress  string  `json:"ip_address,omitempty"`
+	UserAgent  string  `json:"user_agent,omitempty"`
+	LastUsedAt *string `json:"last_used_at,omitempty"`
+	ExpiresAt  string  `json:"expires_at"`
+	IsCurrent  bool    `json:"is_current"`
+}
+
+type LogoutAllRequest struct {
+	ExcludeCurrent bool `json:"exclude_current"`
+}
+
+type VerifyEmailRequest struct {
+	Token string `json:"token" binding:"required"`
+}
+
+type ResendVerificationEmailRequest struct {
+	Email string `json:"email" binding:"required,email"`
+}
+
+

@@ -8,6 +8,7 @@ import (
 
 	"zyad.cloud/internal/core/notification/domain"
 	"zyad.cloud/internal/core/notification/service"
+	coretenant "zyad.cloud/internal/core/tenant"
 )
 
 func TestOutboxWorkerMarksKnownEventSucceeded(t *testing.T) {
@@ -117,6 +118,73 @@ func TestOutboxWorkerMarksDeadAtMaxAttempts(t *testing.T) {
 	}
 }
 
+func TestOutboxWorkerResolvesTenantContextBeforeConsume(t *testing.T) {
+	store := &fakeOutboxStore{
+		events: []domain.OutboxEvent{
+			{
+				ID:             "00000000-0000-0000-0000-000000000005",
+				EventType:      "auth.password_reset_requested",
+				OrganizationID: "00000000-0000-0000-0000-000000000201",
+				Payload:        passwordResetPayload(),
+				MaxAttempts:    3,
+			},
+		},
+	}
+	sender := &fakeSender{}
+	worker := NewOutboxWorker(
+		store,
+		NewNotificationEventConsumer(service.NewNotificationRuleService(), sender),
+	)
+	resolver := &fakeWorkerTenantResolver{tenantContext: workerTenantContext(t)}
+	worker.SetTenantResolver(resolver, "notification-worker")
+
+	results, err := worker.RunOnce(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if len(results) != 1 || !results[0].Sent ||
+		resolver.organizationID != "00000000-0000-0000-0000-000000000201" ||
+		resolver.serviceIdentity != "notification-worker" {
+		t.Fatalf("results/resolver = %#v / %#v", results, resolver)
+	}
+	if sender.tenantOrganizationID != resolver.organizationID {
+		t.Fatalf("sender tenant organization = %q", sender.tenantOrganizationID)
+	}
+}
+
+func TestOutboxWorkerRetriesTenantResolutionFailure(t *testing.T) {
+	store := &fakeOutboxStore{
+		events: []domain.OutboxEvent{
+			{
+				ID:             "00000000-0000-0000-0000-000000000006",
+				EventType:      "auth.password_reset_requested",
+				OrganizationID: "00000000-0000-0000-0000-000000000202",
+				Payload:        passwordResetPayload(),
+				MaxAttempts:    3,
+			},
+		},
+	}
+	sender := &fakeSender{}
+	worker := NewOutboxWorker(
+		store,
+		NewNotificationEventConsumer(service.NewNotificationRuleService(), sender),
+	)
+	worker.SetTenantResolver(
+		&fakeWorkerTenantResolver{err: errors.New("organization inactive")},
+		"notification-worker",
+	)
+
+	results, err := worker.RunOnce(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if len(results) != 1 || results[0].Error == "" ||
+		store.failedID != "00000000-0000-0000-0000-000000000006" ||
+		sender.calls != 0 {
+		t.Fatalf("results/store/sender = %#v / %#v / %#v", results, store, sender)
+	}
+}
+
 func passwordResetPayload() map[string]any {
 	return map[string]any{
 		"app_name":   "Zyad Cloud",
@@ -134,6 +202,39 @@ type fakeOutboxStore struct {
 	failedID    string
 	deadID      string
 	nextRetryAt *time.Time
+}
+
+type fakeWorkerTenantResolver struct {
+	tenantContext   coretenant.Context
+	err             error
+	organizationID  string
+	serviceIdentity string
+}
+
+func (f *fakeWorkerTenantResolver) ResolveWorkerOrganization(
+	_ context.Context,
+	organizationID string,
+	serviceIdentity string,
+) (coretenant.Context, error) {
+	f.organizationID = organizationID
+	f.serviceIdentity = serviceIdentity
+	return f.tenantContext, f.err
+}
+
+func workerTenantContext(t *testing.T) coretenant.Context {
+	t.Helper()
+	tenantContext, err := coretenant.NewVerifiedContext(coretenant.VerifiedContextInput{
+		OrganizationID:     "00000000-0000-0000-0000-000000000201",
+		OrganizationSlug:   "acme",
+		OrganizationType:   coretenant.OrganizationTypeCustomer,
+		OrganizationStatus: coretenant.OrganizationStatusActive,
+		ResolutionSource:   coretenant.ResolutionSourceWorker,
+		DataPlacement:      coretenant.DataPlacementShared,
+	})
+	if err != nil {
+		t.Fatalf("NewVerifiedContext() error = %v", err)
+	}
+	return tenantContext
 }
 
 func (s *fakeOutboxStore) ClaimPending(context.Context, int) ([]domain.OutboxEvent, error) {

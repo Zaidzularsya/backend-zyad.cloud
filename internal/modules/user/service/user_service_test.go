@@ -427,28 +427,36 @@ func TestUserServiceChangeUserStatusRequiresReason(t *testing.T) {
 }
 
 type fakeUserListRepository struct {
-	filter         UserListFilter
-	users          []UserListRecord
-	total          int64
-	err            error
-	detail         UserDetailRecord
-	includeDeleted bool
-	detailErr      error
-	created        NewUser
-	createID       string
-	createErr      error
-	updateCalled   bool
-	updated        UserUpdate
-	updateErr      error
-	deleteCalled   bool
-	deletedAt      time.Time
-	deleteErr      error
-	restoreCalled  bool
-	restoredAt     time.Time
-	restoreErr     error
-	deleteErrors   map[string]error
-	statusChanges  []UserStatusChange
-	statusErrors   map[string]error
+	filter              UserListFilter
+	users               []UserListRecord
+	total               int64
+	err                 error
+	detail              UserDetailRecord
+	includeDeleted      bool
+	detailErr           error
+	created             NewUser
+	createID            string
+	createErr           error
+	updateCalled        bool
+	updated             UserUpdate
+	updateErr           error
+	deleteCalled        bool
+	deletedAt           time.Time
+	deleteErr           error
+	restoreCalled       bool
+	restoredAt          time.Time
+	restoreErr          error
+	deleteErrors        map[string]error
+	statusChanges       []UserStatusChange
+	statusErrors        map[string]error
+	loginHistories      []model.LoginHistory
+	loginHistoriesTotal int64
+	loginHistoriesErr   error
+	loginHistoryFilter  LoginHistoryFilter
+	auditLogs           []model.AuditLog
+	auditLogsTotal      int64
+	auditLogsErr        error
+	auditLogFilter      AuditLogFilter
 }
 
 func (r *fakeUserListRepository) DeleteUser(_ context.Context, userID string, _ UserLifecycleMetadata, deletedAt time.Time) error {
@@ -496,3 +504,90 @@ func (r *fakeUserListRepository) FindUserDetail(_ context.Context, _ string, inc
 	r.includeDeleted = includeDeleted
 	return r.detail, r.detailErr
 }
+
+func (r *fakeUserListRepository) ListLoginHistories(_ context.Context, filter LoginHistoryFilter) ([]model.LoginHistory, int64, error) {
+	r.loginHistoryFilter = filter
+	return r.loginHistories, r.loginHistoriesTotal, r.loginHistoriesErr
+}
+
+func (r *fakeUserListRepository) ListAuditLogs(_ context.Context, filter AuditLogFilter) ([]model.AuditLog, int64, error) {
+	r.auditLogFilter = filter
+	return r.auditLogs, r.auditLogsTotal, r.auditLogsErr
+}
+
+func TestUserServiceListLoginHistories(t *testing.T) {
+	createdAt := time.Date(2026, 6, 12, 10, 0, 0, 0, time.UTC)
+	repo := &fakeUserListRepository{
+		loginHistories: []model.LoginHistory{
+			{
+				ID:         "history-1",
+				UserID:     "user-1",
+				Identifier: "user-1",
+				Event:      model.LoginEventLogin,
+				Success:    true,
+				IPAddress:  "127.0.0.1",
+				UserAgent:  "test-agent",
+				DeviceName: "Desktop",
+				Reason:     "",
+				CreatedAt:  createdAt,
+			},
+		},
+		loginHistoriesTotal: 1,
+	}
+	svc := NewUserService(repo)
+
+	resp, meta, err := svc.ListLoginHistories(context.Background(), dto.LoginHistoryQuery{
+		Page:    1,
+		PerPage: 10,
+		UserID:  "7ea7b1cb-04eb-456a-a19f-e41d590d2a3b",
+	})
+	if err != nil {
+		t.Fatalf("ListLoginHistories() error = %v", err)
+	}
+	if repo.loginHistoryFilter.UserID != "7ea7b1cb-04eb-456a-a19f-e41d590d2a3b" {
+		t.Fatalf("filter = %#v", repo.loginHistoryFilter)
+	}
+	if meta.Total != 1 || len(resp) != 1 || resp[0].ID != "history-1" {
+		t.Fatalf("resp = %#v, meta = %#v", resp, meta)
+	}
+}
+
+func TestUserServiceListAuditLogs(t *testing.T) {
+	createdAt := time.Date(2026, 6, 12, 10, 0, 0, 0, time.UTC)
+	repo := &fakeUserListRepository{
+		auditLogs: []model.AuditLog{
+			{
+				ID:           "audit-1",
+				Module:       "user",
+				Event:        "user_created",
+				ActorUserID:  "actor-1",
+				TargetUserID: "target-1",
+				TargetType:   "user",
+				TargetID:     "target-1",
+				Metadata:     map[string]any{"test": "create"},
+				IPAddress:    "127.0.0.1",
+				UserAgent:    "test-agent",
+				CreatedAt:    createdAt,
+			},
+		},
+		auditLogsTotal: 1,
+	}
+	svc := NewUserService(repo)
+
+	resp, meta, err := svc.ListAuditLogs(context.Background(), dto.AuditLogQuery{
+		Page:         1,
+		PerPage:      10,
+		TargetUserID: "7ea7b1cb-04eb-456a-a19f-e41d590d2a3b",
+	})
+	if err != nil {
+		t.Fatalf("ListAuditLogs() error = %v", err)
+	}
+	if repo.auditLogFilter.TargetUserID != "7ea7b1cb-04eb-456a-a19f-e41d590d2a3b" {
+		t.Fatalf("filter = %#v", repo.auditLogFilter)
+	}
+	if meta.Total != 1 || len(resp) != 1 || resp[0].ID != "audit-1" {
+		t.Fatalf("resp = %#v, meta = %#v", resp, meta)
+	}
+}
+
+

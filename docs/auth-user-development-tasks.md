@@ -437,76 +437,76 @@ Notes:
 
 Scope:
 
-- `GET /users/me`
-- `PATCH /users/me/profile`
-- `PATCH /users/me/avatar`
-- Update name, phone, avatar, bio, job title, department, address, timezone, language preference.
+- `GET /users/me` `done`
+- `PATCH /users/me/profile` `done`
+- `PATCH /users/me/avatar` `done`
+- Update name, phone, avatar, bio, job title, department, address, timezone, language preference. `done`
 
 Acceptance criteria:
 
-- User hanya bisa update profile sendiri.
-- Avatar memakai storage adapter jika upload file diaktifkan.
+- User hanya bisa update profile sendiri. `done`
+- Avatar memakai storage adapter jika upload file diaktifkan. `done`
 
-### USER-0209: Role Assignment
+### USER-0209: Role Assignment `done`
 
 Scope:
 
-- `GET /admin/users/:id/roles`
-- `POST /admin/users/:id/roles`
-- `DELETE /admin/users/:id/roles/:roleId`
-- Support multiple roles.
-- Support organization scoped role.
+- `GET /admin/users/:id/roles` `done`
+- `POST /admin/users/:id/roles` `done`
+- `DELETE /admin/users/:id/roles/:roleId` `done`
+- Support multiple roles. `done`
+- Support organization scoped role. `done`
 
 Acceptance criteria:
 
-- Role tidak bisa duplicate untuk scope yang sama.
-- Super admin role dilindungi dari penghapusan sembarang.
+- Role tidak bisa duplicate untuk scope yang sama. `done`
+- Super admin role dilindungi dari penghapusan sembarang. `done`
 
-### USER-0210: Permission Assignment
+### USER-0210: Permission Assignment `done`
 
 Scope:
 
-- `GET /admin/users/:id/permissions`
-- `POST /admin/users/:id/permissions`
-- `DELETE /admin/users/:id/permissions/:permissionId`
-- Support direct allow dan deny permission.
-- Hitung effective permission dari role plus override.
+- `GET /admin/users/:id/permissions` `done`
+- `POST /admin/users/:id/permissions` `done`
+- `DELETE /admin/users/:id/permissions/:permissionId` `done`
+- Support direct allow dan deny permission. `done`
+- Hitung effective permission dari role plus override. `done`
 
 Acceptance criteria:
 
-- Deny permission mengalahkan allow permission.
-- Permission cache invalidated setelah perubahan.
+- Deny permission mengalahkan allow permission. `done`
+- Permission cache invalidated setelah perubahan. `partial: cache invalidation deferred to Redis phase`
 
-### USER-0211: Role API
+### USER-0211: Role API `done`
 
 Scope:
 
-- `GET /admin/roles`
-- `GET /admin/roles/:id`
-- `POST /admin/roles`
-- `PATCH /admin/roles/:id`
-- `DELETE /admin/roles/:id`
-- `GET /admin/roles/:id/permissions`
-- `POST /admin/roles/:id/permissions`
-- `DELETE /admin/roles/:id/permissions/:permissionId`
+- `GET /admin/roles` `done`
+- `GET /admin/roles/:id` `done`
+- `POST /admin/roles` `done`
+- `PATCH /admin/roles/:id` `done`
+- `DELETE /admin/roles/:id` `done`
+- `GET /admin/roles/:id/permissions` `done`
+- `POST /admin/roles/:id/permissions` `done`
+- `DELETE /admin/roles/:id/permissions/:permissionId` `done`
 
 Acceptance criteria:
 
-- System role tidak bisa dihapus.
-- Role slug unik.
+- System role tidak bisa dihapus. `done`
+- Role slug unik. `done`
 
-### USER-0212: Permission API
+### USER-0212: Permission API `done`
 
 Scope:
 
-- `GET /admin/permissions`
-- `GET /admin/permissions/grouped`
-- `GET /admin/permission-matrix`
+- `GET /admin/permissions` `done`
+- `GET /admin/permissions/grouped` `done`
+- `GET /admin/permission-matrix` `done`
 
 Acceptance criteria:
 
-- Permission grouped by module.
-- Permission matrix bisa dipakai UI admin.
+- Permission grouped by module. `done`
+- Permission matrix bisa dipakai UI admin. `done`
 
 ### USER-0213: RBAC Middleware Integration
 
@@ -528,51 +528,51 @@ Acceptance criteria:
 
 Scope:
 
-- `GET /auth/sessions`
-- User melihat session aktif miliknya.
+- `GET /auth/sessions` `done`
+- User melihat session aktif miliknya. `done`
 
 Acceptance criteria:
 
-- Current session ditandai.
-- Data device/IP tidak terlalu detail untuk menghindari kebocoran.
+- Current session ditandai. `done`
+- Data device/IP tidak terlalu detail untuk menghindari kebocoran. `done`
 
 ### AUTH-0302: Revoke Session
 
 Scope:
 
-- `DELETE /auth/sessions/:id`
-- `DELETE /admin/users/:id/sessions/:sessionId`
-- User atau admin mencabut session.
+- `DELETE /auth/sessions/:id` `done`
+- `DELETE /admin/users/:id/sessions/:sessionId` `done`
+- User atau admin mencabut session. `done`
 
 Acceptance criteria:
 
-- Session revoked tidak bisa refresh token.
-- Audit log tercatat.
+- Session revoked tidak bisa refresh token. `done`
+- Audit log tercatat. `done via session database state; detail audit log terpusat di USER-0301`
 
 ### AUTH-0303: Logout All
 
 Scope:
 
-- `POST /auth/logout-all`
-- Revoke semua session user.
+- `POST /auth/logout-all` `done`
+- Revoke semua session user. `done`
 
 Acceptance criteria:
 
-- Bisa exclude current session jika dibutuhkan oleh request.
+- Bisa exclude current session jika dibutuhkan oleh request. `done`
 
 ### AUTH-0304: Email Verification
 
 Scope:
 
-- `POST /auth/verify-email`
-- `POST /auth/resend-verification-email`
-- Generate token hash.
-- Kirim link verification memakai `APP_FRONTEND_URL`.
+- `POST /auth/verify-email` `done`
+- `POST /auth/resend-verification-email` `done`
+- Generate token hash. `done`
+- Kirim link verification memakai `APP_FRONTEND_URL`. `done`
 
 Acceptance criteria:
 
-- Token expired tidak valid.
-- Email verified mengisi `email_verified_at`.
+- Token expired tidak valid. `done`
+- Email verified mengisi `email_verified_at`. `done`
 
 ### AUTH-0305: Phone or WhatsApp Verification
 
@@ -586,40 +586,36 @@ Acceptance criteria:
 - OTP rate limited.
 - Attempts maksimal diterapkan.
 
-### AUTH-0306: Login History
+### AUTH-0306: Login History `done`
 
 Scope:
-
-- Catat success login, failed login, logout, token refresh, dan revoked session.
-- Simpan IP, user agent, device, waktu, dan reason.
+- Catat success login, failed login, logout, token refresh, dan revoked session. `done`
+- Simpan IP, user agent, device, waktu, dan reason. `done`
 
 Acceptance criteria:
+- Admin bisa melihat riwayat user. `done via GET /api/v1/admin/login-histories and GET /api/v1/admin/users/:id/login-histories`
 
-- Admin bisa melihat riwayat user.
-
-### USER-0301: Audit Log
+### USER-0301: Audit Log `done`
 
 Scope:
-
-- `GET /admin/users/:id/audit-logs`
-- `GET /admin/audit-logs?module=user`
+- `GET /admin/users/:id/audit-logs` `done`
+- `GET /admin/audit-logs?module=user` `done`
 - Catat aksi:
-  - login
-  - logout
-  - failed login
-  - password changed
-  - role assigned
-  - role removed
-  - permission changed
-  - user suspended
-  - user banned
-  - profile updated
-  - token revoked
+  - login `done`
+  - logout `done`
+  - failed login `done`
+  - password changed `done`
+  - role assigned `done`
+  - role removed `done`
+  - permission changed `done`
+  - user suspended `done`
+  - user banned `done`
+  - profile updated `done`
+  - token revoked `done`
 
 Acceptance criteria:
-
-- Audit log menyimpan actor, target, event, metadata, IP, user agent, created at.
-- Metadata tidak menyimpan token plain atau password.
+- Audit log menyimpan actor, target, event, metadata, IP, user agent, created at. `done`
+- Metadata tidak menyimpan token plain atau password. `done`
 
 ### AUTH-0307: Rate Limit and Captcha Hook
 
@@ -706,6 +702,16 @@ Acceptance criteria:
 - Disable 2FA butuh current password atau step-up verification.
 
 ### USER-0401: Organization Support
+
+Status: in_progress.
+
+Progress:
+
+- `GET /users/me/organizations` and `POST /users/me/switch-organization` are implemented by `MT-CORE-006`.
+- The active organization, membership, and membership version are persisted in the authenticated session and resolved into request auth context.
+- Organization-scoped role IDs and slugs are included in self organization list and switch responses.
+- Tenant-scoped request permission evaluation is completed by `MT-CORE-007`; tenant APIs must use its explicit organization middleware.
+- Organization admin user APIs, branch, and department remain follow-up scope.
 
 Scope:
 

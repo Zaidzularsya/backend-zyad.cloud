@@ -28,3 +28,17 @@ func TestSessionIsExpired(t *testing.T) {
 		t.Fatal("expected session to be expired at expiry time")
 	}
 }
+
+func TestSessionOrganizationContextSnapshot(t *testing.T) {
+	session := Session{
+		ActiveOrganizationID:    "organization-1",
+		ActiveMembershipID:      "membership-1",
+		ActiveMembershipVersion: 3,
+	}
+
+	if session.ActiveOrganizationID == "" ||
+		session.ActiveMembershipID == "" ||
+		session.ActiveMembershipVersion != 3 {
+		t.Fatal("expected active organization context snapshot")
+	}
+}

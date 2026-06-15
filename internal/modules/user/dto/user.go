@@ -187,3 +187,19 @@ type UserDetailResponse struct {
 	UpdatedAt       string                 `json:"updated_at"`
 	DeletedAt       *string                `json:"deleted_at"`
 }
+
+type UpdateProfileRequest struct {
+	Name       *string `json:"name"`
+	Phone      *string `json:"phone"`
+	Bio        *string `json:"bio"`
+	JobTitle   *string `json:"job_title"`
+	Department *string `json:"department"`
+	Company    *string `json:"company"`
+	Address    *string `json:"address"`
+	Timezone   *string `json:"timezone"`
+	Language   *string `json:"language"`
+}
+
+type UpdateAvatarRequest struct {
+	AvatarURL string `json:"avatar_url" binding:"required"`
+}

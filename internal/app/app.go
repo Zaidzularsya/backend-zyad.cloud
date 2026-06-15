@@ -18,6 +18,9 @@ import (
 	permissionhandler "zyad.cloud/internal/core/permission/handler"
 	permissionrepo "zyad.cloud/internal/core/permission/repository"
 	permissionservice "zyad.cloud/internal/core/permission/service"
+	organizationhandler "zyad.cloud/internal/modules/organization/handler"
+	organizationrepo "zyad.cloud/internal/modules/organization/repository"
+	organizationservice "zyad.cloud/internal/modules/organization/service"
 	userhandler "zyad.cloud/internal/modules/user/handler"
 	userrepo "zyad.cloud/internal/modules/user/repository"
 	userservice "zyad.cloud/internal/modules/user/service"
@@ -99,9 +102,23 @@ func New(ctx context.Context) (*App, error) {
 		return nil, fmt.Errorf("configure user service: %w", err)
 	}
 	userService.SetNotificationPublisher(notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts))
-	userHandler := userhandler.NewUserHandler(userService, permService)
+	userHandler := userhandler.NewUserHandler(userService, authService, permService)
+	organizationResolverRepo := organizationrepo.NewAuthenticatedResolverRepository(db)
+	organizationResolver := organizationservice.NewAuthenticatedResolver(organizationResolverRepo)
+	publicHostResolverRepo := organizationrepo.NewPublicHostResolverRepository(db)
+	publicHostResolver := organizationservice.NewPublicHostResolver(
+		publicHostResolverRepo,
+		cfg.MultiTenant.PlatformOrganizationID,
+		cfg.MultiTenant.PlatformPrimaryDomain,
+	)
+	organizationSwitchService := organizationservice.NewSwitchService(
+		organizationrepo.NewSwitchRepository(db),
+	)
+	organizationSwitchHandler := organizationhandler.NewSwitchHandler(
+		organizationSwitchService,
+	)
 
-	router := newRouter(Dependencies{
+	router, err := newRouter(Dependencies{
 		Config:                        cfg,
 		Logger:                        log,
 		DB:                            db,
@@ -112,10 +129,16 @@ func New(ctx context.Context) (*App, error) {
 		NotificationTemplateHandler:   templateHandler,
 		NotificationVariableHandler:   variableHandler,
 		PermissionHandler:             permHandler,
+		OrganizationSwitchHandler:     organizationSwitchHandler,
 		UserAuthHandler:               authHandler,
 		UserHandler:                   userHandler,
 		Authenticator:                 authService,
+		OrganizationResolver:          organizationResolver,
+		PublicHostResolver:            publicHostResolver,
 	})
+	if err != nil {
+		return nil, fmt.Errorf("configure trusted proxies: %w", err)
+	}
 
 	server := &http.Server{
 		Addr:         cfg.App.Address(),

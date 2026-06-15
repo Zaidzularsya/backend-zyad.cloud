@@ -16,6 +16,8 @@ import (
 	notificationrepo "zyad.cloud/internal/core/notification/repository"
 	notificationservice "zyad.cloud/internal/core/notification/service"
 	notificationtemplate "zyad.cloud/internal/core/notification/template"
+	organizationrepo "zyad.cloud/internal/modules/organization/repository"
+	organizationservice "zyad.cloud/internal/modules/organization/service"
 	"zyad.cloud/internal/platform/database"
 	"zyad.cloud/internal/platform/logger"
 	"zyad.cloud/internal/platform/mail"
@@ -81,7 +83,15 @@ func buildNotificationWorker(db *database.Pool, notificationService *notificatio
 	ruleService := notificationservice.NewNotificationRuleService()
 	eventConsumer := notificationconsumer.NewNotificationEventConsumer(ruleService, notificationService)
 	outboxRepo := notificationrepo.NewOutboxRepository(db)
-	return notificationconsumer.NewOutboxWorker(outboxRepo, eventConsumer)
+	worker := notificationconsumer.NewOutboxWorker(outboxRepo, eventConsumer)
+	worker.SetTenantResolver(
+		organizationservice.NewWorkerResolver(
+			organizationrepo.NewOrganizationRepository(db),
+			"notification-worker",
+		),
+		"notification-worker",
+	)
+	return worker
 }
 
 func buildNotificationService(db *database.Pool, cfg config.Config) *notificationservice.NotificationService {

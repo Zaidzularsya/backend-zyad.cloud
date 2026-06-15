@@ -3,16 +3,19 @@ package model
 import "time"
 
 type Session struct {
-	ID               string
-	UserID           string
-	RefreshTokenHash string
-	DeviceName       string
-	UserAgent        string
-	IPAddress        string
-	LastUsedAt       *time.Time
-	ExpiresAt        time.Time
-	RevokedAt        *time.Time
-	CreatedAt        time.Time
+	ID                      string
+	UserID                  string
+	RefreshTokenHash        string
+	DeviceName              string
+	UserAgent               string
+	IPAddress               string
+	ActiveOrganizationID    string
+	ActiveMembershipID      string
+	ActiveMembershipVersion int64
+	LastUsedAt              *time.Time
+	ExpiresAt               time.Time
+	RevokedAt               *time.Time
+	CreatedAt               time.Time
 }
 
 func (s Session) IsRevoked() bool {

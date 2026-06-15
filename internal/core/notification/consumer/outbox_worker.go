@@ -2,10 +2,12 @@ package consumer
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"zyad.cloud/internal/core/notification/domain"
 	"zyad.cloud/internal/core/notification/service"
+	coretenant "zyad.cloud/internal/core/tenant"
 )
 
 type OutboxStore interface {
@@ -15,10 +17,20 @@ type OutboxStore interface {
 	MarkDead(ctx context.Context, id string, errorMessage string) error
 }
 
+type WorkerTenantResolver interface {
+	ResolveWorkerOrganization(
+		context.Context,
+		string,
+		string,
+	) (coretenant.Context, error)
+}
+
 type OutboxWorker struct {
-	store    OutboxStore
-	consumer *NotificationEventConsumer
-	now      func() time.Time
+	store           OutboxStore
+	consumer        *NotificationEventConsumer
+	tenantResolver  WorkerTenantResolver
+	serviceIdentity string
+	now             func() time.Time
 }
 
 func NewOutboxWorker(store OutboxStore, consumer *NotificationEventConsumer) *OutboxWorker {
@@ -27,6 +39,14 @@ func NewOutboxWorker(store OutboxStore, consumer *NotificationEventConsumer) *Ou
 		consumer: consumer,
 		now:      time.Now,
 	}
+}
+
+func (w *OutboxWorker) SetTenantResolver(
+	resolver WorkerTenantResolver,
+	serviceIdentity string,
+) {
+	w.tenantResolver = resolver
+	w.serviceIdentity = strings.TrimSpace(serviceIdentity)
 }
 
 func (w *OutboxWorker) RunOnce(ctx context.Context, limit int) ([]Result, error) {
@@ -48,6 +68,37 @@ func (w *OutboxWorker) RunOnce(ctx context.Context, limit int) ([]Result, error)
 }
 
 func (w *OutboxWorker) consumeOutboxEvent(ctx context.Context, outboxEvent domain.OutboxEvent) (Result, error) {
+	if strings.TrimSpace(outboxEvent.OrganizationID) != "" {
+		if w.tenantResolver == nil {
+			return w.failOutboxEvent(
+				ctx,
+				outboxEvent,
+				Result{
+					EventID:   outboxEvent.ID,
+					EventType: outboxEvent.EventType,
+					Error:     "worker tenant resolver is required",
+				},
+			)
+		}
+		tenantContext, err := w.tenantResolver.ResolveWorkerOrganization(
+			ctx,
+			outboxEvent.OrganizationID,
+			w.serviceIdentity,
+		)
+		if err != nil {
+			return w.failOutboxEvent(
+				ctx,
+				outboxEvent,
+				Result{
+					EventID:   outboxEvent.ID,
+					EventType: outboxEvent.EventType,
+					Error:     err.Error(),
+				},
+			)
+		}
+		ctx = coretenant.WithContext(ctx, tenantContext)
+	}
+
 	event := service.NotificationEvent{
 		ID:             outboxEvent.ID,
 		Type:           outboxEvent.EventType,
@@ -68,7 +119,14 @@ func (w *OutboxWorker) consumeOutboxEvent(ctx context.Context, outboxEvent domai
 	if result.Error == "" {
 		return result, w.store.MarkSucceeded(ctx, outboxEvent.ID)
 	}
+	return w.failOutboxEvent(ctx, outboxEvent, result)
+}
 
+func (w *OutboxWorker) failOutboxEvent(
+	ctx context.Context,
+	outboxEvent domain.OutboxEvent,
+	result Result,
+) (Result, error) {
 	if outboxEvent.Attempts+1 >= outboxEvent.MaxAttempts {
 		return result, w.store.MarkDead(ctx, outboxEvent.ID, result.Error)
 	}

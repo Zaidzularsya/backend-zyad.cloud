@@ -1,12 +1,19 @@
 package dto
 
-import "zyad.cloud/internal/core/permission/domain"
+import (
+	"time"
+	"zyad.cloud/internal/core/permission/domain"
+)
 
 type PermissionResponse struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
+	Slug        string `json:"slug"`
+	Module      string `json:"module"`
+	Action      string `json:"action"`
 	Description string `json:"description,omitempty"`
-	ModuleID    string `json:"module_id,omitempty"`
+	CreatedAt   string `json:"created_at,omitempty"`
+	UpdatedAt   string `json:"updated_at,omitempty"`
 }
 
 type RolePermissionsResponse struct {
@@ -21,12 +28,33 @@ type UserPermissionsResponse struct {
 	Permissions []PermissionResponse `json:"permissions"`
 }
 
+type GroupedPermissionsResponse map[string][]PermissionResponse
+
+type PermissionMatrixResponse struct {
+	Roles       []RoleResponse               `json:"roles"`
+	Permissions []PermissionResponse         `json:"permissions"`
+	Matrix      map[string]map[string]string `json:"matrix"` // role_id -> permission_id -> scope
+}
+
 func NewPermissionResponse(permission domain.Permission) PermissionResponse {
+	createdAtStr := ""
+	if permission.CreatedAt != nil {
+		createdAtStr = permission.CreatedAt.UTC().Format(time.RFC3339)
+	}
+	updatedAtStr := ""
+	if permission.UpdatedAt != nil {
+		updatedAtStr = permission.UpdatedAt.UTC().Format(time.RFC3339)
+	}
+
 	return PermissionResponse{
 		ID:          permission.ID,
 		Name:        permission.Name,
+		Slug:        permission.Slug,
+		Module:      permission.Module,
+		Action:      permission.Action,
 		Description: permission.Description,
-		ModuleID:    permission.ModuleID,
+		CreatedAt:   createdAtStr,
+		UpdatedAt:   updatedAtStr,
 	}
 }
 

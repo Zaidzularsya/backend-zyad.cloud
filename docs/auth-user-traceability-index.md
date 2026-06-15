@@ -47,7 +47,7 @@ Status:
 | Manual register | 1.B Register | AUTH-0401 | `POST /auth/register` | `users`, `user_profiles` | planned |
 | Register by admin | 1.B Register | USER-0203 | `POST /admin/users` | `users`, `user_profiles`, `auth_identities`, `user_roles`, `password_reset_tokens`, `audit_logs` | done |
 | Invite user | 1.B Register | AUTH-0402 | `POST /auth/invite/accept` | `user_invitations` | planned |
-| Email verification | 1.B Register | AUTH-0304 | Verify email endpoints | `email_verification_tokens` | planned |
+| Email verification | 1.B Register | AUTH-0304 | Verify email endpoints | `email_verification_tokens` | done |
 | Phone verification | 1.B Register | AUTH-0305 | OTP endpoints | `otp_codes` | planned |
 | Default role saat register | 1.B Register | AUTH-0401 | Register response | `roles`, `user_roles` | planned |
 | Approval admin | 1.B Register | USER-0207 | Status endpoints | `users.status`, `audit_logs` | done |
@@ -55,8 +55,8 @@ Status:
 | Refresh token | 1.C Token dan Session | AUTH-0103 | `POST /auth/refresh-token` | `sessions`, `refresh_tokens` | done |
 | Token rotation | 1.C Token dan Session | AUTH-0103 | Refresh response | `refresh_tokens.replaced_by_token_id` | done |
 | Revoke token | 1.C Token dan Session | AUTH-0102, AUTH-0302 | Logout/session delete | `sessions.revoked_at` | done |
-| Revoke all sessions | 1.C Token dan Session | AUTH-0303 | `POST /auth/logout-all` | `sessions.revoked_at` | planned |
-| Session list | 1.C Token dan Session | AUTH-0301 | `GET /auth/sessions` | `sessions` | planned |
+| Revoke all sessions | 1.C Token dan Session | AUTH-0303 | `POST /auth/logout-all` | `sessions.revoked_at` | done |
+| Session list | 1.C Token dan Session | AUTH-0301 | `GET /auth/sessions` | `sessions` | done |
 | Token blacklist | 1.C Token dan Session | AUTH-0102 | Token revoked errors | Redis or token store | planned |
 | Forgot password | 1.D Forgot Password | AUTH-0105 | `POST /auth/forgot-password` | `password_reset_tokens` | done |
 | Validate reset token | 1.D Forgot Password | AUTH-0106 | `POST /auth/reset-password/validate` | `password_reset_tokens` | done |
@@ -77,21 +77,21 @@ Status:
 | Restore user | 2.A User CRUD | USER-0205 | `POST /admin/users/:id/restore` | `users.deleted_at`, `users.status`, `audit_logs` | done |
 | Bulk delete | 2.A User CRUD | USER-0206 | `POST /admin/users/bulk-action` | `users.deleted_at`, `sessions`, `refresh_tokens`, `audit_logs` | done |
 | Bulk update status | 2.A User CRUD | USER-0206 | `POST /admin/users/bulk-action` | `users.status`, `audit_logs` | done |
-| User profile | 2.B User Profile | USER-0208 | Self profile endpoints | `user_profiles` | planned |
-| Avatar | 2.B User Profile | USER-0208 | `PATCH /users/me/avatar` | `user_profiles.avatar_url` | planned |
+| User profile | 2.B User Profile | USER-0208 | Self profile endpoints | `user_profiles` | done |
+| Avatar | 2.B User Profile | USER-0208 | `PATCH /users/me/avatar` | `user_profiles.avatar_url` | done |
 | User status | 2.C User Status | USER-0207 | Status endpoints | `users.status`, `audit_logs` | done |
-| Assign role | 2.D Role Management | USER-0209 | User role endpoints | `user_roles` | planned |
-| Multiple roles | 2.D Role Management | USER-0209 | User role endpoints | `user_roles` | planned |
+| Assign role | 2.D Role Management | USER-0209 | User role endpoints | `user_roles` | done |
+| Multiple roles | 2.D Role Management | USER-0209 | User role endpoints | `user_roles` | done |
 | Role priority | 2.D Role Management | USER-0211 | Role response | Future column if needed | deferred |
-| Role scope | 2.D Role Management | USER-0209 | `organization_id` field | `user_roles.organization_id` | planned |
-| List user permission | 2.E Permission Management | USER-0210 | User permission endpoints | `user_permissions` | planned |
-| Effective permission | 2.E Permission Management | USER-0210 | `/auth/me`, user permissions | role permission tables | planned |
-| Direct permission | 2.E Permission Management | USER-0210 | User permission endpoints | `user_permissions` | planned |
-| Deny permission | 2.E Permission Management | USER-0210 | `effect=deny` | `user_permissions.effect` | planned |
+| Role scope | 2.D Role Management | USER-0209 | `organization_id` field | `user_roles.organization_id` | done |
+| List user permission | 2.E Permission Management | USER-0210 | User permission endpoints | `user_permissions` | done |
+| Effective permission | 2.E Permission Management | USER-0210 | `/auth/me`, user permissions | role permission tables | done |
+| Direct permission | 2.E Permission Management | USER-0210 | User permission endpoints | `user_permissions` | done |
+| Deny permission | 2.E Permission Management | USER-0210 | `effect=deny` | `user_permissions.effect` | done |
 | Permission cache | 2.E Permission Management | USER-0210 | Not public | Redis/cache | planned |
-| Multi organization | 3 Organization | USER-0401 | Organization endpoints | `organizations` | planned |
-| Switch organization | 3 Organization | USER-0401 | `POST /users/me/switch-organization` | session/context metadata | planned |
-| Audit log user | 4 Audit Log User | USER-0301 | Audit endpoints | `audit_logs` | planned |
+| Multi organization | 3 Organization | USER-0401 | Self organization endpoints done; admin organization users planned | `organizations`, `organization_memberships` | in_progress |
+| Switch organization | 3 Organization | USER-0401 | `GET /users/me/organizations`, `POST /users/me/switch-organization` | session/context metadata, `audit_logs` | done |
+| Audit log user | 4 Audit Log User | USER-0301 | Audit endpoints | `audit_logs` | done |
 | Notification integration | 5 Notification Integration | AUTH-0105, AUTH-0107, AUTH-0108, AUTH-0304, AUTH-0402 | Not public | mail/whatsapp platform | in_progress |
 | Public API documentation | 11 API Feature Lengkap | DOC-API-0001 | Full contract | None | planned |
 | Security checklist | 12 Security Checklist | AUTH-0002, AUTH-0307, USER-0213 | Error and auth contract | token hash tables | planned |
@@ -104,12 +104,12 @@ Status:
 | --- | --- | --- |
 | `POST /auth/login` | AUTH-0101 | done |
 | `POST /auth/logout` | AUTH-0102 | done |
-| `POST /auth/logout-all` | AUTH-0303 | planned |
+| `POST /auth/logout-all` | AUTH-0303 | done |
 | `POST /auth/refresh-token` | AUTH-0103 | done |
 | `GET /auth/me` | AUTH-0104 | done |
 | `POST /auth/register` | AUTH-0401 | planned |
-| `POST /auth/verify-email` | AUTH-0304 | planned |
-| `POST /auth/resend-verification-email` | AUTH-0304 | planned |
+| `POST /auth/verify-email` | AUTH-0304 | done |
+| `POST /auth/resend-verification-email` | AUTH-0304 | done |
 | `POST /auth/forgot-password` | AUTH-0105 | done |
 | `POST /auth/reset-password/validate` | AUTH-0106 | done |
 | `POST /auth/reset-password` | AUTH-0107 | done |
@@ -118,11 +118,11 @@ Status:
 | `POST /auth/2fa/verify` | AUTH-0405 | planned |
 | `POST /auth/2fa/disable` | AUTH-0405 | planned |
 | `GET /auth/2fa/recovery-codes` | AUTH-0405 | planned |
-| `GET /auth/sessions` | AUTH-0301 | planned |
-| `DELETE /auth/sessions/:id` | AUTH-0302 | planned |
-| `GET /users/me` | USER-0208 | planned |
-| `PATCH /users/me/profile` | USER-0208 | planned |
-| `PATCH /users/me/avatar` | USER-0208 | planned |
+| `GET /auth/sessions` | AUTH-0301 | done |
+| `DELETE /auth/sessions/:id` | AUTH-0302 | done |
+| `GET /users/me` | USER-0208 | done |
+| `PATCH /users/me/profile` | USER-0208 | done |
+| `PATCH /users/me/avatar` | USER-0208 | done |
 | `GET /admin/users` | USER-0201 | done |
 | `GET /admin/users/:id` | USER-0202 | done |
 | `POST /admin/users` | USER-0203 | done |
@@ -134,26 +134,29 @@ Status:
 | `POST /admin/users/:id/activate` | USER-0207 | done |
 | `POST /admin/users/:id/suspend` | USER-0207 | done |
 | `POST /admin/users/:id/ban` | USER-0207 | done |
-| `GET /admin/users/:id/roles` | USER-0209 | planned |
-| `POST /admin/users/:id/roles` | USER-0209 | planned |
-| `DELETE /admin/users/:id/roles/:roleId` | USER-0209 | planned |
-| `GET /admin/users/:id/permissions` | USER-0210 | planned |
-| `POST /admin/users/:id/permissions` | USER-0210 | planned |
-| `DELETE /admin/users/:id/permissions/:permissionId` | USER-0210 | planned |
-| `GET /admin/users/:id/sessions` | AUTH-0301 | planned |
-| `DELETE /admin/users/:id/sessions/:sessionId` | AUTH-0302 | planned |
-| `GET /admin/users/:id/audit-logs` | USER-0301 | planned |
-| `GET /admin/roles` | USER-0211 | planned |
-| `GET /admin/roles/:id` | USER-0211 | planned |
-| `POST /admin/roles` | USER-0211 | planned |
-| `PATCH /admin/roles/:id` | USER-0211 | planned |
-| `DELETE /admin/roles/:id` | USER-0211 | planned |
-| `GET /admin/roles/:id/permissions` | USER-0211 | planned |
-| `POST /admin/roles/:id/permissions` | USER-0211 | planned |
-| `DELETE /admin/roles/:id/permissions/:permissionId` | USER-0211 | planned |
-| `GET /admin/permissions` | USER-0212 | planned |
-| `GET /admin/permissions/grouped` | USER-0212 | planned |
-| `GET /admin/permission-matrix` | USER-0212 | planned |
+| `GET /admin/users/:id/roles` | USER-0209 | done |
+| `POST /admin/users/:id/roles` | USER-0209 | done |
+| `DELETE /admin/users/:id/roles/:roleId` | USER-0209 | done |
+| `GET /admin/users/:id/permissions` | USER-0210 | done |
+| `POST /admin/users/:id/permissions` | USER-0210 | done |
+| `DELETE /admin/users/:id/permissions/:permissionId` | USER-0210 | done |
+| `GET /admin/users/:id/sessions` | AUTH-0301 | done |
+| `DELETE /admin/users/:id/sessions/:sessionId` | AUTH-0302 | done |
+| `GET /admin/users/:id/audit-logs` | USER-0301 | done |
+| `GET /admin/audit-logs` | USER-0301 | done |
+| `GET /admin/users/:id/login-histories` | AUTH-0306 | done |
+| `GET /admin/login-histories` | AUTH-0306 | done |
+| `GET /admin/roles` | USER-0211 | done |
+| `GET /admin/roles/:id` | USER-0211 | done |
+| `POST /admin/roles` | USER-0211 | done |
+| `PATCH /admin/roles/:id` | USER-0211 | done |
+| `DELETE /admin/roles/:id` | USER-0211 | done |
+| `GET /admin/roles/:id/permissions` | USER-0211 | done |
+| `POST /admin/roles/:id/permissions` | USER-0211 | done |
+| `DELETE /admin/roles/:id/permissions/:permissionId` | USER-0211 | done |
+| `GET /admin/permissions` | USER-0212 | done |
+| `GET /admin/permissions/grouped` | USER-0212 | done |
+| `GET /admin/permission-matrix` | USER-0212 | done |
 
 ## Migration to Task Index
 
@@ -216,6 +219,14 @@ Status:
 | 2026-06-12 | Completed `USER-0205` soft delete and restore user | `internal/modules/user/handler/user_handler.go`, `internal/modules/user/service/user_service.go`, `internal/modules/user/repository/user_repository.go`, `api/openapi.yaml`, `docs/auth-user-development-tasks.md`, `docs/auth-user-public-api-contract.md`, `docs/auth-user-traceability-index.md` | Menambahkan protected endpoint `DELETE /api/v1/admin/users/:id` dan `POST /api/v1/admin/users/:id/restore`, revoke session/refresh token atomik, restore status dari audit metadata dengan fallback inactive, audit lifecycle, unit/handler test, dan integration test PostgreSQL |
 | 2026-06-12 | Completed `USER-0206` bulk user action | `internal/modules/user/handler/user_handler.go`, `internal/modules/user/service/user_service.go`, `internal/modules/user/repository/user_repository.go`, `internal/modules/user/dto/user.go`, `api/openapi.yaml`, `docs/auth-user-development-tasks.md`, `docs/auth-user-public-api-contract.md`, `docs/auth-user-traceability-index.md` | Menambahkan endpoint `POST /api/v1/admin/users/bulk-action`, action delete/restore/update_status, permission dinamis, batas 100 item, structured partial failure, status audit, unit/handler test, dan integration test PostgreSQL |
 | 2026-06-12 | Completed `USER-0207` user status management | `internal/modules/user/handler/user_handler.go`, `internal/modules/user/service/user_service.go`, `internal/modules/user/repository/user_repository.go`, `internal/modules/user/dto/user.go`, `api/openapi.yaml`, `docs/auth-user-development-tasks.md`, `docs/auth-user-public-api-contract.md`, `docs/auth-user-traceability-index.md` | Menambahkan generic dan shortcut status endpoints, permission `user.update_status`, reason validation untuk suspended/banned, shared status rule dengan bulk action, audit actor/old/new/reason, unit/handler test, dan integration test PostgreSQL |
+| 2026-06-12 | Completed `USER-0208` self profile management | `internal/modules/user/handler/user_handler.go`, `internal/modules/user/service/user_service.go`, `internal/modules/user/dto/user.go`, `api/openapi.yaml`, `docs/auth-user-development-tasks.md`, `docs/auth-user-public-api-contract.md` | Update self profile, avatar upload, and retrieve self user detail |
+| 2026-06-12 | Completed Phase 3 session management tasks | `internal/modules/user/handler/*`, `internal/modules/user/service/*`, `internal/modules/user/repository/*`, `internal/modules/user/dto/*`, `docs/auth-user-development-tasks.md`, `docs/auth-user-traceability-index.md` | Menyelesaikan task session management AUTH-0301 (Session List), AUTH-0302 (Revoke Session), dan AUTH-0303 (Logout All) baik untuk endpoint user biasa maupun admin, lengkap dengan unit test dan manual verification plan |
+| 2026-06-12 | Completed Phase 3 email verification task | `migrations/000012_*`, `internal/modules/user/handler/auth_handler.go`, `internal/modules/user/service/auth_service.go`, `internal/modules/user/repository/auth_repository.go`, `internal/modules/user/dto/auth.go`, `docs/auth-user-development-tasks.md`, `docs/auth-user-traceability-index.md` | Menyelesaikan task email verification AUTH-0304 (endpoints POST /auth/verify-email dan POST /auth/resend-verification-email), lengkap dengan model, migration template, unit test, dan integration test Postgres |
+| 2026-06-12 | Completed Phase 3 login history and audit log tasks | `internal/modules/user/handler/user_handler.go`, `internal/modules/user/service/user_service.go`, `internal/modules/user/repository/user_repository.go`, `internal/modules/user/dto/audit_dto.go`, `api/openapi.yaml`, `docs/auth-user-development-tasks.md`, `docs/auth-user-traceability-index.md` | Menyelesaikan task login history AUTH-0306 dan audit log USER-0301 (endpoints GET /admin/login-histories, GET /admin/users/:id/login-histories, GET /admin/audit-logs, GET /admin/users/:id/audit-logs) lengkap dengan unit test dan integration test PostgreSQL |
+| 2026-06-13 | Added multi-tenant session context schema dependency | `migrations/000017_add_session_organization_context.*.sql`, `internal/modules/user/model/session.go` | Session can persist active organization, membership, and version snapshot; USER-0401 switch flow and runtime stale-context validation remain planned |
+| 2026-06-15 | Completed `MT-CORE-006` organization switch | `internal/modules/organization/{handler,service,repository}`, `internal/app`, `api/openapi.yaml`, multi-tenant and Auth/User docs | Added authenticated organization list and atomic session switch endpoints, active membership validation, switch audit metadata, and unit/handler/integration coverage |
+| 2026-06-15 | Completed organization role read-model follow-up | `internal/modules/organization/{repository,service}` | Self organization list and switch responses now include organization-scoped `role_ids` and `role_slugs`, covered by unit and PostgreSQL integration tests |
+| 2026-06-15 | Completed `MT-CORE-007` tenant-scoped permission evaluation | `internal/core/permission/{middleware,repository,service}`, `internal/modules/user/repository/auth_repository.go`, multi-tenant/Auth docs | Separated global and organization permission queries, added fail-closed organization permission middleware, prevented tenant permission leakage into auth payloads, and added cross-tenant unit/integration tests |
 
 ## Update Rules
 

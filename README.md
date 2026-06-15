@@ -119,7 +119,7 @@ backend-go/
 │   │   ├── billing/             # Tagihan, invoice, siklus billing, status pembayaran
 │   │   ├── contract/            # Kontrak pelanggan dan dokumen kontrak
 │   │   ├── dashboard/           # Statistik, grafik, dan ringkasan dashboard
-│   │   ├── landingpage/         # Konten landing page, form lead, banner, halaman publik
+│   │   ├── landing/             # Konten landing page, form lead, branding, dan halaman publik
 │   │   ├── mikrotik/            # Data router MikroTik dari sisi aplikasi
 │   │   ├── newsaggregator/      # Agregasi berita/konten eksternal
 │   │   ├── order/               # Order lifecycle, order item, approval, cancellation
@@ -145,6 +145,37 @@ backend-go/
 ├── AGENTS.md                    # Instruksi kerja untuk AI coding agent seperti Codex
 └── README.md                    # Dokumentasi utama project untuk developer
 ```
+
+---
+
+## 📚 Development Documentation
+
+### Multi-Tenant Workflow
+
+Gunakan urutan berikut saat mengerjakan capability multi-tenant atau module yang menyimpan data organization:
+
+1. `README.md` untuk konteks platform.
+2. `docs/reference-multi-tenant.md` untuk architecture, ownership, isolation, dan platform organization.
+3. `docs/multi-tenant-development-tasks.md` untuk breakdown pekerjaan.
+4. `docs/multi-tenant-traceability-index.md` untuk requirement, API, migration, permission, dan dependency.
+5. `docs/multi-tenant-schema-query-audit.md` sebelum normalisasi schema/query yang sudah ada.
+6. `docs/migration-guide.md` sebelum membuat migration.
+
+Zyad Cloud sendiri direpresentasikan sebagai platform organization. Landing Page marketing platform dan Landing Page customer memakai module yang sama dengan `organization_id` yang konkret.
+
+### Landing Page Workflow
+
+Gunakan urutan berikut saat mengerjakan module Landing Page:
+
+1. `README.md` untuk konteks platform.
+2. `docs/reference-multi-tenant.md` untuk tenant context dan isolation contract.
+3. `docs/reference-landing-page.md` untuk requirement, boundary, dan kapasitas.
+4. `docs/landing-page-development-tasks.md` untuk breakdown pekerjaan.
+5. `docs/landing-page-traceability-index.md` untuk traceability requirement, API, migration, permission, event, dan status.
+6. `docs/landing-page-public-api-contract.md` untuk kontrak Frontend Vue dan public renderer.
+7. `docs/migration-guide.md` sebelum membuat migration.
+
+Target canonical module adalah `internal/modules/landing`.
 
 ---
 

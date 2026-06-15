@@ -22,7 +22,7 @@ func TestUserHandlerListUsers(t *testing.T) {
 		meta:  dto.PaginationMeta{Page: 2, PerPage: 10, Total: 11, TotalPages: 2},
 	}
 	checker := &fakePermissionChecker{}
-	handler := NewUserHandler(service, checker)
+	handler := NewUserHandler(service, nil, checker)
 	router := gin.New()
 	group := router.Group("")
 	group.Use(seedUserContext("admin-1"))
@@ -47,7 +47,7 @@ func TestUserHandlerListUsersRequiresRestorePermissionForDeleted(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service := &fakeUserListService{}
 	checker := &fakePermissionChecker{deniedPermission: "user.restore"}
-	handler := NewUserHandler(service, checker)
+	handler := NewUserHandler(service, nil, checker)
 	router := gin.New()
 	group := router.Group("")
 	group.Use(seedUserContext("admin-1"))
@@ -74,7 +74,7 @@ func TestUserHandlerGetUser(t *testing.T) {
 		},
 	}
 	checker := &fakePermissionChecker{}
-	handler := NewUserHandler(service, checker)
+	handler := NewUserHandler(service, nil, checker)
 	router := gin.New()
 	group := router.Group("")
 	group.Use(seedUserContext("admin-1"))
@@ -96,7 +96,7 @@ func TestUserHandlerGetDeletedUserRequiresRestorePermission(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service := &fakeUserListService{}
 	checker := &fakePermissionChecker{deniedPermission: "user.restore"}
-	handler := NewUserHandler(service, checker)
+	handler := NewUserHandler(service, nil, checker)
 	router := gin.New()
 	group := router.Group("")
 	group.Use(seedUserContext("admin-1"))
@@ -123,7 +123,7 @@ func TestUserHandlerCreateUser(t *testing.T) {
 		},
 	}
 	checker := &fakePermissionChecker{}
-	handler := NewUserHandler(service, checker)
+	handler := NewUserHandler(service, nil, checker)
 	router := gin.New()
 	group := router.Group("")
 	group.Use(seedUserContext("a73d7c06-96e9-4ab2-bb32-e025dde5660c"))
@@ -161,7 +161,7 @@ func TestUserHandlerUpdateUser(t *testing.T) {
 		},
 	}
 	checker := &fakePermissionChecker{}
-	handler := NewUserHandler(service, checker)
+	handler := NewUserHandler(service, nil, checker)
 	router := gin.New()
 	group := router.Group("")
 	group.Use(seedUserContext("a73d7c06-96e9-4ab2-bb32-e025dde5660c"))
@@ -193,7 +193,7 @@ func TestUserHandlerDeleteUser(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service := &fakeUserListService{}
 	checker := &fakePermissionChecker{}
-	handler := NewUserHandler(service, checker)
+	handler := NewUserHandler(service, nil, checker)
 	router := gin.New()
 	group := router.Group("")
 	group.Use(seedUserContext("a73d7c06-96e9-4ab2-bb32-e025dde5660c"))
@@ -220,7 +220,7 @@ func TestUserHandlerRestoreUser(t *testing.T) {
 		restored: dto.UserDetailResponse{ID: "7ea7b1cb-04eb-456a-a19f-e41d590d2a3b"},
 	}
 	checker := &fakePermissionChecker{}
-	handler := NewUserHandler(service, checker)
+	handler := NewUserHandler(service, nil, checker)
 	router := gin.New()
 	group := router.Group("")
 	group.Use(seedUserContext("a73d7c06-96e9-4ab2-bb32-e025dde5660c"))
@@ -247,7 +247,7 @@ func TestUserHandlerBulkActionUsesActionPermission(t *testing.T) {
 		bulkResult: dto.BulkUserActionResponse{Action: "update_status", Total: 1, Succeeded: 1},
 	}
 	checker := &fakePermissionChecker{}
-	handler := NewUserHandler(service, checker)
+	handler := NewUserHandler(service, nil, checker)
 	router := gin.New()
 	group := router.Group("")
 	group.Use(seedUserContext("a73d7c06-96e9-4ab2-bb32-e025dde5660c"))
@@ -279,7 +279,7 @@ func TestUserHandlerSuspendUser(t *testing.T) {
 		},
 	}
 	checker := &fakePermissionChecker{}
-	handler := NewUserHandler(service, checker)
+	handler := NewUserHandler(service, nil, checker)
 	router := gin.New()
 	group := router.Group("")
 	group.Use(seedUserContext("a73d7c06-96e9-4ab2-bb32-e025dde5660c"))
@@ -307,7 +307,7 @@ func TestUserHandlerActivateUser(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service := &fakeUserListService{statusUpdated: dto.UserDetailResponse{Status: "active"}}
 	checker := &fakePermissionChecker{}
-	handler := NewUserHandler(service, checker)
+	handler := NewUserHandler(service, nil, checker)
 	router := gin.New()
 	group := router.Group("")
 	group.Use(seedUserContext("a73d7c06-96e9-4ab2-bb32-e025dde5660c"))
@@ -443,4 +443,32 @@ func seedUserContext(userID string) gin.HandlerFunc {
 		permissionmiddleware.SetUserID(c, userID)
 		c.Next()
 	}
+}
+
+func (s *fakeUserListService) GetSelfProfile(_ context.Context, userID string) (dto.UserDetailResponse, error) {
+	s.getCalled = true
+	s.userID = userID
+	return s.detail, s.detailErr
+}
+
+func (s *fakeUserListService) UpdateSelfProfile(_ context.Context, userID string, req dto.UpdateProfileRequest, metadata service.UpdateUserMetadata) (dto.UserDetailResponse, error) {
+	s.updateCalled = true
+	s.updateUserID = userID
+	s.updateMetadata = metadata
+	return s.updated, s.updateErr
+}
+
+func (s *fakeUserListService) UpdateSelfAvatar(_ context.Context, userID string, req dto.UpdateAvatarRequest, metadata service.UpdateUserMetadata) (dto.UserDetailResponse, error) {
+	s.updateCalled = true
+	s.updateUserID = userID
+	s.updateMetadata = metadata
+	return s.updated, s.updateErr
+}
+
+func (s *fakeUserListService) ListLoginHistories(_ context.Context, _ dto.LoginHistoryQuery) ([]dto.LoginHistoryResponse, dto.PaginationMeta, error) {
+	return nil, dto.PaginationMeta{}, nil
+}
+
+func (s *fakeUserListService) ListAuditLogs(_ context.Context, _ dto.AuditLogQuery) ([]dto.AuditLogResponse, dto.PaginationMeta, error) {
+	return nil, dto.PaginationMeta{}, nil
 }

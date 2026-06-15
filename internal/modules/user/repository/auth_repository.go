@@ -623,17 +623,20 @@ func (r *AuthRepository) permissionSlugs(ctx context.Context, userID string) ([]
 			JOIN role_permissions rp ON rp.role_id = ur.role_id
 			JOIN permissions p ON p.id = rp.permission_id
 			WHERE ur.user_id = $1
+				AND ur.organization_id IS NULL
 			UNION
 			SELECT COALESCE(NULLIF(p.slug, ''), p.permission_name) AS permission_slug
 			FROM user_permissions up
 			JOIN permissions p ON p.id = up.permission_id
 			WHERE up.user_id = $1
+				AND up.organization_id IS NULL
 				AND up.effect = 'allow'
 			EXCEPT
 			SELECT COALESCE(NULLIF(p.slug, ''), p.permission_name) AS permission_slug
 			FROM user_permissions up
 			JOIN permissions p ON p.id = up.permission_id
 			WHERE up.user_id = $1
+				AND up.organization_id IS NULL
 				AND up.effect = 'deny'
 		) permissions
 		ORDER BY permission_slug
@@ -659,4 +662,222 @@ func scanStrings(rows pgx.Rows) ([]string, error) {
 		return nil, fmt.Errorf("scan strings: %w", err)
 	}
 	return values, nil
+}
+
+func (r *AuthRepository) ListSessions(ctx context.Context, userID string) ([]service.CurrentSession, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, device_name, COALESCE(ip_address::text, ''), COALESCE(user_agent, ''), last_used_at, expires_at, revoked_at
+		FROM sessions
+		WHERE user_id = $1
+		ORDER BY last_used_at DESC NULLS LAST, created_at DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	sessions := make([]service.CurrentSession, 0)
+	for rows.Next() {
+		var s service.CurrentSession
+		var ipAddress, userAgent string
+		var lastUsedAt, revokedAt sql.NullTime
+		if err := rows.Scan(
+			&s.ID,
+			&s.DeviceName,
+			&ipAddress,
+			&userAgent,
+			&lastUsedAt,
+			&s.ExpiresAt,
+			&revokedAt,
+		); err != nil {
+			return nil, err
+		}
+		s.IPAddress = ipAddress
+		s.UserAgent = userAgent
+		if lastUsedAt.Valid {
+			s.LastUsedAt = &lastUsedAt.Time
+		}
+		if revokedAt.Valid {
+			s.RevokedAt = &revokedAt.Time
+		}
+		sessions = append(sessions, s)
+	}
+
+	return sessions, rows.Err()
+}
+
+func (r *AuthRepository) RevokeUserSession(ctx context.Context, sessionID string, userID string, revokedAt time.Time) error {
+	res, err := r.db.Exec(ctx, `
+		UPDATE sessions
+		SET revoked_at = $1
+		WHERE id = $2 AND user_id = $3 AND revoked_at IS NULL
+	`, revokedAt, sessionID, userID)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() == 0 {
+		return service.ErrSessionNotFound
+	}
+	return nil
+}
+
+func (r *AuthRepository) RevokeAllSessions(ctx context.Context, userID string, excludeSessionID string, revokedAt time.Time) error {
+	var err error
+	if excludeSessionID != "" {
+		_, err = r.db.Exec(ctx, `
+			UPDATE sessions
+			SET revoked_at = $1
+			WHERE user_id = $2 AND id <> $3 AND revoked_at IS NULL AND expires_at > $1
+		`, revokedAt, userID, excludeSessionID)
+	} else {
+		_, err = r.db.Exec(ctx, `
+			UPDATE sessions
+			SET revoked_at = $1
+			WHERE user_id = $2 AND revoked_at IS NULL AND expires_at > $1
+		`, revokedAt, userID)
+	}
+	return err
+}
+
+func (r *AuthRepository) CreateEmailVerificationToken(ctx context.Context, token service.NewEmailVerificationToken) error {
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO email_verification_tokens (
+			user_id,
+			email,
+			token_hash,
+			expires_at,
+			created_at
+		)
+		VALUES ($1, $2, $3, $4, now())
+	`, token.UserID, token.Email, token.TokenHash, token.ExpiresAt)
+	return err
+}
+
+func (r *AuthRepository) FindEmailVerificationTokenByHash(ctx context.Context, tokenHash string) (service.EmailVerificationToken, error) {
+	var token service.EmailVerificationToken
+	var usedAt sql.NullTime
+	err := r.db.QueryRow(ctx, `
+		SELECT id, user_id, email, token_hash, expires_at, used_at
+		FROM email_verification_tokens
+		WHERE token_hash = $1
+		LIMIT 1
+	`, tokenHash).Scan(&token.ID, &token.UserID, &token.Email, &token.TokenHash, &token.ExpiresAt, &usedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return service.EmailVerificationToken{}, service.ErrEmailVerificationTokenNotFound
+		}
+		return service.EmailVerificationToken{}, err
+	}
+	if usedAt.Valid {
+		token.UsedAt = &usedAt.Time
+	}
+	return token, nil
+}
+
+func (r *AuthRepository) CompleteEmailVerification(
+	ctx context.Context,
+	tokenHash string,
+	verifiedAt time.Time,
+) (service.EmailVerificationUser, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return service.EmailVerificationUser{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var tokenID string
+	var userID string
+	var email string
+	var expiresAt time.Time
+	var existingUsedAt sql.NullTime
+	var user service.EmailVerificationUser
+
+	err = tx.QueryRow(ctx, `
+		SELECT evt.id, evt.user_id, evt.email, evt.expires_at, evt.used_at, u.name
+		FROM email_verification_tokens evt
+		JOIN users u ON u.id = evt.user_id
+		WHERE evt.token_hash = $1
+			AND u.deleted_at IS NULL
+		LIMIT 1
+		FOR UPDATE OF evt, u
+	`, tokenHash).Scan(
+		&tokenID,
+		&userID,
+		&email,
+		&expiresAt,
+		&existingUsedAt,
+		&user.Name,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return service.EmailVerificationUser{}, service.ErrEmailVerificationTokenNotFound
+		}
+		return service.EmailVerificationUser{}, err
+	}
+
+	user.ID = userID
+	user.Email = email
+
+	if existingUsedAt.Valid || !expiresAt.After(verifiedAt) {
+		return service.EmailVerificationUser{}, service.ErrEmailVerificationTokenNotFound
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE users
+		SET email_verified_at = $2,
+			status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
+			updated_at = $2
+		WHERE id = $1
+	`, userID, verifiedAt); err != nil {
+		return service.EmailVerificationUser{}, err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE email_verification_tokens
+		SET used_at = $2
+		WHERE id = $1
+	`, tokenID, verifiedAt); err != nil {
+		return service.EmailVerificationUser{}, err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE email_verification_tokens
+		SET used_at = $2
+		WHERE user_id = $1 AND id <> $3 AND used_at IS NULL
+	`, userID, verifiedAt, tokenID); err != nil {
+		return service.EmailVerificationUser{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return service.EmailVerificationUser{}, err
+	}
+
+	return user, nil
+}
+
+func (r *AuthRepository) FindEmailVerificationUserByEmail(ctx context.Context, email string) (service.EmailVerificationTargetUser, error) {
+	email = strings.TrimSpace(email)
+
+	var user service.EmailVerificationTargetUser
+	var emailVerifiedAt sql.NullTime
+
+	err := r.db.QueryRow(ctx, `
+		SELECT id, name, email, status, email_verified_at
+		FROM users
+		WHERE deleted_at IS NULL
+			AND lower(email) = lower($1)
+		LIMIT 1
+	`, email).Scan(&user.ID, &user.Name, &user.Email, &user.Status, &emailVerifiedAt)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return service.EmailVerificationTargetUser{}, service.ErrLoginUserNotFound
+		}
+		return service.EmailVerificationTargetUser{}, err
+	}
+
+	if emailVerifiedAt.Valid {
+		user.EmailVerifiedAt = &emailVerifiedAt.Time
+	}
+
+	return user, nil
 }

@@ -752,6 +752,7 @@ func newTestAuthService(t *testing.T, repo LoginRepository) *AuthService {
 			RefreshExpiresIn:           "7d",
 			RememberMeRefreshExpiresIn: "30d",
 			ResetTokenExpiresIn:        "15m",
+			VerificationTokenExpiresIn: "24h",
 			PasswordMinLength:          8,
 		},
 		Notification: config.NotificationConfig{
@@ -796,7 +797,26 @@ type fakeLoginRepository struct {
 	revokedSessionID                string
 	lastLoginUserID                 string
 	histories                       []LoginHistoryRecord
+	// new session management fields
+	sessions                        []CurrentSession
+	listSessionsErr                 error
+	revokedUserID                   string
+	revokeSessionErr                error
+	excludeSessionID                string
+	revokeAllErr                    error
+	// email verification mock fields
+	emailVerificationUser           EmailVerificationTargetUser
+	findEmailVerificationUserErr    error
+	emailVerificationToken          NewEmailVerificationToken
+	createVerificationTokenErr      error
+	emailVerificationTokenFound     EmailVerificationToken
+	findVerificationTokenErr        error
+	completedVerificationUser       EmailVerificationUser
+	completeVerificationErr         error
+	completedVerificationTokenHash  string
+	completedVerificationTime       time.Time
 }
+
 
 func (r *fakeLoginRepository) FindLoginUserByIdentifier(context.Context, string) (LoginUser, error) {
 	if r.findErr != nil {
@@ -894,6 +914,55 @@ func (r *fakeLoginRepository) RecordLoginHistory(_ context.Context, history Logi
 	return nil
 }
 
+func (r *fakeLoginRepository) ListSessions(_ context.Context, userID string) ([]CurrentSession, error) {
+	if r.listSessionsErr != nil {
+		return nil, r.listSessionsErr
+	}
+	return r.sessions, nil
+}
+
+func (r *fakeLoginRepository) RevokeUserSession(_ context.Context, sessionID string, userID string, _ time.Time) error {
+	r.revokedSessionID = sessionID
+	r.revokedUserID = userID
+	return r.revokeSessionErr
+}
+
+func (r *fakeLoginRepository) RevokeAllSessions(_ context.Context, userID string, excludeSessionID string, _ time.Time) error {
+	r.revokedUserID = userID
+	r.excludeSessionID = excludeSessionID
+	return r.revokeAllErr
+}
+
+func (r *fakeLoginRepository) CreateEmailVerificationToken(_ context.Context, token NewEmailVerificationToken) error {
+	r.emailVerificationToken = token
+	return r.createVerificationTokenErr
+}
+
+func (r *fakeLoginRepository) FindEmailVerificationTokenByHash(_ context.Context, tokenHash string) (EmailVerificationToken, error) {
+	if r.findVerificationTokenErr != nil {
+		return EmailVerificationToken{}, r.findVerificationTokenErr
+	}
+	return r.emailVerificationTokenFound, nil
+}
+
+func (r *fakeLoginRepository) CompleteEmailVerification(_ context.Context, tokenHash string, verifiedAt time.Time) (EmailVerificationUser, error) {
+	r.completedVerificationTokenHash = tokenHash
+	r.completedVerificationTime = verifiedAt
+	if r.completeVerificationErr != nil {
+		return EmailVerificationUser{}, r.completeVerificationErr
+	}
+	return r.completedVerificationUser, nil
+}
+
+func (r *fakeLoginRepository) FindEmailVerificationUserByEmail(_ context.Context, email string) (EmailVerificationTargetUser, error) {
+	if r.findEmailVerificationUserErr != nil {
+		return EmailVerificationTargetUser{}, r.findEmailVerificationUserErr
+	}
+	return r.emailVerificationUser, nil
+}
+
+
+
 type fakeNotificationPublisher struct {
 	called bool
 	event  notificationpublisher.Event
@@ -908,3 +977,353 @@ func (p *fakeNotificationPublisher) Publish(_ context.Context, event notificatio
 	}
 	return notificationdomain.OutboxEvent{ID: "event-1"}, nil
 }
+
+func TestAuthServiceListSessionsSuccess(t *testing.T) {
+	now := time.Date(2026, 6, 11, 10, 0, 0, 0, time.UTC)
+	expectedSessions := []CurrentSession{
+		{
+			ID:         "session-1",
+			DeviceName: "iPhone",
+			IPAddress:  "192.168.1.1",
+			UserAgent:  "Mozilla/5.0",
+			ExpiresAt:  now.Add(24 * time.Hour),
+		},
+		{
+			ID:         "session-2",
+			DeviceName: "MacBook",
+			IPAddress:  "192.168.1.2",
+			UserAgent:  "Mozilla/5.0",
+			ExpiresAt:  now.Add(48 * time.Hour),
+		},
+	}
+
+	repo := &fakeLoginRepository{
+		sessions: expectedSessions,
+	}
+	svc := newTestAuthService(t, repo)
+
+	result, err := svc.ListSessions(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("ListSessions: %v", err)
+	}
+
+	if len(result) != 2 {
+		t.Fatalf("expected 2 sessions, got %d", len(result))
+	}
+	if result[0].ID != "session-1" || result[1].ID != "session-2" {
+		t.Fatalf("sessions mapping incorrect: %+v", result)
+	}
+}
+
+func TestAuthServiceListSessionsValidationError(t *testing.T) {
+	repo := &fakeLoginRepository{}
+	svc := newTestAuthService(t, repo)
+
+	_, err := svc.ListSessions(context.Background(), "   ")
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "VALIDATION_ERROR" {
+		t.Fatalf("expected VALIDATION_ERROR, got %v", err)
+	}
+}
+
+func TestAuthServiceListSessionsRepositoryError(t *testing.T) {
+	repo := &fakeLoginRepository{
+		listSessionsErr: errors.New("db error"),
+	}
+	svc := newTestAuthService(t, repo)
+
+	_, err := svc.ListSessions(context.Background(), "user-1")
+	if err == nil {
+		t.Fatal("expected repository error")
+	}
+
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "AUTH_SESSION_LIST_FAILED" {
+		t.Fatalf("expected AUTH_SESSION_LIST_FAILED, got %v", err)
+	}
+}
+
+func TestAuthServiceRevokeSessionSuccess(t *testing.T) {
+	repo := &fakeLoginRepository{}
+	svc := newTestAuthService(t, repo)
+
+	err := svc.RevokeSession(context.Background(), "session-1", "user-1")
+	if err != nil {
+		t.Fatalf("RevokeSession: %v", err)
+	}
+
+	if repo.revokedSessionID != "session-1" || repo.revokedUserID != "user-1" {
+		t.Fatalf("expected session-1 and user-1 to be revoked, got %s and %s", repo.revokedSessionID, repo.revokedUserID)
+	}
+}
+
+func TestAuthServiceRevokeSessionValidationError(t *testing.T) {
+	repo := &fakeLoginRepository{}
+	svc := newTestAuthService(t, repo)
+
+	err := svc.RevokeSession(context.Background(), "", "user-1")
+	if err == nil {
+		t.Fatal("expected validation error for empty sessionID")
+	}
+
+	err = svc.RevokeSession(context.Background(), "session-1", "  ")
+	if err == nil {
+		t.Fatal("expected validation error for empty userID")
+	}
+
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "VALIDATION_ERROR" {
+		t.Fatalf("expected VALIDATION_ERROR, got %v", err)
+	}
+}
+
+func TestAuthServiceRevokeSessionNotFoundError(t *testing.T) {
+	repo := &fakeLoginRepository{
+		revokeSessionErr: ErrSessionNotFound,
+	}
+	svc := newTestAuthService(t, repo)
+
+	err := svc.RevokeSession(context.Background(), "session-1", "user-1")
+	if err == nil {
+		t.Fatal("expected session not found error")
+	}
+
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "AUTH_SESSION_NOT_FOUND" {
+		t.Fatalf("expected AUTH_SESSION_NOT_FOUND, got %v", err)
+	}
+}
+
+func TestAuthServiceLogoutAllSuccess(t *testing.T) {
+	repo := &fakeLoginRepository{}
+	svc := newTestAuthService(t, repo)
+
+	err := svc.LogoutAll(context.Background(), "user-1", "session-current")
+	if err != nil {
+		t.Fatalf("LogoutAll: %v", err)
+	}
+
+	if repo.revokedUserID != "user-1" || repo.excludeSessionID != "session-current" {
+		t.Fatalf("expected user-1 and exclude session-current, got %s and %s", repo.revokedUserID, repo.excludeSessionID)
+	}
+}
+
+func TestAuthServiceLogoutAllValidationError(t *testing.T) {
+	repo := &fakeLoginRepository{}
+	svc := newTestAuthService(t, repo)
+
+	err := svc.LogoutAll(context.Background(), "  ", "")
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "VALIDATION_ERROR" {
+		t.Fatalf("expected VALIDATION_ERROR, got %v", err)
+	}
+}
+
+func TestAuthServiceLogoutAllRepositoryError(t *testing.T) {
+	repo := &fakeLoginRepository{
+		revokeAllErr: errors.New("db error"),
+	}
+	svc := newTestAuthService(t, repo)
+
+	err := svc.LogoutAll(context.Background(), "user-1", "session-current")
+	if err == nil {
+		t.Fatal("expected repository error")
+	}
+
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "AUTH_LOGOUT_ALL_FAILED" {
+		t.Fatalf("expected AUTH_LOGOUT_ALL_FAILED, got %v", err)
+	}
+}
+
+func TestAuthServiceVerifyEmailSuccess(t *testing.T) {
+	repo := &fakeLoginRepository{
+		completedVerificationUser: EmailVerificationUser{
+			ID:    "user-1",
+			Name:  "Verify User",
+			Email: "verify@example.com",
+		},
+	}
+	svc := newTestAuthService(t, repo)
+
+	err := svc.VerifyEmail(context.Background(), dto.VerifyEmailRequest{Token: "valid-verification-token"})
+	if err != nil {
+		t.Fatalf("VerifyEmail: %v", err)
+	}
+
+	expectedHash := coreauth.HashToken("valid-verification-token")
+	if repo.completedVerificationTokenHash != expectedHash {
+		t.Fatalf("expected token hash %s, got %s", expectedHash, repo.completedVerificationTokenHash)
+	}
+	if repo.completedVerificationTime.IsZero() {
+		t.Fatal("expected non-zero verification time")
+	}
+}
+
+func TestAuthServiceVerifyEmailValidationError(t *testing.T) {
+	repo := &fakeLoginRepository{}
+	svc := newTestAuthService(t, repo)
+
+	err := svc.VerifyEmail(context.Background(), dto.VerifyEmailRequest{Token: "   "})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "VALIDATION_ERROR" {
+		t.Fatalf("expected VALIDATION_ERROR, got %v", err)
+	}
+}
+
+func TestAuthServiceVerifyEmailTokenInvalidOrExpired(t *testing.T) {
+	repo := &fakeLoginRepository{
+		completeVerificationErr: ErrEmailVerificationTokenNotFound,
+	}
+	svc := newTestAuthService(t, repo)
+
+	err := svc.VerifyEmail(context.Background(), dto.VerifyEmailRequest{Token: "expired-token"})
+	if err == nil {
+		t.Fatal("expected token invalid/expired error")
+	}
+
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "AUTH_VERIFY_TOKEN_INVALID" {
+		t.Fatalf("expected AUTH_VERIFY_TOKEN_INVALID, got %v", err)
+	}
+}
+
+func TestAuthServiceResendVerificationEmailSuccess(t *testing.T) {
+	repo := &fakeLoginRepository{
+		emailVerificationUser: EmailVerificationTargetUser{
+			ID:     "user-1",
+			Name:   "Pending User",
+			Email:  "pending@example.com",
+			Status: model.UserStatusPending,
+		},
+	}
+	publisher := &fakeNotificationPublisher{}
+	svc := newTestAuthService(t, repo)
+	svc.SetNotificationPublisher(publisher)
+
+	err := svc.ResendVerificationEmail(context.Background(), dto.ResendVerificationEmailRequest{
+		Email: "PENDING@example.com",
+	})
+	if err != nil {
+		t.Fatalf("ResendVerificationEmail: %v", err)
+	}
+
+	if repo.emailVerificationToken.UserID != "user-1" || repo.emailVerificationToken.Email != "pending@example.com" {
+		t.Fatalf("expected token for user-1 and pending@example.com, got %+v", repo.emailVerificationToken)
+	}
+	if repo.emailVerificationToken.TokenHash == "" {
+		t.Fatal("expected verification token hash stored")
+	}
+	if !publisher.called {
+		t.Fatal("expected email verification notification published")
+	}
+	if publisher.event.Type != emailVerificationRequestedEvent {
+		t.Fatalf("expected event type %s, got %s", emailVerificationRequestedEvent, publisher.event.Type)
+	}
+}
+
+func TestAuthServiceResendVerificationEmailValidationError(t *testing.T) {
+	repo := &fakeLoginRepository{}
+	svc := newTestAuthService(t, repo)
+
+	err := svc.ResendVerificationEmail(context.Background(), dto.ResendVerificationEmailRequest{Email: "   "})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "VALIDATION_ERROR" {
+		t.Fatalf("expected VALIDATION_ERROR, got %v", err)
+	}
+}
+
+func TestAuthServiceResendVerificationEmailAlreadyVerified(t *testing.T) {
+	now := time.Now()
+	repo := &fakeLoginRepository{
+		emailVerificationUser: EmailVerificationTargetUser{
+			ID:              "user-1",
+			Name:            "Active User",
+			Email:           "active@example.com",
+			Status:          model.UserStatusActive,
+			EmailVerifiedAt: &now,
+		},
+	}
+	svc := newTestAuthService(t, repo)
+
+	err := svc.ResendVerificationEmail(context.Background(), dto.ResendVerificationEmailRequest{
+		Email: "active@example.com",
+	})
+	if err == nil {
+		t.Fatal("expected already verified error")
+	}
+
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "AUTH_EMAIL_ALREADY_VERIFIED" {
+		t.Fatalf("expected AUTH_EMAIL_ALREADY_VERIFIED, got %v", err)
+	}
+}
+
+func TestAuthServiceResendVerificationEmailGenericSuccessForInactiveStatus(t *testing.T) {
+	repo := &fakeLoginRepository{
+		emailVerificationUser: EmailVerificationTargetUser{
+			ID:     "user-1",
+			Name:   "Banned User",
+			Email:  "banned@example.com",
+			Status: model.UserStatusBanned,
+		},
+	}
+	publisher := &fakeNotificationPublisher{}
+	svc := newTestAuthService(t, repo)
+	svc.SetNotificationPublisher(publisher)
+
+	err := svc.ResendVerificationEmail(context.Background(), dto.ResendVerificationEmailRequest{
+		Email: "banned@example.com",
+	})
+	if err != nil {
+		t.Fatalf("expected generic success, got error: %v", err)
+	}
+
+	if repo.emailVerificationToken.TokenHash != "" {
+		t.Fatal("unexpected verification token generated for banned user")
+	}
+	if publisher.called {
+		t.Fatal("unexpected notification published for banned user")
+	}
+}
+
+func TestAuthServiceResendVerificationEmailGenericSuccessForUnknownEmail(t *testing.T) {
+	repo := &fakeLoginRepository{
+		findEmailVerificationUserErr: ErrLoginUserNotFound,
+	}
+	publisher := &fakeNotificationPublisher{}
+	svc := newTestAuthService(t, repo)
+	svc.SetNotificationPublisher(publisher)
+
+	err := svc.ResendVerificationEmail(context.Background(), dto.ResendVerificationEmailRequest{
+		Email: "unknown@example.com",
+	})
+	if err != nil {
+		t.Fatalf("expected generic success, got error: %v", err)
+	}
+
+	if repo.emailVerificationToken.TokenHash != "" {
+		t.Fatal("unexpected verification token generated for unknown email")
+	}
+	if publisher.called {
+		t.Fatal("unexpected notification published for unknown email")
+	}
+}
+
+

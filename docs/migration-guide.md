@@ -63,3 +63,28 @@ Rencana detail untuk tabel `users`, auth token/session, audit log, role/permissi
 ```bash
 docs/auth-user-migration-seed-plan.md
 ```
+
+## Rencana Migration Landing Page
+
+Requirement data model, audit schema lama, dan urutan task migration Landing Page ada di:
+
+```bash
+docs/reference-landing-page.md
+docs/landing-page-development-tasks.md
+docs/landing-page-traceability-index.md
+```
+
+Sebelum membuat migration Landing Page, periksa table legacy `landing_pages` dan `brands` pada database aktual. Jika perlu normalisasi atau cleanup, buat migration terpisah dan jangan mengubah baseline atau migration lama.
+
+## Rencana Migration Multi-Tenant
+
+Architecture, urutan migration, platform organization, membership, domain, entitlement, audit, dan RLS ada di:
+
+```bash
+docs/reference-multi-tenant.md
+docs/multi-tenant-development-tasks.md
+docs/multi-tenant-traceability-index.md
+docs/multi-tenant-schema-query-audit.md
+```
+
+Migration organization dan tenant context harus diselesaikan sebelum migration module baru mengandalkan `organization_id`. Backfill platform/customer ownership wajib dibuat eksplisit; jangan memakai `organization_id NULL` untuk mewakili platform organization.

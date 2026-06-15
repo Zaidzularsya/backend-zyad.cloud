@@ -79,6 +79,161 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/users/me:
+    get:
+      summary: Get self profile
+      operationId: getSelfProfile
+      tags:
+        - Users
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: User retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDetailEnvelope"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/users/me/profile:
+    patch:
+      summary: Update self profile
+      operationId: updateSelfProfile
+      tags:
+        - Users
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileRequest"
+      responses:
+        "200":
+          description: User profile updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDetailEnvelope"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid partial update
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/users/me/avatar:
+    patch:
+      summary: Update self avatar
+      operationId: updateSelfAvatar
+      tags:
+        - Users
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAvatarRequest"
+      responses:
+        "200":
+          description: User avatar updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDetailEnvelope"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid avatar url
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/users/me/organizations:
+    get:
+      summary: List organizations available to the authenticated session
+      operationId: listMyOrganizations
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Organizations retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserOrganizationsEnvelope"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Organization list could not be retrieved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/users/me/switch-organization:
+    post:
+      summary: Switch the active organization for the authenticated session
+      operationId: switchMyOrganization
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SwitchOrganizationRequest"
+            example:
+              organization_id: 11111111-1111-1111-1111-111111111111
+      responses:
+        "200":
+          description: Organization switched successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SwitchOrganizationEnvelope"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Active membership or active session was not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid organization identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/admin/users:
     post:
       summary: Create a user
@@ -565,6 +720,283 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/admin/login-histories:
+    get:
+      summary: Retrieve global login histories
+      operationId: listGlobalLoginHistories
+      tags:
+        - Audit
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+        - name: user_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: event
+          in: query
+          schema:
+            type: string
+        - name: success
+          in: query
+          schema:
+            type: boolean
+        - name: ip_address
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: created_from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: created_to
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: sort
+          in: query
+          schema:
+            type: string
+        - name: direction
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Login histories retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginHistoriesEnvelope"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/admin/users/{id}/login-histories:
+    get:
+      summary: Retrieve login histories for a specific user
+      operationId: listUserLoginHistories
+      tags:
+        - Audit
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+        - name: event
+          in: query
+          schema:
+            type: string
+        - name: success
+          in: query
+          schema:
+            type: boolean
+        - name: ip_address
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: created_from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: created_to
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: sort
+          in: query
+          schema:
+            type: string
+        - name: direction
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: User login histories retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginHistoriesEnvelope"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/admin/audit-logs:
+    get:
+      summary: Retrieve global audit logs
+      operationId: listGlobalAuditLogs
+      tags:
+        - Audit
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+        - name: module
+          in: query
+          schema:
+            type: string
+        - name: event
+          in: query
+          schema:
+            type: string
+        - name: actor_user_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: target_user_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: created_from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: created_to
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: sort
+          in: query
+          schema:
+            type: string
+        - name: direction
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Audit logs retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditLogsEnvelope"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/admin/users/{id}/audit-logs:
+    get:
+      summary: Retrieve audit logs for a specific user
+      operationId: listUserAuditLogs
+      tags:
+        - Audit
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/UserID"
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+        - name: module
+          in: query
+          schema:
+            type: string
+        - name: event
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: created_from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: created_to
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: sort
+          in: query
+          schema:
+            type: string
+        - name: direction
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: User audit logs retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditLogsEnvelope"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   parameters:
     UserID:
@@ -580,6 +1012,218 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    SwitchOrganizationRequest:
+      type: object
+      required:
+        - organization_id
+      properties:
+        organization_id:
+          type: string
+          format: uuid
+    OrganizationSummary:
+      type: object
+      required:
+        - id
+        - type
+        - slug
+        - name
+        - status
+        - timezone
+        - locale
+        - data_placement
+        - metadata
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [platform, customer]
+        slug:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+          enum: [provisioning, active, suspended, archived]
+        timezone:
+          type: string
+        locale:
+          type: string
+        region:
+          type: string
+        data_placement:
+          type: string
+          enum: [shared, dedicated]
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+    OrganizationMembershipSummary:
+      type: object
+      required:
+        - id
+        - organization_id
+        - user_id
+        - status
+        - is_owner
+        - version
+        - role_ids
+        - role_slugs
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [invited, active, suspended, removed]
+        is_owner:
+          type: boolean
+        version:
+          type: integer
+          format: int64
+        role_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        role_slugs:
+          type: array
+          items:
+            type: string
+        invited_by:
+          type: string
+          format: uuid
+        invited_email:
+          type: string
+          format: email
+        invited_at:
+          type: string
+          format: date-time
+        accepted_at:
+          type: string
+          format: date-time
+        suspended_at:
+          type: string
+          format: date-time
+        removed_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    UserOrganization:
+      type: object
+      required:
+        - organization
+        - membership
+        - is_current
+      properties:
+        organization:
+          $ref: "#/components/schemas/OrganizationSummary"
+        membership:
+          $ref: "#/components/schemas/OrganizationMembershipSummary"
+        is_current:
+          type: boolean
+    UserOrganizationsEnvelope:
+      type: object
+      required:
+        - success
+        - message
+        - data
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: organizations retrieved successfully
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserOrganization"
+    SwitchOrganizationResponse:
+      type: object
+      required:
+        - current_organization
+      properties:
+        current_organization:
+          $ref: "#/components/schemas/UserOrganization"
+    SwitchOrganizationEnvelope:
+      type: object
+      required:
+        - success
+        - message
+        - data
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: organization switched successfully
+        data:
+          $ref: "#/components/schemas/SwitchOrganizationResponse"
+    UpdateProfileRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+          nullable: true
+        bio:
+          type: string
+          nullable: true
+        job_title:
+          type: string
+          nullable: true
+        department:
+          type: string
+          nullable: true
+        company:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        timezone:
+          type: string
+          nullable: true
+        language:
+          type: string
+          nullable: true
+    UpdateAvatarRequest:
+      type: object
+      required:
+        - avatar_url
+      properties:
+        avatar_url:
+          type: string
+          nullable: true
     ResetPasswordRequest:
       type: object
       required:
@@ -1094,3 +1738,122 @@ components:
           properties:
             code:
               type: string
+    LoginHistoriesEnvelope:
+      type: object
+      required:
+        - success
+        - message
+        - data
+        - meta
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: login histories retrieved successfully
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/LoginHistoryResponse"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+    LoginHistoryResponse:
+      type: object
+      required:
+        - id
+        - identifier
+        - event
+        - success
+        - ip_address
+        - user_agent
+        - device_name
+        - reason
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+          nullable: true
+        identifier:
+          type: string
+        event:
+          type: string
+        success:
+          type: boolean
+        ip_address:
+          type: string
+        user_agent:
+          type: string
+        device_name:
+          type: string
+        reason:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    AuditLogsEnvelope:
+      type: object
+      required:
+        - success
+        - message
+        - data
+        - meta
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: audit logs retrieved successfully
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditLogResponse"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+    AuditLogResponse:
+      type: object
+      required:
+        - id
+        - module
+        - event
+        - target_type
+        - metadata
+        - ip_address
+        - user_agent
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        module:
+          type: string
+        event:
+          type: string
+        actor_user_id:
+          type: string
+          format: uuid
+          nullable: true
+        target_user_id:
+          type: string
+          format: uuid
+          nullable: true
+        target_type:
+          type: string
+        target_id:
+          type: string
+          format: uuid
+          nullable: true
+        metadata:
+          type: object
+        ip_address:
+          type: string
+        user_agent:
+          type: string
+        created_at:
+          type: string
+          format: date-time

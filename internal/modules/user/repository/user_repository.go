@@ -836,3 +836,236 @@ func userListWhere(filter service.UserListFilter) (string, []any) {
 
 	return query.String(), args
 }
+
+func (r *UserRepository) ListLoginHistories(ctx context.Context, filter service.LoginHistoryFilter) ([]model.LoginHistory, int64, error) {
+	where, args := loginHistoryWhere(filter)
+
+	var total int64
+	if err := r.db.QueryRow(ctx, "SELECT count(*) FROM login_histories lh"+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	sortColumn := map[string]string{
+		"created_at": "lh.created_at",
+	}[filter.Sort]
+	if sortColumn == "" {
+		sortColumn = "lh.created_at"
+	}
+	direction := "DESC"
+	if filter.Direction == "asc" {
+		direction = "ASC"
+	}
+
+	args = append(args, filter.PerPage, filter.Offset)
+	query := `
+		SELECT
+			lh.id,
+			COALESCE(lh.user_id::text, ''),
+			COALESCE(lh.identifier, ''),
+			lh.event,
+			lh.success,
+			COALESCE(host(lh.ip_address), ''),
+			COALESCE(lh.user_agent, ''),
+			COALESCE(lh.device_name, ''),
+			COALESCE(lh.reason, ''),
+			lh.created_at
+		FROM login_histories lh` + where + `
+		ORDER BY ` + sortColumn + ` ` + direction + `, lh.id DESC
+		LIMIT $` + fmt.Sprint(len(args)-1) + ` OFFSET $` + fmt.Sprint(len(args))
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	histories := make([]model.LoginHistory, 0)
+	for rows.Next() {
+		var h model.LoginHistory
+		var userIDStr string
+		var ipStr string
+		if err := rows.Scan(
+			&h.ID,
+			&userIDStr,
+			&h.Identifier,
+			&h.Event,
+			&h.Success,
+			&ipStr,
+			&h.UserAgent,
+			&h.DeviceName,
+			&h.Reason,
+			&h.CreatedAt,
+		); err != nil {
+			return nil, 0, err
+		}
+		h.UserID = userIDStr
+		h.IPAddress = ipStr
+		histories = append(histories, h)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return histories, total, nil
+}
+
+func loginHistoryWhere(filter service.LoginHistoryFilter) (string, []any) {
+	var query strings.Builder
+	query.WriteString(" WHERE 1 = 1")
+	args := make([]any, 0)
+	addArg := func(value any) string {
+		args = append(args, value)
+		return fmt.Sprintf("$%d", len(args))
+	}
+
+	if filter.UserID != "" {
+		query.WriteString(" AND lh.user_id = " + addArg(filter.UserID) + "::uuid")
+	}
+	if filter.Event != "" {
+		query.WriteString(" AND lh.event = " + addArg(filter.Event))
+	}
+	if filter.Success != nil {
+		query.WriteString(" AND lh.success = " + addArg(*filter.Success))
+	}
+	if filter.IPAddress != "" {
+		query.WriteString(" AND host(lh.ip_address) = " + addArg(filter.IPAddress))
+	}
+	if filter.Search != "" {
+		arg := addArg("%" + filter.Search + "%")
+		query.WriteString(" AND (lh.identifier ILIKE " + arg + " OR lh.reason ILIKE " + arg + " OR lh.device_name ILIKE " + arg + ")")
+	}
+	if filter.CreatedFrom != nil {
+		query.WriteString(" AND lh.created_at >= " + addArg(*filter.CreatedFrom))
+	}
+	if filter.CreatedTo != nil {
+		query.WriteString(" AND lh.created_at < " + addArg(filter.CreatedTo.Add(24*time.Hour)))
+	}
+
+	return query.String(), args
+}
+
+func (r *UserRepository) ListAuditLogs(ctx context.Context, filter service.AuditLogFilter) ([]model.AuditLog, int64, error) {
+	where, args := auditLogWhere(filter)
+
+	var total int64
+	if err := r.db.QueryRow(ctx, "SELECT count(*) FROM audit_logs al"+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	sortColumn := map[string]string{
+		"created_at": "al.created_at",
+	}[filter.Sort]
+	if sortColumn == "" {
+		sortColumn = "al.created_at"
+	}
+	direction := "DESC"
+	if filter.Direction == "asc" {
+		direction = "ASC"
+	}
+
+	args = append(args, filter.PerPage, filter.Offset)
+	query := `
+		SELECT
+			al.id,
+			al.module,
+			al.event,
+			COALESCE(al.organization_id::text, ''),
+			COALESCE(al.membership_id::text, ''),
+			COALESCE(al.session_id::text, ''),
+			COALESCE(al.actor_user_id::text, ''),
+			COALESCE(al.operator_user_id::text, ''),
+			COALESCE(al.effective_user_id::text, ''),
+			COALESCE(al.impersonation_session_id::text, ''),
+			COALESCE(al.resolution_source, ''),
+			COALESCE(al.request_id, ''),
+			COALESCE(al.target_user_id::text, ''),
+			COALESCE(al.target_type, ''),
+			COALESCE(al.target_id::text, ''),
+			al.metadata,
+			COALESCE(host(al.ip_address), ''),
+			COALESCE(al.user_agent, ''),
+			al.created_at
+		FROM audit_logs al` + where + `
+		ORDER BY ` + sortColumn + ` ` + direction + `, al.id DESC
+		LIMIT $` + fmt.Sprint(len(args)-1) + ` OFFSET $` + fmt.Sprint(len(args))
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	logs := make([]model.AuditLog, 0)
+	for rows.Next() {
+		var l model.AuditLog
+		var metadataBytes []byte
+		if err := rows.Scan(
+			&l.ID,
+			&l.Module,
+			&l.Event,
+			&l.OrganizationID,
+			&l.MembershipID,
+			&l.SessionID,
+			&l.ActorUserID,
+			&l.OperatorUserID,
+			&l.EffectiveUserID,
+			&l.ImpersonationSessionID,
+			&l.ResolutionSource,
+			&l.RequestID,
+			&l.TargetUserID,
+			&l.TargetType,
+			&l.TargetID,
+			&metadataBytes,
+			&l.IPAddress,
+			&l.UserAgent,
+			&l.CreatedAt,
+		); err != nil {
+			return nil, 0, err
+		}
+		if len(metadataBytes) > 0 {
+			_ = json.Unmarshal(metadataBytes, &l.Metadata)
+		}
+		logs = append(logs, l)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return logs, total, nil
+}
+
+func auditLogWhere(filter service.AuditLogFilter) (string, []any) {
+	var query strings.Builder
+	query.WriteString(" WHERE 1 = 1")
+	args := make([]any, 0)
+	addArg := func(value any) string {
+		args = append(args, value)
+		return fmt.Sprintf("$%d", len(args))
+	}
+
+	if filter.Module != "" {
+		query.WriteString(" AND al.module = " + addArg(filter.Module))
+	}
+	if filter.OrganizationID != "" {
+		query.WriteString(" AND al.organization_id = " + addArg(filter.OrganizationID) + "::uuid")
+	}
+	if filter.Event != "" {
+		query.WriteString(" AND al.event = " + addArg(filter.Event))
+	}
+	if filter.ActorUserID != "" {
+		query.WriteString(" AND al.actor_user_id = " + addArg(filter.ActorUserID) + "::uuid")
+	}
+	if filter.TargetUserID != "" {
+		query.WriteString(" AND al.target_user_id = " + addArg(filter.TargetUserID) + "::uuid")
+	}
+	if filter.Search != "" {
+		arg := addArg("%" + filter.Search + "%")
+		query.WriteString(" AND (al.event ILIKE " + arg + " OR al.target_type ILIKE " + arg + ")")
+	}
+	if filter.CreatedFrom != nil {
+		query.WriteString(" AND al.created_at >= " + addArg(*filter.CreatedFrom))
+	}
+	if filter.CreatedTo != nil {
+		query.WriteString(" AND al.created_at < " + addArg(filter.CreatedTo.Add(24*time.Hour)))
+	}
+
+	return query.String(), args
+}
