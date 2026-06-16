@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -62,6 +63,14 @@ type TransferMembershipOwnershipParams struct {
 	ChangedAt        time.Time
 }
 
+type MembershipDetail struct {
+	Membership model.Membership
+	UserName   string
+	UserEmail  string
+	RoleIDs    []string
+	RoleSlugs  []string
+}
+
 func NewMembershipServiceRepository(db *database.Pool) *MembershipServiceRepository {
 	return &MembershipServiceRepository{db: db}
 }
@@ -72,6 +81,81 @@ func (r *MembershipServiceRepository) ListByOrganization(
 	filter MembershipListFilter,
 ) ([]model.Membership, int64, error) {
 	return NewMembershipRepository(r.db).ListByOrganization(ctx, organizationID, filter)
+}
+
+func (r *MembershipServiceRepository) ListDetailsByOrganization(
+	ctx context.Context,
+	organizationID string,
+	filter MembershipListFilter,
+) ([]MembershipDetail, int64, error) {
+	where, args := membershipWhere(filter)
+	args = append([]any{strings.TrimSpace(organizationID)}, args...)
+	where = " WHERE organization_id = $1::uuid" + renumberMembershipWhere(where, 1)
+
+	var total int64
+	if err := r.db.QueryRow(ctx, `
+		SELECT count(*)
+		FROM organization_memberships`+where,
+		args...,
+	).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	limit, offset := membershipPagination(filter)
+	args = append(args, limit, offset)
+	rows, err := r.db.Query(ctx, `
+		SELECT
+			membership.*,
+			user_account.name,
+			user_account.email,
+			COALESCE(role_summary.role_ids, ARRAY[]::text[]),
+			COALESCE(role_summary.role_slugs, ARRAY[]::text[])
+		FROM (
+			SELECT `+membershipSelectColumns+`
+			FROM organization_memberships
+			`+where+`
+			ORDER BY is_owner DESC, created_at ASC, id ASC
+			LIMIT $`+fmt.Sprint(len(args)-1)+` OFFSET $`+fmt.Sprint(len(args))+`
+		) membership
+		JOIN users user_account ON user_account.id = membership.user_id
+		LEFT JOIN LATERAL (
+			SELECT
+				array_agg(role.id::text ORDER BY role.slug) AS role_ids,
+				array_agg(role.slug::text ORDER BY role.slug) AS role_slugs
+			FROM user_roles user_role
+			JOIN roles role ON role.id = user_role.role_id
+			WHERE user_role.user_id = membership.user_id
+				AND user_role.organization_id = membership.organization_id
+		) role_summary ON true
+		ORDER BY membership.is_owner DESC, membership.created_at ASC, membership.id ASC
+	`,
+		args...,
+	)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	details := make([]MembershipDetail, 0)
+	for rows.Next() {
+		var detail MembershipDetail
+		if err := rows.Scan(
+			append(
+				membershipScanDest(&detail.Membership),
+				&detail.UserName,
+				&detail.UserEmail,
+				&detail.RoleIDs,
+				&detail.RoleSlugs,
+			)...,
+		); err != nil {
+			return nil, 0, err
+		}
+		details = append(details, detail)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return details, total, nil
 }
 
 func (r *MembershipServiceRepository) Invite(

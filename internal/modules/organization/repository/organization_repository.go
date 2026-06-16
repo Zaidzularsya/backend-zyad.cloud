@@ -66,6 +66,19 @@ type OrganizationListFilter struct {
 	Offset          int
 }
 
+type OrganizationControlPlaneSummary struct {
+	ActiveOwnerCount       int64
+	DomainCount            int64
+	ActiveDomainCount      int64
+	PendingDomainCount     int64
+	FailedDomainCount      int64
+	SSLFailedDomainCount   int64
+	PrimaryActiveCount     int64
+	EntitlementCount       int64
+	ActiveEntitlementCount int64
+	MaxEntitlementVersion  int64
+}
+
 func NewOrganizationRepository(db *database.Pool) *OrganizationRepository {
 	return &OrganizationRepository{db: db}
 }
@@ -177,6 +190,103 @@ func (r *OrganizationRepository) List(ctx context.Context, filter OrganizationLi
 
 func (r *OrganizationRepository) FindByID(ctx context.Context, id string) (model.Organization, error) {
 	return r.findOne(ctx, "id = $1::uuid", strings.TrimSpace(id), false)
+}
+
+func (r *OrganizationRepository) FindByIDIncludingArchived(
+	ctx context.Context,
+	id string,
+) (model.Organization, error) {
+	return r.findOne(ctx, "id = $1::uuid", strings.TrimSpace(id), true)
+}
+
+func (r *OrganizationRepository) ControlPlaneSummary(
+	ctx context.Context,
+	organizationID string,
+) (OrganizationControlPlaneSummary, error) {
+	var summary OrganizationControlPlaneSummary
+	err := r.db.QueryRow(ctx, `
+		SELECT
+			(
+				SELECT count(*)
+				FROM organization_memberships membership
+				WHERE membership.organization_id = organization.id
+					AND membership.is_owner = true
+					AND membership.status = 'active'
+					AND membership.removed_at IS NULL
+			),
+			(
+				SELECT count(*)
+				FROM organization_domains domain
+				WHERE domain.organization_id = organization.id
+					AND domain.deleted_at IS NULL
+			),
+			(
+				SELECT count(*)
+				FROM organization_domains domain
+				WHERE domain.organization_id = organization.id
+					AND domain.status = 'active'
+					AND domain.deleted_at IS NULL
+			),
+			(
+				SELECT count(*)
+				FROM organization_domains domain
+				WHERE domain.organization_id = organization.id
+					AND domain.status IN ('pending', 'verified')
+					AND domain.deleted_at IS NULL
+			),
+			(
+				SELECT count(*)
+				FROM organization_domains domain
+				WHERE domain.organization_id = organization.id
+					AND domain.status = 'failed'
+					AND domain.deleted_at IS NULL
+			),
+			(
+				SELECT count(*)
+				FROM organization_domains domain
+				WHERE domain.organization_id = organization.id
+					AND domain.ssl_status = 'failed'
+					AND domain.deleted_at IS NULL
+			),
+			(
+				SELECT count(*)
+				FROM organization_domains domain
+				WHERE domain.organization_id = organization.id
+					AND domain.status = 'active'
+					AND domain.is_primary = true
+					AND domain.deleted_at IS NULL
+			),
+			(
+				SELECT count(*)
+				FROM organization_entitlements entitlement
+				WHERE entitlement.organization_id = organization.id
+			),
+			(
+				SELECT count(*)
+				FROM organization_entitlements entitlement
+				WHERE entitlement.organization_id = organization.id
+					AND entitlement.status = 'active'
+			),
+			(
+				SELECT COALESCE(max(entitlement.version), 0)
+				FROM organization_entitlements entitlement
+				WHERE entitlement.organization_id = organization.id
+			)
+		FROM organizations organization
+		WHERE organization.id = $1::uuid
+	`, strings.TrimSpace(organizationID)).Scan(
+		&summary.ActiveOwnerCount,
+		&summary.DomainCount,
+		&summary.ActiveDomainCount,
+		&summary.PendingDomainCount,
+		&summary.FailedDomainCount,
+		&summary.SSLFailedDomainCount,
+		&summary.PrimaryActiveCount,
+		&summary.EntitlementCount,
+		&summary.ActiveEntitlementCount,
+		&summary.MaxEntitlementVersion,
+	)
+	return summary, err
 }
 
 func (r *OrganizationRepository) FindBySlug(ctx context.Context, slug string) (model.Organization, error) {

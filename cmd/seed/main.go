@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"zyad.cloud/internal/config"
+	organizationseeder "zyad.cloud/internal/modules/organization/seeder"
 	userseeder "zyad.cloud/internal/modules/user/seeder"
 	"zyad.cloud/internal/platform/database"
 )
@@ -44,6 +45,29 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("Seeded super-admin user_id=%s role_id=%s\n", result.UserID, result.RoleID)
+	case "platform-organization":
+		result, err := organizationseeder.SeedPlatformOrganization(
+			ctx,
+			db,
+			cfg.MultiTenant,
+			cfg.SeedAdmin,
+		)
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				logger.Info("seed cancelled")
+				return
+			}
+			logger.Error("seed failed", "name", *name, "error", err)
+			os.Exit(1)
+		}
+		fmt.Printf(
+			"Seeded platform-organization organization_id=%s owner_user_id=%s membership_id=%s entitlement_id=%s domain_ids=%v\n",
+			result.OrganizationID,
+			result.OwnerUserID,
+			result.MembershipID,
+			result.EntitlementID,
+			result.DomainIDs,
+		)
 	case "":
 		logger.Error("seed name is required")
 		os.Exit(1)

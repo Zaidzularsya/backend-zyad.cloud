@@ -216,6 +216,21 @@ Acceptance:
 
 ### MT-DB-007: RLS Foundation
 
+Status: `done`
+
+Implementation:
+
+- Migration `000019_add_rls_foundation` adds fail-closed helpers for
+  `app.organization_id`.
+- `apply_organization_rls` validates mandatory organization ownership and
+  installs permissive tenant access plus a restrictive organization boundary.
+- `remove_organization_rls` provides the matching down-migration convention.
+- Runtime and migration/maintenance role requirements are documented in
+  `docs/multi-tenant-rls.md`.
+- Integration coverage proves that a runtime role without `BYPASSRLS` cannot
+  read rows without context, cannot read another organization, and cannot
+  insert another organization's row.
+
 Scope:
 
 - Create helper convention for `app.organization_id`.
@@ -695,6 +710,18 @@ Acceptance:
 
 ### MT-DATA-003: RLS Rollout
 
+Status: `in_progress`
+
+Progress:
+
+- Shared policy helpers and runtime role contract are complete through
+  `MT-DB-007`.
+- Landing remains the first production rollout target, but its tables do not
+  exist yet; each Landing table migration must call `apply_organization_rls`.
+- Notification and organization control-plane tables remain deferred until
+  their nullable/global semantics and cross-tenant resolver paths are
+  compatible with RLS.
+
 Scope:
 
 - Apply policy to new Landing tables first.
@@ -706,6 +733,21 @@ Acceptance:
 - Platform operator flow uses explicit controlled path.
 
 ### MT-DATA-004: Tenant Isolation Test Suite
+
+Status: `in_progress`
+
+Progress:
+
+- `testutil.NewTenantPair` provides reusable verified organization A/B
+  contexts and immutable repository scopes.
+- `testutil.RunTenantIsolationSuite` exercises missing-context create plus
+  cross-tenant read, list, update, delete, bulk update, and export behavior.
+- The PostgreSQL RLS integration adapter is the first consumer and proves
+  repository predicates and RLS work together.
+- A mutation test disables RLS and removes repository predicates, proving the
+  shared checker detects cross-tenant leakage.
+- Landing adoption remains pending until concrete Landing repositories and
+  tables exist.
 
 Scope:
 
@@ -721,6 +763,27 @@ Acceptance:
 ## Phase 5 - Platform and Organization API
 
 ### MT-API-001: Platform Organization Management
+
+Status: `done`
+
+Progress:
+
+- Migration `000020_seed_platform_organization_permissions` seeds read,
+  manage, suspend, and provision permissions and grants them to `super_admin`
+  when that role exists.
+- Platform routes require authenticated platform organization context before
+  evaluating global platform permissions.
+- List, detail, create, update, and lifecycle status endpoints are wired.
+- Archive uses the status endpoint with target status `archived`, preserving
+  lifecycle validation, session revocation, and audit behavior.
+- Detail responses include placement availability, domain/SSL counts,
+  entitlement counts/version, and deterministic health issues.
+- Provision/retry verifies shared placement and an active owner before using
+  the lifecycle state machine to activate the organization.
+- Dedicated placement returns a controlled unavailable response until the
+  deferred enterprise provisioning phase is implemented.
+- Platform organization paths and response schemas are synchronized in
+  `api/openapi.yaml`.
 
 Scope:
 
@@ -739,6 +802,8 @@ platform.organization.provision
 
 ### MT-API-002: Organization Self Management
 
+Status: `done`
+
 Scope:
 
 - Current organization detail/settings.
@@ -754,7 +819,34 @@ organization.member.read
 organization.member.manage
 ```
 
+Acceptance:
+
+- Current organization endpoints derive organization and membership identifiers
+  only from the verified tenant context and reject non-active or platform tenants.
+- Organization profile changes support name, timezone, locale, region, and
+  metadata updates with timezone validation and an atomic tenant audit record.
+- Member listing includes user identity, organization roles, status filtering,
+  removed-member opt-in, and pagination.
+- Invitation management reuses the membership transaction flow, validates
+  existing identities and organization roles, stores only the invitation token
+  hash, and returns the plaintext token only in the create response.
+- Suspend, reactivate, and remove operations preserve transition validation,
+  session revocation, audit records, and the last-active-owner guard.
+- Organization self-management permissions are seeded by migration `000021`,
+  and API paths plus schemas are synchronized in `api/openapi.yaml`.
+
+Risk/follow-up:
+
+- Invitation delivery through the notification outbox is not yet wired; callers
+  must deliver the one-time token returned by the create response.
+- Invitations currently require an existing active, pending, or invited user
+  identity. Creating an identity from an invitation remains a separate workflow.
+- Tenant role creation and default owner/admin role assignment remain under
+  organization role management; this task only seeds the required permissions.
+
 ### MT-API-003: Domain Management
+
+Status: `done`
 
 Scope:
 
@@ -762,7 +854,44 @@ Scope:
 - Reserved subdomain checks.
 - SSL state response.
 
+Permission:
+
+```txt
+organization.domain.manage
+```
+
+Acceptance:
+
+- Domain routes require an active customer tenant and derive organization scope
+  only from the verified tenant context.
+- Create validates and canonicalizes DNS hostnames, restricts customer domain
+  types to `subdomain` or `custom`, and returns a one-time DNS TXT challenge
+  while persisting only its SHA-256 hash.
+- Subdomains must be direct children of `PLATFORM_PRIMARY_DOMAIN`; reserved
+  labels and globally claimed canonical hosts are rejected by database guards.
+- Verify resolves `_zyad-verification.<host>` TXT records, compares their
+  hashes, records failed attempts without activating the domain, and activates
+  the domain only after a matching challenge is found.
+- Primary selection only accepts an already verified/active domain and preserves
+  one primary domain per organization and domain type.
+- Delete performs a soft-disable, removes primary status, and prevents public
+  host resolution.
+- Domain responses include verification attempts/errors and full SSL state.
+- Migration `000022_seed_organization_domain_permission` seeds the required
+  permission, and all domain paths/schemas are synchronized in OpenAPI.
+
+Risk/follow-up:
+
+- SSL certificate provisioning is not performed by this API; it exposes the
+  persisted SSL lifecycle for the deferred infrastructure worker/provider.
+- DNS verification depends on the runtime resolver and request timeout. Retry
+  throttling/rate limiting remains part of the API hardening task.
+- Challenge rotation is supported by the repository but does not yet have a
+  public endpoint.
+
 ### MT-API-004: Entitlement and Usage API
+
+Status: `done`
 
 Scope:
 
@@ -774,7 +903,20 @@ Acceptance:
 - Customer cannot grant itself features.
 - Override mutation is audited.
 
+Progress:
+
+- Current organization feature list and usage read endpoints require active
+  customer tenant context plus `organization.feature.read`.
+- Platform override mutation requires platform tenant context plus
+  `platform.organization.manage`, accepts only `platform_override`, and writes
+  an organization audit record in the same upsert transaction.
+- Migration `000023_seed_organization_feature_permission` seeds
+  `organization.feature.read`.
+- API paths and schemas are synchronized in `api/openapi.yaml`.
+
 ### MT-API-005: Operator Impersonation
+
+Status: `done`
 
 Scope:
 
@@ -786,9 +928,32 @@ Acceptance:
 - Explicit permission and audit required.
 - Impersonation cannot become permanent session state.
 
+Progress:
+
+- Platform impersonation routes require active platform tenant context and
+  `platform.organization.impersonate`.
+- Start creates a short-lived impersonation record for an active customer
+  organization, optionally bound to an active target member identity, without
+  mutating the operator session active organization.
+- Stop closes the active impersonation for the authenticated operator session
+  with an explicit reason.
+- Start and stop write tenant audit records with operator, effective target,
+  session, request, IP, user agent, and impersonation session metadata.
+- Migration `000024_seed_platform_impersonation_permission` seeds the required
+  permission, and OpenAPI paths/schemas are synchronized.
+
+Risk/follow-up:
+
+- Runtime request execution is not automatically switched to the target user;
+  this task provides the explicit control-plane start/stop session and frontend
+  banner payload. Sensitive operation blocking during impersonation remains a
+  follow-up authorization policy task.
+
 ## Phase 6 - Platform Organization and Landing
 
 ### MT-PLAT-001: Seed Platform Organization
+
+Status: `done`
 
 Scope:
 
@@ -810,7 +975,31 @@ Acceptance:
 - No duplicate platform organization.
 - Platform organization cannot be removed by tenant API.
 
+Progress:
+
+- `go run ./cmd/seed -name platform-organization` seeds the platform
+  organization from `PLATFORM_ORGANIZATION_ID`, `PLATFORM_ORGANIZATION_SLUG`,
+  `PLATFORM_ORGANIZATION_NAME`, and `PLATFORM_PRIMARY_DOMAIN`.
+- The seed is idempotent by platform type and reserved slug, rejects configured
+  ID drift, and fails if the reserved slug is already owned by a customer
+  organization.
+- The active platform owner membership is assigned to `SEED_ADMIN_EMAIL` when
+  configured, otherwise the first active global `SEED_ADMIN_ROLE`/`super_admin`
+  user is used.
+- The owner's global role is also assigned in the platform organization scope
+  so authenticated platform organization resolution can succeed.
+- The seed creates/refreshes the internal `platform.internal` plan entitlement.
+
+Run order:
+
+```bash
+go run ./cmd/seed -name super-admin
+go run ./cmd/seed -name platform-organization
+```
+
 ### MT-PLAT-002: Platform Domain Resolution
+
+Status: `done`
 
 Scope:
 
@@ -823,7 +1012,24 @@ Acceptance:
 - Platform marketing site does not rely on nullable ownership.
 - Customer cannot claim reserved platform domain/subdomain.
 
+Progress:
+
+- `go run ./cmd/seed -name platform-organization` registers
+  `PLATFORM_PRIMARY_DOMAIN` and `www.<PLATFORM_PRIMARY_DOMAIN>` as active
+  `platform` domains owned by the platform organization.
+- Platform domains are idempotently refreshed with active verification and SSL
+  state, while preserving the primary platform domain as the canonical host.
+- Public host resolution resolves both the configured primary domain and active
+  `platform` domain registry rows to platform organization context.
+- `ResolvePublicHostDetail` exposes a canonical-host redirect hint for platform
+  aliases such as `www`, while preserving the existing `ResolvePublicHost`
+  middleware contract.
+- Customer domain APIs remain restricted to `subdomain` and `custom`, so
+  customers cannot claim `platform` domain rows.
+
 ### MT-PLAT-003: Landing Page Integration
+
+Status: `done`
 
 Scope:
 
@@ -837,37 +1043,152 @@ Acceptance:
 - Platform marketing page works through platform organization.
 - Customer A cannot read/publish Customer B page.
 
+Progress:
+
+- Landing has an access policy contract that derives repository `tenant.Scope`
+  from verified organization context only.
+- Admin Landing scope requires active membership, organization permission, and
+  `landing.enabled` entitlement before repository access.
+- Publish scope uses the dedicated `landing.page.publish` permission.
+- Public Landing scope accepts host-resolved platform/customer organization
+  context without accepting a browser-supplied tenant selector.
+- Repository scope validation rejects cross-organization lookups, so platform
+  and customer pages share the same tenant-owned repository contract.
+
 ## Phase 7 - Cache, Storage, Events, and Observability
 
 ### MT-INFRA-001: Tenant-Aware Cache
+
+Status: `done`
 
 - Prefix/cache key contract.
 - Membership/domain/entitlement version invalidation.
 - Multi-instance invalidation.
 
+Progress:
+
+- `internal/core/cache` defines tenant-aware cache key construction that
+  requires an immutable `tenant.Scope` for tenant data.
+- Cache keys include organization ID and versioned segments for domain,
+  permission membership snapshot, entitlement, and public Landing page payloads.
+- `cache.InvalidationEvent` defines a stable JSON payload for membership,
+  domain, entitlement, session, and organization invalidation events.
+- Redis publishes invalidation events on `zyad.cache.invalidate.v1` for
+  multi-instance cache eviction consumers.
+- Tests cover fail-closed missing scope, canonical key segments, version
+  requirements, and invalidation payload validation.
+
+Risk/follow-up:
+
+- Concrete module producers and subscribers must be wired where cache entries
+  are introduced; current resolvers still use authoritative database reads.
+
 ### MT-INFRA-002: Tenant-Aware Storage
+
+Status: `done`
 
 - Organization object prefix.
 - Signed URL ownership check.
 - Public published asset policy.
 
+Progress:
+
+- `internal/platform/storage` defines tenant object key construction from
+  immutable `tenant.Scope`.
+- Storage object keys are prefixed with `organizations/<organization_id>` and
+  use random object names instead of original filenames.
+- Signed upload/download validation rejects object keys outside the active
+  organization prefix.
+- Public asset URL policy requires a published asset owned by the same
+  organization and returns an opaque public path without exposing storage keys.
+- Tests cover missing scope, canonical object keys, cross-tenant signed URL
+  rejection, and unpublished public asset rejection.
+
+Risk/follow-up:
+
+- Concrete storage providers, malware scanning, MIME sniffing, and Landing media
+  metadata enforcement remain part of the Landing media implementation.
+
 ### MT-INFRA-003: Tenant Event Contract
+
+Status: `done`
 
 - Standard event envelope with organization ID.
 - Outbox publisher validation.
 - Worker context loading.
 - Organization-scoped idempotency.
 
+Progress:
+
+- `internal/core/event` defines the standard tenant business-event envelope with
+  event ID/type, organization ID, actor, resource, occurred time, and payload.
+- Tenant events are created from immutable `tenant.Scope`, preventing producers
+  from mass-assigning another organization ID.
+- Event idempotency keys are scoped by organization.
+- Worker helpers load verified organization context before processing a tenant
+  event.
+- Notification outbox publisher has a `PublishTenant` adapter that validates the
+  tenant envelope and preserves organization metadata in the outbox payload.
+
+Risk/follow-up:
+
+- Organization lifecycle and Landing producers still need to emit concrete
+  business events when their async workflows are introduced.
+
 ### MT-INFRA-004: Audit and Structured Logging
+
+Status: `done`
 
 - Add tenant, membership, resolution, operator/effective actor fields.
 - Audit organization lifecycle, switch, domain, entitlement, impersonation.
 
+Progress:
+
+- Migration `000018_add_tenant_audit_metadata` adds organization, membership,
+  session, operator/effective actor, impersonation session, resolution source,
+  and request ID fields to `audit_logs`.
+- Organization lifecycle, membership, active organization switch, domain
+  create/verification/activation/primary/disable, entitlement override, and
+  impersonation start/stop write tenant-aware audit rows.
+- `middleware.TenantLogFields` exposes request-scoped tenant fields for Gin
+  handlers and middleware.
+- `internal/platform/logger` now provides reusable `TenantAttrs`/`WithTenant`
+  helpers for non-Gin platform logging with organization, membership,
+  resolution, session, operator/effective actor, and impersonation fields.
+
+Risk/follow-up:
+
+- Audit read endpoints and `platform.audit.read`/`organization.audit.read`
+  permissions remain separate API work.
+- Existing log call sites can adopt `logger.WithTenant` incrementally as they
+  are touched.
+
 ### MT-INFRA-005: Tenant Metrics and Health
+
+Status: `done`
 
 - Bounded global metrics.
 - Platform organization and tenant health diagnostics.
 - Avoid organization ID as uncontrolled metric label.
+
+Progress:
+
+- `internal/platform/metrics` defines bounded label validation and blocks
+  high-cardinality labels such as organization, membership, user, session,
+  request, impersonation, email, and IP identifiers.
+- Organization health metric labels are limited to organization type/status,
+  data placement, and bounded health status.
+- Tenant resolution metric labels are limited to resolution source and bounded
+  result values.
+- Platform organization detail already exposes deterministic domain,
+  entitlement, placement, and health diagnostics for platform operators.
+- Tests cover bounded label normalization, high-cardinality rejection, and
+  deterministic health issue ordering.
+
+Risk/follow-up:
+
+- No Prometheus/OpenTelemetry dependency is introduced yet; concrete exporters
+  should reuse the bounded label helpers when metrics are wired.
 
 ## Phase 8 - Dedicated Database Enterprise
 
@@ -903,12 +1224,35 @@ Tasks in this phase are `deferred` until shared-schema tenancy is stable.
 
 ### MT-SEC-001: Header and Host Security
 
+Status: `done`
+
 - Header canonicalization.
 - Trusted proxy.
 - Host allowlist/canonicalization.
 - Cache poisoning tests.
 
+Progress:
+
+- Public routes reject browser-supplied organization selector headers.
+- `X-Forwarded-Host` is only honored from configured trusted proxy CIDRs.
+- Trusted forwarded host values must be a single host value without scheme,
+  path, userinfo, comma-separated alternatives, or whitespace.
+- Public host normalization rejects IP literals, localhost, invalid ports,
+  invalid labels, schemes, paths, and multi-host values before resolving tenant
+  context.
+- Effective host allowlist is the platform primary domain plus active verified
+  `organization_domains` rows; unknown or inactive hosts do not resolve.
+- Tests cover trusted/untrusted forwarded host behavior and cache-poisoning host
+  candidates.
+
+Risk/follow-up:
+
+- Edge/proxy configuration must preserve `RemoteAddr` accurately for trusted
+  proxy evaluation.
+
 ### MT-SEC-002: Cross-Tenant Security Tests
+
+Status: `done`
 
 - IDOR.
 - Forged header.
@@ -916,12 +1260,46 @@ Tasks in this phase are `deferred` until shared-schema tenancy is stable.
 - Super admin without explicit platform permission.
 - Bulk/export/storage/event isolation.
 
+Progress:
+- IDOR and bulk/export isolation are covered by immutable tenant scope
+  contracts and the reusable tenant isolation suite for read, list, update,
+  delete, bulk update, and export behavior.
+- Forged header and stale membership coverage is enforced in authenticated
+  resolver tests.
+- Platform handlers now prove platform context alone is insufficient without
+  explicit platform permission.
+- Storage and event tests now cover cross-tenant asset metadata and payload
+  tenant override attempts.
+
+Risks / follow-up:
+- Full API end-to-end attack flow remains part of MT-TEST-003.
+
 ### MT-SEC-003: Organization Suspension and Incident Control
+
+Status: `done`
 
 - Emergency suspend.
 - Revoke sessions.
 - Stop public serving/jobs.
 - Security notification and audit.
+
+Progress:
+- Emergency suspend is handled through the platform status endpoint and
+  lifecycle state machine.
+- Suspending, disabling, or archiving an organization revokes active sessions
+  bound to that organization in the same status-change transaction.
+- Public host resolution and worker tenant resolution reject inactive
+  organizations, stopping public serving and tenant jobs after suspension.
+- Status changes write organization audit records with previous status, target
+  status, actor, and reason.
+- Incident statuses publish a best-effort platform security notification event
+  with organization and actor metadata without requiring tenant worker context
+  from the suspended organization.
+
+Risks / follow-up:
+- Notification routing/template ownership for
+  `organization.security_status_changed` still needs platform security
+  recipient configuration before it can become an operator-facing alert.
 
 ### MT-OPS-001: Data Retention and Purge
 

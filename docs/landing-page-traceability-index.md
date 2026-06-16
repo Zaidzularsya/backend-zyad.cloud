@@ -58,7 +58,7 @@ Status: `planned`, `in_progress`, `done`, `deferred`, atau `blocked`.
 | --- | --- | --- | --- |
 | Canonical module `landing` | LAND-0001 | Code path | done |
 | Module skeleton | LAND-0002 | Code path | done |
-| Tenant isolation | LAND-0003, MT-CORE-001..005, MT-DATA-001..004 | Context/resolvers/guards, tenant transaction, and repository scope contract done; RLS and isolation suite planned |
+| Tenant isolation | LAND-0003, MT-CORE-001..005, MT-DATA-001..004, MT-PLAT-001..003 | Context/resolvers/guards, tenant transaction, repository scope, Landing access policy, RLS foundation, and reusable isolation suite done; concrete Landing repositories pending |
 | Existing schema audit | LAND-DB-001 | Legacy `landing_pages`, `brands` | planned |
 | Page CRUD/duplicate/restore | LAND-BE-010, LAND-API-001 | `/admin/landing-pages` | planned |
 | Section builder/reorder | LAND-BE-011, LAND-API-001 | `landing_page_sections` | planned |
@@ -297,6 +297,7 @@ Nama file final mengikuti nomor migration berikutnya saat implementasi.
 | 2026-06-13 | Multi-tenant entitlement schema dependency available | `migrations/000016_create_organization_entitlements.*.sql` | Landing feature and quota records are ready; effective entitlement evaluation and route guards remain planned |
 | 2026-06-14 | Multi-tenant domain repository dependency available | `internal/modules/organization/repository` | Active verified host lookup and safe reassignment are ready; Landing page binding and HTTP host resolver remain planned |
 | 2026-06-14 | Multi-tenant entitlement repository dependency available | `internal/modules/organization/repository` | Effective source precedence and atomic usage counters are ready; Landing entitlement policy and route guards remain planned |
+| 2026-06-16 | LAND-0003 dependency completed | `internal/modules/landing/service` | Landing admin/public scope contract now requires verified context, permission, and `landing.enabled` entitlement before repository access |
 
 ## Update Rules
 

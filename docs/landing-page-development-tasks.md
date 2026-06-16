@@ -57,7 +57,7 @@ Acceptance: app compile, module dapat diregistrasikan, dan tidak ada dependency 
 
 ### LAND-0003: Tenant and Permission Contract
 
-Status: `in_progress`
+Status: `done`
 
 Dependency:
 
@@ -74,7 +74,9 @@ Progress:
 - Permission catalog Landing sudah tersedia dan diuji.
 - Typed organization context, authenticated/public/worker resolution, dan fail-closed tenant guards selesai melalui `MT-CORE-001..005`.
 - Repository tenant scope contract selesai melalui `MT-DATA-002`; implementasi repository Landing wajib memakai `tenant.Scope`.
-- Permission seed, RLS, dan platform organization masih mengikuti task multi-tenant berikutnya.
+- Platform organization/domain dependency selesai melalui `MT-PLAT-001..003`.
+- Landing access policy membentuk admin/public repository scope dari verified organization context, permission, dan entitlement `landing.enabled`.
+- Permission seed dan RLS enforcement tetap dilacak oleh task multi-tenant terpisah.
 
 Acceptance: admin route memerlukan auth/permission dan repository tidak berjalan tanpa tenant scope kecuali explicit super admin method.
 

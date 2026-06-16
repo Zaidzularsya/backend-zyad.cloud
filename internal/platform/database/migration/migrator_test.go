@@ -18,6 +18,10 @@ func TestLoadIncludesMultiTenantFoundationMigrations(t *testing.T) {
 		"000016": "create_organization_entitlements",
 		"000017": "add_session_organization_context",
 		"000018": "add_tenant_audit_metadata",
+		"000019": "add_rls_foundation",
+		"000020": "seed_platform_organization_permissions",
+		"000021": "seed_organization_self_permissions",
+		"000022": "seed_organization_domain_permission",
 	}
 	for _, migration := range migrations {
 		if name, ok := expected[migration.Version]; ok && name == migration.Name {

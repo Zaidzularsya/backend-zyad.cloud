@@ -57,6 +57,16 @@ func TestOrganizationRepositoryLifecycleIntegration(t *testing.T) {
 		t.Fatalf("FindByID() slug = %q, want %q", found.Slug, slug)
 	}
 
+	summary, err := repo.ControlPlaneSummary(ctx, organization.ID)
+	if err != nil {
+		t.Fatalf("ControlPlaneSummary() error = %v", err)
+	}
+	if summary.ActiveOwnerCount != 0 ||
+		summary.DomainCount != 0 ||
+		summary.EntitlementCount != 0 {
+		t.Fatalf("ControlPlaneSummary() = %#v", summary)
+	}
+
 	_, err = repo.Create(ctx, CreateOrganizationParams{
 		Type: coretenant.OrganizationTypeCustomer,
 		Slug: strings.ToUpper(slug),

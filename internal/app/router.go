@@ -83,6 +83,21 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.OrganizationSwitchHandler != nil {
 		deps.OrganizationSwitchHandler.RegisterRoutes(protected)
 	}
+	if deps.OrganizationPlatformHandler != nil {
+		deps.OrganizationPlatformHandler.RegisterRoutes(protected)
+	}
+	if deps.OrganizationDomainHandler != nil {
+		deps.OrganizationDomainHandler.RegisterRoutes(protected)
+	}
+	if deps.OrganizationEntitlementHandler != nil {
+		deps.OrganizationEntitlementHandler.RegisterRoutes(protected)
+	}
+	if deps.OrganizationImpersonationHandler != nil {
+		deps.OrganizationImpersonationHandler.RegisterRoutes(protected)
+	}
+	if deps.OrganizationSelfHandler != nil {
+		deps.OrganizationSelfHandler.RegisterRoutes(protected)
+	}
 	if deps.PermissionHandler != nil {
 		deps.PermissionHandler.RegisterRoutes(protected)
 	}

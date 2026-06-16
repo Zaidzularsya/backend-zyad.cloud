@@ -47,6 +47,10 @@ func TestDomainRepositoryVerificationAndResolutionIntegration(t *testing.T) {
 	t.Cleanup(func() {
 		cleanupCtx := context.Background()
 		_, _ = db.Exec(cleanupCtx, `
+			DELETE FROM audit_logs
+			WHERE organization_id = ANY($1::uuid[])
+		`, []string{organizationA.ID, organizationB.ID})
+		_, _ = db.Exec(cleanupCtx, `
 			DELETE FROM organization_domains
 			WHERE organization_id = ANY($1::uuid[])
 		`, []string{organizationA.ID, organizationB.ID})
@@ -74,7 +78,7 @@ func TestDomainRepositoryVerificationAndResolutionIntegration(t *testing.T) {
 	if _, err := domainRepo.ResolveActiveHost(ctx, hostA); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("ResolveActiveHost() pending error = %v, want pgx.ErrNoRows", err)
 	}
-	if _, err := domainRepo.Activate(ctx, organizationA.ID, domain.ID, true, time.Now().UTC()); !errors.Is(err, pgx.ErrNoRows) {
+	if _, err := domainRepo.Activate(ctx, organizationA.ID, domain.ID, true, time.Now().UTC(), ""); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("Activate() unverified error = %v, want pgx.ErrNoRows", err)
 	}
 
@@ -103,7 +107,7 @@ func TestDomainRepositoryVerificationAndResolutionIntegration(t *testing.T) {
 		t.Fatalf("UpdateVerification() domain = %#v", domain)
 	}
 
-	domain, err = domainRepo.SetPrimary(ctx, organizationA.ID, domain.ID, verifiedAt.Add(time.Second))
+	domain, err = domainRepo.SetPrimary(ctx, organizationA.ID, domain.ID, verifiedAt.Add(time.Second), "")
 	if err != nil {
 		t.Fatalf("SetPrimary() error = %v", err)
 	}
@@ -176,7 +180,7 @@ func TestDomainRepositoryVerificationAndResolutionIntegration(t *testing.T) {
 		t.Fatalf("ListByOrganization() total = %d, domains = %#v", total, domains)
 	}
 
-	if err := domainRepo.Delete(ctx, organizationB.ID, domain.ID, time.Now().UTC()); err != nil {
+	if err := domainRepo.Delete(ctx, organizationB.ID, domain.ID, time.Now().UTC(), ""); err != nil {
 		t.Fatalf("Delete() error = %v", err)
 	}
 	if _, err := domainRepo.FindByID(ctx, organizationB.ID, domain.ID); !errors.Is(err, pgx.ErrNoRows) {
@@ -209,6 +213,7 @@ func TestDomainRepositoryRejectsReservedSubdomainIntegration(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		cleanupCtx := context.Background()
+		_, _ = db.Exec(cleanupCtx, `DELETE FROM audit_logs WHERE organization_id = $1`, organization.ID)
 		_, _ = db.Exec(cleanupCtx, `DELETE FROM organization_domains WHERE organization_id = $1`, organization.ID)
 		_, _ = db.Exec(cleanupCtx, `DELETE FROM reserved_subdomains WHERE label = $1`, label)
 		_, _ = db.Exec(cleanupCtx, `DELETE FROM organizations WHERE id = $1`, organization.ID)

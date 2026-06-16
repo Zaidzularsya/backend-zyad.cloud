@@ -30,6 +30,13 @@ type PublicHostResolver struct {
 	platformPrimaryDomain  string
 }
 
+type PublicHostResolution struct {
+	TenantContext coretenant.Context
+	Resolved      bool
+	CanonicalHost string
+	Redirect      bool
+}
+
 func NewPublicHostResolver(
 	store PublicHostResolverStore,
 	platformOrganizationID string,
@@ -46,12 +53,20 @@ func (r *PublicHostResolver) ResolvePublicHost(
 	ctx context.Context,
 	rawHost string,
 ) (coretenant.Context, bool, error) {
+	resolution, err := r.ResolvePublicHostDetail(ctx, rawHost)
+	return resolution.TenantContext, resolution.Resolved, err
+}
+
+func (r *PublicHostResolver) ResolvePublicHostDetail(
+	ctx context.Context,
+	rawHost string,
+) (PublicHostResolution, error) {
 	host, err := NormalizePublicHost(rawHost)
 	if err != nil {
-		return coretenant.Context{}, false, err
+		return PublicHostResolution{}, err
 	}
 	if r.store == nil {
-		return coretenant.Context{}, false, coreerrors.New(
+		return PublicHostResolution{}, coreerrors.New(
 			"PUBLIC_HOST_RESOLVER_STORE_REQUIRED",
 			"public host resolver store is required",
 			http.StatusInternalServerError,
@@ -60,7 +75,7 @@ func (r *PublicHostResolver) ResolvePublicHost(
 
 	if r.platformPrimaryDomain != "" && host == r.platformPrimaryDomain {
 		if !validUUID(r.platformOrganizationID) {
-			return coretenant.Context{}, false, coreerrors.New(
+			return PublicHostResolution{}, coreerrors.New(
 				"PLATFORM_ORGANIZATION_CONFIG_INVALID",
 				"platform organization ID is required for the primary domain",
 				http.StatusInternalServerError,
@@ -69,33 +84,55 @@ func (r *PublicHostResolver) ResolvePublicHost(
 		organization, err := r.store.FindOrganizationByID(ctx, r.platformOrganizationID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return coretenant.Context{}, false, nil
+				return PublicHostResolution{}, nil
 			}
-			return coretenant.Context{}, false, publicHostInternalError(err)
+			return PublicHostResolution{}, publicHostInternalError(err)
 		}
 		if !organization.IsPlatform() || !organization.IsActive() {
-			return coretenant.Context{}, false, nil
+			return PublicHostResolution{}, nil
 		}
-		return newPublicTenantContext(
+		tenantContext, ok, err := newPublicTenantContext(
 			organization,
 			coretenant.ResolutionSourcePlatformHost,
 			host,
 		)
+		return PublicHostResolution{
+			TenantContext: tenantContext,
+			Resolved:      ok,
+			CanonicalHost: r.platformPrimaryDomain,
+		}, err
 	}
 
 	resolved, err := r.store.ResolveActiveHost(ctx, host)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return coretenant.Context{}, false, nil
+			return PublicHostResolution{}, nil
 		}
-		return coretenant.Context{}, false, publicHostInternalError(err)
+		return PublicHostResolution{}, publicHostInternalError(err)
 	}
 
 	source, ok := publicDomainResolutionSource(resolved.Domain.Type)
 	if !ok || !resolved.Domain.CanResolvePublicly() || !resolved.Organization.IsActive() {
-		return coretenant.Context{}, false, nil
+		return PublicHostResolution{}, nil
 	}
-	return newPublicTenantContext(resolved.Organization, source, host)
+	tenantContext, resolvedContext, err := newPublicTenantContext(resolved.Organization, source, host)
+	if err != nil {
+		return PublicHostResolution{}, err
+	}
+	canonicalHost := resolved.Domain.CanonicalHost
+	redirect := false
+	if resolved.Domain.Type == model.DomainTypePlatform &&
+		r.platformPrimaryDomain != "" &&
+		host != r.platformPrimaryDomain {
+		canonicalHost = r.platformPrimaryDomain
+		redirect = true
+	}
+	return PublicHostResolution{
+		TenantContext: tenantContext,
+		Resolved:      resolvedContext,
+		CanonicalHost: canonicalHost,
+		Redirect:      redirect,
+	}, nil
 }
 
 func NormalizePublicHost(rawHost string) (string, error) {

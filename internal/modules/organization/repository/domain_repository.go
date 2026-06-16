@@ -42,6 +42,7 @@ type CreateDomainParams struct {
 	CanonicalHost             string
 	VerificationChallengeHash string
 	SSLStatus                 model.DomainSSLStatus
+	ActorUserID               string
 }
 
 type DomainListFilter struct {
@@ -57,6 +58,7 @@ type UpdateDomainVerificationParams struct {
 	VerificationError string
 	VerifiedAt        *time.Time
 	AttemptedAt       time.Time
+	ActorUserID       string
 }
 
 type UpdateDomainSSLParams struct {
@@ -83,9 +85,14 @@ func (r *DomainRepository) Create(
 	if sslStatus == "" {
 		sslStatus = model.DomainSSLStatusPending
 	}
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return model.OrganizationDomain{}, err
+	}
+	defer tx.Rollback(ctx)
 
 	var domain model.OrganizationDomain
-	err := r.db.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		INSERT INTO organization_domains (
 			organization_id,
 			type,
@@ -115,6 +122,26 @@ func (r *DomainRepository) Create(
 		string(sslStatus),
 	).Scan(domainScanDest(&domain)...)
 	if err != nil {
+		return model.OrganizationDomain{}, err
+	}
+	if err := insertDomainAudit(
+		ctx,
+		tx,
+		domain,
+		params.ActorUserID,
+		"organization_domain_created",
+		map[string]any{
+			"domain_id":      domain.ID,
+			"canonical_host": domain.CanonicalHost,
+			"type":           string(domain.Type),
+			"status":         string(domain.Status),
+			"ssl_status":     string(domain.SSLStatus),
+		},
+		domain.CreatedAt,
+	); err != nil {
+		return model.OrganizationDomain{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return model.OrganizationDomain{}, err
 	}
 	return domain, nil
@@ -228,8 +255,14 @@ func (r *DomainRepository) UpdateVerification(
 	id string,
 	params UpdateDomainVerificationParams,
 ) (model.OrganizationDomain, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return model.OrganizationDomain{}, err
+	}
+	defer tx.Rollback(ctx)
+
 	var domain model.OrganizationDomain
-	err := r.db.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		UPDATE organization_domains
 		SET
 			status = $3,
@@ -255,6 +288,28 @@ func (r *DomainRepository) UpdateVerification(
 	if err != nil {
 		return model.OrganizationDomain{}, err
 	}
+	if err := insertDomainAudit(
+		ctx,
+		tx,
+		domain,
+		params.ActorUserID,
+		"organization_domain_verification_recorded",
+		map[string]any{
+			"domain_id":             domain.ID,
+			"canonical_host":        domain.CanonicalHost,
+			"type":                  string(domain.Type),
+			"status":                string(domain.Status),
+			"verification_attempts": domain.VerificationAttempts,
+			"verification_error":    domain.VerificationError,
+			"verified":              domain.VerifiedAt != nil,
+		},
+		params.AttemptedAt,
+	); err != nil {
+		return model.OrganizationDomain{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return model.OrganizationDomain{}, err
+	}
 	return domain, nil
 }
 
@@ -264,6 +319,7 @@ func (r *DomainRepository) Activate(
 	id string,
 	isPrimary bool,
 	activatedAt time.Time,
+	actorUserID string,
 ) (model.OrganizationDomain, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -308,6 +364,27 @@ func (r *DomainRepository) Activate(
 	if err != nil {
 		return model.OrganizationDomain{}, err
 	}
+	event := "organization_domain_activated"
+	if isPrimary {
+		event = "organization_domain_primary_set"
+	}
+	if err := insertDomainAudit(
+		ctx,
+		tx,
+		domain,
+		actorUserID,
+		event,
+		map[string]any{
+			"domain_id":      domain.ID,
+			"canonical_host": domain.CanonicalHost,
+			"type":           string(domain.Type),
+			"status":         string(domain.Status),
+			"is_primary":     domain.IsPrimary,
+		},
+		activatedAt,
+	); err != nil {
+		return model.OrganizationDomain{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return model.OrganizationDomain{}, err
 	}
@@ -319,8 +396,9 @@ func (r *DomainRepository) SetPrimary(
 	organizationID string,
 	id string,
 	updatedAt time.Time,
+	actorUserID string,
 ) (model.OrganizationDomain, error) {
-	return r.Activate(ctx, organizationID, id, true, updatedAt)
+	return r.Activate(ctx, organizationID, id, true, updatedAt, actorUserID)
 }
 
 func (r *DomainRepository) UpdateSSL(
@@ -409,8 +487,16 @@ func (r *DomainRepository) Delete(
 	organizationID string,
 	id string,
 	deletedAt time.Time,
+	actorUserID string,
 ) error {
-	commandTag, err := r.db.Exec(ctx, `
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var domain model.OrganizationDomain
+	err = tx.QueryRow(ctx, `
 		UPDATE organization_domains
 		SET
 			status = 'disabled',
@@ -420,14 +506,29 @@ func (r *DomainRepository) Delete(
 		WHERE id = $1::uuid
 			AND organization_id = $2::uuid
 			AND deleted_at IS NULL
-	`, strings.TrimSpace(id), strings.TrimSpace(organizationID), deletedAt)
+		RETURNING `+domainSelectColumns,
+		strings.TrimSpace(id), strings.TrimSpace(organizationID), deletedAt).
+		Scan(domainScanDest(&domain)...)
 	if err != nil {
 		return err
 	}
-	if commandTag.RowsAffected() == 0 {
-		return pgx.ErrNoRows
+	if err := insertDomainAudit(
+		ctx,
+		tx,
+		domain,
+		actorUserID,
+		"organization_domain_disabled",
+		map[string]any{
+			"domain_id":      domain.ID,
+			"canonical_host": domain.CanonicalHost,
+			"type":           string(domain.Type),
+			"status":         string(domain.Status),
+		},
+		deletedAt,
+	); err != nil {
+		return err
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 func (r *DomainRepository) ResolveActiveHost(
@@ -460,6 +561,27 @@ func (r *DomainRepository) ResolveActiveHost(
 		return ResolvedDomain{}, err
 	}
 	return result, nil
+}
+
+func insertDomainAudit(
+	ctx context.Context,
+	tx pgx.Tx,
+	domain model.OrganizationDomain,
+	actorUserID string,
+	event string,
+	metadata map[string]any,
+	createdAt time.Time,
+) error {
+	return insertOrganizationAuditTx(
+		ctx,
+		tx,
+		model.Organization{ID: domain.OrganizationID},
+		model.Membership{},
+		strings.TrimSpace(actorUserID),
+		event,
+		metadata,
+		createdAt,
+	)
 }
 
 func domainWhere(filter DomainListFilter) (string, []any) {

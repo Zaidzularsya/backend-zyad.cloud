@@ -115,21 +115,7 @@ func userOrganizationResponse(
 	currentOrganizationID string,
 ) dto.UserOrganizationResponse {
 	return dto.UserOrganizationResponse{
-		Organization: dto.OrganizationResponse{
-			ID:            result.Organization.ID,
-			Type:          string(result.Organization.Type),
-			Slug:          result.Organization.Slug,
-			Name:          result.Organization.Name,
-			Status:        string(result.Organization.Status),
-			Timezone:      result.Organization.Timezone,
-			Locale:        result.Organization.Locale,
-			Region:        result.Organization.Region,
-			DataPlacement: string(result.Organization.DataPlacement),
-			Metadata:      result.Organization.Metadata,
-			CreatedAt:     result.Organization.CreatedAt.UTC().Format(time.RFC3339),
-			UpdatedAt:     result.Organization.UpdatedAt.UTC().Format(time.RFC3339),
-			DeletedAt:     formatOrganizationTime(result.Organization.DeletedAt),
-		},
+		Organization: organizationResponse(result.Organization),
 		Membership: dto.MembershipResponse{
 			ID:             result.Membership.ID,
 			OrganizationID: result.Membership.OrganizationID,

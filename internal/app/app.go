@@ -117,24 +117,78 @@ func New(ctx context.Context) (*App, error) {
 	organizationSwitchHandler := organizationhandler.NewSwitchHandler(
 		organizationSwitchService,
 	)
+	organizationLifecycleService := organizationservice.NewLifecycleService(
+		organizationrepo.NewLifecycleRepository(db),
+	)
+	organizationLifecycleService.SetNotificationPublisher(
+		notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts),
+	)
+	organizationPlatformService := organizationservice.NewPlatformService(
+		organizationrepo.NewOrganizationRepository(db),
+		organizationLifecycleService,
+	)
+	organizationPlatformHandler := organizationhandler.NewPlatformHandler(
+		organizationPlatformService,
+		permService,
+	)
+	organizationMembershipRepository := organizationrepo.NewMembershipServiceRepository(db)
+	organizationSelfService := organizationservice.NewSelfService(
+		organizationrepo.NewSelfRepository(db),
+		organizationservice.NewMembershipService(organizationMembershipRepository),
+		organizationMembershipRepository,
+	)
+	organizationSelfHandler := organizationhandler.NewSelfHandler(
+		organizationSelfService,
+		permService,
+	)
+	organizationDomainService := organizationservice.NewDomainService(
+		organizationrepo.NewDomainRepository(db),
+		organizationservice.NewDNSDomainVerifier(nil),
+		cfg.MultiTenant.PlatformPrimaryDomain,
+	)
+	organizationDomainHandler := organizationhandler.NewDomainHandler(
+		organizationDomainService,
+		permService,
+	)
+	organizationEntitlementRepository := organizationrepo.NewEntitlementRepository(db)
+	organizationEntitlementService := organizationservice.NewEntitlementAPIService(
+		organizationEntitlementRepository,
+		organizationservice.NewEntitlementService(organizationEntitlementRepository),
+	)
+	organizationEntitlementHandler := organizationhandler.NewEntitlementHandler(
+		organizationEntitlementService,
+		permService,
+		permService,
+	)
+	organizationImpersonationHandler := organizationhandler.NewImpersonationHandler(
+		organizationservice.NewImpersonationService(
+			organizationrepo.NewImpersonationRepository(db),
+		),
+		permService,
+	)
 
 	router, err := newRouter(Dependencies{
-		Config:                        cfg,
-		Logger:                        log,
-		DB:                            db,
-		Redis:                         redisClient,
-		NotificationHandler:           notificationHandler,
-		NotificationLogHandler:        logHandler,
-		NotificationPreferenceHandler: preferenceHandler,
-		NotificationTemplateHandler:   templateHandler,
-		NotificationVariableHandler:   variableHandler,
-		PermissionHandler:             permHandler,
-		OrganizationSwitchHandler:     organizationSwitchHandler,
-		UserAuthHandler:               authHandler,
-		UserHandler:                   userHandler,
-		Authenticator:                 authService,
-		OrganizationResolver:          organizationResolver,
-		PublicHostResolver:            publicHostResolver,
+		Config:                           cfg,
+		Logger:                           log,
+		DB:                               db,
+		Redis:                            redisClient,
+		NotificationHandler:              notificationHandler,
+		NotificationLogHandler:           logHandler,
+		NotificationPreferenceHandler:    preferenceHandler,
+		NotificationTemplateHandler:      templateHandler,
+		NotificationVariableHandler:      variableHandler,
+		PermissionHandler:                permHandler,
+		OrganizationDomainHandler:        organizationDomainHandler,
+		OrganizationEntitlementHandler:   organizationEntitlementHandler,
+		OrganizationImpersonationHandler: organizationImpersonationHandler,
+		OrganizationPlatformHandler:      organizationPlatformHandler,
+		OrganizationSelfHandler:          organizationSelfHandler,
+		OrganizationSwitchHandler:        organizationSwitchHandler,
+		UserAuthHandler:                  authHandler,
+		UserHandler:                      userHandler,
+		Authenticator:                    authService,
+		OrganizationResolver:             organizationResolver,
+		PublicHostResolver:               publicHostResolver,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("configure trusted proxies: %w", err)

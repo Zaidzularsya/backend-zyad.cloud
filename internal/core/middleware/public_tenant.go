@@ -55,7 +55,12 @@ func ResolvePublicOrganization(
 		host := c.Request.Host
 		if options.TrustForwardedHost && remoteIPTrusted(c.Request.RemoteAddr, trustedProxies) {
 			if forwardedHost := strings.TrimSpace(c.GetHeader("X-Forwarded-Host")); forwardedHost != "" {
-				host = forwardedHost
+				host, err = canonicalForwardedHost(forwardedHost)
+				if err != nil {
+					corehttp.Fail(c, err)
+					c.Abort()
+					return
+				}
 			}
 		}
 		tenantContext, resolved, err := resolver.ResolvePublicHost(
@@ -78,6 +83,20 @@ func ResolvePublicOrganization(
 		}
 		c.Next()
 	}, nil
+}
+
+func canonicalForwardedHost(host string) (string, error) {
+	host = strings.TrimSpace(host)
+	if host == "" ||
+		strings.ContainsAny(host, "/\\@, \t\r\n") ||
+		strings.Contains(host, "://") {
+		return "", coreerrors.New(
+			"FORWARDED_HOST_INVALID",
+			"forwarded host is invalid",
+			http.StatusBadRequest,
+		)
+	}
+	return host, nil
 }
 
 func parseTrustedProxyCIDRs(values []string) ([]*net.IPNet, error) {

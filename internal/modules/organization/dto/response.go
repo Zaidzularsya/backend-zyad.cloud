@@ -28,6 +28,40 @@ type OrganizationListResponse struct {
 	Meta  PaginationMeta         `json:"meta"`
 }
 
+type OrganizationPlacementSummary struct {
+	Type      string `json:"type"`
+	Supported bool   `json:"supported"`
+	Status    string `json:"status"`
+}
+
+type OrganizationDomainSummary struct {
+	Total         int64 `json:"total"`
+	Active        int64 `json:"active"`
+	Pending       int64 `json:"pending"`
+	Failed        int64 `json:"failed"`
+	SSLFailed     int64 `json:"ssl_failed"`
+	PrimaryActive int64 `json:"primary_active"`
+}
+
+type OrganizationEntitlementSummary struct {
+	Total      int64 `json:"total"`
+	Active     int64 `json:"active"`
+	MaxVersion int64 `json:"max_version"`
+}
+
+type OrganizationHealthSummary struct {
+	Status string   `json:"status"`
+	Issues []string `json:"issues"`
+}
+
+type PlatformOrganizationDetailResponse struct {
+	Organization OrganizationResponse           `json:"organization"`
+	Placement    OrganizationPlacementSummary   `json:"placement"`
+	Domains      OrganizationDomainSummary      `json:"domains"`
+	Entitlements OrganizationEntitlementSummary `json:"entitlements"`
+	Health       OrganizationHealthSummary      `json:"health"`
+}
+
 type MembershipResponse struct {
 	ID             string   `json:"id"`
 	OrganizationID string   `json:"organization_id"`
@@ -47,6 +81,12 @@ type MembershipResponse struct {
 	RemovedAt      *string  `json:"removed_at,omitempty"`
 	CreatedAt      string   `json:"created_at"`
 	UpdatedAt      string   `json:"updated_at"`
+}
+
+type InvitationResponse struct {
+	Membership      MembershipResponse `json:"membership"`
+	InvitationToken string             `json:"invitation_token"`
+	ExpiresAt       string             `json:"expires_at"`
 }
 
 type UserOrganizationResponse struct {
@@ -86,7 +126,6 @@ type DomainChallengeResponse struct {
 	ChallengeType string         `json:"challenge_type"`
 	RecordName    string         `json:"record_name"`
 	RecordValue   string         `json:"record_value"`
-	ExpiresAt     string         `json:"expires_at"`
 }
 
 type EntitlementResponse struct {
@@ -113,6 +152,11 @@ type EffectiveFeatureResponse struct {
 	Version        int64          `json:"version"`
 }
 
+type EffectiveFeatureListResponse struct {
+	Items []EffectiveFeatureResponse `json:"items"`
+	Meta  PaginationMeta             `json:"meta"`
+}
+
 type UsageResponse struct {
 	FeatureKey     string  `json:"feature_key"`
 	MetricKey      string  `json:"metric_key"`
@@ -123,4 +167,21 @@ type UsageResponse struct {
 	RemainingValue *int64  `json:"remaining_value,omitempty"`
 	Version        int64   `json:"version"`
 	LastRecordedAt *string `json:"last_recorded_at,omitempty"`
+}
+
+type ImpersonationSessionResponse struct {
+	ID                   string         `json:"id"`
+	OperatorSessionID    string         `json:"operator_session_id"`
+	OperatorUserID       string         `json:"operator_user_id"`
+	TargetOrganizationID string         `json:"target_organization_id"`
+	TargetUserID         string         `json:"target_user_id,omitempty"`
+	Reason               string         `json:"reason"`
+	TicketReference      string         `json:"ticket_reference,omitempty"`
+	StartedAt            string         `json:"started_at"`
+	ExpiresAt            string         `json:"expires_at"`
+	StoppedAt            *string        `json:"stopped_at,omitempty"`
+	StoppedByUserID      string         `json:"stopped_by_user_id,omitempty"`
+	StopReason           string         `json:"stop_reason,omitempty"`
+	Metadata             map[string]any `json:"metadata"`
+	IsActive             bool           `json:"is_active"`
 }

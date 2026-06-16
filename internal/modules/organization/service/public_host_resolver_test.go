@@ -49,6 +49,8 @@ func TestNormalizePublicHost(t *testing.T) {
 		"https://example.com",
 		"example.com/path",
 		"example.com,evil.test",
+		"example.com:99999",
+		"[::1]:8080",
 		"127.0.0.1",
 		"localhost",
 		"bad_host.example.com",
@@ -80,6 +82,40 @@ func TestPublicHostResolverResolvesPlatformPrimaryDomain(t *testing.T) {
 	}
 	if !ok || tenantContext.ResolutionSource() != coretenant.ResolutionSourcePlatformHost {
 		t.Fatalf("resolved context = %#v, %v", tenantContext, ok)
+	}
+}
+
+func TestPublicHostResolverResolvesPlatformWWWAliasWithCanonicalHint(t *testing.T) {
+	store := &fakePublicHostResolverStore{
+		resolved: repository.ResolvedDomain{
+			Domain: model.OrganizationDomain{
+				Type:          model.DomainTypePlatform,
+				CanonicalHost: "www.zyad.cloud",
+				Status:        model.DomainStatusActive,
+			},
+			Organization: model.Organization{
+				ID:            resolverOrganizationID,
+				Slug:          "zyad-cloud",
+				Type:          coretenant.OrganizationTypePlatform,
+				Status:        coretenant.OrganizationStatusActive,
+				DataPlacement: coretenant.DataPlacementShared,
+			},
+		},
+	}
+	resolver := NewPublicHostResolver(store, resolverOrganizationID, "zyad.cloud")
+
+	resolution, err := resolver.ResolvePublicHostDetail(
+		context.Background(),
+		"www.zyad.cloud",
+	)
+	if err != nil {
+		t.Fatalf("ResolvePublicHostDetail() error = %v", err)
+	}
+	if !resolution.Resolved ||
+		resolution.TenantContext.ResolutionSource() != coretenant.ResolutionSourcePlatformHost ||
+		!resolution.Redirect ||
+		resolution.CanonicalHost != "zyad.cloud" {
+		t.Fatalf("resolution = %#v", resolution)
 	}
 }
 

@@ -14,20 +14,25 @@ import (
 )
 
 type Dependencies struct {
-	Config                        config.Config
-	Logger                        *slog.Logger
-	DB                            *pgdatabase.Pool
-	Redis                         *redis.Client
-	NotificationHandler           *notificationhandler.NotificationHandler
-	NotificationLogHandler        *notificationhandler.LogHandler
-	NotificationPreferenceHandler *notificationhandler.PreferenceHandler
-	NotificationTemplateHandler   *notificationhandler.TemplateHandler
-	NotificationVariableHandler   *notificationhandler.VariableHandler
-	PermissionHandler             *permissionhandler.Handler
-	OrganizationSwitchHandler     *organizationhandler.SwitchHandler
-	UserAuthHandler               *userhandler.AuthHandler
-	UserHandler                   *userhandler.UserHandler
-	Authenticator                 middleware.AccessTokenAuthenticator
-	OrganizationResolver          middleware.AuthenticatedOrganizationResolver
-	PublicHostResolver            middleware.PublicHostResolver
+	Config                           config.Config
+	Logger                           *slog.Logger
+	DB                               *pgdatabase.Pool
+	Redis                            *redis.Client
+	NotificationHandler              *notificationhandler.NotificationHandler
+	NotificationLogHandler           *notificationhandler.LogHandler
+	NotificationPreferenceHandler    *notificationhandler.PreferenceHandler
+	NotificationTemplateHandler      *notificationhandler.TemplateHandler
+	NotificationVariableHandler      *notificationhandler.VariableHandler
+	PermissionHandler                *permissionhandler.Handler
+	OrganizationDomainHandler        *organizationhandler.DomainHandler
+	OrganizationEntitlementHandler   *organizationhandler.EntitlementHandler
+	OrganizationImpersonationHandler *organizationhandler.ImpersonationHandler
+	OrganizationPlatformHandler      *organizationhandler.PlatformHandler
+	OrganizationSelfHandler          *organizationhandler.SelfHandler
+	OrganizationSwitchHandler        *organizationhandler.SwitchHandler
+	UserAuthHandler                  *userhandler.AuthHandler
+	UserHandler                      *userhandler.UserHandler
+	Authenticator                    middleware.AccessTokenAuthenticator
+	OrganizationResolver             middleware.AuthenticatedOrganizationResolver
+	PublicHostResolver               middleware.PublicHostResolver
 }

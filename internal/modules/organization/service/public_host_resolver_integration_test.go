@@ -66,11 +66,13 @@ func TestPublicHostResolverCustomDomainAndStatusIntegration(t *testing.T) {
 		domain.ID,
 		true,
 		verifiedAt,
+		"",
 	); err != nil {
 		t.Fatalf("activate domain: %v", err)
 	}
 	t.Cleanup(func() {
 		cleanupCtx := context.Background()
+		_, _ = db.Exec(cleanupCtx, `DELETE FROM audit_logs WHERE organization_id = $1`, organization.ID)
 		_, _ = db.Exec(cleanupCtx, `DELETE FROM organization_domains WHERE id = $1`, domain.ID)
 		_, _ = db.Exec(cleanupCtx, `DELETE FROM organizations WHERE id = $1`, organization.ID)
 	})

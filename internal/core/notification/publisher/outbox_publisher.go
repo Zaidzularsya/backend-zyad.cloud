@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	coreerrors "zyad.cloud/internal/core/errors"
+	coreevent "zyad.cloud/internal/core/event"
 	"zyad.cloud/internal/core/notification/domain"
 )
 
@@ -69,4 +70,26 @@ func (p *OutboxPublisher) Publish(ctx context.Context, event Event) (domain.Outb
 	}
 
 	return outboxEvent, nil
+}
+
+func (p *OutboxPublisher) PublishTenant(
+	ctx context.Context,
+	event coreevent.Envelope,
+	recipient domain.NotificationRecipient,
+	locale string,
+	maxAttempts int,
+) (domain.OutboxEvent, error) {
+	if err := event.Validate(); err != nil {
+		return domain.OutboxEvent{}, err
+	}
+	return p.Publish(ctx, Event{
+		ID:             event.ID,
+		Type:           event.Type,
+		OrganizationID: event.OrganizationID,
+		UserID:         event.ActorUserID,
+		Recipient:      recipient,
+		Payload:        event.PayloadWithMetadata(),
+		Locale:         locale,
+		MaxAttempts:    maxAttempts,
+	})
 }

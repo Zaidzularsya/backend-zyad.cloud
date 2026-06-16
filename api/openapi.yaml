@@ -234,6 +234,801 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/organizations:
+    get:
+      summary: List organizations from the platform control plane
+      operationId: listPlatformOrganizations
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [platform, customer]
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/OrganizationStatus"
+        - name: data_placement
+          in: query
+          schema:
+            type: string
+            enum: [shared, dedicated]
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: include_deleted
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Organizations retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformOrganizationListEnvelope"
+        "403":
+          description: Platform organization context or permission is missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create a customer organization
+      operationId: createPlatformOrganization
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrganizationRequest"
+      responses:
+        "201":
+          description: Organization created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationEnvelope"
+        "403":
+          description: Platform organization context or permission is missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Organization slug already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid organization payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/organizations/{id}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationID"
+    get:
+      summary: Get organization control-plane detail
+      operationId: getPlatformOrganization
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Organization retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformOrganizationDetailEnvelope"
+        "404":
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      summary: Update organization control-plane settings
+      operationId: updatePlatformOrganization
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrganizationRequest"
+      responses:
+        "200":
+          description: Organization updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationEnvelope"
+        "409":
+          description: Organization is archived or protected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid organization payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/organizations/{id}/status:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationID"
+    patch:
+      summary: Change organization lifecycle status
+      operationId: changePlatformOrganizationStatus
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrganizationStatusRequest"
+      responses:
+        "200":
+          description: Organization status updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationEnvelope"
+        "409":
+          description: Lifecycle transition is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid status or missing reason
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/organizations/{id}/provision:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationID"
+    post:
+      summary: Provision or retry a shared organization
+      operationId: provisionPlatformOrganization
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Organization provisioned successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformOrganizationDetailEnvelope"
+        "409":
+          description: Organization is not ready or not waiting for provisioning
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Dedicated database provisioning is not available
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/organizations/{id}/entitlements:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationID"
+    patch:
+      summary: Upsert a platform entitlement override
+      operationId: upsertPlatformOrganizationEntitlementOverride
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpsertOrganizationEntitlementRequest"
+      responses:
+        "200":
+          description: Organization entitlement override updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationEntitlementEnvelope"
+        "403":
+          description: Platform organization context or permission is missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Organization was not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid entitlement override payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/organizations/{id}/impersonate:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationID"
+    post:
+      summary: Start a short-lived operator impersonation session
+      operationId: startPlatformOrganizationImpersonation
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartOrganizationImpersonationRequest"
+      responses:
+        "201":
+          description: Organization impersonation started successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationImpersonationEnvelope"
+        "403":
+          description: Platform organization context or impersonation permission is missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Operator session already has active impersonation or target is invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid impersonation payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/impersonation:
+    delete:
+      summary: Stop the current operator impersonation session
+      operationId: stopPlatformOrganizationImpersonation
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StopOrganizationImpersonationRequest"
+      responses:
+        "200":
+          description: Organization impersonation stopped successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationImpersonationEnvelope"
+        "403":
+          description: Platform organization context or impersonation permission is missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Active impersonation was not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Stop reason is missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/organization:
+    get:
+      summary: Get the current customer organization
+      operationId: getCurrentOrganization
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Organization retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationEnvelope"
+        "403":
+          description: Active customer organization context or permission is missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      summary: Update the current customer organization settings
+      operationId: updateCurrentOrganization
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateCurrentOrganizationRequest"
+      responses:
+        "200":
+          description: Organization updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationEnvelope"
+        "403":
+          description: Active customer organization context or permission is missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid organization settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/organization/members:
+    get:
+      summary: List members of the current organization
+      operationId: listCurrentOrganizationMembers
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/MembershipStatus"
+        - name: include_removed
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Organization members retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationMembershipListEnvelope"
+        "403":
+          description: Organization member read permission is missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/organization/invitations:
+    post:
+      summary: Invite an existing identity to the current organization
+      operationId: inviteCurrentOrganizationMember
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InviteOrganizationMemberRequest"
+      responses:
+        "201":
+          description: Member invited successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationInvitationEnvelope"
+        "404":
+          description: Existing identity was not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: User is already an active or suspended member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid email, role, or expiry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/organization/members/{id}/status:
+    parameters:
+      - $ref: "#/components/parameters/MembershipID"
+    patch:
+      summary: Change a current organization membership status
+      operationId: changeCurrentOrganizationMembershipStatus
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMembershipStatusRequest"
+      responses:
+        "200":
+          description: Membership status updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationMembershipEnvelope"
+        "409":
+          description: Invalid transition or last active owner guard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid status or missing reason
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/organization/members/{id}:
+    parameters:
+      - $ref: "#/components/parameters/MembershipID"
+    delete:
+      summary: Remove a member from the current organization
+      operationId: removeCurrentOrganizationMember
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RemoveMembershipRequest"
+      responses:
+        "200":
+          description: Member removed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationMembershipEnvelope"
+        "409":
+          description: Invalid transition or last active owner guard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Removal reason is required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/organization/domains:
+    get:
+      summary: List domains of the current organization
+      operationId: listCurrentOrganizationDomains
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: type
+          in: query
+          schema:
+            $ref: "#/components/schemas/OrganizationDomainType"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/OrganizationDomainStatus"
+        - name: include_deleted
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Organization domains retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationDomainListEnvelope"
+        "403":
+          description: Domain management permission is missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Register a domain and create its DNS TXT challenge
+      operationId: createCurrentOrganizationDomain
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateOrganizationDomainRequest"
+      responses:
+        "201":
+          description: Organization domain created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationDomainChallengeEnvelope"
+        "409":
+          description: Host is registered or its subdomain label is reserved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid domain type, host, or premature primary request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/organization/domains/{id}/verify:
+    parameters:
+      - $ref: "#/components/parameters/DomainID"
+    post:
+      summary: Verify and activate a domain using its DNS TXT challenge
+      operationId: verifyCurrentOrganizationDomain
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Organization domain verified successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationDomainEnvelope"
+        "404":
+          description: Domain was not found in the current organization
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: DNS TXT challenge was not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: DNS resolver is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/organization/domains/{id}:
+    parameters:
+      - $ref: "#/components/parameters/DomainID"
+    patch:
+      summary: Set a verified domain as primary
+      operationId: setCurrentOrganizationPrimaryDomain
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrganizationDomainRequest"
+      responses:
+        "200":
+          description: Primary organization domain updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationDomainEnvelope"
+        "404":
+          description: Verified domain was not found in the current organization
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: is_primary must be true
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      summary: Disable a domain of the current organization
+      operationId: disableCurrentOrganizationDomain
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Organization domain disabled successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationDomainDeleteEnvelope"
+        "404":
+          description: Domain was not found in the current organization
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/organization/features:
+    get:
+      summary: List effective features of the current organization
+      operationId: listCurrentOrganizationFeatures
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: feature_key
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Organization features retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationEffectiveFeatureListEnvelope"
+        "403":
+          description: Feature read permission is missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/organization/usage:
+    get:
+      summary: Get current organization usage for a feature metric period
+      operationId: getCurrentOrganizationUsage
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: feature_key
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: metric_key
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit_key
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: period_start
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: period_end
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Organization usage retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationUsageEnvelope"
+        "403":
+          description: Feature read permission or entitlement is missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid usage query
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/admin/users:
     post:
       summary: Create a user
@@ -999,6 +1794,27 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
 components:
   parameters:
+    OrganizationID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    MembershipID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    DomainID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     UserID:
       name: id
       in: path
@@ -1046,8 +1862,7 @@ components:
         name:
           type: string
         status:
-          type: string
-          enum: [provisioning, active, suspended, archived]
+          $ref: "#/components/schemas/OrganizationStatus"
         timezone:
           type: string
         locale:
@@ -1070,6 +1885,191 @@ components:
           type: string
           format: date-time
           nullable: true
+    OrganizationStatus:
+      type: string
+      enum:
+        - pending
+        - provisioning
+        - provisioning_failed
+        - active
+        - suspended
+        - disabled
+        - archived
+    CreateOrganizationRequest:
+      type: object
+      required: [type, slug, name, owner_user_id]
+      properties:
+        type:
+          type: string
+          enum: [customer]
+        slug:
+          type: string
+        name:
+          type: string
+        timezone:
+          type: string
+        locale:
+          type: string
+        region:
+          type: string
+        data_placement:
+          type: string
+          enum: [shared, dedicated]
+        owner_user_id:
+          type: string
+          format: uuid
+        metadata:
+          type: object
+          additionalProperties: true
+    UpdateOrganizationRequest:
+      type: object
+      minProperties: 1
+      properties:
+        slug:
+          type: string
+        name:
+          type: string
+        timezone:
+          type: string
+        locale:
+          type: string
+        region:
+          type: string
+        data_placement:
+          type: string
+          enum: [shared, dedicated]
+        metadata:
+          type: object
+          additionalProperties: true
+    UpdateCurrentOrganizationRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+        timezone:
+          type: string
+        locale:
+          type: string
+        region:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+    UpdateOrganizationStatusRequest:
+      type: object
+      required: [status, reason]
+      properties:
+        status:
+          $ref: "#/components/schemas/OrganizationStatus"
+        reason:
+          type: string
+    OrganizationEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/OrganizationSummary"
+    PlatformOrganizationListEnvelope:
+      type: object
+      required: [success, message, data, meta]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrganizationSummary"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+    OrganizationPlacementSummary:
+      type: object
+      required: [type, supported, status]
+      properties:
+        type:
+          type: string
+          enum: [shared, dedicated]
+        supported:
+          type: boolean
+        status:
+          type: string
+          enum: [ready, unavailable]
+    OrganizationDomainSummary:
+      type: object
+      required: [total, active, pending, failed, ssl_failed, primary_active]
+      properties:
+        total:
+          type: integer
+          format: int64
+        active:
+          type: integer
+          format: int64
+        pending:
+          type: integer
+          format: int64
+        failed:
+          type: integer
+          format: int64
+        ssl_failed:
+          type: integer
+          format: int64
+        primary_active:
+          type: integer
+          format: int64
+    OrganizationEntitlementSummary:
+      type: object
+      required: [total, active, max_version]
+      properties:
+        total:
+          type: integer
+          format: int64
+        active:
+          type: integer
+          format: int64
+        max_version:
+          type: integer
+          format: int64
+    OrganizationHealthSummary:
+      type: object
+      required: [status, issues]
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unavailable]
+        issues:
+          type: array
+          items:
+            type: string
+    PlatformOrganizationDetail:
+      type: object
+      required: [organization, placement, domains, entitlements, health]
+      properties:
+        organization:
+          $ref: "#/components/schemas/OrganizationSummary"
+        placement:
+          $ref: "#/components/schemas/OrganizationPlacementSummary"
+        domains:
+          $ref: "#/components/schemas/OrganizationDomainSummary"
+        entitlements:
+          $ref: "#/components/schemas/OrganizationEntitlementSummary"
+        health:
+          $ref: "#/components/schemas/OrganizationHealthSummary"
+    PlatformOrganizationDetailEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/PlatformOrganizationDetail"
     OrganizationMembershipSummary:
       type: object
       required:
@@ -1093,9 +2093,13 @@ components:
         user_id:
           type: string
           format: uuid
-        status:
+        user_name:
           type: string
-          enum: [invited, active, suspended, removed]
+        user_email:
+          type: string
+          format: email
+        status:
+          $ref: "#/components/schemas/MembershipStatus"
         is_owner:
           type: boolean
         version:
@@ -1134,6 +2138,482 @@ components:
         updated_at:
           type: string
           format: date-time
+    MembershipStatus:
+      type: string
+      enum: [invited, active, suspended, removed]
+    InviteOrganizationMemberRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+        role_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        expires_at:
+          type: string
+          format: date-time
+    UpdateMembershipStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [active, suspended, removed]
+        reason:
+          type: string
+    RemoveMembershipRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+    OrganizationInvitation:
+      type: object
+      required: [membership, invitation_token, expires_at]
+      properties:
+        membership:
+          $ref: "#/components/schemas/OrganizationMembershipSummary"
+        invitation_token:
+          type: string
+          description: Returned once; only its hash is persisted.
+        expires_at:
+          type: string
+          format: date-time
+    OrganizationMembershipEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/OrganizationMembershipSummary"
+    OrganizationMembershipListEnvelope:
+      type: object
+      required: [success, message, data, meta]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrganizationMembershipSummary"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+    OrganizationInvitationEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/OrganizationInvitation"
+    OrganizationDomainType:
+      type: string
+      enum: [subdomain, custom]
+    OrganizationDomainStatus:
+      type: string
+      enum: [pending, verified, active, failed, disabled]
+    OrganizationDomainSSLStatus:
+      type: string
+      enum: [pending, provisioning, active, failed, not_required]
+    OrganizationDomain:
+      type: object
+      required:
+        - id
+        - organization_id
+        - type
+        - canonical_host
+        - status
+        - is_primary
+        - verification_attempts
+        - ssl_status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        type:
+          $ref: "#/components/schemas/OrganizationDomainType"
+        canonical_host:
+          type: string
+          format: hostname
+        status:
+          $ref: "#/components/schemas/OrganizationDomainStatus"
+        is_primary:
+          type: boolean
+        verification_attempts:
+          type: integer
+        last_verification_at:
+          type: string
+          format: date-time
+        verified_at:
+          type: string
+          format: date-time
+        verification_error:
+          type: string
+        ssl_status:
+          $ref: "#/components/schemas/OrganizationDomainSSLStatus"
+        ssl_error:
+          type: string
+        ssl_expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateOrganizationDomainRequest:
+      type: object
+      required: [type, canonical_host]
+      properties:
+        type:
+          $ref: "#/components/schemas/OrganizationDomainType"
+        canonical_host:
+          type: string
+          format: hostname
+        is_primary:
+          type: boolean
+          default: false
+          description: Must remain false until verification completes.
+    UpdateOrganizationDomainRequest:
+      type: object
+      required: [is_primary]
+      properties:
+        is_primary:
+          type: boolean
+          enum: [true]
+    OrganizationDomainChallenge:
+      type: object
+      required: [domain, challenge_type, record_name, record_value]
+      properties:
+        domain:
+          $ref: "#/components/schemas/OrganizationDomain"
+        challenge_type:
+          type: string
+          enum: [dns_txt]
+        record_name:
+          type: string
+        record_value:
+          type: string
+          description: Returned once; only its hash is persisted.
+    OrganizationDomainEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/OrganizationDomain"
+    OrganizationDomainListEnvelope:
+      type: object
+      required: [success, message, data, meta]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/OrganizationDomain"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+    OrganizationDomainChallengeEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/OrganizationDomainChallenge"
+    OrganizationDomainDeleteEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: object
+          required: [id]
+          properties:
+            id:
+              type: string
+              format: uuid
+    EntitlementSource:
+      type: string
+      enum: [plan, addon, trial, platform_override]
+    EntitlementStatus:
+      type: string
+      enum: [active, inactive, expired, revoked]
+    OrganizationEntitlement:
+      type: object
+      required:
+        - id
+        - organization_id
+        - feature_key
+        - source
+        - status
+        - limits
+        - version
+        - effective_from
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        feature_key:
+          type: string
+        source:
+          $ref: "#/components/schemas/EntitlementSource"
+        source_reference:
+          type: string
+        status:
+          $ref: "#/components/schemas/EntitlementStatus"
+        limits:
+          type: object
+          additionalProperties: true
+        version:
+          type: integer
+          format: int64
+        effective_from:
+          type: string
+          format: date-time
+        effective_until:
+          type: string
+          format: date-time
+        reason:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    EffectiveOrganizationFeature:
+      type: object
+      required: [feature_key, enabled, limits, version]
+      properties:
+        feature_key:
+          type: string
+        enabled:
+          type: boolean
+        limits:
+          type: object
+          additionalProperties: true
+        effective_until:
+          type: string
+          format: date-time
+        version:
+          type: integer
+          format: int64
+    OrganizationUsage:
+      type: object
+      required:
+        - feature_key
+        - metric_key
+        - period_start
+        - period_end
+        - usage_value
+        - version
+      properties:
+        feature_key:
+          type: string
+        metric_key:
+          type: string
+        period_start:
+          type: string
+          format: date-time
+        period_end:
+          type: string
+          format: date-time
+        usage_value:
+          type: integer
+          format: int64
+        limit_value:
+          type: integer
+          format: int64
+          nullable: true
+        remaining_value:
+          type: integer
+          format: int64
+          nullable: true
+        version:
+          type: integer
+          format: int64
+        last_recorded_at:
+          type: string
+          format: date-time
+    UpsertOrganizationEntitlementRequest:
+      type: object
+      required: [feature_key, source]
+      properties:
+        feature_key:
+          type: string
+        source:
+          type: string
+          enum: [platform_override]
+        source_reference:
+          type: string
+        status:
+          $ref: "#/components/schemas/EntitlementStatus"
+        limits:
+          type: object
+          additionalProperties: true
+        effective_from:
+          type: string
+          format: date-time
+        effective_until:
+          type: string
+          format: date-time
+        reason:
+          type: string
+    OrganizationEntitlementEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/OrganizationEntitlement"
+    OrganizationEffectiveFeatureListEnvelope:
+      type: object
+      required: [success, message, data, meta]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/EffectiveOrganizationFeature"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+    OrganizationUsageEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/OrganizationUsage"
+    StartOrganizationImpersonationRequest:
+      type: object
+      required: [reason, expires_at]
+      properties:
+        target_user_id:
+          type: string
+          format: uuid
+          description: Optional active member identity to expose as the effective user.
+        reason:
+          type: string
+        ticket_reference:
+          type: string
+          maxLength: 150
+        expires_at:
+          type: string
+          format: date-time
+          description: Must be in the future and within two hours.
+        metadata:
+          type: object
+          additionalProperties: true
+    StopOrganizationImpersonationRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+    OrganizationImpersonation:
+      type: object
+      required:
+        - id
+        - operator_session_id
+        - operator_user_id
+        - target_organization_id
+        - reason
+        - started_at
+        - expires_at
+        - metadata
+        - is_active
+      properties:
+        id:
+          type: string
+          format: uuid
+        operator_session_id:
+          type: string
+          format: uuid
+        operator_user_id:
+          type: string
+          format: uuid
+        target_organization_id:
+          type: string
+          format: uuid
+        target_user_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+        ticket_reference:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        stopped_at:
+          type: string
+          format: date-time
+        stopped_by_user_id:
+          type: string
+          format: uuid
+        stop_reason:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        is_active:
+          type: boolean
+    OrganizationImpersonationEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/OrganizationImpersonation"
     UserOrganization:
       type: object
       required:

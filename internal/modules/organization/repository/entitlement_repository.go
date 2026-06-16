@@ -214,6 +214,28 @@ func (r *EntitlementRepository) Upsert(
 	if err := decodeLimits(limitsBytes, &entitlement.Limits); err != nil {
 		return model.Entitlement{}, err
 	}
+	if params.Source == model.EntitlementSourcePlatformOverride {
+		if err := insertOrganizationAuditTx(
+			ctx,
+			tx,
+			model.Organization{ID: entitlement.OrganizationID},
+			model.Membership{},
+			params.ActorUserID,
+			"entitlement_override_upserted",
+			map[string]any{
+				"entitlement_id":   entitlement.ID,
+				"feature_key":      entitlement.FeatureKey,
+				"source":           string(entitlement.Source),
+				"source_reference": entitlement.SourceReference,
+				"status":           string(entitlement.Status),
+				"version":          entitlement.Version,
+				"reason":           strings.TrimSpace(params.Reason),
+			},
+			time.Now().UTC(),
+		); err != nil {
+			return model.Entitlement{}, err
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return model.Entitlement{}, err
 	}
@@ -257,6 +279,72 @@ func (r *EntitlementRepository) FindEffective(
 		return model.Entitlement{}, err
 	}
 	return entitlement, nil
+}
+
+func (r *EntitlementRepository) ListEffective(
+	ctx context.Context,
+	organizationID string,
+	filter EntitlementListFilter,
+	at time.Time,
+) ([]model.Entitlement, int64, error) {
+	where, args := effectiveEntitlementWhere(filter, at)
+	args = append([]any{strings.TrimSpace(organizationID)}, args...)
+	where = " WHERE organization_id = $1::uuid" + renumberWhere(where, 1)
+
+	var total int64
+	if err := r.db.QueryRow(ctx, `
+		SELECT count(DISTINCT feature_key)
+		FROM organization_entitlements`+where,
+		args...,
+	).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	limit, offset := entitlementPagination(filter)
+	args = append(args, limit, offset)
+	rows, err := r.db.Query(ctx, `
+		SELECT `+entitlementSelectColumns+`
+		FROM (
+			SELECT DISTINCT ON (feature_key) *
+			FROM organization_entitlements`+where+`
+			ORDER BY
+				feature_key ASC,
+				CASE source
+					WHEN 'platform_override' THEN 4
+					WHEN 'addon' THEN 3
+					WHEN 'trial' THEN 2
+					WHEN 'plan' THEN 1
+				END DESC,
+				version DESC,
+				effective_from DESC,
+				updated_at DESC,
+				id DESC
+		) effective
+		ORDER BY feature_key ASC
+		LIMIT $`+fmt.Sprint(len(args)-1)+` OFFSET $`+fmt.Sprint(len(args)),
+		args...,
+	)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	entitlements := make([]model.Entitlement, 0)
+	for rows.Next() {
+		var entitlement model.Entitlement
+		var limitsBytes []byte
+		if err := rows.Scan(entitlementScanDest(&entitlement, &limitsBytes)...); err != nil {
+			return nil, 0, err
+		}
+		if err := decodeLimits(limitsBytes, &entitlement.Limits); err != nil {
+			return nil, 0, err
+		}
+		entitlements = append(entitlements, entitlement)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return entitlements, total, nil
 }
 
 func (r *EntitlementRepository) List(
@@ -466,6 +554,23 @@ func entitlementWhere(filter EntitlementListFilter) (string, []any) {
 	if filter.Status != "" {
 		args = append(args, string(filter.Status))
 		query.WriteString(fmt.Sprintf(" AND status = $%d", len(args)))
+	}
+	return query.String(), args
+}
+
+func effectiveEntitlementWhere(
+	filter EntitlementListFilter,
+	at time.Time,
+) (string, []any) {
+	query := strings.Builder{}
+	query.WriteString(" WHERE 1 = 1")
+	query.WriteString(" AND status = 'active'")
+	args := []any{at}
+	query.WriteString(" AND effective_from <= $1")
+	query.WriteString(" AND (effective_until IS NULL OR effective_until > $1)")
+	if filter.FeatureKey != "" {
+		args = append(args, canonicalFeatureKey(filter.FeatureKey))
+		query.WriteString(fmt.Sprintf(" AND feature_key = $%d", len(args)))
 	}
 	return query.String(), args
 }

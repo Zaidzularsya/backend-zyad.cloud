@@ -53,9 +53,20 @@ type InviteMemberRequest struct {
 	ExpiresAt *string  `json:"expires_at"`
 }
 
+type MembershipListQuery struct {
+	Page           int    `form:"page"`
+	PerPage        int    `form:"per_page"`
+	Status         string `form:"status"`
+	IncludeRemoved bool   `form:"include_removed"`
+}
+
 type UpdateMembershipStatusRequest struct {
 	Status string `json:"status" binding:"required"`
 	Reason string `json:"reason"`
+}
+
+type RemoveMembershipRequest struct {
+	Reason string `json:"reason" binding:"required"`
 }
 
 type TransferOwnershipRequest struct {
@@ -72,6 +83,14 @@ type CreateDomainRequest struct {
 	IsPrimary     bool   `json:"is_primary"`
 }
 
+type DomainListQuery struct {
+	Page           int    `form:"page"`
+	PerPage        int    `form:"per_page"`
+	Type           string `form:"type"`
+	Status         string `form:"status"`
+	IncludeDeleted bool   `form:"include_deleted"`
+}
+
 type UpdateDomainRequest struct {
 	IsPrimary *bool `json:"is_primary"`
 }
@@ -85,4 +104,30 @@ type UpsertEntitlementRequest struct {
 	EffectiveFrom   *string        `json:"effective_from"`
 	EffectiveUntil  *string        `json:"effective_until"`
 	Reason          string         `json:"reason"`
+}
+
+type EntitlementListQuery struct {
+	Page       int    `form:"page"`
+	PerPage    int    `form:"per_page"`
+	FeatureKey string `form:"feature_key"`
+}
+
+type UsageQuery struct {
+	FeatureKey  string `form:"feature_key" binding:"required"`
+	MetricKey   string `form:"metric_key" binding:"required"`
+	LimitKey    string `form:"limit_key" binding:"required"`
+	PeriodStart string `form:"period_start" binding:"required"`
+	PeriodEnd   string `form:"period_end" binding:"required"`
+}
+
+type StartImpersonationRequest struct {
+	TargetUserID    string         `json:"target_user_id"`
+	Reason          string         `json:"reason" binding:"required"`
+	TicketReference string         `json:"ticket_reference"`
+	ExpiresAt       string         `json:"expires_at" binding:"required"`
+	Metadata        map[string]any `json:"metadata"`
+}
+
+type StopImpersonationRequest struct {
+	Reason string `json:"reason" binding:"required"`
 }

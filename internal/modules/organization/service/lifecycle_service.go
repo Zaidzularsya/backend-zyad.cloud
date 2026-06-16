@@ -12,10 +12,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	coreerrors "zyad.cloud/internal/core/errors"
+	notificationdomain "zyad.cloud/internal/core/notification/domain"
+	notificationpublisher "zyad.cloud/internal/core/notification/publisher"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/organization/model"
 	"zyad.cloud/internal/modules/organization/repository"
 )
+
+const organizationSecurityStatusChangedEvent = "organization.security_status_changed"
 
 type LifecycleStore interface {
 	CreateBundle(
@@ -31,6 +35,13 @@ type LifecycleStore interface {
 		reason string,
 		changedAt time.Time,
 	) (model.Organization, error)
+}
+
+type LifecycleNotificationPublisher interface {
+	Publish(
+		ctx context.Context,
+		event notificationpublisher.Event,
+	) (notificationdomain.OutboxEvent, error)
 }
 
 type CreateOrganizationInput struct {
@@ -55,8 +66,9 @@ type ChangeOrganizationStatusInput struct {
 }
 
 type LifecycleService struct {
-	store LifecycleStore
-	now   func() time.Time
+	store                 LifecycleStore
+	notificationPublisher LifecycleNotificationPublisher
+	now                   func() time.Time
 }
 
 func NewLifecycleService(store LifecycleStore) *LifecycleService {
@@ -64,6 +76,10 @@ func NewLifecycleService(store LifecycleStore) *LifecycleService {
 		store: store,
 		now:   time.Now,
 	}
+}
+
+func (s *LifecycleService) SetNotificationPublisher(publisher LifecycleNotificationPublisher) {
+	s.notificationPublisher = publisher
 }
 
 func (s *LifecycleService) Create(
@@ -162,7 +178,39 @@ func (s *LifecycleService) ChangeStatus(
 			err,
 		)
 	}
+	s.publishSecurityStatusChange(ctx, current, organization, input)
 	return organization, nil
+}
+
+func (s *LifecycleService) publishSecurityStatusChange(
+	ctx context.Context,
+	previous model.Organization,
+	organization model.Organization,
+	input ChangeOrganizationStatusInput,
+) {
+	if s.notificationPublisher == nil || !isSecurityIncidentStatus(input.Status) {
+		return
+	}
+	_, _ = s.notificationPublisher.Publish(ctx, notificationpublisher.Event{
+		Type:   organizationSecurityStatusChangedEvent,
+		UserID: strings.TrimSpace(input.ActorUserID),
+		Payload: map[string]any{
+			"organization_id":   organization.ID,
+			"organization_slug": organization.Slug,
+			"organization_name": organization.Name,
+			"from_status":       string(previous.Status),
+			"to_status":         string(input.Status),
+			"reason":            strings.TrimSpace(input.Reason),
+			"actor_user_id":     strings.TrimSpace(input.ActorUserID),
+			"changed_at":        organization.UpdatedAt.UTC().Format(time.RFC3339),
+		},
+	})
+}
+
+func isSecurityIncidentStatus(status coretenant.OrganizationStatus) bool {
+	return status == coretenant.OrganizationStatusSuspended ||
+		status == coretenant.OrganizationStatusDisabled ||
+		status == coretenant.OrganizationStatusArchived
 }
 
 func normalizeCreateOrganization(input CreateOrganizationInput) (CreateOrganizationInput, error) {
