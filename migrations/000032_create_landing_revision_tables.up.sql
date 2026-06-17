@@ -58,4 +58,4 @@ CREATE INDEX IF NOT EXISTS idx_landing_page_schedules_claim
 	WHERE status IN ('pending', 'failed');
 
 SELECT apply_organization_rls('landing_page_revisions'::regclass);
-SELECT apply_organization_rls('landing_page_schedules'::regclass);
+-- landing_page_schedules does not have RLS so background workers can claim schedules globally

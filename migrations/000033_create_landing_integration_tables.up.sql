@@ -65,4 +65,4 @@ CREATE INDEX IF NOT EXISTS idx_landing_lead_delivery_logs_claim
 	WHERE status = 'pending';
 
 SELECT apply_organization_rls('landing_lead_integrations'::regclass);
-SELECT apply_organization_rls('landing_lead_delivery_logs'::regclass);
+-- landing_lead_delivery_logs does not have RLS so background workers can claim logs globally

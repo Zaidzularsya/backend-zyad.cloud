@@ -392,7 +392,7 @@ Acceptance: asset list tenant-scoped dan delete menolak asset aktif tanpa explic
 
 ### LAND-REPO-009: Revision and Schedule Repository
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Penanganan concurrent publish schedule worker agar tidak double publish (row locks).
@@ -405,7 +405,7 @@ Acceptance: claim aman untuk concurrent worker dan revision immutable.
 
 ### LAND-REPO-010: Lead Integration Repository
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Pastikan secret kredensial selalu terenkripsi sebelum insert ke DB.
