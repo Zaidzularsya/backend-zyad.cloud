@@ -17,10 +17,33 @@ import (
 
 func TestSectionRepositoryLifecycleAndIsolationIntegration(t *testing.T) {
 	db := testutil.OpenTestDatabase(t)
-	pageRepo := repository.NewPageRepository(db)
-	sectionRepo := repository.NewSectionRepository(db)
 	ctx := context.Background()
 	tenants := testutil.NewTenantPair(t)
+
+	_, err := db.Exec(ctx, `
+		INSERT INTO users (id, name, email, status)
+		VALUES 
+		('11111111-1111-1111-1111-111111111111', 'Mock User A', 'mock_a@example.com', 'active'),
+		('22222222-2222-2222-2222-222222222222', 'Mock User B', 'mock_b@example.com', 'active')
+		ON CONFLICT DO NOTHING
+	`)
+	if err != nil {
+		t.Fatalf("failed to insert mock users: %v", err)
+	}
+
+	_, err = db.Exec(ctx, `
+		INSERT INTO organizations (id, type, slug, name, status)
+		VALUES 
+		($1, 'customer', 'organization-a', 'Organization A', 'active'),
+		($2, 'customer', 'organization-b', 'Organization B', 'active')
+		ON CONFLICT DO NOTHING
+	`, tenants.A.OrganizationID, tenants.B.OrganizationID)
+	if err != nil {
+		t.Fatalf("failed to insert mock organizations: %v", err)
+	}
+
+	pageRepo := repository.NewPageRepository(db)
+	sectionRepo := repository.NewSectionRepository(db)
 
 	slugA := strings.ReplaceAll("page-"+testutil.UniqueCode("secrepoa"), ".", "-")
 	slugB := strings.ReplaceAll("page-"+testutil.UniqueCode("secrepob"), ".", "-")

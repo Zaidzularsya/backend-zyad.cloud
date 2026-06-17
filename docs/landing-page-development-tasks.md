@@ -298,7 +298,7 @@ Acceptance: hanya published snapshot dan enabled section/form yang dikembalikan.
 
 ### LAND-REPO-001: Landing Page Repository
 
-Status: `in_progress`
+Status: `done`
 
 Risk / Follow-up:
 - Pastikan implementasi mematuhi `coretenant.Scope` untuk RLS isolasi data.
@@ -311,7 +311,7 @@ Acceptance: admin query tenant-scoped dan public query hanya published data.
 
 ### LAND-REPO-002: Section Repository
 
-Status: `in_progress`
+Status: `done`
 
 Risk / Follow-up:
 - Pastikan reorder dan duplikasi berjalan secara atomik (transactional).

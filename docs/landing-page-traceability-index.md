@@ -105,8 +105,8 @@ Status: `planned`, `in_progress`, `done`, `deferred`, atau `blocked`.
 | Domain models | LAND-BE-001 | done |
 | Admin DTO | LAND-BE-002 | done |
 | Public DTO | LAND-BE-003 | done |
-| Page repository | LAND-REPO-001 | in_progress |
-| Section repository | LAND-REPO-002 | in_progress |
+| Page repository | LAND-REPO-001 | done |
+| Section repository | LAND-REPO-002 | done |
 | Form repository | LAND-REPO-003 | planned |
 | Submission repository | LAND-REPO-004 | planned |
 | Version/domain/branding repository | LAND-REPO-005 | planned |
@@ -304,6 +304,7 @@ Nama file final mengikuti nomor migration berikutnya saat implementasi.
 | 2026-06-17 | Completed remaining Landing migrations and domain models | `migrations/000026..000033`, `internal/modules/landing/domain/*.go` | Created remaining tables and Go domain models for branding, analytics, reusable content, media, revisions, and integrations |
 | 2026-06-17 | Completed Landing Page request and response DTOs | `internal/modules/landing/dto/*.go` | Created admin and public DTO structs matching API contract and verified with unit tests |
 | 2026-06-17 | Completed development audit and task tracking setup | `docs/landing-page-development-tasks.md`, `docs/landing-page-traceability-index.md` | Audit task status for Phase 3-12 and added Risk/Follow-up notes for all remaining tasks |
+| 2026-06-17 | Completed Landing Page and Section Repositories | `internal/modules/landing/repository/page_repository.go`, `internal/modules/landing/repository/section_repository.go` | Successfully implemented CRUD operations with RLS `tenant.Scope` support, atomicity, and passed all integration tests. |
 
 ## Update Rules
 
