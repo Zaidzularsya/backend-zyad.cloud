@@ -121,6 +121,16 @@ Acceptance: up/down tersedia, slug unik per organization, dan section order kons
 
 ### LAND-DB-003: Form and Submission Tables
 
+Status: `done`
+
+Migration:
+- `migrations/000026_create_landing_form_tables.up.sql`
+- `migrations/000026_create_landing_form_tables.down.sql`
+
+Progress:
+- Created landing_forms, landing_form_fields, landing_submissions, and landing_submission_notes.
+- Applied unique indexes and RLS.
+
 - Migration `landing_forms`, `landing_form_fields`, `landing_submissions`, dan `landing_submission_notes`.
 - Index form, page, status, dan created time.
 
@@ -128,12 +138,32 @@ Acceptance: submission tetap dapat dibaca setelah schema form berubah dan snapsh
 
 ### LAND-DB-004: Publish Version and Redirect Tables
 
+Status: `done`
+
+Migration:
+- `migrations/000027_create_landing_version_tables.up.sql`
+- `migrations/000027_create_landing_version_tables.down.sql`
+
+Progress:
+- Created landing_page_versions and landing_slug_redirects.
+- Applied unique indexes and RLS.
+
 - Migration `landing_page_versions` dan `landing_slug_redirects`.
 - Simpan immutable published snapshot.
 
 Acceptance: version unik per page dan redirect tidak loop.
 
 ### LAND-DB-005: Domain and Branding Tables
+
+Status: `done`
+
+Migration:
+- `migrations/000028_create_landing_branding_tables.up.sql`
+- `migrations/000028_create_landing_branding_tables.down.sql`
+
+Progress:
+- Created landing_brandings and landing_domain_bindings.
+- Applied unique indexes and RLS.
 
 - Migration `landing_domain_bindings` dan `landing_brandings`.
 - Gunakan `organization_domains` dari multi-tenant sebagai source of truth host/verification.
@@ -143,12 +173,32 @@ Acceptance: branding resolve deterministik, binding hanya menerima verified doma
 
 ### LAND-DB-006: Analytics Tables
 
+Status: `done`
+
+Migration:
+- `migrations/000029_create_landing_analytics_tables.up.sql`
+- `migrations/000029_create_landing_analytics_tables.down.sql`
+
+Progress:
+- Created landing_analytics_events and landing_analytics_daily.
+- Applied unique indexes and RLS.
+
 - Migration `landing_analytics_events` dan `landing_analytics_daily`.
 - Index aggregation dan retention.
 
 Acceptance: event insert ringan dan daily aggregate idempotent.
 
 ### LAND-DB-007: Reusable Content and Navigation Tables
+
+Status: `done`
+
+Migration:
+- `migrations/000030_create_landing_reusable_tables.up.sql`
+- `migrations/000030_create_landing_reusable_tables.down.sql`
+
+Progress:
+- Created landing_section_templates, landing_ctas, landing_menus, and landing_menu_items.
+- Applied unique indexes and RLS.
 
 - Migration `landing_section_templates`, `landing_ctas`, `landing_menus`, dan `landing_menu_items`.
 - Tenant ownership, soft delete, sort order, dan nested menu constraint.
@@ -157,6 +207,16 @@ Acceptance: reusable content tidak lintas tenant, menu cycle ditolak, dan publis
 
 ### LAND-DB-008: Media Metadata Tables
 
+Status: `done`
+
+Migration:
+- `migrations/000031_create_landing_media_tables.up.sql`
+- `migrations/000031_create_landing_media_tables.down.sql`
+
+Progress:
+- Created landing_media_assets.
+- Applied unique indexes and RLS.
+
 - Migration `landing_media_assets` dan optional folder/tag metadata.
 - Simpan storage object reference, MIME, size, dimensions/duration, alt text, dan processing status.
 
@@ -164,12 +224,32 @@ Acceptance: binary tidak disimpan di database dan asset yang masih dipakai tidak
 
 ### LAND-DB-009: Revision and Schedule Tables
 
+Status: `done`
+
+Migration:
+- `migrations/000032_create_landing_revision_tables.up.sql`
+- `migrations/000032_create_landing_revision_tables.down.sql`
+
+Progress:
+- Created landing_page_revisions and landing_page_schedules.
+- Applied unique indexes and RLS.
+
 - Migration `landing_page_revisions`.
 - Tambahkan publish/unpublish schedule state dan processing lock/idempotency metadata.
 
 Acceptance: revision number unik, snapshot immutable, dan due schedule dapat diproses ulang dengan aman.
 
 ### LAND-DB-010: Lead Integration Tables
+
+Status: `done`
+
+Migration:
+- `migrations/000033_create_landing_integration_tables.up.sql`
+- `migrations/000033_create_landing_integration_tables.down.sql`
+
+Progress:
+- Created landing_lead_integrations and landing_lead_delivery_logs.
+- Applied unique indexes and RLS.
 
 - Migration `landing_lead_integrations` dan `landing_lead_delivery_logs`.
 - Simpan integration type, encrypted credential reference, event filter, retry, dan delivery status.
@@ -180,34 +260,48 @@ Acceptance: secret tidak plain text, delivery idempotent, dan retry query memili
 
 ### LAND-BE-001: Domain Models
 
-Status: `in_progress`
+Status: `done`
 
 - Page, section/template, CTA, form, field, submission, note, version/revision, media, menu, domain, branding/theme, lead integration, dan analytics.
 - Status/value object validation.
 
 Progress:
-
 - Model dan enum awal page, section, form, field, dan submission sudah dibuat.
-- Branding, domain, revision, media, menu, integration, dan analytics masih planned.
+- Model branding, domain, revision, media, menu, integration, dan analytics selesai dibuat.
 
 Acceptance: model selaras migration dan tidak bergantung pada Gin/SQL driver.
 
 ### LAND-BE-002: Admin DTO
 
+Status: `done`
+
 - Page/access, section/template, CTA, form, submission, media, branding/theme, menu, domain, revision/schedule, lead integration, publish, analytics.
 - Pagination/filter/sort.
+
+Progress:
+- Created request and response structures matching the admin API parameters and filters in request.go and response.go.
 
 Acceptance: request/response terpisah dan internal path/raw IP/secret tidak diekspos.
 
 ### LAND-BE-003: Public DTO
 
+Status: `done`
+
 - Published page, access challenge, navigation, media URL, resolved branding, public form schema, submission, dan analytics event.
+
+Progress:
+- Created public query models and envelopes in request.go and response.go.
 
 Acceptance: hanya published snapshot dan enabled section/form yang dikembalikan.
 
 ## Phase 3 - Repository
 
 ### LAND-REPO-001: Landing Page Repository
+
+Status: `in_progress`
+
+Risk / Follow-up:
+- Pastikan implementasi mematuhi `coretenant.Scope` untuk RLS isolasi data.
 
 - CRUD/list/detail/soft delete/restore.
 - Resolve organization/slug dan published host.
@@ -217,17 +311,32 @@ Acceptance: admin query tenant-scoped dan public query hanya published data.
 
 ### LAND-REPO-002: Section Repository
 
+Status: `in_progress`
+
+Risk / Follow-up:
+- Pastikan reorder dan duplikasi berjalan secara atomik (transactional).
+
 - CRUD, duplicate, dan bulk reorder atomik.
 
 Acceptance: tidak ada duplicate order dan ownership page tervalidasi.
 
 ### LAND-REPO-003: Form Repository
 
+Status: `planned`
+
+Risk / Follow-up:
+- Validasi integritas schema JSON form dan konsistensi tipe fields.
+
 - CRUD form/fields, reorder, dan active public lookup.
 
 Acceptance: schema konsisten dan public lookup menolak unpublished page.
 
 ### LAND-REPO-004: Submission Repository
+
+Status: `planned`
+
+Risk / Follow-up:
+- Pastikan export ke CSV mematuhi batasan memory (streaming cursor).
 
 - Create, list/detail/status/note/delete.
 - Idempotency lookup dan export cursor.
@@ -236,11 +345,21 @@ Acceptance: create transaction aman dan filter status/date/page/form tersedia.
 
 ### LAND-REPO-005: Version, Domain, and Branding Repository
 
+Status: `planned`
+
+Risk / Follow-up:
+- Domain binding harus dicek silang dengan tabel verified domains organization (modul multi-tenant).
+
 - Version, slug redirect, verified organization domain binding, branding default/override.
 
 Acceptance: published version immutable dan domain binding tidak dapat lintas organization.
 
 ### LAND-REPO-006: Analytics Repository
+
+Status: `planned`
+
+Risk / Follow-up:
+- Pertimbangkan optimasi bulk insert atau async insertion untuk log events.
 
 - Insert event, aggregate daily, summary, dan time series.
 
@@ -248,12 +367,22 @@ Acceptance: aggregate idempotent dan dashboard tenant-scoped.
 
 ### LAND-REPO-007: Reusable Content and Navigation Repository
 
+Status: `planned`
+
+Risk / Follow-up:
+- Pencegahan infinite loop (cycle) saat resolusi nested menu hirarkis.
+
 - CRUD section template, CTA, menu, dan menu item.
 - Resolve referenced resources saat membuat published snapshot.
 
 Acceptance: nested menu tidak cycle, ordering atomik, dan tenant ownership selalu diperiksa.
 
 ### LAND-REPO-008: Media Repository
+
+Status: `planned`
+
+Risk / Follow-up:
+- Pastikan URL asset internal / private tidak mudah ditebak public.
 
 - Create/list/detail/update metadata.
 - Usage lookup dan soft delete.
@@ -263,6 +392,11 @@ Acceptance: asset list tenant-scoped dan delete menolak asset aktif tanpa explic
 
 ### LAND-REPO-009: Revision and Schedule Repository
 
+Status: `planned`
+
+Risk / Follow-up:
+- Penanganan concurrent publish schedule worker agar tidak double publish (row locks).
+
 - Create/list/get/compare source revision.
 - Claim due publish/unpublish schedule.
 - Mark schedule processed/failed.
@@ -270,6 +404,11 @@ Acceptance: asset list tenant-scoped dan delete menolak asset aktif tanpa explic
 Acceptance: claim aman untuk concurrent worker dan revision immutable.
 
 ### LAND-REPO-010: Lead Integration Repository
+
+Status: `planned`
+
+Risk / Follow-up:
+- Pastikan secret kredensial selalu terenkripsi sebelum insert ke DB.
 
 - CRUD integration config.
 - Create/claim/update delivery log.
@@ -281,12 +420,22 @@ Acceptance: credential hanya melalui encrypted reference dan claim delivery conc
 
 ### LAND-BE-010: Landing Page CRUD Service
 
+Status: `planned`
+
+Risk / Follow-up:
+- Pencegahan slug conflict secara atomik dengan database unique index handling.
+
 - Create/list/detail/update/duplicate/delete/restore/archive.
 - Slug conflict dan audit metadata.
 
 Acceptance: duplicate menjadi draft/slug baru dan draft edit tidak mengubah public snapshot.
 
 ### LAND-BE-011: Section Service
+
+Status: `planned`
+
+Risk / Follow-up:
+- Sanitasi konten rich text untuk mencegah ancaman XSS.
 
 - Section registry dan content/style validation.
 - CRUD, duplicate, reorder, toggle.
@@ -296,12 +445,22 @@ Acceptance: invalid schema menghasilkan field errors dan reorder atomik.
 
 ### LAND-BE-012: SEO Service
 
+Status: `planned`
+
+Risk / Follow-up:
+- Sediakan intelligent fallback metadata jika form disubmit kosong.
+
 - Validate meta title/description/keywords, canonical URL, robots, social metadata, dan JSON-LD.
 - Generate fallback metadata.
 
 Acceptance: invalid URL/schema ditolak dan effective SEO deterministik.
 
 ### LAND-BE-013: Page Visibility and Access Service
+
+Status: `planned`
+
+Risk / Follow-up:
+- Rate limiting dan brute-force protection pada password protected pages.
 
 - Visibility `public`, `private`, dan `password_protected`.
 - Hash/replace/remove page password.
@@ -312,6 +471,11 @@ Acceptance: password plain tidak disimpan/dikembalikan, private page tidak dapat
 
 ### LAND-BE-014: CTA Service
 
+Status: `planned`
+
+Risk / Follow-up:
+- Konsistensi target link CTA agar tidak menghasilkan broken link jika halaman target berubah/dihapus.
+
 - Reusable CTA CRUD dan inline CTA validation.
 - Type contact form, WhatsApp, internal/external link, dan document download.
 - Target dan stable tracking key.
@@ -320,12 +484,22 @@ Acceptance: referenced form/page/asset satu tenant, URL aman, dan click dapat di
 
 ### LAND-BE-015: Reusable Section Template Service
 
+Status: `planned`
+
+Risk / Follow-up:
+- Mekanisme update policy (copy-on-use) jika base template berubah agar tidak otomatis memutus layout page existing.
+
 - Save section as template, list/detail/update/delete, dan instantiate ke page.
 - Copy-on-use untuk MVP.
 
 Acceptance: perubahan template tidak mengubah existing page dan schema divalidasi sesuai section type.
 
 ### LAND-BE-016: Navigation Service
+
+Status: `planned`
+
+Risk / Follow-up:
+- Validasi menu depth dan child assignment dengan validasi DFS/tree aman.
 
 - Header/footer/sidebar menu CRUD.
 - Nested item, reorder, toggle, internal/external link, anchor, dan button.
@@ -336,6 +510,11 @@ Acceptance: cycle/depth invalid ditolak dan broken internal reference masuk publ
 
 ### LAND-BE-020: Branding Service
 
+Status: `planned`
+
+Risk / Follow-up:
+- Sediakan proteksi override nilai property yang membahayakan (misal inline script di property).
+
 - Get/update organization default.
 - Get/update/remove page override.
 - Merge effective branding.
@@ -345,12 +524,22 @@ Acceptance: tidak menerima script, override bersifat partial, dan update diaudit
 
 ### LAND-BE-021: Branding Asset Integration
 
+Status: `planned`
+
+Risk / Follow-up:
+- Limit file size upload untuk aset untuk mencegah malicious payload overstorage.
+
 - Integrasi logo/favicon/social image dengan `internal/platform/storage`.
 - Validate MIME, size, ownership, dan alt text.
 
 Acceptance: public URL sesuai dan internal path tidak diekspos.
 
 ### LAND-BE-022: Theme and Layout Service
+
+Status: `planned`
+
+Risk / Follow-up:
+- Implementasi fallback token saat tenant menggunakan fitur tanpa men-setup theme custom.
 
 - Spacing scale, background style, layout width, header/footer style.
 - Mode light/dark/system dan effective token resolution.
@@ -359,6 +548,11 @@ Acceptance: public URL sesuai dan internal path tidak diekspos.
 Acceptance: token tervalidasi, contrast warning tersedia, dan arbitrary script tidak dapat diinjeksi.
 
 ### LAND-BE-023: Landing Media Service
+
+Status: `planned`
+
+Risk / Follow-up:
+- Pastikan isolasi folder resource storage antar tenant terjaga.
 
 - Upload/list/update/reuse/delete image, video, dan PDF/document.
 - Folder/tag metadata, alt text, caption, focal point.
@@ -370,12 +564,22 @@ Acceptance: MIME sniffing, size limit, ownership, random object key, usage guard
 
 ### LAND-BE-030: Form Builder Service
 
+Status: `planned`
+
+Risk / Follow-up:
+- Validasi logic untuk nested form conditional constraints jika ada, dan min/max array boundaries.
+
 - Form/field CRUD dan reorder.
 - Stored-schema validation, consent, dan success behavior.
 
 Acceptance: duplicate field key ditolak, redirect URL aman, dan file field memiliki MIME/size/count policy.
 
 ### LAND-BE-031: Public Submission Service
+
+Status: `planned`
+
+Risk / Follow-up:
+- Penanganan spam dengan mitigasi honeypot, CAPTCHA hooks, dan IP rate limiting.
 
 - Resolve published form dan validate payload.
 - Normalize email/phone.
@@ -388,11 +592,21 @@ Acceptance: invalid payload tidak disimpan, notification failure tidak menghilan
 
 ### LAND-BE-032: Submission Admin Service
 
+Status: `planned`
+
+Risk / Follow-up:
+- Perlu diwaspadai CSV Injection (formula injection: =+-@) pada form export.
+
 - List/detail/status/note/delete/export.
 
 Acceptance: CSV mencegah formula injection dan export besar memakai streaming/cursor.
 
 ### LAND-BE-033: Lead Notification and Delivery Service
+
+Status: `planned`
+
+Risk / Follow-up:
+- Perencanaan mekanisme outbox delivery idempotency jika 3rd party webhook timeout.
 
 - Kirim email/WhatsApp/optional Discord melalui notification outbox.
 - Generic signed webhook untuk N8N/automation.
@@ -405,6 +619,11 @@ Acceptance: submission commit lebih dulu, delivery failure tidak rollback submis
 
 ### LAND-BE-040: Publish Validation
 
+Status: `planned`
+
+Risk / Follow-up:
+- Checklist publish harus divalidasi dengan constraint yang sangat strict agar menghindari error runtime.
+
 - Validasi page, branding, SEO, section, form, dan domain.
 - Return structured checklist.
 
@@ -412,17 +631,32 @@ Acceptance: invalid page tidak publish dan validation tidak mengubah state.
 
 ### LAND-BE-041: Publish Service
 
+Status: `planned`
+
+Risk / Follow-up:
+- Sediakan row locks dan transaction isolations untuk menghindari partial snapshot publish.
+
 - Publish immutable snapshot, unpublish, restore version to draft, cache invalidation, event/audit.
 
 Acceptance: transaction/row lock dipakai dan public reader tidak melihat partial publish.
 
 ### LAND-BE-042: Preview
 
+Status: `planned`
+
+Risk / Follow-up:
+- Gunakan expiring secure token berdurasi singkat untuk authenticated preview page public.
+
 - Authenticated preview dan optional expiring hashed preview token.
 
 Acceptance: preview noindex; token scoped, expiring, revocable.
 
 ### LAND-BE-043: Public Page Resolver
+
+Status: `planned`
+
+Risk / Follow-up:
+- Penanganan caching strategies (ETag) untuk heavy traffic resolvers tanpa bocor cross-tenant.
 
 - Resolve custom domain, platform subdomain, atau fallback slug.
 - Canonical/old slug redirect.
@@ -432,6 +666,11 @@ Acceptance: draft tidak bocor dan disabled resource ditangani konsisten.
 
 ### LAND-BE-044: Draft Autosave and Revision Service
 
+Status: `planned`
+
+Risk / Follow-up:
+- Kebijakan cleanup version lama autosave untuk optimasi disk/DB bloat.
+
 - Autosave draft dengan optimistic concurrency.
 - Buat revision snapshot berdasarkan debounce/meaningful change.
 - List revision, compare dua revision, dan restore revision menjadi draft.
@@ -440,6 +679,11 @@ Acceptance: draft tidak bocor dan disabled resource ditangani konsisten.
 Acceptance: stale editor menerima conflict, autosave tidak membuat revision setiap keystroke, dan restore tidak langsung publish.
 
 ### LAND-BE-045: Scheduled Publishing Service
+
+Status: `planned`
+
+Risk / Follow-up:
+- Penanganan lokalisasi timezone organisasi saat cron schedule berjalan di backend UTC.
 
 - Schedule/cancel publish dan unpublish berdasarkan timezone organization.
 - Worker claim due schedule dan memanggil publish service idempotently.
@@ -451,6 +695,11 @@ Acceptance: concurrent worker tidak double publish, invalid draft gagal dengan r
 
 ### LAND-BE-050: Domain Management
 
+Status: `planned`
+
+Risk / Follow-up:
+- Proteksi domain hijack via re-verification ke module origin.
+
 - List verified organization domains yang tersedia.
 - Bind/unbind domain ke Landing Page.
 - Set primary/canonical page binding.
@@ -459,6 +708,11 @@ Acceptance: concurrent worker tidak double publish, invalid draft gagal dengan r
 Acceptance: hanya verified domain organization aktif yang dapat di-bind dan duplicate active binding ditolak.
 
 ### LAND-BE-051: SSL Provisioning Integration
+
+Status: `planned`
+
+Risk / Follow-up:
+- Sistem invalidasi cache jika status SSL tiba-tiba revoke/expired.
 
 - Consume SSL/domain provisioning status dari multi-tenant organization domain capability.
 - Invalidate public Landing cache saat status host berubah.
@@ -469,6 +723,11 @@ Acceptance: Landing tidak mengimplementasikan provider SSL kedua dan local devel
 
 ### LAND-BE-060: Public Analytics Event
 
+Status: `planned`
+
+Risk / Follow-up:
+- Data proxy mask untuk GDPR compliance atau private ID.
+
 - Track allowlisted event.
 - Validate page/section/form key.
 - Bot/rate-limit hooks dan privacy-preserving visitor key.
@@ -476,6 +735,11 @@ Acceptance: Landing tidak mengimplementasikan provider SSL kedua dan local devel
 Acceptance: arbitrary event/property dan PII ditolak.
 
 ### LAND-BE-061: Analytics Aggregate
+
+Status: `planned`
+
+Risk / Follow-up:
+- Pastikan re-aggregate data cron secara idempotent berjalan tidak lambat (bulk indexing).
 
 - Daily aggregate, summary, time series, traffic source, device/browser, top-performing page, lead attribution, dan conversion funnel.
 
@@ -485,20 +749,40 @@ Acceptance: re-run tidak menggandakan count dan timezone organization dipakai.
 
 ### LAND-API-001: Admin Page and Section API
 
+Status: `planned`
+
+Risk / Follow-up:
+- Middleware security guard (RBAC/permissions), data mask on response, dan request payload validations untuk setiap endpoint.
+
 - Page, section, SEO, preview, publish, version endpoints.
 - Permission middleware dan OpenAPI.
 
 ### LAND-API-002: Admin Form and Submission API
+
+Status: `planned`
+
+Risk / Follow-up:
+- Middleware security guard (RBAC/permissions), data mask on response, dan request payload validations untuk setiap endpoint.
 
 - Form/field/submission/note/export endpoints.
 - Pagination, filter, dan permission terpisah.
 
 ### LAND-API-003: Branding, Domain, and Analytics API
 
+Status: `planned`
+
+Risk / Follow-up:
+- Middleware security guard (RBAC/permissions), data mask on response, dan request payload validations untuk setiap endpoint.
+
 - Branding, theme, domain, analytics endpoints.
 - Audit mutation dan response stabil untuk Vue.
 
 ### LAND-API-004: Public API
+
+Status: `planned`
+
+Risk / Follow-up:
+- Middleware security guard (RBAC/permissions), data mask on response, dan request payload validations untuk setiap endpoint.
 
 - Public resolve/access challenge, submit/file upload, analytics event.
 - Temporary scoped upload untuk field form bertipe file.
@@ -508,6 +792,11 @@ Acceptance: tidak memerlukan admin auth dan tidak menerima tenant ID bebas.
 
 ### LAND-API-005: CTA, Template, Media, and Navigation API
 
+Status: `planned`
+
+Risk / Follow-up:
+- Middleware security guard (RBAC/permissions), data mask on response, dan request payload validations untuk setiap endpoint.
+
 - Reusable CTA dan section template endpoints.
 - Landing media upload/list/update/delete endpoints.
 - Menu dan menu item CRUD/reorder endpoints.
@@ -515,6 +804,11 @@ Acceptance: tidak memerlukan admin auth dan tidak menerima tenant ID bebas.
 Acceptance: contract Vue memiliki schema stabil dan permission granular.
 
 ### LAND-API-006: Revision, Schedule, and Lead Integration API
+
+Status: `planned`
+
+Risk / Follow-up:
+- Middleware security guard (RBAC/permissions), data mask on response, dan request payload validations untuk setiap endpoint.
 
 - Revision list/detail/compare/restore.
 - Schedule/cancel publish/unpublish.
@@ -526,16 +820,31 @@ Acceptance: secret di-mask, mutation diaudit, dan endpoint test tidak dapat dipa
 
 ### LAND-SEED-001: Landing Permissions
 
+Status: `planned`
+
+Risk / Follow-up:
+- Setiap instruksi seed harus 100% idempotent untuk di-run berkali-kali di production update tanpa error.
+
 - Seed permission catalog dan assign ke `super_admin`.
 
 Acceptance: idempotent dan rollback aman.
 
 ### LAND-SEED-002: Default Presets
 
+Status: `planned`
+
+Risk / Follow-up:
+- Setiap instruksi seed harus 100% idempotent untuk di-run berkali-kali di production update tanpa error.
+
 - Seed Hero, About, Feature, CTA, Contact Form, section template, dan branding preset yang benar-benar diperlukan.
 - Hindari demo tenant pada production migration.
 
 ### LAND-SEED-003: Default Role Permission Matrix
+
+Status: `planned`
+
+Risk / Follow-up:
+- Setiap instruksi seed harus 100% idempotent untuk di-run berkali-kali di production update tanpa error.
 
 - Dokumentasikan dan bila sesuai seed assignment untuk Marketing Manager, Content Editor, Sales, dan Viewer.
 - Jangan membuat duplicate system role jika role ekuivalen sudah tersedia.
@@ -546,11 +855,21 @@ Acceptance: Content Editor tidak dapat publish, Sales hanya mengakses submission
 
 ### LAND-TEST-001: Unit Tests
 
+Status: `planned`
+
+Risk / Follow-up:
+- Coverage line test harus bisa merepresentasikan seluruh edge-cases business logic module.
+
 - Slug/domain, tenant guard, section/form validation, branding merge.
 - Visibility/password, CTA/reference, menu cycle, media validation.
 - Publish/revision/schedule, submission idempotency, lead delivery, analytics validation.
 
 ### LAND-TEST-002: Repository Integration Tests
+
+Status: `planned`
+
+Risk / Follow-up:
+- Coverage line test harus bisa merepresentasikan seluruh edge-cases business logic module.
 
 - CRUD/tenant isolation, publish transaction, unique slug/domain.
 - Reusable content, navigation, media usage, revision/schedule claim.
@@ -558,9 +877,19 @@ Acceptance: Content Editor tidak dapat publish, Sales hanya mengakses submission
 
 ### LAND-TEST-003: Handler and Public Flow Tests
 
+Status: `planned`
+
+Risk / Follow-up:
+- Coverage line test harus bisa merepresentasikan seluruh edge-cases business logic module.
+
 - Permission, validation, resolve/access, submit/upload, preview, schedule, integration secret masking, error envelope.
 
 ### LAND-DOC-001: Documentation Sync
+
+Status: `planned`
+
+Risk / Follow-up:
+- Mencegah desync contract OpenAPI dan frontend implementation jika ada perubahan.
 
 - Update traceability, API contract, OpenAPI, migration guide, dan README.
 
@@ -579,28 +908,63 @@ Task berikut dicatat agar requirement source tidak hilang, tetapi status awalnya
 
 ### LAND-ADV-001: Visual Page Builder
 
+Status: `planned`
+
+Risk / Follow-up:
+- Task ini ditunda dulu untuk next phase roadmap (Deferred).
+
 - Drag-and-drop visual canvas, responsive preview, undo/redo, dan component inspector.
 
 ### LAND-ADV-002: Template Marketplace
+
+Status: `planned`
+
+Risk / Follow-up:
+- Task ini ditunda dulu untuk next phase roadmap (Deferred).
 
 - Template catalog, import/export, version compatibility, dan tenant-safe install.
 
 ### LAND-ADV-003: Experiment and Personalization
 
+Status: `planned`
+
+Risk / Follow-up:
+- Task ini ditunda dulu untuk next phase roadmap (Deferred).
+
 - A/B testing, audience rule, experiment allocation, dan conversion attribution.
 
 ### LAND-ADV-004: Multi-Language Page
+
+Status: `planned`
+
+Risk / Follow-up:
+- Task ini ditunda dulu untuk next phase roadmap (Deferred).
 
 - Locale variants, translation workflow, hreflang, dan locale fallback.
 
 ### LAND-ADV-005: AI Content Assistance
 
+Status: `planned`
+
+Risk / Follow-up:
+- Task ini ditunda dulu untuk next phase roadmap (Deferred).
+
 - AI copywriting dan page generation dengan approval, audit, quota, dan safe output.
 
 ### LAND-ADV-006: Advanced Delivery
 
+Status: `planned`
+
+Risk / Follow-up:
+- Task ini ditunda dulu untuk next phase roadmap (Deferred).
+
 - Static page generation, edge cache/CDN, heatmap integration, dan data warehouse export.
 
 ### LAND-ADV-007: Custom CSS
+
+Status: `planned`
+
+Risk / Follow-up:
+- Task ini ditunda dulu untuk next phase roadmap (Deferred).
 
 - Restricted custom CSS editor, sanitization, CSP compatibility, preview, dan permission khusus.

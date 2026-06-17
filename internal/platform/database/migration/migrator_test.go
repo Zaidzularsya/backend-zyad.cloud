@@ -22,6 +22,15 @@ func TestLoadIncludesMultiTenantFoundationMigrations(t *testing.T) {
 		"000020": "seed_platform_organization_permissions",
 		"000021": "seed_organization_self_permissions",
 		"000022": "seed_organization_domain_permission",
+		"000025": "create_landing_page_core_tables",
+		"000026": "create_landing_form_tables",
+		"000027": "create_landing_version_tables",
+		"000028": "create_landing_branding_tables",
+		"000029": "create_landing_analytics_tables",
+		"000030": "create_landing_reusable_tables",
+		"000031": "create_landing_media_tables",
+		"000032": "create_landing_revision_tables",
+		"000033": "create_landing_integration_tables",
 	}
 	for _, migration := range migrations {
 		if name, ok := expected[migration.Version]; ok && name == migration.Name {
@@ -30,6 +39,7 @@ func TestLoadIncludesMultiTenantFoundationMigrations(t *testing.T) {
 	}
 
 	if len(expected) > 0 {
-		t.Fatalf("multi-tenant migrations were not discovered: %#v", expected)
+		t.Fatalf("migrations were not discovered: %#v", expected)
 	}
 }
+

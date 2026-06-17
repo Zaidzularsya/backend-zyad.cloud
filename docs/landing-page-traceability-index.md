@@ -102,11 +102,11 @@ Status: `planned`, `in_progress`, `done`, `deferred`, atau `blocked`.
 
 | Layer/Concern | Task ID | Status |
 | --- | --- | --- |
-| Domain models | LAND-BE-001 | in_progress |
-| Admin DTO | LAND-BE-002 | planned |
-| Public DTO | LAND-BE-003 | planned |
-| Page repository | LAND-REPO-001 | planned |
-| Section repository | LAND-REPO-002 | planned |
+| Domain models | LAND-BE-001 | done |
+| Admin DTO | LAND-BE-002 | done |
+| Public DTO | LAND-BE-003 | done |
+| Page repository | LAND-REPO-001 | in_progress |
+| Section repository | LAND-REPO-002 | in_progress |
 | Form repository | LAND-REPO-003 | planned |
 | Submission repository | LAND-REPO-004 | planned |
 | Version/domain/branding repository | LAND-REPO-005 | planned |
@@ -220,14 +220,14 @@ Nama file final mengikuti nomor migration berikutnya saat implementasi.
 | --- | --- | --- |
 | Audit/cleanup legacy landing schema | LAND-DB-001 | done |
 | `000025_create_landing_page_core_tables` | LAND-DB-002 | done |
-| Create forms and submissions | LAND-DB-003 | planned |
-| Create versions and redirects | LAND-DB-004 | planned |
-| Create domain bindings and brandings | LAND-DB-005 | planned |
-| Create analytics tables | LAND-DB-006 | planned |
-| Create reusable content and navigation | LAND-DB-007 | planned |
-| Create media metadata | LAND-DB-008 | planned |
-| Create revisions and schedule state | LAND-DB-009 | planned |
-| Create lead integrations and delivery logs | LAND-DB-010 | planned |
+| `000026_create_landing_form_tables` | LAND-DB-003 | done |
+| `000027_create_landing_version_tables` | LAND-DB-004 | done |
+| `000028_create_landing_branding_tables` | LAND-DB-005 | done |
+| `000029_create_landing_analytics_tables` | LAND-DB-006 | done |
+| `000030_create_landing_reusable_tables` | LAND-DB-007 | done |
+| `000031_create_landing_media_tables` | LAND-DB-008 | done |
+| `000032_create_landing_revision_tables` | LAND-DB-009 | done |
+| `000033_create_landing_integration_tables` | LAND-DB-010 | done |
 | Seed permissions | LAND-SEED-001 | planned |
 | Seed optional presets | LAND-SEED-002 | planned |
 
@@ -301,6 +301,9 @@ Nama file final mengikuti nomor migration berikutnya saat implementasi.
 | 2026-06-16 | LAND-0003 dependency completed | `internal/modules/landing/service` | Landing admin/public scope contract now requires verified context, permission, and `landing.enabled` entitlement before repository access |
 | 2026-06-17 | Completed Landing schema audit | `docs/landing-page-schema-audit.md` | Active dev/test schema has no legacy `landing_pages` or `brands`; archived baseline is incompatible with target tenant ownership, so new Landing tables can start at `000025` without cleanup |
 | 2026-06-17 | Added Landing page core tables | `migrations/000025_create_landing_page_core_tables.*.sql` | Created tenant-owned pages and sections with organization-scoped uniqueness, soft delete, JSON object constraints, and RLS policies |
+| 2026-06-17 | Completed remaining Landing migrations and domain models | `migrations/000026..000033`, `internal/modules/landing/domain/*.go` | Created remaining tables and Go domain models for branding, analytics, reusable content, media, revisions, and integrations |
+| 2026-06-17 | Completed Landing Page request and response DTOs | `internal/modules/landing/dto/*.go` | Created admin and public DTO structs matching API contract and verified with unit tests |
+| 2026-06-17 | Completed development audit and task tracking setup | `docs/landing-page-development-tasks.md`, `docs/landing-page-traceability-index.md` | Audit task status for Phase 3-12 and added Risk/Follow-up notes for all remaining tasks |
 
 ## Update Rules
 
