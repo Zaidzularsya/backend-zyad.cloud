@@ -37,7 +37,7 @@ Status:
 | Entitlement and usage registry | `organization_entitlements`, `organization_usage_counters` in migration `000016` | repository and evaluation/quota service ready |
 | Session organization context | `sessions` columns and `organization_impersonation_sessions` in migration `000017` | authenticated resolver and switch ready; impersonation API pending |
 | Tenant audit metadata | `audit_logs` columns and validation in migration `000018` | schema and organization lifecycle/membership/switch audit writers ready |
-| RLS | Migration `000019` helpers and role contract | foundation done; Landing production policy rollout pending |
+| RLS | Migration `000019` helpers and role contract | foundation done; Landing core page/section tables adopted RLS in `000025`; repository rollout pending |
 | Dedicated database routing | None | deferred target |
 
 ## Requirement Traceability
@@ -53,7 +53,7 @@ Status:
 | Public host resolution | MT-CORE-003 | Platform host/domain registry/trusted proxy | done |
 | Worker tenant context | MT-CORE-004 | Notification outbox organization ID/internal identity | done |
 | Fail-closed middleware | MT-CORE-005 | Active/setup/platform/customer guards and public module chain | done |
-| Shared-schema isolation | MT-DATA-001..004 | Repository scope and RLS foundation done; production policy rollout and isolation suite in progress |
+| Shared-schema isolation | MT-DATA-001..004 | Repository scope and RLS foundation done; Landing core table policy rollout started in `000025`; repository isolation suite adoption in progress |
 | Dedicated database tenancy | MT-ENT-001..005 | Placement router | deferred |
 | Organization domain | MT-DB-003, MT-API-003 | `organization_domains`, `reserved_subdomains` | schema, verification repository, and management API done |
 | Feature entitlement | MT-DB-004, MT-BE-012, MT-API-004 | `organization_entitlements` | schema, service, effective feature API, and platform override API done |
@@ -66,7 +66,7 @@ Status:
 | Tenant audit/logging | MT-DB-006, MT-INFRA-004 | Audit/log fields | schema, organization audit writers, and structured logger helpers done; audit read API planned |
 | Tenant metrics/health | MT-INFRA-005 | Bounded metrics and health diagnostics | done |
 | Platform marketing Landing Page | MT-PLAT-002, MT-PLAT-003 | Platform host/page | platform host/domain foundation done; Landing integration planned |
-| Customer Landing isolation | MT-PLAT-003 | Landing repository | planned |
+| Customer Landing isolation | MT-DATA-001..004, MT-PLAT-003 | Landing page/section RLS tables and access policy done; concrete Landing repositories pending |
 | Header and host security | MT-SEC-001 | Tenant selector and public host middleware | done |
 | Suspension/incident control | MT-SEC-003 | Lifecycle/session/jobs/security event | done |
 | Retention/deletion | MT-OPS-001 | Purge workflow | planned |
@@ -213,7 +213,7 @@ Final migration number is assigned during implementation.
 | --- | --- | --- |
 | `LAND-0003` typed organization context | MT-CORE-001..005 | typed context, authenticated/public resolvers, and fail-closed guards done |
 | Platform marketing Landing Page | MT-PLAT-001..003 | platform organization, platform domain, and Landing scope contract done |
-| Customer page isolation | MT-DATA-001..004, MT-PLAT-003 | repository scope and Landing access policy done; concrete Landing repositories pending |
+| Customer page isolation | MT-DATA-001..004, MT-PLAT-003 | repository scope, Landing access policy, and page/section RLS tables done; concrete Landing repositories pending |
 | Public custom domain resolution | MT-CORE-003, MT-API-003 | runtime resolver and domain management API done |
 | Landing feature/limit | MT-BE-012, MT-API-004 | done |
 | Tenant media/storage | MT-INFRA-002 | object prefix and ownership contract done; Landing media metadata pending |
@@ -284,6 +284,7 @@ Final migration number is assigned during implementation.
 | 2026-06-16 | Completed header and host security hardening | `internal/core/middleware/public_tenant.go`, `internal/modules/organization/service/public_host_resolver.go` | Added trusted forwarded-host validation, public selector rejection coverage, and cache-poisoning host normalization tests |
 | 2026-06-16 | Completed cross-tenant security test coverage | `internal/modules/organization/handler`, `internal/platform/storage`, `internal/core/event` | Added explicit platform permission denial coverage, storage asset metadata isolation, event payload tenant override protection, and documented existing forged-header, stale-membership, IDOR, bulk/export isolation coverage |
 | 2026-06-16 | Completed organization suspension and incident control | `internal/modules/organization/service`, `internal/app` | Added best-effort platform security notification event for incident statuses and documented existing transactional session revocation, audit, public serving, and worker stop controls |
+| 2026-06-17 | Started Landing production RLS rollout | `migrations/000025_create_landing_page_core_tables.*.sql` | Landing pages and sections now have `organization_id NOT NULL`, tenant uniqueness, and forced RLS; repository isolation adoption remains under Landing repository tasks |
 
 ## Update Rules
 

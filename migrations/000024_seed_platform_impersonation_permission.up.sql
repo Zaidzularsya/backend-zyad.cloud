@@ -53,7 +53,7 @@ INSERT INTO role_permissions (
 SELECT
 	super_admin_role.id,
 	upserted_permission.id,
-	'global',
+	'all',
 	now()
 FROM super_admin_role
 CROSS JOIN upserted_permission

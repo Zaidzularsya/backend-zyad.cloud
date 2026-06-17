@@ -59,7 +59,8 @@ Status: `planned`, `in_progress`, `done`, `deferred`, atau `blocked`.
 | Canonical module `landing` | LAND-0001 | Code path | done |
 | Module skeleton | LAND-0002 | Code path | done |
 | Tenant isolation | LAND-0003, MT-CORE-001..005, MT-DATA-001..004, MT-PLAT-001..003 | Context/resolvers/guards, tenant transaction, repository scope, Landing access policy, RLS foundation, and reusable isolation suite done; concrete Landing repositories pending |
-| Existing schema audit | LAND-DB-001 | Legacy `landing_pages`, `brands` | planned |
+| Existing schema audit | LAND-DB-001 | Legacy `landing_pages`, `brands` | done |
+| Landing core tables | LAND-DB-002 | `landing_pages`, `landing_page_sections` | done |
 | Page CRUD/duplicate/restore | LAND-BE-010, LAND-API-001 | `/admin/landing-pages` | planned |
 | Section builder/reorder | LAND-BE-011, LAND-API-001 | `landing_page_sections` | planned |
 | Page visibility/password | LAND-BE-013, LAND-API-004 | Page access endpoints | planned |
@@ -217,8 +218,8 @@ Nama file final mengikuti nomor migration berikutnya saat implementasi.
 
 | Logical Migration | Task | Status |
 | --- | --- | --- |
-| Audit/cleanup legacy landing schema | LAND-DB-001 | planned |
-| Create pages and sections | LAND-DB-002 | planned |
+| Audit/cleanup legacy landing schema | LAND-DB-001 | done |
+| `000025_create_landing_page_core_tables` | LAND-DB-002 | done |
 | Create forms and submissions | LAND-DB-003 | planned |
 | Create versions and redirects | LAND-DB-004 | planned |
 | Create domain bindings and brandings | LAND-DB-005 | planned |
@@ -298,6 +299,8 @@ Nama file final mengikuti nomor migration berikutnya saat implementasi.
 | 2026-06-14 | Multi-tenant domain repository dependency available | `internal/modules/organization/repository` | Active verified host lookup and safe reassignment are ready; Landing page binding and HTTP host resolver remain planned |
 | 2026-06-14 | Multi-tenant entitlement repository dependency available | `internal/modules/organization/repository` | Effective source precedence and atomic usage counters are ready; Landing entitlement policy and route guards remain planned |
 | 2026-06-16 | LAND-0003 dependency completed | `internal/modules/landing/service` | Landing admin/public scope contract now requires verified context, permission, and `landing.enabled` entitlement before repository access |
+| 2026-06-17 | Completed Landing schema audit | `docs/landing-page-schema-audit.md` | Active dev/test schema has no legacy `landing_pages` or `brands`; archived baseline is incompatible with target tenant ownership, so new Landing tables can start at `000025` without cleanup |
+| 2026-06-17 | Added Landing page core tables | `migrations/000025_create_landing_page_core_tables.*.sql` | Created tenant-owned pages and sections with organization-scoped uniqueness, soft delete, JSON object constraints, and RLS policies |
 
 ## Update Rules
 

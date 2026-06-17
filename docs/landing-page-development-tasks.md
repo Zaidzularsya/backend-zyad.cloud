@@ -84,6 +84,12 @@ Acceptance: admin route memerlukan auth/permission dan repository tidak berjalan
 
 ### LAND-DB-001: Audit Existing Landing Schema
 
+Status: `done`
+
+Output:
+
+- `docs/landing-page-schema-audit.md`
+
 - Periksa `landing_pages` dan `brands` pada database aktual.
 - Bandingkan dengan baseline arsip.
 - Dokumentasikan mapping, conflict, dan backfill.
@@ -91,6 +97,22 @@ Acceptance: admin route memerlukan auth/permission dan repository tidak berjalan
 Acceptance: cleanup/compatibility memakai migration terpisah dan tidak mengasumsikan baseline sudah diterapkan.
 
 ### LAND-DB-002: Landing Page Core Tables
+
+Status: `done`
+
+Migration:
+
+- `migrations/000025_create_landing_page_core_tables.up.sql`
+- `migrations/000025_create_landing_page_core_tables.down.sql`
+
+Progress:
+
+- Created tenant-owned `landing_pages` and `landing_page_sections`.
+- Added organization-scoped slug, homepage, section key, and section order
+  uniqueness.
+- Added page status, type, visibility, schedule, JSON object, and soft-delete
+  constraints.
+- Applied PostgreSQL RLS through `apply_organization_rls` on both tables.
 
 - Migration `landing_pages` dan `landing_page_sections`.
 - Index tenant, slug, status, order, dan soft delete.
