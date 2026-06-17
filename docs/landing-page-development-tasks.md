@@ -446,7 +446,7 @@ Acceptance: invalid schema menghasilkan field errors dan reorder atomik.
 
 ### LAND-BE-012: SEO Service
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Sediakan intelligent fallback metadata jika form disubmit kosong.
@@ -511,7 +511,7 @@ Acceptance: cycle/depth invalid ditolak dan broken internal reference masuk publ
 
 ### LAND-BE-020: Branding Service
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Sediakan proteksi override nilai property yang membahayakan (misal inline script di property).
@@ -525,7 +525,7 @@ Acceptance: tidak menerima script, override bersifat partial, dan update diaudit
 
 ### LAND-BE-021: Branding Asset Integration
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Limit file size upload untuk aset untuk mencegah malicious payload overstorage.
@@ -537,7 +537,7 @@ Acceptance: public URL sesuai dan internal path tidak diekspos.
 
 ### LAND-BE-022: Theme and Layout Service
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Implementasi fallback token saat tenant menggunakan fitur tanpa men-setup theme custom.
@@ -550,7 +550,7 @@ Acceptance: token tervalidasi, contrast warning tersedia, dan arbitrary script t
 
 ### LAND-BE-023: Landing Media Service
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Pastikan isolasi folder resource storage antar tenant terjaga.
@@ -565,7 +565,7 @@ Acceptance: MIME sniffing, size limit, ownership, random object key, usage guard
 
 ### LAND-BE-030: Form Builder Service
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Validasi logic untuk nested form conditional constraints jika ada, dan min/max array boundaries.
@@ -577,7 +577,7 @@ Acceptance: duplicate field key ditolak, redirect URL aman, dan file field memil
 
 ### LAND-BE-031: Public Submission Service
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Penanganan spam dengan mitigasi honeypot, CAPTCHA hooks, dan IP rate limiting.
@@ -593,7 +593,7 @@ Acceptance: invalid payload tidak disimpan, notification failure tidak menghilan
 
 ### LAND-BE-032: Submission Admin Service
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Perlu diwaspadai CSV Injection (formula injection: =+-@) pada form export.

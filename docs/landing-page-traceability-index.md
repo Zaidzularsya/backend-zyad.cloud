@@ -72,11 +72,11 @@ Status: `planned`, `in_progress`, `done`, `deferred`, atau `blocked`.
 | Public submission | LAND-BE-031, LAND-API-004 | Public form submit | planned |
 | Submission management/export | LAND-BE-032, LAND-API-002 | Submission endpoints | planned |
 | Lead notification/integration | LAND-BE-033, LAND-API-006 | Integration/delivery endpoints | planned |
-| Branding default/override | LAND-BE-020, LAND-API-003 | Branding endpoints | planned |
-| Branding storage asset | LAND-BE-021 | Storage reference | planned |
-| Theme/layout/mode | LAND-BE-022, LAND-API-003 | Branding/theme endpoints | planned |
-| Landing media library | LAND-BE-023, LAND-API-005 | Media endpoints | planned |
-| SEO metadata | LAND-BE-012, LAND-API-001 | SEO endpoint | planned |
+| Branding default/override | LAND-BE-020, LAND-API-003 | Branding endpoints | done |
+| Branding storage asset | LAND-BE-021 | Storage reference | done |
+| Theme/layout/mode | LAND-BE-022, LAND-API-003 | Branding/theme endpoints | done |
+| Landing media library | LAND-BE-023, LAND-API-005 | Media endpoints | done |
+| SEO metadata | LAND-BE-012, LAND-API-001 | SEO endpoint | done |
 | Publish validation | LAND-BE-040 | Validate publish endpoint | planned |
 | Immutable publish/version | LAND-BE-041 | Version/publish endpoints | planned |
 | Preview | LAND-BE-042 | Preview token endpoint | planned |
