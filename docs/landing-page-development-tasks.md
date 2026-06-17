@@ -322,7 +322,7 @@ Acceptance: tidak ada duplicate order dan ownership page tervalidasi.
 
 ### LAND-REPO-003: Form Repository
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Validasi integritas schema JSON form dan konsistensi tipe fields.
@@ -333,7 +333,7 @@ Acceptance: schema konsisten dan public lookup menolak unpublished page.
 
 ### LAND-REPO-004: Submission Repository
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Pastikan export ke CSV mematuhi batasan memory (streaming cursor).
