@@ -420,9 +420,10 @@ Acceptance: credential hanya melalui encrypted reference dan claim delivery conc
 
 ### LAND-BE-010: Landing Page CRUD Service
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
+- Menambahkan test yang lebih komprehensif jika struktur section lebih rumit.
 - Pencegahan slug conflict secara atomik dengan database unique index handling.
 
 - Create/list/detail/update/duplicate/delete/restore/archive.
@@ -432,7 +433,7 @@ Acceptance: duplicate menjadi draft/slug baru dan draft edit tidak mengubah publ
 
 ### LAND-BE-011: Section Service
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Sanitasi konten rich text untuk mencegah ancaman XSS.
