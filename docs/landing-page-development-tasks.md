@@ -367,7 +367,7 @@ Acceptance: aggregate idempotent dan dashboard tenant-scoped.
 
 ### LAND-REPO-007: Reusable Content and Navigation Repository
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Pencegahan infinite loop (cycle) saat resolusi nested menu hirarkis.
@@ -379,7 +379,7 @@ Acceptance: nested menu tidak cycle, ordering atomik, dan tenant ownership selal
 
 ### LAND-REPO-008: Media Repository
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Pastikan URL asset internal / private tidak mudah ditebak public.

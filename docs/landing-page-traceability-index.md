@@ -111,8 +111,8 @@ Status: `planned`, `in_progress`, `done`, `deferred`, atau `blocked`.
 | Submission repository | LAND-REPO-004 | done |
 | Version/domain/branding repository | LAND-REPO-005 | done |
 | Analytics repository | LAND-REPO-006 | done |
-| Reusable content/navigation repository | LAND-REPO-007 | planned |
-| Media repository | LAND-REPO-008 | planned |
+| Reusable content/navigation repository | LAND-REPO-007 | done |
+| Media repository | LAND-REPO-008 | done |
 | Revision/schedule repository | LAND-REPO-009 | planned |
 | Lead integration repository | LAND-REPO-010 | planned |
 | Unit tests | LAND-TEST-001 | planned |
@@ -307,6 +307,7 @@ Nama file final mengikuti nomor migration berikutnya saat implementasi.
 | 2026-06-17 | Completed Landing Page and Section Repositories | `internal/modules/landing/repository/page_repository.go`, `internal/modules/landing/repository/section_repository.go` | Successfully implemented CRUD operations with RLS `tenant.Scope` support, atomicity, and passed all integration tests. |
 | 2026-06-17 | Completed Form and Submission Repositories | `internal/modules/landing/repository/form_repository.go`, `internal/modules/landing/repository/submission_repository.go` | Implemented CRUD operations, JSON nullable field handling, and robust integration testing with RLS support. |
 | 2026-06-17 | Completed Version, Branding, and Analytics Repositories | `internal/modules/landing/repository/version_repository.go`, `branding_repository.go`, `analytics_repository.go` | Implemented version snapshots, branding upserts with conflicts, and analytic event logging with aggregate tables. |
+| 2026-06-17 | Completed Reusable Content and Media Repositories | `internal/modules/landing/repository/reusable_repository.go`, `internal/modules/landing/repository/media_repository.go` | Added CRUD implementations with RLS for templates, menus, ctas, and media assets. Added ordering mechanism for menu items. |
 
 ## Update Rules
 
