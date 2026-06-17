@@ -345,7 +345,7 @@ Acceptance: create transaction aman dan filter status/date/page/form tersedia.
 
 ### LAND-REPO-005: Version, Domain, and Branding Repository
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Domain binding harus dicek silang dengan tabel verified domains organization (modul multi-tenant).
@@ -356,7 +356,7 @@ Acceptance: published version immutable dan domain binding tidak dapat lintas or
 
 ### LAND-REPO-006: Analytics Repository
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Pertimbangkan optimasi bulk insert atau async insertion untuk log events.
