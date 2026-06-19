@@ -137,11 +137,11 @@ func TestIntegrationRepositoryIntegration(t *testing.T) {
 	}
 
 	// 3. Claim Pending Deliveries (Worker)
-	claimed, err := integrationRepo.ClaimPendingDeliveries(ctx, 10)
+	claimed, err := integrationRepo.ClaimPendingDeliveries(ctx, tenants.A.Scope, 10)
 	if err != nil {
 		t.Fatalf("Claim pending deliveries: %v", err)
 	}
-	
+
 	var foundClaim *domain.LandingLeadDeliveryLog
 	for _, c := range claimed {
 		if c.ID == logA.ID {
@@ -159,7 +159,7 @@ func TestIntegrationRepositoryIntegration(t *testing.T) {
 	// 4. Update Delivery Log Status
 	errMsg := "Connection timeout"
 	nextRetry := time.Now().UTC().Add(5 * time.Minute)
-	err = integrationRepo.UpdateDeliveryLogStatus(ctx, foundClaim.ID, repository.UpdateDeliveryLogParams{
+	err = integrationRepo.UpdateDeliveryLogStatus(ctx, tenants.A.Scope, foundClaim.ID, repository.UpdateDeliveryLogParams{
 		Status:       domain.DeliveryStatusFailed,
 		ErrorMessage: &errMsg,
 		NextRetryAt:  &nextRetry,

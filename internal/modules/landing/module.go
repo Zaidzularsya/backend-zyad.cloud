@@ -14,6 +14,7 @@ func NewModule() *Module {
 }
 
 func (m *Module) RegisterRoutes(router gin.IRoutes) {
+	// Let routes.Register handle public/unprotected routes if any in the future
 	routes.Register(router)
 }
 

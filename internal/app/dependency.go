@@ -5,9 +5,11 @@ import (
 
 	"zyad.cloud/internal/config"
 	"zyad.cloud/internal/core/middleware"
+	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	notificationhandler "zyad.cloud/internal/core/notification/handler"
 	permissionhandler "zyad.cloud/internal/core/permission/handler"
 	organizationhandler "zyad.cloud/internal/modules/organization/handler"
+	landinghandler "zyad.cloud/internal/modules/landing/handler"
 	userhandler "zyad.cloud/internal/modules/user/handler"
 	pgdatabase "zyad.cloud/internal/platform/database"
 	"zyad.cloud/internal/platform/redis"
@@ -32,6 +34,21 @@ type Dependencies struct {
 	OrganizationSwitchHandler        *organizationhandler.SwitchHandler
 	UserAuthHandler                  *userhandler.AuthHandler
 	UserHandler                      *userhandler.UserHandler
+	LandingAdminPageHandler          *landinghandler.AdminPageHandler
+	LandingAdminSectionHandler       *landinghandler.AdminSectionHandler
+	LandingAdminBrandingHandler      *landinghandler.AdminBrandingHandler
+	LandingAdminDomainHandler        *landinghandler.AdminDomainHandler
+	LandingAdminFormHandler          *landinghandler.AdminFormHandler
+	LandingAdminSubmissionHandler    *landinghandler.AdminSubmissionHandler
+	PublicLandingHandler             *landinghandler.PublicLandingHandler
+	LandingAdminCTAHandler           *landinghandler.AdminCTAHandler
+	LandingAdminTemplateHandler      *landinghandler.AdminTemplateHandler
+	LandingAdminMediaHandler         *landinghandler.AdminMediaHandler
+	LandingAdminNavigationHandler    *landinghandler.AdminNavigationHandler
+	LandingAdminRevisionHandler      *landinghandler.AdminRevisionHandler
+	LandingAdminScheduleHandler      *landinghandler.AdminScheduleHandler
+	LandingAdminIntegrationHandler   *landinghandler.AdminIntegrationHandler
+	PermissionChecker                permissionmiddleware.PermissionChecker
 	Authenticator                    middleware.AccessTokenAuthenticator
 	OrganizationResolver             middleware.AuthenticatedOrganizationResolver
 	PublicHostResolver               middleware.PublicHostResolver

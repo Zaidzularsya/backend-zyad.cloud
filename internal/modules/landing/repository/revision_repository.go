@@ -83,8 +83,12 @@ func (r *revisionRepository) CreateRevision(ctx context.Context, scope coretenan
 		return domain.LandingPageRevision{}, err
 	}
 	rev.OrganizationID = scope.OrganizationID()
-	if createdBy != nil { rev.CreatedBy = *createdBy }
-	if changeNote != nil { rev.ChangeNote = *changeNote }
+	if createdBy != nil {
+		rev.CreatedBy = *createdBy
+	}
+	if changeNote != nil {
+		rev.ChangeNote = *changeNote
+	}
 
 	return rev, nil
 }
@@ -115,8 +119,12 @@ func (r *revisionRepository) GetRevision(ctx context.Context, scope coretenant.S
 		return domain.LandingPageRevision{}, err
 	}
 	rev.OrganizationID = scope.OrganizationID()
-	if createdBy != nil { rev.CreatedBy = *createdBy }
-	if changeNote != nil { rev.ChangeNote = *changeNote }
+	if createdBy != nil {
+		rev.CreatedBy = *createdBy
+	}
+	if changeNote != nil {
+		rev.ChangeNote = *changeNote
+	}
 
 	return rev, nil
 }
@@ -155,8 +163,12 @@ func (r *revisionRepository) ListRevisions(ctx context.Context, scope coretenant
 				return err
 			}
 			rev.OrganizationID = scope.OrganizationID()
-			if createdBy != nil { rev.CreatedBy = *createdBy }
-			if changeNote != nil { rev.ChangeNote = *changeNote }
+			if createdBy != nil {
+				rev.CreatedBy = *createdBy
+			}
+			if changeNote != nil {
+				rev.ChangeNote = *changeNote
+			}
 			revisions = append(revisions, rev)
 		}
 		return rows.Err()
@@ -197,8 +209,12 @@ func (r *revisionRepository) GetLatestRevision(ctx context.Context, scope corete
 		return domain.LandingPageRevision{}, err
 	}
 	rev.OrganizationID = scope.OrganizationID()
-	if createdBy != nil { rev.CreatedBy = *createdBy }
-	if changeNote != nil { rev.ChangeNote = *changeNote }
+	if createdBy != nil {
+		rev.CreatedBy = *createdBy
+	}
+	if changeNote != nil {
+		rev.ChangeNote = *changeNote
+	}
 
 	return rev, nil
 }
@@ -245,10 +261,18 @@ func (r *revisionRepository) CreateSchedule(ctx context.Context, scope coretenan
 		return domain.LandingPageSchedule{}, err
 	}
 	s.OrganizationID = scope.OrganizationID()
-	if lockID != nil { s.LockID = lockID }
-	if lockExpiresAt != nil { s.LockExpiresAt = lockExpiresAt }
-	if errorMessage != nil { s.ErrorMessage = *errorMessage }
-	if createdBy != nil { s.CreatedBy = *createdBy }
+	if lockID != nil {
+		s.LockID = lockID
+	}
+	if lockExpiresAt != nil {
+		s.LockExpiresAt = lockExpiresAt
+	}
+	if errorMessage != nil {
+		s.ErrorMessage = *errorMessage
+	}
+	if createdBy != nil {
+		s.CreatedBy = *createdBy
+	}
 
 	return s, nil
 }
@@ -281,10 +305,18 @@ func (r *revisionRepository) GetSchedule(ctx context.Context, scope coretenant.S
 		return domain.LandingPageSchedule{}, err
 	}
 	s.OrganizationID = scope.OrganizationID()
-	if lockID != nil { s.LockID = lockID }
-	if lockExpiresAt != nil { s.LockExpiresAt = lockExpiresAt }
-	if errorMessage != nil { s.ErrorMessage = *errorMessage }
-	if createdBy != nil { s.CreatedBy = *createdBy }
+	if lockID != nil {
+		s.LockID = lockID
+	}
+	if lockExpiresAt != nil {
+		s.LockExpiresAt = lockExpiresAt
+	}
+	if errorMessage != nil {
+		s.ErrorMessage = *errorMessage
+	}
+	if createdBy != nil {
+		s.CreatedBy = *createdBy
+	}
 
 	return s, nil
 }
@@ -325,10 +357,18 @@ func (r *revisionRepository) ListSchedules(ctx context.Context, scope coretenant
 				return err
 			}
 			s.OrganizationID = scope.OrganizationID()
-			if lockID != nil { s.LockID = lockID }
-			if lockExpiresAt != nil { s.LockExpiresAt = lockExpiresAt }
-			if errorMessage != nil { s.ErrorMessage = *errorMessage }
-			if createdBy != nil { s.CreatedBy = *createdBy }
+			if lockID != nil {
+				s.LockID = lockID
+			}
+			if lockExpiresAt != nil {
+				s.LockExpiresAt = lockExpiresAt
+			}
+			if errorMessage != nil {
+				s.ErrorMessage = *errorMessage
+			}
+			if createdBy != nil {
+				s.CreatedBy = *createdBy
+			}
 			schedules = append(schedules, s)
 		}
 		return rows.Err()
@@ -363,23 +403,27 @@ func (r *revisionRepository) DeleteSchedule(ctx context.Context, scope coretenan
 	})
 }
 
-func (r *revisionRepository) ClaimPendingSchedules(ctx context.Context, limit int, lockDuration time.Duration) ([]domain.LandingPageSchedule, error) {
-	// Worker operation, runs outside tenant scope (system-level)
+func (r *revisionRepository) ClaimPendingSchedules(ctx context.Context, scope coretenant.Scope, limit int, lockDuration time.Duration) ([]domain.LandingPageSchedule, error) {
+	if !scope.IsValid() {
+		return nil, coretenant.ErrInvalidScope
+	}
+
 	query := `
 		WITH pending AS (
 			SELECT id
 			FROM landing_page_schedules
-			WHERE (status = 'pending' OR status = 'failed')
+			WHERE organization_id = $1
+			  AND (status = 'pending' OR status = 'failed')
 			  AND scheduled_at <= NOW()
 			  AND (lock_expires_at IS NULL OR lock_expires_at <= NOW())
 			ORDER BY scheduled_at ASC
 			FOR UPDATE SKIP LOCKED
-			LIMIT $1
+			LIMIT $2
 		)
 		UPDATE landing_page_schedules s
 		SET status = 'processing',
 			lock_id = gen_random_uuid(),
-			lock_expires_at = NOW() + $2::interval,
+			lock_expires_at = NOW() + $3::interval,
 			attempts = attempts + 1,
 			updated_at = NOW()
 		FROM pending p
@@ -389,39 +433,52 @@ func (r *revisionRepository) ClaimPendingSchedules(ctx context.Context, limit in
 
 	var schedules []domain.LandingPageSchedule
 
-	// Temporarily bypass RLS if possible, or we could test with a transaction and a scope?
-	// But ClaimPendingSchedules doesn't take a scope.
-	rows, err := r.db.Query(ctx, query, limit, lockDuration)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var s domain.LandingPageSchedule
-		var retLockID, createdBy, errorMessage *string
-		var lockExpiresAt *time.Time
-
-		err := rows.Scan(
-			&s.ID, &s.OrganizationID, &s.LandingPageID, &s.Action, &s.ScheduledAt, &s.Status,
-			&retLockID, &lockExpiresAt, &errorMessage, &s.Attempts, &createdBy,
-			&s.CreatedAt, &s.UpdatedAt,
-		)
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, scope.OrganizationID(), limit, lockDuration)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if retLockID != nil { s.LockID = retLockID }
-		if lockExpiresAt != nil { s.LockExpiresAt = lockExpiresAt }
-		if errorMessage != nil { s.ErrorMessage = *errorMessage }
-		if createdBy != nil { s.CreatedBy = *createdBy }
-		schedules = append(schedules, s)
-	}
+		defer rows.Close()
 
-	return schedules, rows.Err()
+		for rows.Next() {
+			var s domain.LandingPageSchedule
+			var retLockID, createdBy, errorMessage *string
+			var lockExpiresAt *time.Time
+
+			err := rows.Scan(
+				&s.ID, &s.OrganizationID, &s.LandingPageID, &s.Action, &s.ScheduledAt, &s.Status,
+				&retLockID, &lockExpiresAt, &errorMessage, &s.Attempts, &createdBy,
+				&s.CreatedAt, &s.UpdatedAt,
+			)
+			if err != nil {
+				return err
+			}
+			if retLockID != nil {
+				s.LockID = retLockID
+			}
+			if lockExpiresAt != nil {
+				s.LockExpiresAt = lockExpiresAt
+			}
+			if errorMessage != nil {
+				s.ErrorMessage = *errorMessage
+			}
+			if createdBy != nil {
+				s.CreatedBy = *createdBy
+			}
+			schedules = append(schedules, s)
+		}
+
+		return rows.Err()
+	})
+
+	return schedules, err
 }
 
-func (r *revisionRepository) MarkScheduleStatus(ctx context.Context, id string, status domain.ScheduleStatus, errorMessage *string) error {
-	// Worker operation, runs outside tenant scope
+func (r *revisionRepository) MarkScheduleStatus(ctx context.Context, scope coretenant.Scope, id string, status domain.ScheduleStatus, errorMessage *string) error {
+	if !scope.IsValid() {
+		return coretenant.ErrInvalidScope
+	}
+
 	query := `
 		UPDATE landing_page_schedules
 		SET status = $1,
@@ -429,16 +486,17 @@ func (r *revisionRepository) MarkScheduleStatus(ctx context.Context, id string, 
 			lock_id = NULL,
 			lock_expires_at = NULL,
 			updated_at = NOW()
-		WHERE id = $3
+		WHERE id = $3 AND organization_id = $4
 	`
 
-	cmdTag, err := r.db.Exec(ctx, query, status, errorMessage, id)
-	if err != nil {
-		return err
-	}
-	if cmdTag.RowsAffected() == 0 {
-		return pgx.ErrNoRows
-	}
-
-	return nil
+	return r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		cmdTag, err := tx.Exec(ctx, query, status, errorMessage, id, scope.OrganizationID())
+		if err != nil {
+			return err
+		}
+		if cmdTag.RowsAffected() == 0 {
+			return pgx.ErrNoRows
+		}
+		return nil
+	})
 }

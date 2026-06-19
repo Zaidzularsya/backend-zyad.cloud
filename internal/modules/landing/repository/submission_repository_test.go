@@ -4,9 +4,13 @@ package repository_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+
+	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/landing/domain"
 	"zyad.cloud/internal/modules/landing/repository"
 	"zyad.cloud/internal/platform/database/testutil"
@@ -123,4 +127,192 @@ func TestSubmissionRepositoryLifecycleAndIsolationIntegration(t *testing.T) {
 	if err == nil {
 		t.Error("Expected submission to be soft deleted, got success")
 	}
+}
+
+type submissionIsolationAdapter struct {
+	repo       repository.SubmissionRepository
+	pageRepo   repository.PageRepository
+	formRepo   repository.FormRepository
+	ids        map[string]string
+	scopePages map[string]string
+	scopeForms map[string]string
+}
+
+func (a *submissionIsolationAdapter) ensurePageAndForm(ctx context.Context, scope coretenant.Scope) (string, string, error) {
+	pageID, ok := a.scopePages[scope.OrganizationID()]
+	if ok {
+		return pageID, a.scopeForms[scope.OrganizationID()], nil
+	}
+	page, err := a.pageRepo.Create(ctx, scope, repository.CreatePageParams{
+		Name:       "Test Page " + scope.OrganizationID(),
+		Title:      "Test",
+		Slug:       strings.ReplaceAll("testpage-"+testutil.UniqueCode("sub")+scope.OrganizationID()[:8], ".", "-"),
+		Type:       domain.PageTypeCampaign,
+		Status:     domain.PageStatusDraft,
+		Visibility: domain.PageVisibilityPublic,
+		Locale:     "id-ID",
+		Timezone:   "Asia/Jakarta",
+	})
+	if err != nil {
+		return "", "", err
+	}
+	a.scopePages[scope.OrganizationID()] = page.ID
+
+	form, err := a.formRepo.Create(ctx, scope, repository.CreateFormParams{
+		LandingPageID: page.ID,
+		Name:          "Test Form",
+		Key:           strings.ReplaceAll("testform-"+testutil.UniqueCode("sub")+scope.OrganizationID()[:8], ".", "-"),
+		IsActive:      true,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	a.scopeForms[scope.OrganizationID()] = form.ID
+
+	return page.ID, form.ID, nil
+}
+
+func (a *submissionIsolationAdapter) Create(ctx context.Context, tctx coretenant.Context, key string, value string) error {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return err
+	}
+	pageID, formID, err := a.ensurePageAndForm(ctx, scope)
+	if err != nil {
+		return err
+	}
+	sub, err := a.repo.Create(ctx, scope, repository.CreateSubmissionParams{
+		LandingPageID: pageID,
+		FormID:        formID,
+		Reference:     value,
+		Status:        domain.SubmissionStatusNew,
+		SubmittedData: map[string]any{"key": key},
+	})
+	if err != nil {
+		return err
+	}
+	a.ids[key] = sub.ID
+	return nil
+}
+
+func (a *submissionIsolationAdapter) Read(ctx context.Context, tctx coretenant.Context, key string) (string, bool, error) {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return "", false, err
+	}
+	id, ok := a.ids[key]
+	if !ok {
+		return "", false, nil
+	}
+	sub, err := a.repo.FindByID(ctx, scope, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || strings.Contains(err.Error(), "no rows") {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return sub.Reference, true, nil
+}
+
+func (a *submissionIsolationAdapter) List(ctx context.Context, tctx coretenant.Context) ([]string, error) {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return nil, err
+	}
+	_, _, err = a.ensurePageAndForm(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	subs, err := a.repo.List(ctx, scope, repository.SubmissionFilter{})
+	if err != nil {
+		return nil, err
+	}
+	var keys []string
+	for _, s := range subs {
+		for k, id := range a.ids {
+			if id == s.ID {
+				keys = append(keys, k)
+				break
+			}
+		}
+	}
+	return keys, nil
+}
+
+func (a *submissionIsolationAdapter) Update(ctx context.Context, tctx coretenant.Context, key string, value string) (bool, error) {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return false, err
+	}
+	id, ok := a.ids[key]
+	if !ok {
+		return false, nil
+	}
+	status := domain.SubmissionStatus(value)
+	if status != domain.SubmissionStatusContacted && status != domain.SubmissionStatusNew {
+		status = domain.SubmissionStatusContacted
+	}
+	_, err = a.repo.Update(ctx, scope, id, repository.UpdateSubmissionParams{
+		Status: &status,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || strings.Contains(err.Error(), "no rows") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (a *submissionIsolationAdapter) Delete(ctx context.Context, tctx coretenant.Context, key string) (bool, error) {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return false, err
+	}
+	id, ok := a.ids[key]
+	if !ok {
+		return false, nil
+	}
+	err = a.repo.Delete(ctx, scope, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || strings.Contains(err.Error(), "no rows") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (a *submissionIsolationAdapter) BulkUpdate(ctx context.Context, tctx coretenant.Context, keys []string, value string) (int64, error) {
+	var count int64
+	for _, k := range keys {
+		updated, err := a.Update(ctx, tctx, k, value)
+		if err != nil {
+			return count, err
+		}
+		if updated {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (a *submissionIsolationAdapter) Export(ctx context.Context, tctx coretenant.Context) ([]string, error) {
+	return a.List(ctx, tctx)
+}
+
+func TestSubmissionTenantIsolationSuite(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	repo := repository.NewSubmissionRepository(db)
+	pageRepo := repository.NewPageRepository(db)
+	formRepo := repository.NewFormRepository(db)
+	adapter := &submissionIsolationAdapter{
+		repo:       repo,
+		pageRepo:   pageRepo,
+		formRepo:   formRepo,
+		ids:        make(map[string]string),
+		scopePages: make(map[string]string),
+		scopeForms: make(map[string]string),
+	}
+	testutil.RunTenantIsolationSuite(t, adapter)
 }

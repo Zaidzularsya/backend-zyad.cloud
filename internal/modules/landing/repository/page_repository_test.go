@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/landing/domain"
 	"zyad.cloud/internal/modules/landing/repository"
 	"zyad.cloud/internal/platform/database/testutil"
@@ -168,4 +169,139 @@ func TestPageRepositoryLifecycleAndIsolationIntegration(t *testing.T) {
 	if !errors.Is(err, pgx.ErrNoRows) {
 		t.Errorf("FindByID soft-deleted page: expected pgx.ErrNoRows, got %v", err)
 	}
+}
+
+type pageIsolationAdapter struct {
+	repo repository.PageRepository
+	ids  map[string]string
+}
+
+func (a *pageIsolationAdapter) Create(ctx context.Context, tctx coretenant.Context, key string, value string) error {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return err
+	}
+	page, err := a.repo.Create(ctx, scope, repository.CreatePageParams{
+		Name:       value,
+		Title:      "Title " + value,
+		Slug:       strings.ReplaceAll(key, "_", "-") + "-page",
+		Type:       domain.PageTypeCampaign,
+		Status:     domain.PageStatusDraft,
+		Visibility: domain.PageVisibilityPublic,
+		Locale:     "id-ID",
+		Timezone:   "Asia/Jakarta",
+	})
+	if err != nil {
+		return err
+	}
+	a.ids[key] = page.ID
+	return nil
+}
+
+func (a *pageIsolationAdapter) Read(ctx context.Context, tctx coretenant.Context, key string) (string, bool, error) {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return "", false, err
+	}
+	id, ok := a.ids[key]
+	if !ok {
+		return "", false, nil
+	}
+	page, err := a.repo.FindByID(ctx, scope, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || strings.Contains(err.Error(), "no rows") {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return page.Name, true, nil
+}
+
+func (a *pageIsolationAdapter) List(ctx context.Context, tctx coretenant.Context) ([]string, error) {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return nil, err
+	}
+	pages, _, err := a.repo.List(ctx, scope, repository.PageListFilter{})
+	if err != nil {
+		return nil, err
+	}
+	var keys []string
+	for _, p := range pages {
+		for k, id := range a.ids {
+			if id == p.ID {
+				keys = append(keys, k)
+				break
+			}
+		}
+	}
+	return keys, nil
+}
+
+func (a *pageIsolationAdapter) Update(ctx context.Context, tctx coretenant.Context, key string, value string) (bool, error) {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return false, err
+	}
+	id, ok := a.ids[key]
+	if !ok {
+		return false, nil
+	}
+	_, err = a.repo.Update(ctx, scope, id, repository.UpdatePageParams{
+		Name: &value,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || strings.Contains(err.Error(), "no rows") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (a *pageIsolationAdapter) Delete(ctx context.Context, tctx coretenant.Context, key string) (bool, error) {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return false, err
+	}
+	id, ok := a.ids[key]
+	if !ok {
+		return false, nil
+	}
+	err = a.repo.Delete(ctx, scope, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || strings.Contains(err.Error(), "no rows") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (a *pageIsolationAdapter) BulkUpdate(ctx context.Context, tctx coretenant.Context, keys []string, value string) (int64, error) {
+	var count int64
+	for _, k := range keys {
+		updated, err := a.Update(ctx, tctx, k, value)
+		if err != nil {
+			return count, err
+		}
+		if updated {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (a *pageIsolationAdapter) Export(ctx context.Context, tctx coretenant.Context) ([]string, error) {
+	return a.List(ctx, tctx)
+}
+
+func TestPageTenantIsolationSuite(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	repo := repository.NewPageRepository(db)
+	adapter := &pageIsolationAdapter{
+		repo: repo,
+		ids:  make(map[string]string),
+	}
+	testutil.RunTenantIsolationSuite(t, adapter)
 }

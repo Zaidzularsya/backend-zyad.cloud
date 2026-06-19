@@ -52,6 +52,6 @@ type IntegrationRepository interface {
 	ListDeliveryLogs(context.Context, coretenant.Scope, string) ([]domain.LandingLeadDeliveryLog, error)
 
 	// Worker Operations
-	ClaimPendingDeliveries(context.Context, int) ([]domain.LandingLeadDeliveryLog, error)
-	UpdateDeliveryLogStatus(context.Context, string, UpdateDeliveryLogParams) error
+	ClaimPendingDeliveries(context.Context, coretenant.Scope, int) ([]domain.LandingLeadDeliveryLog, error)
+	UpdateDeliveryLogStatus(context.Context, coretenant.Scope, string, UpdateDeliveryLogParams) error
 }

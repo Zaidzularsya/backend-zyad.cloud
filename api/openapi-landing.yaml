@@ -1,0 +1,22 @@
+# Landing Page Endpoints
+# This file is a stub mapping of the landing page endpoints for openapi.yaml
+# Copy these under the paths: node in api/openapi.yaml
+paths:
+  /api/v1/admin/landing-pages:
+    get:
+      summary: List landing pages
+      tags: [Landing Pages]
+    post:
+      summary: Create landing page
+      tags: [Landing Pages]
+  /api/v1/admin/landing-pages/{id}:
+    get:
+      summary: Get landing page detail
+      tags: [Landing Pages]
+    patch:
+      summary: Update landing page
+      tags: [Landing Pages]
+    delete:
+      summary: Delete landing page
+      tags: [Landing Pages]
+  # ... Add remaining endpoints based on docs/landing-page-public-api-contract.md

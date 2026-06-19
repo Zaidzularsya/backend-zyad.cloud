@@ -1,0 +1,26 @@
+- generic [ref=e3]:
+  - navigation [ref=e4]:
+    - generic [ref=e5]:
+      - link "HEY Digital Solution" [ref=e6] [cursor=pointer]:
+        - /url: "#"
+      - generic [ref=e7]:
+        - link "Solusi" [ref=e8] [cursor=pointer]:
+          - /url: "#solusi"
+        - link "Cara Kerja" [ref=e9] [cursor=pointer]:
+          - /url: "#cara-kerja"
+        - link "Demo" [ref=e10] [cursor=pointer]:
+          - /url: "#demo-portal"
+        - link "FAQ" [ref=e11] [cursor=pointer]:
+          - /url: "#faq"
+        - link "Partner Program" [ref=e12] [cursor=pointer]:
+          - /url: "#benefits"
+      - generic [ref=e13]:
+        - button "dark_mode" [ref=e14] [cursor=pointer]:
+          - generic [ref=e15]: dark_mode
+        - link "Login Partner" [ref=e16] [cursor=pointer]:
+          - /url: /auth/login
+          - button "Login Partner" [ref=e17]
+  - main [ref=e18]:
+    - generic [ref=e23]: Memuat Halaman...
+  - contentinfo [ref=e24]:
+    - paragraph [ref=e26]: © 2026 Zyad Cloud Platform. All rights reserved.

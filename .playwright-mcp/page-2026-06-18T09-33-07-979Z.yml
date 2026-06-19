@@ -1,0 +1,216 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - link "Z Zyad Demo Workspace Console" [ref=e6] [cursor=pointer]:
+      - /url: /app/profile
+      - generic [ref=e7]: Z
+      - generic [ref=e8]:
+        - strong [ref=e9]: Zyad Demo
+        - text: Workspace Console
+    - navigation [ref=e10]:
+      - generic [ref=e11]:
+        - paragraph [ref=e12]: Workspace
+        - generic [ref=e13]:
+          - link "Landing Page" [ref=e14] [cursor=pointer]:
+            - /url: /app/landing-pages
+            - img [ref=e15]
+            - text: Landing Page
+          - link "Team & Roles" [ref=e18] [cursor=pointer]:
+            - /url: /app/users
+            - img [ref=e19]
+            - text: Team & Roles
+      - generic [ref=e22]:
+        - paragraph [ref=e23]: Account Services
+        - generic [ref=e24]:
+          - link "Plan & Billing" [ref=e25] [cursor=pointer]:
+            - /url: /app/plan-upgrade
+            - img [ref=e26]
+            - text: Plan & Billing
+          - link "Support Tickets" [ref=e28] [cursor=pointer]:
+            - /url: /app/ticketing
+            - img [ref=e29]
+            - text: Support Tickets
+    - link "Profile" [ref=e37] [cursor=pointer]:
+      - /url: /app/profile
+      - img [ref=e38]
+      - text: Profile
+  - generic [ref=e42]:
+    - banner [ref=e43]:
+      - generic [ref=e44]:
+        - img [ref=e45]
+        - searchbox [ref=e48]
+      - generic [ref=e49]:
+        - button "Ganti tema" [ref=e50]:
+          - img [ref=e51]
+        - button "D Demo Admin admin@zyad.cloud" [ref=e54]:
+          - generic [ref=e55]: D
+          - generic [ref=e56]:
+            - paragraph [ref=e57]: Demo Admin
+            - paragraph [ref=e58]: admin@zyad.cloud
+          - img [ref=e59]
+    - main [ref=e61]:
+      - generic [ref=e62]:
+        - generic [ref=e63]:
+          - generic [ref=e65]:
+            - heading "Landing Page Management" [level=1] [ref=e66]
+            - paragraph [ref=e67]: Bangun, optimalkan, dan publikasikan landing page tenant dari satu workspace.
+          - generic [ref=e68]:
+            - button "Refresh" [ref=e69]:
+              - img [ref=e70]
+              - text: Refresh
+            - button "Save Page" [ref=e75]:
+              - img [ref=e76]
+              - text: Save Page
+        - generic [ref=e79]:
+          - generic [ref=e80]:
+            - generic [ref=e81]:
+              - paragraph [ref=e82]: Total pages
+              - img [ref=e83]
+            - paragraph [ref=e88]: "1"
+          - generic [ref=e89]:
+            - generic [ref=e90]:
+              - paragraph [ref=e91]: Published
+              - img [ref=e92]
+            - paragraph [ref=e95]: "0"
+          - generic [ref=e96]:
+            - generic [ref=e97]:
+              - paragraph [ref=e98]: Draft
+              - img [ref=e99]
+            - paragraph [ref=e104]: "1"
+          - generic [ref=e105]:
+            - generic [ref=e106]:
+              - paragraph [ref=e107]: Archived
+              - img [ref=e108]
+            - paragraph [ref=e111]: "0"
+        - generic [ref=e112]:
+          - complementary [ref=e113]:
+            - generic [ref=e114]:
+              - generic [ref=e115]:
+                - img [ref=e116]
+                - searchbox "Cari page, slug, tipe..." [ref=e119]
+              - generic [ref=e120]:
+                - button "all" [ref=e121]
+                - button "draft" [ref=e122]
+                - button "published" [ref=e123]
+                - button "archived" [ref=e124]
+              - button "Main Product Campaign /internet-bisnis draft Homepage Public" [ref=e126]:
+                - generic [ref=e127]:
+                  - generic [ref=e128]:
+                    - paragraph [ref=e129]: Main Product Campaign
+                    - paragraph [ref=e130]: /internet-bisnis
+                  - generic [ref=e131]: draft
+                - generic [ref=e132]:
+                  - generic [ref=e133]: Homepage
+                  - generic [ref=e134]: Public
+          - main [ref=e135]:
+            - generic [ref=e137]:
+              - generic [ref=e138]:
+                - generic [ref=e139]:
+                  - heading "Internet Bisnis Cepat dan Stabil" [level=2] [ref=e140]
+                  - generic [ref=e141]: draft
+                - paragraph [ref=e142]: /internet-bisnis
+              - generic [ref=e143]:
+                - button "Duplicate" [ref=e144]:
+                  - img [ref=e145]
+                  - text: Duplicate
+                - button "Publish" [ref=e148]:
+                  - img [ref=e149]
+                  - text: Publish
+            - generic [ref=e155]:
+              - button "Overview" [ref=e156]:
+                - img [ref=e157]
+                - text: Overview
+              - button "Content" [active] [ref=e160]:
+                - img [ref=e161]
+                - text: Content
+              - button "SEO" [ref=e164]:
+                - img [ref=e165]
+                - text: SEO
+              - button "Media" [ref=e170]:
+                - img [ref=e171]
+                - text: Media
+              - button "Navigation" [ref=e175]:
+                - img [ref=e176]
+                - text: Navigation
+              - button "Leads" [ref=e177]:
+                - img [ref=e178]
+                - text: Leads
+              - button "History" [ref=e184]:
+                - img [ref=e185]
+                - text: History
+            - generic [ref=e295]:
+              - generic [ref=e296]:
+                - generic [ref=e297]:
+                  - img [ref=e298]
+                  - heading "Call to actions" [level=3] [ref=e304]
+                - generic [ref=e305]:
+                  - generic [ref=e306]:
+                    - generic [ref=e307]: Name
+                    - textbox "Name" [ref=e308]:
+                      - /placeholder: Hero WhatsApp
+                  - generic [ref=e309]:
+                    - generic [ref=e310]: Button label
+                    - textbox "Button label" [ref=e311]:
+                      - /placeholder: Konsultasi gratis
+                  - generic [ref=e312]:
+                    - generic [ref=e313]: Destination
+                    - textbox "Destination" [ref=e314]:
+                      - /placeholder: https://...
+                  - generic [ref=e315]:
+                    - generic [ref=e316]: Tracking key
+                    - textbox "Tracking key" [ref=e317]:
+                      - /placeholder: hero_primary
+                  - generic [ref=e318]:
+                    - generic [ref=e319]: Type
+                    - combobox "Type" [ref=e320]:
+                      - option "Contact form"
+                      - option "WhatsApp"
+                      - option "External link" [selected]
+                      - option "Internal page"
+                      - option "Document download"
+                  - generic [ref=e321]:
+                    - generic [ref=e322]: Target
+                    - combobox "Target" [ref=e323]:
+                      - option "Same tab" [selected]
+                      - option "New tab"
+                      - option "Modal"
+                  - button "Create CTA" [ref=e325]
+                - generic [ref=e327]:
+                  - generic [ref=e328]:
+                    - paragraph [ref=e329]: Konsultasi Gratis
+                    - paragraph [ref=e330]: whatsapp · https://wa.me/628123
+                  - button [ref=e331]:
+                    - img [ref=e332]
+              - generic [ref=e335]:
+                - generic [ref=e336]:
+                  - img [ref=e337]
+                  - heading "Section templates" [level=3] [ref=e340]
+                - generic [ref=e341]:
+                  - generic [ref=e342]:
+                    - generic [ref=e343]:
+                      - generic [ref=e344]: Template name
+                      - textbox "Template name" [ref=e345]:
+                        - /placeholder: Hero ISP
+                    - generic [ref=e346]:
+                      - generic [ref=e347]: Section type
+                      - textbox "Section type" [ref=e348]:
+                        - /placeholder: hero
+                        - text: hero
+                  - generic [ref=e349]:
+                    - generic [ref=e350]: Description
+                    - textbox "Description" [ref=e351]:
+                      - /placeholder: Section untuk campaign internet bisnis
+                  - generic [ref=e352]:
+                    - generic [ref=e353]:
+                      - generic [ref=e354]: Content JSON
+                      - textbox "Content JSON" [ref=e355]:
+                        - /placeholder: "{\"headline\":\"...\"}"
+                    - generic [ref=e356]:
+                      - generic [ref=e357]: Style JSON
+                      - textbox "Style JSON" [ref=e358]:
+                        - /placeholder: "{\"theme\":\"light\"}"
+                  - button "Create template" [ref=e360]
+                - generic [ref=e363]:
+                  - generic [ref=e364]:
+                    - paragraph [ref=e365]: Hero Campaign
+                    - paragraph [ref=e366]: hero · Hero section untuk promo
+                  - button "Add" [ref=e367]

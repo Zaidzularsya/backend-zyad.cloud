@@ -19,4 +19,5 @@ type FormService interface {
 	UpdateField(ctx context.Context, scope coretenant.Scope, fieldID string, params repository.UpdateFormFieldParams) (domain.LandingFormField, error)
 	ReorderFields(ctx context.Context, scope coretenant.Scope, formID string, params []repository.FormFieldReorderParam) error
 	DeleteField(ctx context.Context, scope coretenant.Scope, fieldID string) error
+	ReplaceFields(ctx context.Context, scope coretenant.Scope, formID string, params []repository.CreateFormFieldParams) ([]domain.LandingFormField, error)
 }

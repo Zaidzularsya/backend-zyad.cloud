@@ -29,6 +29,14 @@ func (s *brandingService) UpsertPageOverride(ctx context.Context, scope coretena
 	return s.brandingRepo.Upsert(ctx, scope, params)
 }
 
+func (s *brandingService) GetDefaultBranding(ctx context.Context, scope coretenant.Scope) (domain.LandingBranding, error) {
+	defBranding, err := s.brandingRepo.GetDefault(ctx, scope)
+	if err != nil {
+		return domain.LandingBranding{}, err
+	}
+	return defBranding, nil
+}
+
 func (s *brandingService) GetEffectiveBranding(ctx context.Context, scope coretenant.Scope, pageID string) (domain.LandingBranding, error) {
 	// Fetch default branding
 	defBranding, err := s.brandingRepo.GetDefault(ctx, scope)

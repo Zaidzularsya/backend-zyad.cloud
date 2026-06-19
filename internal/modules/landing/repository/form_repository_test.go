@@ -4,9 +4,13 @@ package repository_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+
+	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/landing/domain"
 	"zyad.cloud/internal/modules/landing/repository"
 	"zyad.cloud/internal/platform/database/testutil"
@@ -172,4 +176,172 @@ func TestFormRepositoryLifecycleAndIsolationIntegration(t *testing.T) {
 	if err == nil {
 		t.Error("Expected form A to be soft deleted, got success finding it")
 	}
+}
+
+type formIsolationAdapter struct {
+	repo       repository.FormRepository
+	pageRepo   repository.PageRepository
+	ids        map[string]string
+	scopePages map[string]string
+}
+
+func (a *formIsolationAdapter) ensurePage(ctx context.Context, scope coretenant.Scope) (string, error) {
+	pageID, ok := a.scopePages[scope.OrganizationID()]
+	if ok {
+		return pageID, nil
+	}
+	page, err := a.pageRepo.Create(ctx, scope, repository.CreatePageParams{
+		Name:       "Test Page " + scope.OrganizationID(),
+		Title:      "Test",
+		Slug:       strings.ReplaceAll("testpage-"+testutil.UniqueCode("frm")+scope.OrganizationID()[:8], ".", "-"),
+		Type:       domain.PageTypeCampaign,
+		Status:     domain.PageStatusDraft,
+		Visibility: domain.PageVisibilityPublic,
+		Locale:     "id-ID",
+		Timezone:   "Asia/Jakarta",
+	})
+	if err != nil {
+		return "", err
+	}
+	a.scopePages[scope.OrganizationID()] = page.ID
+	return page.ID, nil
+}
+
+func (a *formIsolationAdapter) Create(ctx context.Context, tctx coretenant.Context, key string, value string) error {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return err
+	}
+	pageID, err := a.ensurePage(ctx, scope)
+	if err != nil {
+		return err
+	}
+	form, err := a.repo.Create(ctx, scope, repository.CreateFormParams{
+		LandingPageID: pageID,
+		Name:          value,
+		Key:           strings.ReplaceAll(key, "_", "-"),
+		Description:   "Description",
+		SubmitLabel:   "Submit",
+		IsActive:      true,
+	})
+	if err != nil {
+		return err
+	}
+	a.ids[key] = form.ID
+	return nil
+}
+
+func (a *formIsolationAdapter) Read(ctx context.Context, tctx coretenant.Context, key string) (string, bool, error) {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return "", false, err
+	}
+	id, ok := a.ids[key]
+	if !ok {
+		return "", false, nil
+	}
+	form, err := a.repo.FindByID(ctx, scope, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || strings.Contains(err.Error(), "no rows") {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return form.Name, true, nil
+}
+
+func (a *formIsolationAdapter) List(ctx context.Context, tctx coretenant.Context) ([]string, error) {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return nil, err
+	}
+	pageID, err := a.ensurePage(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	forms, err := a.repo.ListByPage(ctx, scope, pageID)
+	if err != nil {
+		return nil, err
+	}
+	var keys []string
+	for _, f := range forms {
+		for k, id := range a.ids {
+			if id == f.ID {
+				keys = append(keys, k)
+				break
+			}
+		}
+	}
+	return keys, nil
+}
+
+func (a *formIsolationAdapter) Update(ctx context.Context, tctx coretenant.Context, key string, value string) (bool, error) {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return false, err
+	}
+	id, ok := a.ids[key]
+	if !ok {
+		return false, nil
+	}
+	_, err = a.repo.Update(ctx, scope, id, repository.UpdateFormParams{
+		Name: &value,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || strings.Contains(err.Error(), "no rows") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (a *formIsolationAdapter) Delete(ctx context.Context, tctx coretenant.Context, key string) (bool, error) {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return false, err
+	}
+	id, ok := a.ids[key]
+	if !ok {
+		return false, nil
+	}
+	err = a.repo.Delete(ctx, scope, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || strings.Contains(err.Error(), "no rows") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (a *formIsolationAdapter) BulkUpdate(ctx context.Context, tctx coretenant.Context, keys []string, value string) (int64, error) {
+	var count int64
+	for _, k := range keys {
+		updated, err := a.Update(ctx, tctx, k, value)
+		if err != nil {
+			return count, err
+		}
+		if updated {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (a *formIsolationAdapter) Export(ctx context.Context, tctx coretenant.Context) ([]string, error) {
+	return a.List(ctx, tctx)
+}
+
+func TestFormTenantIsolationSuite(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	repo := repository.NewFormRepository(db)
+	pageRepo := repository.NewPageRepository(db)
+	adapter := &formIsolationAdapter{
+		repo:       repo,
+		pageRepo:   pageRepo,
+		ids:        make(map[string]string),
+		scopePages: make(map[string]string),
+	}
+	testutil.RunTenantIsolationSuite(t, adapter)
 }

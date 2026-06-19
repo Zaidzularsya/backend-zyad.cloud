@@ -750,7 +750,7 @@ Acceptance: re-run tidak menggandakan count dan timezone organization dipakai.
 
 ### LAND-API-001: Admin Page and Section API
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Middleware security guard (RBAC/permissions), data mask on response, dan request payload validations untuk setiap endpoint.
@@ -760,7 +760,7 @@ Risk / Follow-up:
 
 ### LAND-API-002: Admin Form and Submission API
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Middleware security guard (RBAC/permissions), data mask on response, dan request payload validations untuk setiap endpoint.
@@ -770,7 +770,7 @@ Risk / Follow-up:
 
 ### LAND-API-003: Branding, Domain, and Analytics API
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Middleware security guard (RBAC/permissions), data mask on response, dan request payload validations untuk setiap endpoint.
@@ -780,7 +780,7 @@ Risk / Follow-up:
 
 ### LAND-API-004: Public API
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Middleware security guard (RBAC/permissions), data mask on response, dan request payload validations untuk setiap endpoint.
@@ -791,9 +791,9 @@ Risk / Follow-up:
 
 Acceptance: tidak memerlukan admin auth dan tidak menerima tenant ID bebas.
 
-### LAND-API-005: CTA, Template, Media, and Navigation API
+### LAND-API-005: Reusable Content and Navigation Handlers
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Middleware security guard (RBAC/permissions), data mask on response, dan request payload validations untuk setiap endpoint.
@@ -804,9 +804,9 @@ Risk / Follow-up:
 
 Acceptance: contract Vue memiliki schema stabil dan permission granular.
 
-### LAND-API-006: Revision, Schedule, and Lead Integration API
+### LAND-API-006: Revision, Schedule, and Integration Handlers
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Middleware security guard (RBAC/permissions), data mask on response, dan request payload validations untuk setiap endpoint.
@@ -887,7 +887,7 @@ Risk / Follow-up:
 
 ### LAND-DOC-001: Documentation Sync
 
-Status: `planned`
+Status: `done`
 
 Risk / Follow-up:
 - Mencegah desync contract OpenAPI dan frontend implementation jika ada perubahan.

@@ -74,3 +74,35 @@ func (s *formService) ReorderFields(ctx context.Context, scope coretenant.Scope,
 func (s *formService) DeleteField(ctx context.Context, scope coretenant.Scope, fieldID string) error {
 	return s.formRepo.DeleteField(ctx, scope, fieldID)
 }
+
+func (s *formService) ReplaceFields(ctx context.Context, scope coretenant.Scope, formID string, params []repository.CreateFormFieldParams) ([]domain.LandingFormField, error) {
+	// 1. Fetch existing fields
+	existingFields, err := s.formRepo.ListFieldsByForm(ctx, scope, formID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. Delete existing fields
+	for _, field := range existingFields {
+		err := s.formRepo.DeleteField(ctx, scope, field.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// 3. Create new fields
+	var createdFields []domain.LandingFormField
+	for _, param := range params {
+		param.FormID = formID
+		if !param.Type.IsValid() {
+			return nil, ErrInvalidFieldType
+		}
+		field, err := s.formRepo.CreateField(ctx, scope, param)
+		if err != nil {
+			return nil, err
+		}
+		createdFields = append(createdFields, field)
+	}
+
+	return createdFields, nil
+}

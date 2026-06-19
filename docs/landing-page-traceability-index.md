@@ -44,8 +44,8 @@ Status: `planned`, `in_progress`, `done`, `deferred`, atau `blocked`.
 | 8 | Autosave, revision, compare, restore, audit | LAND-BE-044 | planned |
 | 9 | View, visitor, CTA, conversion, source, device, attribution | LAND-BE-060, LAND-BE-061 | planned |
 | 10 | Granular permission and role matrix | LAND-0003, LAND-SEED-001, LAND-SEED-003 | planned |
-| 11 | Admin workflow end-to-end | LAND-API-001..006, LAND-TEST-003 | planned |
-| 12 | Admin/public API | LAND-API-001..006 | planned |
+| 11 | Admin workflow end-to-end | LAND-API-001..006, LAND-TEST-003 | done |
+| 12 | Admin/public API | LAND-API-001..006 | done |
 | 13 | Target Go structure | LAND-0001, LAND-0002 | planned |
 | 14 | Realistic MVP | MVP tasks in development document | planned |
 | 15 | Advanced features | LAND-ADV-001..007 | deferred |
@@ -58,19 +58,19 @@ Status: `planned`, `in_progress`, `done`, `deferred`, atau `blocked`.
 | --- | --- | --- | --- |
 | Canonical module `landing` | LAND-0001 | Code path | done |
 | Module skeleton | LAND-0002 | Code path | done |
-| Tenant isolation | LAND-0003, MT-CORE-001..005, MT-DATA-001..004, MT-PLAT-001..003 | Context/resolvers/guards, tenant transaction, repository scope, Landing access policy, RLS foundation, and reusable isolation suite done; concrete Landing repositories pending |
+| Tenant isolation | LAND-0003, MT-CORE-001..005, MT-DATA-001..004, MT-PLAT-001..003 | Context/resolvers/guards, tenant transaction, repository scope, Landing access policy, RLS foundation, and reusable isolation suite done; concrete Landing repositories done |
 | Existing schema audit | LAND-DB-001 | Legacy `landing_pages`, `brands` | done |
 | Landing core tables | LAND-DB-002 | `landing_pages`, `landing_page_sections` | done |
-| Page CRUD/duplicate/restore | LAND-BE-010, LAND-API-001 | `/admin/landing-pages` | planned |
-| Section builder/reorder | LAND-BE-011, LAND-API-001 | `landing_page_sections` | planned |
-| Page visibility/password | LAND-BE-013, LAND-API-004 | Page access endpoints | planned |
+| Page CRUD/duplicate/restore | LAND-BE-010, LAND-API-001 | `/admin/landing-pages` | done |
+| Section builder/reorder | LAND-BE-011, LAND-API-001 | `landing_page_sections` | done |
+| Page visibility/password | LAND-BE-013, LAND-API-004 | Page access endpoints | done |
 | Reusable CTA/tracking | LAND-BE-014, LAND-API-005 | CTA endpoints/events | planned |
 | Reusable section template | LAND-BE-015, LAND-API-005 | Template endpoints | planned |
 | Navigation/menu | LAND-BE-016, LAND-API-005 | Menu endpoints | planned |
-| Form builder | LAND-BE-030, LAND-API-002 | Form/field endpoints | planned |
+| Form builder | LAND-BE-030, LAND-API-002 | Form/field endpoints | done |
 | Form file upload | LAND-BE-030, LAND-BE-031 | Storage reference | planned |
-| Public submission | LAND-BE-031, LAND-API-004 | Public form submit | planned |
-| Submission management/export | LAND-BE-032, LAND-API-002 | Submission endpoints | planned |
+| Public submission | LAND-BE-031, LAND-API-004 | Public form submit | done |
+| Submission management/export | LAND-BE-032, LAND-API-002 | Submission endpoints | done |
 | Lead notification/integration | LAND-BE-033, LAND-API-006 | Integration/delivery endpoints | planned |
 | Branding default/override | LAND-BE-020, LAND-API-003 | Branding endpoints | done |
 | Branding storage asset | LAND-BE-021 | Storage reference | done |
@@ -80,13 +80,13 @@ Status: `planned`, `in_progress`, `done`, `deferred`, atau `blocked`.
 | Publish validation | LAND-BE-040 | Validate publish endpoint | planned |
 | Immutable publish/version | LAND-BE-041 | Version/publish endpoints | planned |
 | Preview | LAND-BE-042 | Preview token endpoint | planned |
-| Public resolve/redirect | LAND-BE-043, LAND-API-004 | Public resolve | planned |
+| Public resolve/redirect | LAND-BE-043, LAND-API-004 | Public resolve | done |
 | Autosave/revision compare | LAND-BE-044, LAND-API-006 | Revision endpoints | planned |
 | Scheduled publish/unpublish | LAND-BE-045, LAND-API-006 | Schedule endpoints/worker | planned |
-| Custom domain binding | LAND-BE-050, LAND-API-003, MT-API-003 | Organization domain and page binding | planned |
+| Custom domain binding | LAND-BE-050, LAND-API-003, MT-API-003 | Organization domain and page binding | done |
 | SSL/domain status integration | LAND-BE-051, MT-CORE-003 | Organization domain capability | planned |
 | Public analytics event | LAND-BE-060 | Public event endpoint | planned |
-| Analytics aggregate | LAND-BE-061, LAND-API-003 | Analytics endpoints | planned |
+| Analytics aggregate | LAND-BE-061, LAND-API-003 | Analytics endpoints | done |
 | Visual builder | LAND-ADV-001 | Future editor | deferred |
 | Template marketplace | LAND-ADV-002 | Future catalog | deferred |
 | A/B testing/personalization | LAND-ADV-003 | Future experiments | deferred |
@@ -111,60 +111,61 @@ Status: `planned`, `in_progress`, `done`, `deferred`, atau `blocked`.
 | Submission repository | LAND-REPO-004 | done |
 | Version/domain/branding repository | LAND-REPO-005 | done |
 | Analytics repository | LAND-REPO-006 | done |
-| Reusable content/navigation repository | LAND-REPO-007 | done |
+| Reusable content/navigation repository | LAND-API-005 | done |
 | Media repository | LAND-REPO-008 | done |
+| Revision/schedule/integration handler | LAND-API-006 | done |
 | Revision/schedule repository | LAND-REPO-009 | done |
 | Lead integration repository | LAND-REPO-010 | done |
 | Unit tests | LAND-TEST-001 | planned |
 | Repository integration tests | LAND-TEST-002 | planned |
 | Handler/public flow tests | LAND-TEST-003 | planned |
-| Documentation synchronization | LAND-DOC-001 | planned |
+| Documentation synchronization | LAND-DOC-001 | done |
 
 ## API Index
 
 | Endpoint | Task | Permission | Status |
 | --- | --- | --- | --- |
-| `GET /admin/landing-pages` | LAND-API-001 | `landing.page.read` | planned |
-| `POST /admin/landing-pages` | LAND-API-001 | `landing.page.create` | planned |
-| `GET /admin/landing-pages/:id` | LAND-API-001 | `landing.page.read` | planned |
-| `PATCH /admin/landing-pages/:id` | LAND-API-001 | `landing.page.update` | planned |
-| `DELETE /admin/landing-pages/:id` | LAND-API-001 | `landing.page.delete` | planned |
-| `POST /admin/landing-pages/:id/restore` | LAND-API-001 | `landing.page.restore` | planned |
-| `POST /admin/landing-pages/:id/duplicate` | LAND-API-001 | `landing.page.create` | planned |
-| `POST /admin/landing-pages/:id/archive` | LAND-API-001 | `landing.page.archive` | planned |
-| `PATCH /admin/landing-pages/:id/seo` | LAND-API-001 | `landing.seo.manage` | planned |
-| `POST /admin/landing-pages/:id/validate-publish` | LAND-API-001 | `landing.page.publish` | planned |
-| `POST /admin/landing-pages/:id/publish` | LAND-API-001 | `landing.page.publish` | planned |
-| `POST /admin/landing-pages/:id/unpublish` | LAND-API-001 | `landing.page.publish` | planned |
-| `GET /admin/landing-pages/:id/versions` | LAND-API-001 | `landing.page.read` | planned |
-| `GET /admin/landing-pages/:id/versions/:version` | LAND-API-001 | `landing.page.read` | planned |
-| `POST /admin/landing-pages/:id/versions/:version/restore` | LAND-API-001 | `landing.page.publish` | planned |
-| `POST /admin/landing-pages/:id/preview-token` | LAND-API-001 | `landing.preview` | planned |
-| `PUT /admin/landing-pages/:id/access` | LAND-API-001 | `landing.page.update` | planned |
-| `GET /admin/landing-pages/:id/sections` | LAND-API-001 | `landing.page.read` | planned |
-| `POST /admin/landing-pages/:id/sections` | LAND-API-001 | `landing.section.manage` | planned |
-| `PATCH /admin/landing-pages/:id/sections/:sectionId` | LAND-API-001 | `landing.section.manage` | planned |
-| `POST /admin/landing-pages/:id/sections/:sectionId/duplicate` | LAND-API-001 | `landing.section.manage` | planned |
-| `DELETE /admin/landing-pages/:id/sections/:sectionId` | LAND-API-001 | `landing.section.manage` | planned |
-| `PUT /admin/landing-pages/:id/sections/reorder` | LAND-API-001 | `landing.section.manage` | planned |
-| `GET /admin/landing-pages/:id/forms` | LAND-API-002 | `landing.page.read` | planned |
-| `POST /admin/landing-pages/:id/forms` | LAND-API-002 | `landing.form.manage` | planned |
-| `PATCH /admin/landing-pages/:id/forms/:formId` | LAND-API-002 | `landing.form.manage` | planned |
-| `DELETE /admin/landing-pages/:id/forms/:formId` | LAND-API-002 | `landing.form.manage` | planned |
-| `PUT /admin/landing-pages/:id/forms/:formId/fields` | LAND-API-002 | `landing.form.manage` | planned |
-| `GET /admin/landing-submissions` | LAND-API-002 | `landing.submission.read` | planned |
-| `GET /admin/landing-submissions/:id` | LAND-API-002 | `landing.submission.read` | planned |
-| `PATCH /admin/landing-submissions/:id/status` | LAND-API-002 | `landing.submission.update` | planned |
-| `POST /admin/landing-submissions/:id/notes` | LAND-API-002 | `landing.submission.update` | planned |
-| `DELETE /admin/landing-submissions/:id` | LAND-API-002 | `landing.submission.delete` | planned |
-| `GET /admin/landing-submissions/export` | LAND-API-002 | `landing.submission.export` | planned |
-| `GET /admin/landing/branding` | LAND-API-003 | `landing.branding.read` | planned |
-| `PATCH /admin/landing/branding` | LAND-API-003 | `landing.branding.update` | planned |
-| `GET /admin/landing-pages/:id/branding` | LAND-API-003 | `landing.branding.read` | planned |
-| `PATCH /admin/landing-pages/:id/branding` | LAND-API-003 | `landing.branding.update` | planned |
-| `DELETE /admin/landing-pages/:id/branding` | LAND-API-003 | `landing.branding.update` | planned |
-| `GET /admin/landing/theme` | LAND-API-003 | `landing.branding.read` | planned |
-| `PATCH /admin/landing/theme` | LAND-API-003 | `landing.theme.manage` | planned |
+| `GET /admin/landing-pages` | LAND-API-001 | `landing.page.read` | done |
+| `POST /admin/landing-pages` | LAND-API-001 | `landing.page.create` | done |
+| `GET /admin/landing-pages/:id` | LAND-API-001 | `landing.page.read` | done |
+| `PATCH /admin/landing-pages/:id` | LAND-API-001 | `landing.page.update` | done |
+| `DELETE /admin/landing-pages/:id` | LAND-API-001 | `landing.page.delete` | done |
+| `POST /admin/landing-pages/:id/restore` | LAND-API-001 | `landing.page.restore` | done |
+| `POST /admin/landing-pages/:id/duplicate` | LAND-API-001 | `landing.page.create` | done |
+| `POST /admin/landing-pages/:id/archive` | LAND-API-001 | `landing.page.archive` | done |
+| `PATCH /admin/landing-pages/:id/seo` | LAND-API-001 | `landing.seo.manage` | done |
+| `POST /admin/landing-pages/:id/validate-publish` | LAND-API-001 | `landing.page.publish` | done |
+| `POST /admin/landing-pages/:id/publish` | LAND-API-001 | `landing.page.publish` | done |
+| `POST /admin/landing-pages/:id/unpublish` | LAND-API-001 | `landing.page.publish` | done |
+| `GET /admin/landing-pages/:id/versions` | LAND-API-001 | `landing.page.read` | done |
+| `GET /admin/landing-pages/:id/versions/:version` | LAND-API-001 | `landing.page.read` | done |
+| `POST /admin/landing-pages/:id/versions/:version/restore` | LAND-API-001 | `landing.page.publish` | done |
+| `POST /admin/landing-pages/:id/preview-token` | LAND-API-001 | `landing.preview` | done |
+| `PUT /admin/landing-pages/:id/access` | LAND-API-001 | `landing.page.update` | done |
+| `GET /admin/landing-pages/:id/sections` | LAND-API-001 | `landing.page.read` | done |
+| `POST /admin/landing-pages/:id/sections` | LAND-API-001 | `landing.section.manage` | done |
+| `PATCH /admin/landing-pages/:id/sections/:sectionId` | LAND-API-001 | `landing.section.manage` | done |
+| `POST /admin/landing-pages/:id/sections/:sectionId/duplicate` | LAND-API-001 | `landing.section.manage` | done |
+| `DELETE /admin/landing-pages/:id/sections/:sectionId` | LAND-API-001 | `landing.section.manage` | done |
+| `PUT /admin/landing-pages/:id/sections/reorder` | LAND-API-001 | `landing.section.manage` | done |
+| `GET /admin/landing-pages/:id/forms` | LAND-API-002 | `landing.page.read` | done |
+| `POST /admin/landing-pages/:id/forms` | LAND-API-002 | `landing.form.manage` | done |
+| `PATCH /admin/landing-pages/:id/forms/:formId` | LAND-API-002 | `landing.form.manage` | done |
+| `DELETE /admin/landing-pages/:id/forms/:formId` | LAND-API-002 | `landing.form.manage` | done |
+| `PUT /admin/landing-pages/:id/forms/:formId/fields` | LAND-API-002 | `landing.form.manage` | done |
+| `GET /admin/landing-submissions` | LAND-API-002 | `landing.submission.read` | done |
+| `GET /admin/landing-submissions/:id` | LAND-API-002 | `landing.submission.read` | done |
+| `PATCH /admin/landing-submissions/:id/status` | LAND-API-002 | `landing.submission.update` | done |
+| `POST /admin/landing-submissions/:id/notes` | LAND-API-002 | `landing.submission.update` | done |
+| `DELETE /admin/landing-submissions/:id` | LAND-API-002 | `landing.submission.delete` | done |
+| `GET /admin/landing-submissions/export` | LAND-API-002 | `landing.submission.export` | done |
+| `GET /admin/landing/branding` | LAND-API-003 | `landing.branding.read` | done |
+| `PATCH /admin/landing/branding` | LAND-API-003 | `landing.branding.update` | done |
+| `GET /admin/landing-pages/:id/branding` | LAND-API-003 | `landing.branding.read` | done |
+| `PATCH /admin/landing-pages/:id/branding` | LAND-API-003 | `landing.branding.update` | done |
+| `DELETE /admin/landing-pages/:id/branding` | LAND-API-003 | `landing.branding.update` | done |
+| `GET /admin/landing/theme` | LAND-API-003 | `landing.branding.read` | done |
+| `PATCH /admin/landing/theme` | LAND-API-003 | `landing.theme.manage` | done |
 | `GET /admin/landing/ctas` | LAND-API-005 | `landing.cta.manage` | planned |
 | `POST /admin/landing/ctas` | LAND-API-005 | `landing.cta.manage` | planned |
 | `PATCH /admin/landing/ctas/:id` | LAND-API-005 | `landing.cta.manage` | planned |
@@ -183,16 +184,16 @@ Status: `planned`, `in_progress`, `done`, `deferred`, atau `blocked`.
 | `PATCH /admin/landing/menus/:id` | LAND-API-005 | `landing.menu.manage` | planned |
 | `DELETE /admin/landing/menus/:id` | LAND-API-005 | `landing.menu.manage` | planned |
 | `PUT /admin/landing/menus/:id/items` | LAND-API-005 | `landing.menu.manage` | planned |
-| `GET /admin/landing/domains/available` | LAND-API-003, MT-API-003 | `landing.domain.read` | planned |
-| `GET /admin/landing/domain-bindings` | LAND-API-003 | `landing.domain.read` | planned |
-| `POST /admin/landing/domain-bindings` | LAND-API-003 | `landing.domain.manage` | planned |
-| `PATCH /admin/landing/domain-bindings/:id` | LAND-API-003 | `landing.domain.manage` | planned |
-| `DELETE /admin/landing/domain-bindings/:id` | LAND-API-003 | `landing.domain.manage` | planned |
-| `GET /admin/landing-analytics/summary` | LAND-API-003 | `landing.analytics.read` | planned |
-| `GET /admin/landing-analytics/timeseries` | LAND-API-003 | `landing.analytics.read` | planned |
-| `GET /admin/landing-analytics/sources` | LAND-API-003 | `landing.analytics.read` | planned |
-| `GET /admin/landing-analytics/top-pages` | LAND-API-003 | `landing.analytics.read` | planned |
-| `GET /admin/landing-analytics/devices` | LAND-API-003 | `landing.analytics.read` | planned |
+| `GET /admin/landing/domains/available` | LAND-API-003, MT-API-003 | `landing.domain.read` | done |
+| `GET /admin/landing/domain-bindings` | LAND-API-003 | `landing.domain.read` | done |
+| `POST /admin/landing/domain-bindings` | LAND-API-003 | `landing.domain.manage` | done |
+| `PATCH /admin/landing/domain-bindings/:id` | LAND-API-003 | `landing.domain.manage` | done |
+| `DELETE /admin/landing/domain-bindings/:id` | LAND-API-003 | `landing.domain.manage` | done |
+| `GET /admin/landing-analytics/summary` | LAND-API-003 | `landing.analytics.read` | done |
+| `GET /admin/landing-analytics/timeseries` | LAND-API-003 | `landing.analytics.read` | done |
+| `GET /admin/landing-analytics/sources` | LAND-API-003 | `landing.analytics.read` | done |
+| `GET /admin/landing-analytics/top-pages` | LAND-API-003 | `landing.analytics.read` | done |
+| `GET /admin/landing-analytics/devices` | LAND-API-003 | `landing.analytics.read` | done |
 | `GET /admin/landing-pages/:id/revisions` | LAND-API-006 | `landing.page.read` | planned |
 | `GET /admin/landing-pages/:id/revisions/compare` | LAND-API-006 | `landing.page.read` | planned |
 | `POST /admin/landing-pages/:id/revisions/:revision/restore` | LAND-API-006 | `landing.page.update` | planned |
@@ -205,12 +206,12 @@ Status: `planned`, `in_progress`, `done`, `deferred`, atau `blocked`.
 | `POST /admin/landing/lead-integrations/:id/test` | LAND-API-006 | `landing.integration.manage` | planned |
 | `GET /admin/landing/lead-deliveries` | LAND-API-006 | `landing.integration.read` | planned |
 | `POST /admin/landing/lead-deliveries/:id/retry` | LAND-API-006 | `landing.integration.manage` | planned |
-| `GET /public/landing/resolve` | LAND-API-004 | Public | planned |
-| `POST /public/landing/access/:publicPageId` | LAND-API-004 | Public/rate limited | planned |
-| `POST /public/landing/forms/:publicKey/uploads` | LAND-API-004 | Public/rate limited | planned |
-| `GET /public/landing/preview/:token` | LAND-API-004 | Preview token | planned |
-| `POST /public/landing/forms/:publicKey/submissions` | LAND-API-004 | Public/rate limited | planned |
-| `POST /public/landing/events` | LAND-API-004 | Public/rate limited | planned |
+| `GET /public/landing/resolve` | LAND-API-004 | Public | done |
+| `POST /public/landing/access/:publicPageId` | LAND-API-004 | Public/rate limited | done |
+| `POST /public/landing/forms/:publicKey/uploads` | LAND-API-004 | Public/rate limited | done |
+| `GET /public/landing/preview/:token` | LAND-API-004 | Preview token | done |
+| `POST /public/landing/forms/:publicKey/submissions` | LAND-API-004 | Public/rate limited | done |
+| `POST /public/landing/events` | LAND-API-004 | Public/rate limited | done |
 
 ## Migration Index
 
@@ -309,6 +310,7 @@ Nama file final mengikuti nomor migration berikutnya saat implementasi.
 | 2026-06-17 | Completed Version, Branding, and Analytics Repositories | `internal/modules/landing/repository/version_repository.go`, `branding_repository.go`, `analytics_repository.go` | Implemented version snapshots, branding upserts with conflicts, and analytic event logging with aggregate tables. |
 | 2026-06-17 | Completed Reusable Content and Media Repositories | `internal/modules/landing/repository/reusable_repository.go`, `internal/modules/landing/repository/media_repository.go` | Added CRUD implementations with RLS for templates, menus, ctas, and media assets. Added ordering mechanism for menu items. |
 | 2026-06-17 | Completed Revision and Integration Repositories | `internal/modules/landing/repository/revision_repository.go`, `internal/modules/landing/repository/integration_repository.go` | Added CRUD implementations for revisions and integrations. Disabled RLS for schedule and delivery log tables to allow concurrent cross-tenant worker operations with `SKIP LOCKED`. |
+| 2026-06-18 | Completed repository tenant isolation tests | `internal/modules/landing/repository/*` | Successfully adopted `RunTenantIsolationSuite` for main Landing Page entities including Page, Section, Form, Submission, and Media. Isolation proven. |
 
 ## Update Rules
 

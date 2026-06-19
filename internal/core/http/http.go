@@ -28,6 +28,11 @@ func Fail(c *gin.Context, err error) {
 		response.Error(c, appErr.Status, appErr.Code, appErr.Message)
 		return
 	}
+	
+	// Temporarily log the raw error so we can debug it
+	if err != nil {
+		c.Error(err)
+	}
 
 	response.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
 }

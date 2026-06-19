@@ -23,6 +23,7 @@ type CreatePageParams struct {
 	Type       domain.PageType
 	Status     domain.PageStatus
 	Visibility domain.PageVisibility
+	SEO        map[string]any
 	Locale     string
 	Timezone   string
 	IsHomepage bool
@@ -35,11 +36,13 @@ type UpdatePageParams struct {
 	Slug       *string
 	Type       *domain.PageType
 	Status     *domain.PageStatus
-	Visibility *domain.PageVisibility
-	Locale     *string
-	Timezone   *string
-	IsHomepage *bool
-	UpdatedBy  string
+	Visibility   *domain.PageVisibility
+	PasswordHash *string
+	SEO          map[string]any
+	Locale       *string
+	Timezone     *string
+	IsHomepage   *bool
+	UpdatedBy    string
 }
 
 // PageRepository is the tenant-owned data contract. Every method requires a

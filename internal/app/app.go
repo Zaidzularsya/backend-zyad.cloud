@@ -21,6 +21,9 @@ import (
 	organizationhandler "zyad.cloud/internal/modules/organization/handler"
 	organizationrepo "zyad.cloud/internal/modules/organization/repository"
 	organizationservice "zyad.cloud/internal/modules/organization/service"
+	landinghandler "zyad.cloud/internal/modules/landing/handler"
+	landingrepo "zyad.cloud/internal/modules/landing/repository"
+	landingservice "zyad.cloud/internal/modules/landing/service"
 	userhandler "zyad.cloud/internal/modules/user/handler"
 	userrepo "zyad.cloud/internal/modules/user/repository"
 	userservice "zyad.cloud/internal/modules/user/service"
@@ -167,6 +170,57 @@ func New(ctx context.Context) (*App, error) {
 		permService,
 	)
 
+	landingPageRepo := landingrepo.NewPageRepository(db)
+	landingSectionRepo := landingrepo.NewSectionRepository(db)
+	landingRevisionRepo := landingrepo.NewRevisionRepository(db)
+	landingFormRepo := landingrepo.NewFormRepository(db)
+	landingBrandingRepo := landingrepo.NewBrandingRepository(db)
+	landingVersionRepo := landingrepo.NewVersionRepository(db)
+	landingPlatformRepo := landingrepo.NewPlatformPageRepository(db)
+
+	landingVisibilitySvc := landingservice.NewVisibilityService(landingPageRepo, landingPlatformRepo, redisClient, cfg)
+	landingRevisionSvc := landingservice.NewRevisionService(landingRevisionRepo, landingPageRepo)
+	landingPublishSvc := landingservice.NewPublishService(db, landingPageRepo, landingSectionRepo, landingFormRepo, landingBrandingRepo, landingVersionRepo, cfg.App.Secret)
+	landingPageSvc := landingservice.NewPageService(landingPageRepo, landingSectionRepo)
+	landingSectionSvc := landingservice.NewSectionService(landingSectionRepo)
+
+	landingDomainRepo := landingrepo.NewDomainRepository(db)
+	landingDomainSvc := landingservice.NewDomainService(landingDomainRepo, landingPageRepo, db)
+	landingBrandingSvc := landingservice.NewBrandingService(landingBrandingRepo)
+	landingFormSvc := landingservice.NewFormService(landingFormRepo)
+	landingSubmissionRepo := landingrepo.NewSubmissionRepository(db)
+	landingSubmissionSvc := landingservice.NewSubmissionService(landingSubmissionRepo, landingFormRepo)
+
+	landingReusableRepo := landingrepo.NewReusableRepository(db)
+	landingMediaRepo := landingrepo.NewMediaRepository(db)
+	landingIntegrationRepo := landingrepo.NewIntegrationRepository(db)
+
+	landingCTASvc := landingservice.NewCTAService(landingReusableRepo)
+	landingTemplateSvc := landingservice.NewTemplateService(landingReusableRepo, landingSectionRepo)
+	landingMediaSvc := landingservice.NewMediaService(landingMediaRepo)
+	landingNavigationSvc := landingservice.NewNavigationService(landingReusableRepo)
+	landingDeliverySvc := landingservice.NewDeliveryService(landingIntegrationRepo, landingSubmissionRepo)
+
+	landingAdminPageHandler := landinghandler.NewAdminPageHandler(landingPageSvc, landingVisibilitySvc, landingRevisionSvc, landingPublishSvc)
+	landingAdminSectionHandler := landinghandler.NewAdminSectionHandler(landingSectionSvc)
+	landingAdminBrandingHandler := landinghandler.NewAdminBrandingHandler(landingBrandingSvc)
+	landingAdminDomainHandler := landinghandler.NewAdminDomainHandler(landingDomainSvc)
+	landingAdminFormHandler := landinghandler.NewAdminFormHandler(landingFormSvc)
+	landingAdminSubmissionHandler := landinghandler.NewAdminSubmissionHandler(landingSubmissionSvc)
+	landingAdminCTAHandler := landinghandler.NewAdminCTAHandler(landingCTASvc)
+	landingAdminTemplateHandler := landinghandler.NewAdminTemplateHandler(landingTemplateSvc)
+	landingAdminMediaHandler := landinghandler.NewAdminMediaHandler(landingMediaSvc)
+	landingAdminNavigationHandler := landinghandler.NewAdminNavigationHandler(landingNavigationSvc)
+	landingAdminRevisionHandler := landinghandler.NewAdminRevisionHandler(landingRevisionSvc)
+	landingAdminScheduleHandler := landinghandler.NewAdminScheduleHandler(landingRevisionSvc)
+	landingAdminIntegrationHandler := landinghandler.NewAdminIntegrationHandler(landingDeliverySvc)
+
+	landingResolverRepo := landingrepo.NewResolverRepository(db)
+	landingResolverSvc := landingservice.NewResolverService(db, landingResolverRepo, landingVersionRepo, landingPageRepo, landingSectionRepo, landingFormRepo, landingBrandingRepo, landingPublishSvc)
+	landingAnalyticsRepo := landingrepo.NewAnalyticsRepository(db)
+	landingAnalyticsSvc := landingservice.NewAnalyticsService(landingAnalyticsRepo, landingPageRepo, db)
+	publicLandingHandler := landinghandler.NewPublicLandingHandler(landingResolverSvc, landingVisibilitySvc, landingSubmissionSvc, landingAnalyticsSvc)
+
 	router, err := newRouter(Dependencies{
 		Config:                           cfg,
 		Logger:                           log,
@@ -186,6 +240,21 @@ func New(ctx context.Context) (*App, error) {
 		OrganizationSwitchHandler:        organizationSwitchHandler,
 		UserAuthHandler:                  authHandler,
 		UserHandler:                      userHandler,
+		LandingAdminPageHandler:          landingAdminPageHandler,
+		LandingAdminSectionHandler:       landingAdminSectionHandler,
+		LandingAdminBrandingHandler:      landingAdminBrandingHandler,
+		LandingAdminDomainHandler:        landingAdminDomainHandler,
+		LandingAdminFormHandler:          landingAdminFormHandler,
+		LandingAdminSubmissionHandler:    landingAdminSubmissionHandler,
+		PublicLandingHandler:             publicLandingHandler,
+		LandingAdminCTAHandler:           landingAdminCTAHandler,
+		LandingAdminTemplateHandler:      landingAdminTemplateHandler,
+		LandingAdminMediaHandler:         landingAdminMediaHandler,
+		LandingAdminNavigationHandler:    landingAdminNavigationHandler,
+		LandingAdminRevisionHandler:      landingAdminRevisionHandler,
+		LandingAdminScheduleHandler:      landingAdminScheduleHandler,
+		LandingAdminIntegrationHandler:   landingAdminIntegrationHandler,
+		PermissionChecker:                permService,
 		Authenticator:                    authService,
 		OrganizationResolver:             organizationResolver,
 		PublicHostResolver:               publicHostResolver,

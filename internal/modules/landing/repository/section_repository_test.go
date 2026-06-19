@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/landing/domain"
 	"zyad.cloud/internal/modules/landing/repository"
 	"zyad.cloud/internal/platform/database/testutil"
@@ -217,4 +218,174 @@ func TestSectionRepositoryLifecycleAndIsolationIntegration(t *testing.T) {
 	if !errors.Is(err, pgx.ErrNoRows) {
 		t.Errorf("FindByID soft-deleted section: expected pgx.ErrNoRows, got %v", err)
 	}
+}
+
+type sectionIsolationAdapter struct {
+	repo       repository.SectionRepository
+	pageRepo   repository.PageRepository
+	ids        map[string]string
+	scopePages map[string]string
+}
+
+func (a *sectionIsolationAdapter) ensurePage(ctx context.Context, scope coretenant.Scope) (string, error) {
+	pageID, ok := a.scopePages[scope.OrganizationID()]
+	if ok {
+		return pageID, nil
+	}
+	page, err := a.pageRepo.Create(ctx, scope, repository.CreatePageParams{
+		Name:       "Test Page " + scope.OrganizationID(),
+		Title:      "Test",
+		Slug:       strings.ReplaceAll("testpage-"+testutil.UniqueCode("sec")+scope.OrganizationID()[:8], ".", "-"),
+		Type:       domain.PageTypeCampaign,
+		Status:     domain.PageStatusDraft,
+		Visibility: domain.PageVisibilityPublic,
+		Locale:     "id-ID",
+		Timezone:   "Asia/Jakarta",
+	})
+	if err != nil {
+		return "", err
+	}
+	a.scopePages[scope.OrganizationID()] = page.ID
+	return page.ID, nil
+}
+
+func (a *sectionIsolationAdapter) Create(ctx context.Context, tctx coretenant.Context, key string, value string) error {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return err
+	}
+	pageID, err := a.ensurePage(ctx, scope)
+	if err != nil {
+		return err
+	}
+	section, err := a.repo.Create(ctx, scope, repository.CreateSectionParams{
+		LandingPageID: pageID,
+		Key:           strings.ReplaceAll(key, "_", "-"),
+		Type:          domain.SectionTypeHero,
+		Name:          value,
+		SortOrder:     0,
+		IsEnabled:     true,
+		Content:       make(map[string]any),
+		Style:         make(map[string]any),
+	})
+	if err != nil {
+		return err
+	}
+	a.ids[key] = section.ID
+	return nil
+}
+
+func (a *sectionIsolationAdapter) Read(ctx context.Context, tctx coretenant.Context, key string) (string, bool, error) {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return "", false, err
+	}
+	id, ok := a.ids[key]
+	if !ok {
+		return "", false, nil
+	}
+	section, err := a.repo.FindByID(ctx, scope, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || strings.Contains(err.Error(), "no rows") {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return section.Name, true, nil
+}
+
+func (a *sectionIsolationAdapter) List(ctx context.Context, tctx coretenant.Context) ([]string, error) {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return nil, err
+	}
+	pageID, err := a.ensurePage(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	sections, err := a.repo.ListByPage(ctx, scope, pageID)
+	if err != nil {
+		return nil, err
+	}
+	var keys []string
+	for _, s := range sections {
+		for k, id := range a.ids {
+			if id == s.ID {
+				keys = append(keys, k)
+				break
+			}
+		}
+	}
+	return keys, nil
+}
+
+func (a *sectionIsolationAdapter) Update(ctx context.Context, tctx coretenant.Context, key string, value string) (bool, error) {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return false, err
+	}
+	id, ok := a.ids[key]
+	if !ok {
+		return false, nil
+	}
+	_, err = a.repo.Update(ctx, scope, id, repository.UpdateSectionParams{
+		Name: &value,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || strings.Contains(err.Error(), "no rows") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (a *sectionIsolationAdapter) Delete(ctx context.Context, tctx coretenant.Context, key string) (bool, error) {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return false, err
+	}
+	id, ok := a.ids[key]
+	if !ok {
+		return false, nil
+	}
+	err = a.repo.Delete(ctx, scope, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || strings.Contains(err.Error(), "no rows") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (a *sectionIsolationAdapter) BulkUpdate(ctx context.Context, tctx coretenant.Context, keys []string, value string) (int64, error) {
+	var count int64
+	for _, k := range keys {
+		updated, err := a.Update(ctx, tctx, k, value)
+		if err != nil {
+			return count, err
+		}
+		if updated {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (a *sectionIsolationAdapter) Export(ctx context.Context, tctx coretenant.Context) ([]string, error) {
+	return a.List(ctx, tctx)
+}
+
+func TestSectionTenantIsolationSuite(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	repo := repository.NewSectionRepository(db)
+	pageRepo := repository.NewPageRepository(db)
+	adapter := &sectionIsolationAdapter{
+		repo:       repo,
+		pageRepo:   pageRepo,
+		ids:        make(map[string]string),
+		scopePages: make(map[string]string),
+	}
+	testutil.RunTenantIsolationSuite(t, adapter)
 }

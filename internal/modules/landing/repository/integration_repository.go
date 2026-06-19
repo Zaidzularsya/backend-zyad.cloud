@@ -79,8 +79,12 @@ func (r *integrationRepository) CreateIntegration(ctx context.Context, scope cor
 		return domain.LandingLeadIntegration{}, err
 	}
 	i.OrganizationID = scope.OrganizationID()
-	if createdBy != nil { i.CreatedBy = *createdBy }
-	if updatedBy != nil { i.UpdatedBy = *updatedBy }
+	if createdBy != nil {
+		i.CreatedBy = *createdBy
+	}
+	if updatedBy != nil {
+		i.UpdatedBy = *updatedBy
+	}
 
 	return i, nil
 }
@@ -111,8 +115,12 @@ func (r *integrationRepository) GetIntegration(ctx context.Context, scope corete
 		return domain.LandingLeadIntegration{}, err
 	}
 	i.OrganizationID = scope.OrganizationID()
-	if createdBy != nil { i.CreatedBy = *createdBy }
-	if updatedBy != nil { i.UpdatedBy = *updatedBy }
+	if createdBy != nil {
+		i.CreatedBy = *createdBy
+	}
+	if updatedBy != nil {
+		i.UpdatedBy = *updatedBy
+	}
 
 	return i, nil
 }
@@ -151,8 +159,12 @@ func (r *integrationRepository) ListIntegrations(ctx context.Context, scope core
 				return err
 			}
 			i.OrganizationID = scope.OrganizationID()
-			if createdBy != nil { i.CreatedBy = *createdBy }
-			if updatedBy != nil { i.UpdatedBy = *updatedBy }
+			if createdBy != nil {
+				i.CreatedBy = *createdBy
+			}
+			if updatedBy != nil {
+				i.UpdatedBy = *updatedBy
+			}
 			integrations = append(integrations, i)
 		}
 		return rows.Err()
@@ -302,17 +314,21 @@ func (r *integrationRepository) ListDeliveryLogs(ctx context.Context, scope core
 	return logs, nil
 }
 
-func (r *integrationRepository) ClaimPendingDeliveries(ctx context.Context, limit int) ([]domain.LandingLeadDeliveryLog, error) {
-	// Worker operation, bypasses RLS
+func (r *integrationRepository) ClaimPendingDeliveries(ctx context.Context, scope coretenant.Scope, limit int) ([]domain.LandingLeadDeliveryLog, error) {
+	if !scope.IsValid() {
+		return nil, coretenant.ErrInvalidScope
+	}
+
 	query := `
 		WITH pending AS (
 			SELECT id
 			FROM landing_lead_delivery_logs
-			WHERE status = 'pending'
+			WHERE organization_id = $1
+			  AND status = 'pending'
 			  AND (next_retry_at IS NULL OR next_retry_at <= NOW())
 			ORDER BY created_at ASC
 			FOR UPDATE SKIP LOCKED
-			LIMIT $1
+			LIMIT $2
 		)
 		UPDATE landing_lead_delivery_logs d
 		SET status = 'pending',
@@ -325,43 +341,51 @@ func (r *integrationRepository) ClaimPendingDeliveries(ctx context.Context, limi
 
 	var logs []domain.LandingLeadDeliveryLog
 
-	rows, err := r.db.Query(ctx, query, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var d domain.LandingLeadDeliveryLog
-		err := rows.Scan(
-			&d.ID, &d.OrganizationID, &d.IntegrationID, &d.SubmissionID, &d.Status,
-			&d.ResponsePayload, &d.ErrorMessage, &d.Attempts, &d.NextRetryAt,
-			&d.CreatedAt, &d.UpdatedAt,
-		)
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, scope.OrganizationID(), limit)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		logs = append(logs, d)
-	}
+		defer rows.Close()
 
-	return logs, rows.Err()
+		for rows.Next() {
+			var d domain.LandingLeadDeliveryLog
+			err := rows.Scan(
+				&d.ID, &d.OrganizationID, &d.IntegrationID, &d.SubmissionID, &d.Status,
+				&d.ResponsePayload, &d.ErrorMessage, &d.Attempts, &d.NextRetryAt,
+				&d.CreatedAt, &d.UpdatedAt,
+			)
+			if err != nil {
+				return err
+			}
+			logs = append(logs, d)
+		}
+
+		return rows.Err()
+	})
+
+	return logs, err
 }
 
-func (r *integrationRepository) UpdateDeliveryLogStatus(ctx context.Context, id string, params UpdateDeliveryLogParams) error {
-	// Worker operation, bypasses RLS
+func (r *integrationRepository) UpdateDeliveryLogStatus(ctx context.Context, scope coretenant.Scope, id string, params UpdateDeliveryLogParams) error {
+	if !scope.IsValid() {
+		return coretenant.ErrInvalidScope
+	}
+
 	query := `
 		UPDATE landing_lead_delivery_logs
 		SET status = $1, response_payload = $2, error_message = $3, next_retry_at = $4, updated_at = NOW()
-		WHERE id = $5
+		WHERE id = $5 AND organization_id = $6
 	`
 
-	cmdTag, err := r.db.Exec(ctx, query, params.Status, params.ResponsePayload, params.ErrorMessage, params.NextRetryAt, id)
-	if err != nil {
-		return err
-	}
-	if cmdTag.RowsAffected() == 0 {
-		return pgx.ErrNoRows
-	}
-
-	return nil
+	return r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		cmdTag, err := tx.Exec(ctx, query, params.Status, params.ResponsePayload, params.ErrorMessage, params.NextRetryAt, id, scope.OrganizationID())
+		if err != nil {
+			return err
+		}
+		if cmdTag.RowsAffected() == 0 {
+			return pgx.ErrNoRows
+		}
+		return nil
+	})
 }

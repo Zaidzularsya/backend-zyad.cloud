@@ -4,8 +4,13 @@ package repository_test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+
+	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/landing/domain"
 	"zyad.cloud/internal/modules/landing/repository"
 	"zyad.cloud/internal/platform/database/testutil"
@@ -97,4 +102,137 @@ func TestMediaRepositoryIntegration(t *testing.T) {
 	if len(assetsAfter) != 0 {
 		t.Fatalf("Expected 0 media assets, got %d", len(assetsAfter))
 	}
+}
+
+type mediaIsolationAdapter struct {
+	repo repository.MediaRepository
+	ids  map[string]string
+}
+
+func (a *mediaIsolationAdapter) Create(ctx context.Context, tctx coretenant.Context, key string, value string) error {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return err
+	}
+	w, h := 100, 100
+	asset, err := a.repo.Create(ctx, scope, repository.CreateMediaAssetParams{
+		StorageKey:       key,
+		Filename:         value,
+		MimeType:         "image/jpeg",
+		SizeBytes:        100,
+		Width:            &w,
+		Height:           &h,
+		ProcessingStatus: domain.MediaProcessingPending,
+	})
+	if err != nil {
+		return err
+	}
+	a.ids[key] = asset.ID
+	return nil
+}
+
+func (a *mediaIsolationAdapter) Read(ctx context.Context, tctx coretenant.Context, key string) (string, bool, error) {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return "", false, err
+	}
+	id, ok := a.ids[key]
+	if !ok {
+		return "", false, nil
+	}
+	asset, err := a.repo.Get(ctx, scope, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || strings.Contains(err.Error(), "no rows") {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return asset.Filename, true, nil
+}
+
+func (a *mediaIsolationAdapter) List(ctx context.Context, tctx coretenant.Context) ([]string, error) {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return nil, err
+	}
+	assets, err := a.repo.List(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	var keys []string
+	for _, as := range assets {
+		for k, id := range a.ids {
+			if id == as.ID {
+				keys = append(keys, k)
+				break
+			}
+		}
+	}
+	return keys, nil
+}
+
+func (a *mediaIsolationAdapter) Update(ctx context.Context, tctx coretenant.Context, key string, value string) (bool, error) {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return false, err
+	}
+	id, ok := a.ids[key]
+	if !ok {
+		return false, nil
+	}
+	err = a.repo.UpdateStatus(ctx, scope, id, domain.MediaProcessingCompleted)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || strings.Contains(err.Error(), "no rows") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (a *mediaIsolationAdapter) Delete(ctx context.Context, tctx coretenant.Context, key string) (bool, error) {
+	scope, err := coretenant.NewScope(tctx)
+	if err != nil {
+		return false, err
+	}
+	id, ok := a.ids[key]
+	if !ok {
+		return false, nil
+	}
+	err = a.repo.Delete(ctx, scope, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || strings.Contains(err.Error(), "no rows") {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (a *mediaIsolationAdapter) BulkUpdate(ctx context.Context, tctx coretenant.Context, keys []string, value string) (int64, error) {
+	var count int64
+	for _, k := range keys {
+		updated, err := a.Update(ctx, tctx, k, value)
+		if err != nil {
+			return count, err
+		}
+		if updated {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (a *mediaIsolationAdapter) Export(ctx context.Context, tctx coretenant.Context) ([]string, error) {
+	return a.List(ctx, tctx)
+}
+
+func TestMediaTenantIsolationSuite(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	repo := repository.NewMediaRepository(db)
+	adapter := &mediaIsolationAdapter{
+		repo: repo,
+		ids:  make(map[string]string),
+	}
+	testutil.RunTenantIsolationSuite(t, adapter)
 }

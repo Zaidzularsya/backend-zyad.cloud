@@ -78,6 +78,7 @@ type LandingPage struct {
 	Status           PageStatus
 	Visibility       PageVisibility
 	PasswordHash     string
+	SEO              map[string]any
 	Locale           string
 	Timezone         string
 	IsHomepage       bool

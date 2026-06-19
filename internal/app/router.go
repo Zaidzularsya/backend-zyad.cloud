@@ -116,6 +116,46 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.NotificationHandler != nil {
 		deps.NotificationHandler.RegisterInternalRoutes(protected)
 	}
+	// Landing Page API (Admin)
+	if deps.LandingAdminPageHandler != nil {
+		deps.LandingAdminPageHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
+	if deps.LandingAdminSectionHandler != nil {
+		deps.LandingAdminSectionHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
+	if deps.LandingAdminBrandingHandler != nil {
+		deps.LandingAdminBrandingHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
+	if deps.LandingAdminDomainHandler != nil {
+		deps.LandingAdminDomainHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
+	if deps.LandingAdminFormHandler != nil {
+		deps.LandingAdminFormHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
+	if deps.LandingAdminSubmissionHandler != nil {
+		deps.LandingAdminSubmissionHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
+	if deps.LandingAdminCTAHandler != nil {
+		deps.LandingAdminCTAHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
+	if deps.LandingAdminTemplateHandler != nil {
+		deps.LandingAdminTemplateHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
+	if deps.LandingAdminMediaHandler != nil {
+		deps.LandingAdminMediaHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
+	if deps.LandingAdminNavigationHandler != nil {
+		deps.LandingAdminNavigationHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
+	if deps.LandingAdminRevisionHandler != nil {
+		deps.LandingAdminRevisionHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
+	if deps.LandingAdminScheduleHandler != nil {
+		deps.LandingAdminScheduleHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
+	if deps.LandingAdminIntegrationHandler != nil {
+		deps.LandingAdminIntegrationHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
 
 	publicTenantMiddleware, err := middleware.ResolvePublicOrganization(
 		deps.PublicHostResolver,
@@ -132,6 +172,9 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		publicTenantMiddleware,
 		middleware.RequireActiveTenant(),
 	)
+	if deps.PublicLandingHandler != nil {
+		deps.PublicLandingHandler.RegisterRoutes(publicModules)
+	}
 	registerModuleRoutes(publicModules)
 	return router, nil
 }

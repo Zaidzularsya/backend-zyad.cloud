@@ -22,6 +22,12 @@ func NewPageRepository(db *database.Pool) PageRepository {
 	}
 }
 
+func NewPlatformPageRepository(db *database.Pool) PlatformPageRepository {
+	return &platformPageStore{
+		db: db,
+	}
+}
+
 func (r *pageRepository) withTx(ctx context.Context, scope coretenant.Scope, fn func(pgx.Tx) error) error {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -45,16 +51,19 @@ func (r *pageRepository) Create(ctx context.Context, scope coretenant.Scope, par
 	if !scope.IsValid() {
 		return domain.LandingPage{}, coretenant.ErrInvalidScope
 	}
+	if params.SEO == nil {
+		params.SEO = make(map[string]any)
+	}
 
 	query := `
 		INSERT INTO landing_pages (
 			organization_id, name, title, slug, page_type, status,
-			visibility, locale, timezone, is_homepage, created_by
+			visibility, seo, locale, timezone, is_homepage, created_by
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 		) RETURNING
 			id, organization_id, name, title, slug, page_type, status,
-			visibility, password_hash, locale, timezone, is_homepage,
+			visibility, password_hash, seo, locale, timezone, is_homepage,
 			published_version, publish_at, unpublish_at, published_at,
 			created_by, updated_by, created_at, updated_at, deleted_at
 	`
@@ -77,13 +86,14 @@ func (r *pageRepository) Create(ctx context.Context, scope coretenant.Scope, par
 			params.Type,
 			params.Status,
 			params.Visibility,
+			params.SEO,
 			params.Locale,
 			params.Timezone,
 			params.IsHomepage,
 			createdByInterface,
 		).Scan(
 			&page.ID, &page.OrganizationID, &page.Name, &page.Title, &page.Slug,
-			&page.Type, &page.Status, &page.Visibility, &passwordHash,
+			&page.Type, &page.Status, &page.Visibility, &passwordHash, &page.SEO,
 			&page.Locale, &page.Timezone, &page.IsHomepage,
 			&page.PublishedVersion, &page.PublishAt, &page.UnpublishAt, &page.PublishedAt,
 			&createdBy, &updatedBy, &page.CreatedAt, &page.UpdatedAt, &page.DeletedAt,
@@ -115,7 +125,7 @@ func (r *pageRepository) FindByID(ctx context.Context, scope coretenant.Scope, i
 	query := `
 		SELECT
 			id, organization_id, name, title, slug, page_type, status,
-			visibility, password_hash, locale, timezone, is_homepage,
+			visibility, password_hash, seo, locale, timezone, is_homepage,
 			published_version, publish_at, unpublish_at, published_at,
 			created_by, updated_by, created_at, updated_at, deleted_at
 		FROM landing_pages
@@ -129,7 +139,7 @@ func (r *pageRepository) FindByID(ctx context.Context, scope coretenant.Scope, i
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, query, id, scope.OrganizationID()).Scan(
 			&page.ID, &page.OrganizationID, &page.Name, &page.Title, &page.Slug,
-			&page.Type, &page.Status, &page.Visibility, &passwordHash,
+			&page.Type, &page.Status, &page.Visibility, &passwordHash, &page.SEO,
 			&page.Locale, &page.Timezone, &page.IsHomepage,
 			&page.PublishedVersion, &page.PublishAt, &page.UnpublishAt, &page.PublishedAt,
 			&createdBy, &updatedBy, &page.CreatedAt, &page.UpdatedAt, &page.DeletedAt,
@@ -192,7 +202,7 @@ func (r *pageRepository) List(ctx context.Context, scope coretenant.Scope, filte
 		query := `
 			SELECT
 				id, organization_id, name, title, slug, page_type, status,
-				visibility, password_hash, locale, timezone, is_homepage,
+				visibility, password_hash, seo, locale, timezone, is_homepage,
 				published_version, publish_at, unpublish_at, published_at,
 				created_by, updated_by, created_at, updated_at, deleted_at
 			FROM landing_pages
@@ -228,7 +238,7 @@ func (r *pageRepository) List(ctx context.Context, scope coretenant.Scope, filte
 
 			err := rows.Scan(
 				&page.ID, &page.OrganizationID, &page.Name, &page.Title, &page.Slug,
-				&page.Type, &page.Status, &page.Visibility, &passwordHash,
+				&page.Type, &page.Status, &page.Visibility, &passwordHash, &page.SEO,
 				&page.Locale, &page.Timezone, &page.IsHomepage,
 				&page.PublishedVersion, &page.PublishAt, &page.UnpublishAt, &page.PublishedAt,
 				&createdBy, &updatedBy, &page.CreatedAt, &page.UpdatedAt, &page.DeletedAt,
@@ -300,6 +310,20 @@ func (r *pageRepository) Update(ctx context.Context, scope coretenant.Scope, id 
 		query += fmt.Sprintf(", visibility = $%d", argCount)
 		argCount++
 	}
+	if params.PasswordHash != nil {
+		if *params.PasswordHash == "" {
+			query += ", password_hash = NULL"
+		} else {
+			args = append(args, *params.PasswordHash)
+			query += fmt.Sprintf(", password_hash = $%d", argCount)
+			argCount++
+		}
+	}
+	if params.SEO != nil {
+		args = append(args, params.SEO)
+		query += fmt.Sprintf(", seo = $%d", argCount)
+		argCount++
+	}
 	if params.Locale != nil {
 		args = append(args, *params.Locale)
 		query += fmt.Sprintf(", locale = $%d", argCount)
@@ -325,7 +349,7 @@ func (r *pageRepository) Update(ctx context.Context, scope coretenant.Scope, id 
 	query += fmt.Sprintf(" WHERE id = $%d AND organization_id = $%d AND deleted_at IS NULL RETURNING ", argCount, argCount+1)
 	query += `
 		id, organization_id, name, title, slug, page_type, status,
-		visibility, password_hash, locale, timezone, is_homepage,
+		visibility, password_hash, seo, locale, timezone, is_homepage,
 		published_version, publish_at, unpublish_at, published_at,
 		created_by, updated_by, created_at, updated_at, deleted_at
 	`
@@ -337,7 +361,7 @@ func (r *pageRepository) Update(ctx context.Context, scope coretenant.Scope, id 
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, query, args...).Scan(
 			&page.ID, &page.OrganizationID, &page.Name, &page.Title, &page.Slug,
-			&page.Type, &page.Status, &page.Visibility, &passwordHash,
+			&page.Type, &page.Status, &page.Visibility, &passwordHash, &page.SEO,
 			&page.Locale, &page.Timezone, &page.IsHomepage,
 			&page.PublishedVersion, &page.PublishAt, &page.UnpublishAt, &page.PublishedAt,
 			&createdBy, &updatedBy, &page.CreatedAt, &page.UpdatedAt, &page.DeletedAt,
@@ -385,4 +409,64 @@ func (r *pageRepository) Delete(ctx context.Context, scope coretenant.Scope, id 
 	})
 
 	return err
+}
+
+type platformPageStore struct {
+	db *database.Pool
+}
+
+func (r *platformPageStore) FindByOrganizationAndID(ctx context.Context, organizationID string, id string) (domain.LandingPage, error) {
+	query := `
+		SELECT
+			id, organization_id, name, title, slug, page_type, status,
+			visibility, password_hash, seo, locale, timezone, is_homepage,
+			published_version, publish_at, unpublish_at, published_at,
+			created_by, updated_by, created_at, updated_at, deleted_at
+		FROM landing_pages
+		WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL
+	`
+
+	var page domain.LandingPage
+	var passwordHash *string
+	var createdBy, updatedBy *string
+
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return domain.LandingPage{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	_, err = tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", organizationID)
+	if err != nil {
+		return domain.LandingPage{}, err
+	}
+
+	err = tx.QueryRow(ctx, query, id, organizationID).Scan(
+		&page.ID, &page.OrganizationID, &page.Name, &page.Title, &page.Slug,
+		&page.Type, &page.Status, &page.Visibility, &passwordHash, &page.SEO,
+		&page.Locale, &page.Timezone, &page.IsHomepage,
+		&page.PublishedVersion, &page.PublishAt, &page.UnpublishAt, &page.PublishedAt,
+		&createdBy, &updatedBy, &page.CreatedAt, &page.UpdatedAt, &page.DeletedAt,
+	)
+
+	if err != nil {
+		return domain.LandingPage{}, err
+	}
+
+	if passwordHash != nil {
+		page.PasswordHash = *passwordHash
+	}
+	if createdBy != nil {
+		page.CreatedBy = *createdBy
+	}
+	if updatedBy != nil {
+		page.UpdatedBy = *updatedBy
+	}
+
+	return page, nil
+}
+
+func (r *platformPageStore) ListByOrganization(ctx context.Context, organizationID string, filter PageListFilter) ([]domain.LandingPage, int64, error) {
+	// Not fully implemented yet
+	return nil, 0, nil
 }

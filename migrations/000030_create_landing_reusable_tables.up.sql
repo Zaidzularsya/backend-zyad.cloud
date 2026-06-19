@@ -116,7 +116,8 @@ CREATE TABLE IF NOT EXISTS landing_menus (
 	CONSTRAINT fk_landing_menus_created_by
 		FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
 	CONSTRAINT fk_landing_menus_updated_by
-		FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+		FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL,
+	CONSTRAINT landing_menus_org_id_unique UNIQUE (organization_id, id)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_landing_menus_org_location_active_unique

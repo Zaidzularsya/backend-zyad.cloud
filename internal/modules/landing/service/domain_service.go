@@ -1,0 +1,97 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	coretenant "zyad.cloud/internal/core/tenant"
+	"zyad.cloud/internal/modules/landing/domain"
+	"zyad.cloud/internal/modules/landing/repository"
+	"zyad.cloud/internal/platform/database"
+)
+
+type defaultDomainService struct {
+	repo     repository.DomainRepository
+	pageRepo repository.PageRepository
+	db       *database.Pool
+}
+
+func NewDomainService(
+	repo repository.DomainRepository,
+	pageRepo repository.PageRepository,
+	db *database.Pool,
+) DomainService {
+	return &defaultDomainService{
+		repo:     repo,
+		pageRepo: pageRepo,
+		db:       db,
+	}
+}
+
+func (s *defaultDomainService) BindDomain(ctx context.Context, scope coretenant.Scope, params BindDomainParams) (domain.DomainBinding, error) {
+	// First check if the domain exists and is verified in the organization
+	availableDomains, err := s.ListAvailableDomains(ctx, scope)
+	if err != nil {
+		return domain.DomainBinding{}, fmt.Errorf("check available domains: %w", err)
+	}
+
+	domainVerified := false
+	for _, d := range availableDomains {
+		if d.ID == params.OrganizationDomainID {
+			domainVerified = true
+			break
+		}
+	}
+
+	if !domainVerified {
+		return domain.DomainBinding{}, errors.New("domain is not available or not verified")
+	}
+
+	// Verify the page exists
+	_, err = s.pageRepo.FindByID(ctx, scope, params.LandingPageID)
+	if err != nil {
+		return domain.DomainBinding{}, fmt.Errorf("verify page exists: %w", err)
+	}
+
+	// Check if binding already exists
+	bindings, err := s.repo.ListBindings(ctx, scope, params.LandingPageID)
+	if err != nil {
+		return domain.DomainBinding{}, fmt.Errorf("list bindings: %w", err)
+	}
+
+	for _, b := range bindings {
+		if b.OrganizationDomainID == params.OrganizationDomainID {
+			return domain.DomainBinding{}, errors.New("domain is already bound to this page")
+		}
+	}
+
+	// If this is the first binding, we might want to make it primary automatically
+	if len(bindings) == 0 {
+		params.IsPrimary = true
+	}
+
+	repoParams := repository.BindDomainParams{
+		OrganizationDomainID: params.OrganizationDomainID,
+		LandingPageID:        params.LandingPageID,
+		IsPrimary:            params.IsPrimary,
+	}
+
+	return s.repo.BindDomain(ctx, scope, repoParams)
+}
+
+func (s *defaultDomainService) UnbindDomain(ctx context.Context, scope coretenant.Scope, bindingID string) error {
+	return s.repo.UnbindDomain(ctx, scope, bindingID)
+}
+
+func (s *defaultDomainService) SetPrimaryBinding(ctx context.Context, scope coretenant.Scope, pageID string, bindingID string) error {
+	return s.repo.SetPrimaryBinding(ctx, scope, pageID, bindingID)
+}
+
+func (s *defaultDomainService) ListBindings(ctx context.Context, scope coretenant.Scope, pageID string) ([]domain.DomainBinding, error) {
+	return s.repo.ListBindings(ctx, scope, pageID)
+}
+
+func (s *defaultDomainService) ListAvailableDomains(ctx context.Context, scope coretenant.Scope) ([]domain.AvailableDomain, error) {
+	return s.repo.ListAvailableDomains(ctx, scope)
+}

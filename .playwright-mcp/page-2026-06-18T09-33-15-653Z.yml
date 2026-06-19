@@ -1,0 +1,182 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - link "Z Zyad Demo Workspace Console" [ref=e6] [cursor=pointer]:
+      - /url: /app/profile
+      - generic [ref=e7]: Z
+      - generic [ref=e8]:
+        - strong [ref=e9]: Zyad Demo
+        - text: Workspace Console
+    - navigation [ref=e10]:
+      - generic [ref=e11]:
+        - paragraph [ref=e12]: Workspace
+        - generic [ref=e13]:
+          - link "Landing Page" [ref=e14] [cursor=pointer]:
+            - /url: /app/landing-pages
+            - img [ref=e15]
+            - text: Landing Page
+          - link "Team & Roles" [ref=e18] [cursor=pointer]:
+            - /url: /app/users
+            - img [ref=e19]
+            - text: Team & Roles
+      - generic [ref=e22]:
+        - paragraph [ref=e23]: Account Services
+        - generic [ref=e24]:
+          - link "Plan & Billing" [ref=e25] [cursor=pointer]:
+            - /url: /app/plan-upgrade
+            - img [ref=e26]
+            - text: Plan & Billing
+          - link "Support Tickets" [ref=e28] [cursor=pointer]:
+            - /url: /app/ticketing
+            - img [ref=e29]
+            - text: Support Tickets
+    - link "Profile" [ref=e37] [cursor=pointer]:
+      - /url: /app/profile
+      - img [ref=e38]
+      - text: Profile
+  - generic [ref=e42]:
+    - banner [ref=e43]:
+      - generic [ref=e44]:
+        - img [ref=e45]
+        - searchbox [ref=e48]
+      - generic [ref=e49]:
+        - button "Ganti tema" [ref=e50]:
+          - img [ref=e51]
+        - button "D Demo Admin admin@zyad.cloud" [ref=e54]:
+          - generic [ref=e55]: D
+          - generic [ref=e56]:
+            - paragraph [ref=e57]: Demo Admin
+            - paragraph [ref=e58]: admin@zyad.cloud
+          - img [ref=e59]
+    - main [ref=e61]:
+      - generic [ref=e62]:
+        - generic [ref=e63]:
+          - generic [ref=e65]:
+            - heading "Landing Page Management" [level=1] [ref=e66]
+            - paragraph [ref=e67]: Bangun, optimalkan, dan publikasikan landing page tenant dari satu workspace.
+          - generic [ref=e68]:
+            - button "Refresh" [ref=e69]:
+              - img [ref=e70]
+              - text: Refresh
+            - button "Save Page" [ref=e75]:
+              - img [ref=e76]
+              - text: Save Page
+        - generic [ref=e79]:
+          - generic [ref=e80]:
+            - generic [ref=e81]:
+              - paragraph [ref=e82]: Total pages
+              - img [ref=e83]
+            - paragraph [ref=e88]: "1"
+          - generic [ref=e89]:
+            - generic [ref=e90]:
+              - paragraph [ref=e91]: Published
+              - img [ref=e92]
+            - paragraph [ref=e95]: "0"
+          - generic [ref=e96]:
+            - generic [ref=e97]:
+              - paragraph [ref=e98]: Draft
+              - img [ref=e99]
+            - paragraph [ref=e104]: "1"
+          - generic [ref=e105]:
+            - generic [ref=e106]:
+              - paragraph [ref=e107]: Archived
+              - img [ref=e108]
+            - paragraph [ref=e111]: "0"
+        - generic [ref=e112]:
+          - complementary [ref=e113]:
+            - generic [ref=e114]:
+              - generic [ref=e115]:
+                - img [ref=e116]
+                - searchbox "Cari page, slug, tipe..." [ref=e119]
+              - generic [ref=e120]:
+                - button "all" [ref=e121]
+                - button "draft" [ref=e122]
+                - button "published" [ref=e123]
+                - button "archived" [ref=e124]
+              - button "Main Product Campaign /internet-bisnis draft Homepage Public" [ref=e126]:
+                - generic [ref=e127]:
+                  - generic [ref=e128]:
+                    - paragraph [ref=e129]: Main Product Campaign
+                    - paragraph [ref=e130]: /internet-bisnis
+                  - generic [ref=e131]: draft
+                - generic [ref=e132]:
+                  - generic [ref=e133]: Homepage
+                  - generic [ref=e134]: Public
+          - main [ref=e135]:
+            - generic [ref=e137]:
+              - generic [ref=e138]:
+                - generic [ref=e139]:
+                  - heading "Internet Bisnis Cepat dan Stabil" [level=2] [ref=e140]
+                  - generic [ref=e141]: draft
+                - paragraph [ref=e142]: /internet-bisnis
+              - generic [ref=e143]:
+                - button "Duplicate" [ref=e144]:
+                  - img [ref=e145]
+                  - text: Duplicate
+                - button "Publish" [ref=e148]:
+                  - img [ref=e149]
+                  - text: Publish
+            - generic [ref=e155]:
+              - button "Overview" [ref=e156]:
+                - img [ref=e157]
+                - text: Overview
+              - button "Content" [ref=e160]:
+                - img [ref=e161]
+                - text: Content
+              - button "SEO" [ref=e164]:
+                - img [ref=e165]
+                - text: SEO
+              - button "Media" [ref=e170]:
+                - img [ref=e171]
+                - text: Media
+              - button "Navigation" [ref=e175]:
+                - img [ref=e176]
+                - text: Navigation
+              - button "Leads" [active] [ref=e177]:
+                - img [ref=e178]
+                - text: Leads
+              - button "History" [ref=e184]:
+                - img [ref=e185]
+                - text: History
+            - generic [ref=e368]:
+              - generic [ref=e369]:
+                - generic [ref=e370]:
+                  - img [ref=e371]
+                  - heading "Lead integrations" [level=3] [ref=e377]
+                - generic [ref=e378]:
+                  - generic [ref=e379]:
+                    - generic [ref=e380]:
+                      - generic [ref=e381]: Name
+                      - textbox "Name" [ref=e382]:
+                        - /placeholder: CRM Webhook
+                    - generic [ref=e383]:
+                      - generic [ref=e384]: Type
+                      - textbox "Type" [ref=e385]:
+                        - /placeholder: webhook
+                        - text: webhook
+                  - generic [ref=e386]:
+                    - generic [ref=e387]: Endpoint URL
+                    - textbox "Endpoint URL" [ref=e388]:
+                      - /placeholder: https://...
+                  - generic [ref=e389]:
+                    - generic [ref=e390]: Event filters
+                    - textbox "Event filters" [ref=e391]:
+                      - /placeholder: lead_submitted,form_submitted
+                      - text: lead_submitted
+                  - generic [ref=e392]:
+                    - checkbox "Active integration" [checked] [ref=e393]
+                    - text: Active integration
+                  - button "Create integration" [ref=e394]
+                - generic [ref=e396]:
+                  - generic [ref=e397]:
+                    - paragraph [ref=e398]: CRM Webhook
+                    - paragraph [ref=e399]: webhook · active
+                  - button "Test" [ref=e400]
+              - generic [ref=e401]:
+                - generic [ref=e402]:
+                  - img [ref=e403]
+                  - heading "Lead delivery log" [level=3] [ref=e405]
+                - generic [ref=e407]:
+                  - generic [ref=e408]:
+                    - paragraph [ref=e409]: success
+                    - paragraph [ref=e410]: Attempts 1 · 18 Jun 2026, 15.00
+                  - button "Retry" [ref=e411]

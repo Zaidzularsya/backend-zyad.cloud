@@ -37,6 +37,6 @@ type RevisionRepository interface {
 	DeleteSchedule(context.Context, coretenant.Scope, string) error
 
 	// Worker Operations
-	ClaimPendingSchedules(context.Context, int, time.Duration) ([]domain.LandingPageSchedule, error)
-	MarkScheduleStatus(context.Context, string, domain.ScheduleStatus, *string) error
+	ClaimPendingSchedules(context.Context, coretenant.Scope, int, time.Duration) ([]domain.LandingPageSchedule, error)
+	MarkScheduleStatus(context.Context, coretenant.Scope, string, domain.ScheduleStatus, *string) error
 }

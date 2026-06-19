@@ -53,7 +53,7 @@ Status:
 | Public host resolution | MT-CORE-003 | Platform host/domain registry/trusted proxy | done |
 | Worker tenant context | MT-CORE-004 | Notification outbox organization ID/internal identity | done |
 | Fail-closed middleware | MT-CORE-005 | Active/setup/platform/customer guards and public module chain | done |
-| Shared-schema isolation | MT-DATA-001..004 | Repository scope and RLS foundation done; Landing core table policy rollout started in `000025`; repository isolation suite adoption in progress |
+| Shared-schema isolation | MT-DATA-001..004 | Repository scope and RLS foundation done; Landing core table policy rollout started in `000025`; repository isolation suite adoption done |
 | Dedicated database tenancy | MT-ENT-001..005 | Placement router | deferred |
 | Organization domain | MT-DB-003, MT-API-003 | `organization_domains`, `reserved_subdomains` | schema, verification repository, and management API done |
 | Feature entitlement | MT-DB-004, MT-BE-012, MT-API-004 | `organization_entitlements` | schema, service, effective feature API, and platform override API done |
@@ -104,8 +104,8 @@ Status:
 | Authorization | MT-CORE-007 | done |
 | Data isolation | MT-DATA-001 | done |
 | Data isolation | MT-DATA-002 | done |
-| Data isolation | MT-DATA-003 | in_progress |
-| Data isolation | MT-DATA-004 | in_progress |
+| Data isolation | MT-DATA-003 | done |
+| Data isolation | MT-DATA-004 | done |
 | API | MT-API-001 | done |
 | API | MT-API-002 | done |
 | API | MT-API-003 | done |
@@ -285,6 +285,7 @@ Final migration number is assigned during implementation.
 | 2026-06-16 | Completed cross-tenant security test coverage | `internal/modules/organization/handler`, `internal/platform/storage`, `internal/core/event` | Added explicit platform permission denial coverage, storage asset metadata isolation, event payload tenant override protection, and documented existing forged-header, stale-membership, IDOR, bulk/export isolation coverage |
 | 2026-06-16 | Completed organization suspension and incident control | `internal/modules/organization/service`, `internal/app` | Added best-effort platform security notification event for incident statuses and documented existing transactional session revocation, audit, public serving, and worker stop controls |
 | 2026-06-17 | Started Landing production RLS rollout | `migrations/000025_create_landing_page_core_tables.*.sql` | Landing pages and sections now have `organization_id NOT NULL`, tenant uniqueness, and forced RLS; repository isolation adoption remains under Landing repository tasks |
+| 2026-06-18 | Completed repository tenant isolation tests | `testutil/tenant_isolation.go`, `internal/modules/landing/repository/*` | Validated tenant scope boundary for Page, Section, Form, Submission, and Media repositories via `RunTenantIsolationSuite`. MT-DATA-004 is done. |
 
 ## Update Rules
 

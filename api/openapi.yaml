@@ -1792,6 +1792,1531 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/admin/landing-pages:
+    get:
+      summary: List landing pages
+      operationId: listLandingPages
+      tags:
+        - Landing Pages
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Landing pages retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+    post:
+      summary: Create landing page
+      operationId: createLandingPage
+      tags:
+        - Landing Pages
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "201":
+          description: Landing page created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/admin/landing-pages/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Get landing page detail
+      operationId: getLandingPage
+      tags:
+        - Landing Pages
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Landing page retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+    patch:
+      summary: Update landing page
+      operationId: updateLandingPage
+      tags:
+        - Landing Pages
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Landing page updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+    delete:
+      summary: Delete landing page
+      operationId: deleteLandingPage
+      tags:
+        - Landing Pages
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Landing page deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/admin/landing-pages/{id}/access:
+    put:
+      summary: Update landing page access
+      operationId: updateLandingPageAccess
+      tags:
+        - Landing Pages
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Landing page access updated successfully
+  /api/v1/admin/landing-pages/{id}/duplicate:
+    post:
+      summary: Duplicate landing page
+      operationId: duplicateLandingPage
+      tags:
+        - Landing Pages
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "201":
+          description: Landing page duplicated successfully
+  /api/v1/admin/landing-pages/{id}/archive:
+    post:
+      summary: Archive landing page
+      operationId: archiveLandingPage
+      tags:
+        - Landing Pages
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Landing page archived successfully
+  /api/v1/admin/landing-pages/{id}/restore:
+    post:
+      summary: Restore landing page
+      operationId: restoreLandingPage
+      tags:
+        - Landing Pages
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Landing page restored successfully
+  /api/v1/admin/landing-pages/{id}/seo:
+    patch:
+      summary: Update landing page SEO
+      operationId: updateLandingPageSeo
+      tags:
+        - Landing Pages
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Landing page SEO updated successfully
+  /api/v1/admin/landing-pages/{id}/publish:
+    post:
+      summary: Publish landing page
+      operationId: publishLandingPage
+      tags:
+        - Landing Pages
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Landing page published successfully
+  /api/v1/admin/landing-pages/{id}/unpublish:
+    post:
+      summary: Unpublish landing page
+      operationId: unpublishLandingPage
+      tags:
+        - Landing Pages
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Landing page unpublished successfully
+  /api/v1/admin/landing-pages/{id}/schedule:
+    put:
+      summary: Schedule landing page publish or unpublish
+      operationId: scheduleLandingPage
+      tags:
+        - Landing Pages
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Landing page schedule updated successfully
+    delete:
+      summary: Cancel landing page pending schedules
+      operationId: cancelLandingPageSchedule
+      tags:
+        - Landing Pages
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Landing page schedule cancelled successfully
+  /api/v1/admin/landing-pages/{id}/schedules/{scheduleId}:
+    delete:
+      summary: Cancel landing page schedule by id
+      operationId: cancelLandingPageScheduleById
+      tags:
+        - Landing Pages
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: scheduleId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Landing page schedule cancelled successfully
+  /api/v1/admin/landing-pages/{id}/revisions:
+    get:
+      summary: List landing page revisions
+      operationId: listLandingPageRevisions
+      tags:
+        - Landing Revisions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Landing page revisions retrieved successfully
+  /api/v1/admin/landing-pages/{id}/revisions/compare:
+    get:
+      summary: Compare landing page revisions
+      operationId: compareLandingPageRevisions
+      tags:
+        - Landing Revisions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "501":
+          description: Revision compare is not implemented yet
+  /api/v1/admin/landing-pages/{id}/revisions/{revision}/restore:
+    post:
+      summary: Restore landing page revision
+      operationId: restoreLandingPageRevision
+      tags:
+        - Landing Revisions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: revision
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Landing page revision restored successfully
+  /api/v1/admin/landing-pages/{id}/sections:
+    get:
+      summary: List landing page sections
+      operationId: listLandingPageSections
+      tags:
+        - Landing Sections
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Sections retrieved successfully
+    post:
+      summary: Create landing page section
+      operationId: createLandingPageSection
+      tags:
+        - Landing Sections
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "201":
+          description: Section created successfully
+  /api/v1/admin/landing-pages/{id}/sections/reorder:
+    put:
+      summary: Reorder landing page sections
+      operationId: reorderLandingPageSections
+      tags:
+        - Landing Sections
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Sections reordered successfully
+  /api/v1/admin/landing-pages/{id}/sections/from-template:
+    post:
+      summary: Create section from template
+      operationId: createLandingPageSectionFromTemplate
+      tags:
+        - Landing Sections
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Section created from template successfully
+  /api/v1/admin/landing-pages/{id}/sections/{sectionId}:
+    patch:
+      summary: Update landing page section
+      operationId: updateLandingPageSection
+      tags:
+        - Landing Sections
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: sectionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Section updated successfully
+    delete:
+      summary: Delete landing page section
+      operationId: deleteLandingPageSection
+      tags:
+        - Landing Sections
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: sectionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Section deleted successfully
+  /api/v1/admin/landing-pages/{id}/forms:
+    get:
+      summary: List landing page forms
+      operationId: listLandingPageForms
+      tags:
+        - Landing Forms
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Forms retrieved successfully
+    post:
+      summary: Create landing page form
+      operationId: createLandingPageForm
+      tags:
+        - Landing Forms
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Form created successfully
+  /api/v1/admin/landing-pages/{id}/forms/{formId}:
+    patch:
+      summary: Update landing page form
+      operationId: updateLandingPageForm
+      tags:
+        - Landing Forms
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: formId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Form updated successfully
+    delete:
+      summary: Delete landing page form
+      operationId: deleteLandingPageForm
+      tags:
+        - Landing Forms
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: formId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Form deleted successfully
+  /api/v1/admin/landing-pages/{id}/forms/{formId}/fields:
+    put:
+      summary: Replace landing page form fields
+      operationId: replaceLandingPageFormFields
+      tags:
+        - Landing Forms
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: formId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Form fields replaced successfully
+  /api/v1/admin/landing-pages/{id}/branding:
+    get:
+      summary: Get landing page effective branding
+      operationId: getLandingPageBranding
+      tags:
+        - Landing Branding
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Page branding retrieved successfully
+    patch:
+      summary: Update landing page branding override
+      operationId: updateLandingPageBranding
+      tags:
+        - Landing Branding
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Page branding override updated successfully
+    delete:
+      summary: Delete landing page branding override
+      operationId: deleteLandingPageBranding
+      tags:
+        - Landing Branding
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Page branding override removed successfully
+  /api/v1/admin/landing/branding:
+    get:
+      summary: Get default landing branding
+      operationId: getDefaultLandingBranding
+      tags:
+        - Landing Branding
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Default branding retrieved successfully
+    patch:
+      summary: Update default landing branding
+      operationId: updateDefaultLandingBranding
+      tags:
+        - Landing Branding
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Default branding updated successfully
+  /api/v1/admin/landing/theme:
+    get:
+      summary: Get landing theme tokens
+      operationId: getLandingTheme
+      tags:
+        - Landing Branding
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Theme retrieved successfully
+    patch:
+      summary: Update landing theme tokens
+      operationId: updateLandingTheme
+      tags:
+        - Landing Branding
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Theme updated successfully
+  /api/v1/admin/landing/domains/available:
+    get:
+      summary: List available landing domains
+      operationId: listAvailableLandingDomains
+      tags:
+        - Landing Domains
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Available domains retrieved successfully
+  /api/v1/admin/landing/domain-bindings:
+    get:
+      summary: List landing domain bindings
+      operationId: listLandingDomainBindings
+      tags:
+        - Landing Domains
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: landing_page_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Domain bindings retrieved successfully
+    post:
+      summary: Create landing domain binding
+      operationId: createLandingDomainBinding
+      tags:
+        - Landing Domains
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Domain bound successfully
+  /api/v1/admin/landing/domain-bindings/{id}:
+    patch:
+      summary: Update landing domain binding
+      operationId: updateLandingDomainBinding
+      tags:
+        - Landing Domains
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Domain binding updated successfully
+    delete:
+      summary: Delete landing domain binding
+      operationId: deleteLandingDomainBinding
+      tags:
+        - Landing Domains
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Domain binding removed successfully
+  /api/v1/admin/landing/ctas:
+    get:
+      summary: List landing CTAs
+      operationId: listLandingCtas
+      tags:
+        - Landing Reusable
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: CTAs retrieved successfully
+    post:
+      summary: Create landing CTA
+      operationId: createLandingCta
+      tags:
+        - Landing Reusable
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: CTA created successfully
+  /api/v1/admin/landing/ctas/{id}:
+    patch:
+      summary: Update landing CTA
+      operationId: updateLandingCta
+      tags:
+        - Landing Reusable
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: CTA updated successfully
+    delete:
+      summary: Delete landing CTA
+      operationId: deleteLandingCta
+      tags:
+        - Landing Reusable
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: CTA deleted successfully
+  /api/v1/admin/landing/section-templates:
+    get:
+      summary: List landing section templates
+      operationId: listLandingSectionTemplates
+      tags:
+        - Landing Reusable
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Section templates retrieved successfully
+    post:
+      summary: Create landing section template
+      operationId: createLandingSectionTemplate
+      tags:
+        - Landing Reusable
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Section template created successfully
+  /api/v1/admin/landing/section-templates/{id}:
+    patch:
+      summary: Update landing section template
+      operationId: updateLandingSectionTemplate
+      tags:
+        - Landing Reusable
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Section template updated successfully
+    delete:
+      summary: Delete landing section template
+      operationId: deleteLandingSectionTemplate
+      tags:
+        - Landing Reusable
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Section template deleted successfully
+  /api/v1/admin/landing/media:
+    get:
+      summary: List landing media
+      operationId: listLandingMedia
+      tags:
+        - Landing Media
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Media retrieved successfully
+    post:
+      summary: Upload landing media metadata
+      operationId: uploadLandingMedia
+      tags:
+        - Landing Media
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Media uploaded successfully
+  /api/v1/admin/landing/media/{id}:
+    delete:
+      summary: Delete landing media
+      operationId: deleteLandingMedia
+      tags:
+        - Landing Media
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Media deleted successfully
+  /api/v1/admin/landing/menus:
+    get:
+      summary: List landing menus
+      operationId: listLandingMenus
+      tags:
+        - Landing Navigation
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Menus retrieved successfully
+    post:
+      summary: Create landing menu
+      operationId: createLandingMenu
+      tags:
+        - Landing Navigation
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Menu created successfully
+  /api/v1/admin/landing/menus/{id}:
+    patch:
+      summary: Update landing menu
+      operationId: updateLandingMenu
+      tags:
+        - Landing Navigation
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Menu updated successfully
+    delete:
+      summary: Delete landing menu
+      operationId: deleteLandingMenu
+      tags:
+        - Landing Navigation
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Menu deleted successfully
+  /api/v1/admin/landing/menus/{id}/items:
+    get:
+      summary: List landing menu items
+      operationId: listLandingMenuItems
+      tags:
+        - Landing Navigation
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Menu items retrieved successfully
+    post:
+      summary: Create landing menu item
+      operationId: createLandingMenuItem
+      tags:
+        - Landing Navigation
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Menu item created successfully
+  /api/v1/admin/landing/menus/{id}/items/reorder:
+    put:
+      summary: Reorder landing menu items
+      operationId: reorderLandingMenuItems
+      tags:
+        - Landing Navigation
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Menu items reordered successfully
+  /api/v1/admin/landing/menus/{id}/items/{itemId}:
+    patch:
+      summary: Update landing menu item
+      operationId: updateLandingMenuItem
+      tags:
+        - Landing Navigation
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Menu item updated successfully
+    delete:
+      summary: Delete landing menu item
+      operationId: deleteLandingMenuItem
+      tags:
+        - Landing Navigation
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: itemId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Menu item deleted successfully
+  /api/v1/admin/landing/lead-integrations:
+    get:
+      summary: List landing lead integrations
+      operationId: listLandingLeadIntegrations
+      tags:
+        - Landing Integrations
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Lead integrations retrieved successfully
+    post:
+      summary: Create landing lead integration
+      operationId: createLandingLeadIntegration
+      tags:
+        - Landing Integrations
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Lead integration created successfully
+  /api/v1/admin/landing/lead-integrations/{id}:
+    patch:
+      summary: Update landing lead integration
+      operationId: updateLandingLeadIntegration
+      tags:
+        - Landing Integrations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Lead integration updated successfully
+    delete:
+      summary: Delete landing lead integration
+      operationId: deleteLandingLeadIntegration
+      tags:
+        - Landing Integrations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Lead integration deleted successfully
+  /api/v1/admin/landing/lead-integrations/{id}/test:
+    post:
+      summary: Test landing lead integration
+      operationId: testLandingLeadIntegration
+      tags:
+        - Landing Integrations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "501":
+          description: Integration test is not implemented yet
+  /api/v1/admin/landing/lead-deliveries:
+    get:
+      summary: List landing lead deliveries
+      operationId: listLandingLeadDeliveries
+      tags:
+        - Landing Integrations
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Lead deliveries retrieved successfully
+  /api/v1/admin/landing/lead-deliveries/{id}/retry:
+    post:
+      summary: Retry landing lead delivery
+      operationId: retryLandingLeadDelivery
+      tags:
+        - Landing Integrations
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "501":
+          description: Lead delivery retry is not implemented yet
+  /api/v1/admin/landing-submissions:
+    get:
+      summary: List landing submissions
+      operationId: listLandingSubmissions
+      tags:
+        - Landing Submissions
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Submissions retrieved successfully
+  /api/v1/admin/landing-submissions/export:
+    get:
+      summary: Export landing submissions
+      operationId: exportLandingSubmissions
+      tags:
+        - Landing Submissions
+      security:
+        - BearerAuth: []
+      responses:
+        "501":
+          description: Export functionality is not yet implemented
+  /api/v1/admin/landing-submissions/{id}:
+    get:
+      summary: Get landing submission
+      operationId: getLandingSubmission
+      tags:
+        - Landing Submissions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Submission retrieved successfully
+    delete:
+      summary: Delete landing submission
+      operationId: deleteLandingSubmission
+      tags:
+        - Landing Submissions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Submission deleted successfully
+  /api/v1/admin/landing-submissions/{id}/status:
+    patch:
+      summary: Update landing submission status
+      operationId: updateLandingSubmissionStatus
+      tags:
+        - Landing Submissions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Submission status updated successfully
+  /api/v1/admin/landing-submissions/{id}/notes:
+    post:
+      summary: Add landing submission note
+      operationId: addLandingSubmissionNote
+      tags:
+        - Landing Submissions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Submission note added successfully
+  /api/v1/public/landing/resolve:
+    get:
+      summary: Resolve public landing page
+      operationId: resolvePublicLandingPage
+      tags:
+        - Public Landing
+      parameters:
+        - name: slug
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Public landing page resolved successfully
+  /api/v1/public/landing/preview/{token}:
+    get:
+      summary: Preview public landing page
+      operationId: previewPublicLandingPage
+      tags:
+        - Public Landing
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: slug
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Public landing preview resolved successfully
+  /api/v1/public/landing/access/{publicPageId}:
+    post:
+      summary: Request public landing page access
+      operationId: requestPublicLandingPageAccess
+      tags:
+        - Public Landing
+      parameters:
+        - name: publicPageId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Public landing page access granted
+  /api/v1/public/landing/forms/{formKey}/submissions:
+    post:
+      summary: Submit public landing form
+      operationId: submitPublicLandingForm
+      tags:
+        - Public Landing
+      parameters:
+        - name: formKey
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Public landing form submitted successfully
+  /api/v1/public/landing/forms/{formKey}/uploads:
+    post:
+      summary: Upload public landing form file
+      operationId: uploadPublicLandingFormFile
+      tags:
+        - Public Landing
+      parameters:
+        - name: formKey
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+      responses:
+        "501":
+          description: File upload is not implemented yet
+  /api/v1/public/landing/events:
+    post:
+      summary: Track public landing event
+      operationId: trackPublicLandingEvent
+      tags:
+        - Public Landing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Public landing event tracked successfully
 components:
   parameters:
     OrganizationID:

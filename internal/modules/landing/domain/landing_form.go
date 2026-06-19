@@ -49,6 +49,7 @@ type LandingForm struct {
 	IsActive       bool
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	Fields         []LandingFormField
 }
 
 type LandingFormField struct {

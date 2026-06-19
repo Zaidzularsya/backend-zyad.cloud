@@ -1,0 +1,148 @@
+//go:build integration
+
+package service_test
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"zyad.cloud/internal/modules/landing/domain"
+	"zyad.cloud/internal/modules/landing/repository"
+	"zyad.cloud/internal/modules/landing/service"
+	"zyad.cloud/internal/platform/database/testutil"
+)
+
+func TestPublishServiceIntegration(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+
+	_, err := db.Exec(ctx, `
+		INSERT INTO users (id, name, email, status)
+		VALUES 
+		('11111111-1111-1111-1111-111111111111', 'Mock User A', 'mock_a@example.com', 'active')
+		ON CONFLICT DO NOTHING
+	`)
+	if err != nil {
+		t.Fatalf("failed to insert mock users: %v", err)
+	}
+
+	_, err = db.Exec(ctx, `
+		INSERT INTO organizations (id, type, slug, name, status)
+		VALUES 
+		($1, 'customer', 'organization-a', 'Organization A', 'active')
+		ON CONFLICT DO NOTHING
+	`, tenants.A.OrganizationID)
+	if err != nil {
+		t.Fatalf("failed to insert mock organizations: %v", err)
+	}
+
+	pageRepo := repository.NewPageRepository(db)
+	sectionRepo := repository.NewSectionRepository(db)
+	formRepo := repository.NewFormRepository(db)
+	brandingRepo := repository.NewBrandingRepository(db)
+	versionRepo := repository.NewVersionRepository(db)
+
+	publishService := service.NewPublishService(db, pageRepo, sectionRepo, formRepo, brandingRepo, versionRepo, "test-secret")
+
+	userID := "11111111-1111-1111-1111-111111111111"
+
+	// Pre-requisites: Page
+	page, err := pageRepo.Create(ctx, tenants.A.Scope, repository.CreatePageParams{
+		Name:       "Publish Test Page",
+		Title:      "My Title",
+		Slug:       strings.ReplaceAll(testutil.UniqueCode("pub-page-"), ".", "-"),
+		Type:       domain.PageTypeCampaign,
+		Status:     domain.PageStatusDraft,
+		Visibility: domain.PageVisibilityPrivate,
+		CreatedBy:  userID,
+	})
+	if err != nil {
+		t.Fatalf("CreatePage: %v", err)
+	}
+
+	t.Run("ValidateForPublish - Without Sections and Branding", func(t *testing.T) {
+		checklist, err := publishService.ValidateForPublish(ctx, tenants.A.Scope, page.ID)
+		if err != nil {
+			t.Fatalf("ValidateForPublish: %v", err)
+		}
+		if !checklist.IsValid {
+			t.Errorf("Expected valid but got invalid: %v", checklist.Errors)
+		}
+		if len(checklist.Warnings) != 1 { // Missing sections
+			t.Errorf("Expected 1 warning, got %d: %v", len(checklist.Warnings), checklist.Warnings)
+		}
+	})
+
+	t.Run("Publish", func(t *testing.T) {
+		version, err := publishService.Publish(ctx, tenants.A.Scope, page.ID, "Initial Release", userID)
+		if err != nil {
+			t.Fatalf("Publish: %v", err)
+		}
+		if version.Version != 1 {
+			t.Errorf("Expected version 1, got %d", version.Version)
+		}
+
+		// Verify page status
+		updatedPage, err := pageRepo.FindByID(ctx, tenants.A.Scope, page.ID)
+		if err != nil {
+			t.Fatalf("FindByID: %v", err)
+		}
+		if updatedPage.Status != domain.PageStatusPublished {
+			t.Errorf("Expected Published status, got %s", updatedPage.Status)
+		}
+	})
+
+	t.Run("Unpublish", func(t *testing.T) {
+		err := publishService.Unpublish(ctx, tenants.A.Scope, page.ID, userID)
+		if err != nil {
+			t.Fatalf("Unpublish: %v", err)
+		}
+
+		updatedPage, err := pageRepo.FindByID(ctx, tenants.A.Scope, page.ID)
+		if err != nil {
+			t.Fatalf("FindByID: %v", err)
+		}
+		if updatedPage.Status != domain.PageStatusDraft {
+			t.Errorf("Expected Draft status, got %s", updatedPage.Status)
+		}
+	})
+
+	var validToken string
+	t.Run("Generate Preview Token", func(t *testing.T) {
+		token, err := publishService.GeneratePreviewToken(ctx, tenants.A.Scope, page.ID, 60)
+		if err != nil {
+			t.Fatalf("GeneratePreviewToken: %v", err)
+		}
+		if token == "" {
+			t.Errorf("Expected non-empty token")
+		}
+		validToken = token
+	})
+
+	t.Run("Validate Preview Token - Valid", func(t *testing.T) {
+		pageID, err := publishService.ValidatePreviewToken(ctx, validToken)
+		if err != nil {
+			t.Fatalf("ValidatePreviewToken: %v", err)
+		}
+		if pageID != page.ID {
+			t.Errorf("Expected page ID %s, got %s", page.ID, pageID)
+		}
+	})
+
+	t.Run("Validate Preview Token - Invalid", func(t *testing.T) {
+		_, err := publishService.ValidatePreviewToken(ctx, "invalid-token")
+		if err == nil {
+			t.Errorf("Expected error for invalid token")
+		}
+	})
+
+	t.Run("Validate Preview Token - Expired", func(t *testing.T) {
+		expiredToken, _ := publishService.GeneratePreviewToken(ctx, tenants.A.Scope, page.ID, -10)
+		_, err := publishService.ValidatePreviewToken(ctx, expiredToken)
+		if err != service.ErrInvalidToken {
+			t.Errorf("Expected ErrInvalidToken, got %v", err)
+		}
+	})
+}

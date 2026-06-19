@@ -117,7 +117,7 @@ func TestRevisionRepositoryIntegration(t *testing.T) {
 	}
 
 	// 3. Claim Pending Schedules (Worker operation)
-	claimed, err := revisionRepo.ClaimPendingSchedules(ctx, 10, 5*time.Minute)
+	claimed, err := revisionRepo.ClaimPendingSchedules(ctx, tenants.A.Scope, 10, 5*time.Minute)
 	if err != nil {
 		t.Fatalf("Claim pending schedules: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestRevisionRepositoryIntegration(t *testing.T) {
 
 	// 4. Mark Schedule Status (Worker operation)
 	errMsg := "Simulated error"
-	err = revisionRepo.MarkScheduleStatus(ctx, foundClaim.ID, domain.ScheduleStatusFailed, &errMsg)
+	err = revisionRepo.MarkScheduleStatus(ctx, tenants.A.Scope, foundClaim.ID, domain.ScheduleStatusFailed, &errMsg)
 	if err != nil {
 		t.Fatalf("Mark schedule status: %v", err)
 	}
