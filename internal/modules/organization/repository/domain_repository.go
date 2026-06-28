@@ -334,16 +334,31 @@ func (r *DomainRepository) Activate(
 	if err != nil {
 		return model.OrganizationDomain{}, err
 	}
+	if !isPrimary {
+		var hasPrimary bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM organization_domains
+				WHERE organization_id = $1::uuid
+					AND is_primary = true
+					AND status = 'active'
+					AND deleted_at IS NULL
+			)
+		`, domain.OrganizationID).Scan(&hasPrimary); err != nil {
+			return model.OrganizationDomain{}, err
+		}
+		isPrimary = !hasPrimary
+	}
 	if isPrimary {
 		if _, err := tx.Exec(ctx, `
 			UPDATE organization_domains
-			SET is_primary = false, updated_at = $3
+			SET is_primary = false, updated_at = $2
 			WHERE organization_id = $1::uuid
-				AND type = $2
-				AND id <> $4::uuid
+				AND id <> $3::uuid
 				AND is_primary = true
 				AND deleted_at IS NULL
-		`, domain.OrganizationID, string(domain.Type), activatedAt, domain.ID); err != nil {
+		`, domain.OrganizationID, activatedAt, domain.ID); err != nil {
 			return model.OrganizationDomain{}, err
 		}
 	}

@@ -90,6 +90,16 @@ type AuthConfig struct {
 	PasswordMinLength          int
 	CookieSecret               string
 	CookieExpiresIn            string
+	Google                     GoogleAuthConfig
+}
+
+type GoogleAuthConfig struct {
+	Enabled               bool
+	ClientIDs             []string
+	AutoRegister          bool
+	AutoLinkVerifiedEmail bool
+	DefaultRole           string
+	DefaultStatus         string
 }
 
 type SeedAdminConfig struct {

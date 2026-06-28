@@ -15,6 +15,22 @@ type LoginResponse struct {
 	User         AuthUserView `json:"user"`
 }
 
+type GoogleAuthRequest struct {
+	IDToken     string `json:"id_token" binding:"required"`
+	RememberMe  bool   `json:"remember_me"`
+	DeviceName  string `json:"device_name"`
+	InviteToken string `json:"invite_token,omitempty"`
+}
+
+type GoogleAuthResponse struct {
+	AccessToken  string       `json:"access_token"`
+	RefreshToken string       `json:"refresh_token"`
+	TokenType    string       `json:"token_type"`
+	ExpiresIn    int64        `json:"expires_in"`
+	IsNewUser    bool         `json:"is_new_user"`
+	User         AuthUserView `json:"user"`
+}
+
 type AuthUserView struct {
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
@@ -118,5 +134,3 @@ type VerifyEmailRequest struct {
 type ResendVerificationEmailRequest struct {
 	Email string `json:"email" binding:"required,email"`
 }
-
-

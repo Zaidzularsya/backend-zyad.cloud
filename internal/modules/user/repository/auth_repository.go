@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -59,6 +60,260 @@ func (r *AuthRepository) FindLoginUserByIdentifier(ctx context.Context, identifi
 	user.Roles = roles
 	user.Permissions = permissions
 
+	return user, nil
+}
+
+func (r *AuthRepository) FindGoogleUserBySubject(ctx context.Context, subject string) (service.GoogleAuthUser, error) {
+	var user service.GoogleAuthUser
+	var deletedAt sql.NullTime
+	var emailVerifiedAt sql.NullTime
+
+	err := r.db.QueryRow(ctx, `
+		SELECT u.id, u.name, u.email, COALESCE(u.username, ''), u.status, u.deleted_at, u.email_verified_at
+		FROM auth_identities ai
+		JOIN users u ON u.id = ai.user_id
+		WHERE ai.provider = 'google'
+			AND ai.provider_user_id = $1
+		LIMIT 1
+	`, strings.TrimSpace(subject)).Scan(
+		&user.ID,
+		&user.Name,
+		&user.Email,
+		&user.Username,
+		&user.Status,
+		&deletedAt,
+		&emailVerifiedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return service.GoogleAuthUser{}, service.ErrGoogleIdentityNotFound
+		}
+		return service.GoogleAuthUser{}, err
+	}
+	if deletedAt.Valid {
+		user.DeletedAt = &deletedAt.Time
+	}
+	if emailVerifiedAt.Valid {
+		user.EmailVerifiedAt = &emailVerifiedAt.Time
+	}
+	if err := r.fillGoogleUserAccess(ctx, &user); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	return user, nil
+}
+
+func (r *AuthRepository) FindGoogleUserByEmail(ctx context.Context, email string) (service.GoogleAuthUser, error) {
+	var user service.GoogleAuthUser
+	var deletedAt sql.NullTime
+	var emailVerifiedAt sql.NullTime
+
+	err := r.db.QueryRow(ctx, `
+		SELECT id, name, email, COALESCE(username, ''), status, deleted_at, email_verified_at
+		FROM users
+		WHERE deleted_at IS NULL
+			AND lower(email) = lower($1)
+		LIMIT 1
+	`, strings.TrimSpace(email)).Scan(
+		&user.ID,
+		&user.Name,
+		&user.Email,
+		&user.Username,
+		&user.Status,
+		&deletedAt,
+		&emailVerifiedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return service.GoogleAuthUser{}, service.ErrGoogleEmailUserNotFound
+		}
+		return service.GoogleAuthUser{}, err
+	}
+	if deletedAt.Valid {
+		user.DeletedAt = &deletedAt.Time
+	}
+	if emailVerifiedAt.Valid {
+		user.EmailVerifiedAt = &emailVerifiedAt.Time
+	}
+	if err := r.fillGoogleUserAccess(ctx, &user); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	return user, nil
+}
+
+func (r *AuthRepository) LinkGoogleIdentity(ctx context.Context, link service.GoogleIdentityLink) (service.GoogleAuthUser, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var user service.GoogleAuthUser
+	var deletedAt sql.NullTime
+	var emailVerifiedAt sql.NullTime
+	if err := tx.QueryRow(ctx, `
+		SELECT id, name, email, COALESCE(username, ''), status, deleted_at, email_verified_at
+		FROM users
+		WHERE id = $1
+			AND deleted_at IS NULL
+		FOR UPDATE
+	`, link.UserID).Scan(
+		&user.ID,
+		&user.Name,
+		&user.Email,
+		&user.Username,
+		&user.Status,
+		&deletedAt,
+		&emailVerifiedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return service.GoogleAuthUser{}, service.ErrGoogleEmailUserNotFound
+		}
+		return service.GoogleAuthUser{}, err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO auth_identities (user_id, provider, provider_user_id, provider_email, created_at, updated_at)
+		VALUES ($1, 'google', $2, $3, $4, $4)
+		ON CONFLICT (provider, provider_user_id)
+		DO UPDATE SET provider_email = EXCLUDED.provider_email, updated_at = EXCLUDED.updated_at
+	`, link.UserID, link.ProviderUserID, link.ProviderEmail, link.VerifiedAt); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE users
+		SET email_verified_at = COALESCE(email_verified_at, $2),
+			updated_at = $2
+		WHERE id = $1
+	`, link.UserID, link.VerifiedAt); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	if emailVerifiedAt.Valid {
+		user.EmailVerifiedAt = &emailVerifiedAt.Time
+	} else {
+		user.EmailVerifiedAt = &link.VerifiedAt
+	}
+	if deletedAt.Valid {
+		user.DeletedAt = &deletedAt.Time
+	}
+
+	metadata, err := json.Marshal(map[string]any{
+		"provider":       "google",
+		"provider_email": link.ProviderEmail,
+	})
+	if err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO audit_logs (
+			module, event, target_user_id, target_type, target_id, metadata, ip_address, user_agent, created_at
+		)
+		VALUES (
+			'user', 'google_identity_linked', $1, 'user', $1, $2, NULLIF($3, '')::inet, NULLIF($4, ''), $5
+		)
+	`, link.UserID, metadata, link.IPAddress, link.UserAgent, link.VerifiedAt); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	if err := r.fillGoogleUserAccess(ctx, &user); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	return user, nil
+}
+
+func (r *AuthRepository) CreateGoogleUser(ctx context.Context, registration service.GoogleUserRegistration) (service.GoogleAuthUser, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var roleID string
+	if err := tx.QueryRow(ctx, `
+		SELECT id
+		FROM roles
+		WHERE lower(COALESCE(NULLIF(slug, ''), role_name)) = lower($1)
+		LIMIT 1
+	`, registration.RoleSlug).Scan(&roleID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return service.GoogleAuthUser{}, service.ErrGoogleDefaultRoleNotFound
+		}
+		return service.GoogleAuthUser{}, err
+	}
+
+	username, err := r.nextAvailableUsername(ctx, tx, registration.UsernameBase)
+	if err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+
+	var user service.GoogleAuthUser
+	var emailVerifiedAt sql.NullTime
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO users (name, email, username, status, email_verified_at, created_at, updated_at)
+		VALUES ($1, $2, NULLIF($3, ''), $4, $5, $5, $5)
+		RETURNING id, name, email, COALESCE(username, ''), status, email_verified_at
+	`, registration.Name, registration.Email, username, registration.Status, registration.VerifiedAt).Scan(
+		&user.ID,
+		&user.Name,
+		&user.Email,
+		&user.Username,
+		&user.Status,
+		&emailVerifiedAt,
+	); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	if emailVerifiedAt.Valid {
+		user.EmailVerifiedAt = &emailVerifiedAt.Time
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO user_profiles (user_id, avatar_url, created_at, updated_at)
+		VALUES ($1, NULLIF($2, ''), $3, $3)
+	`, user.ID, registration.AvatarURL, registration.VerifiedAt); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO auth_identities (user_id, provider, provider_user_id, provider_email, created_at, updated_at)
+		VALUES ($1, 'google', $2, $3, $4, $4)
+	`, user.ID, registration.Subject, registration.Email, registration.VerifiedAt); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO user_roles (user_id, role_id)
+		VALUES ($1, $2)
+	`, user.ID, roleID); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+
+	metadata, err := json.Marshal(map[string]any{
+		"provider":       "google",
+		"provider_email": registration.Email,
+		"default_role":   registration.RoleSlug,
+		"status":         registration.Status,
+	})
+	if err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO audit_logs (
+			module, event, target_user_id, target_type, target_id, metadata, ip_address, user_agent, created_at
+		)
+		VALUES (
+			'user', 'google_user_registered', $1, 'user', $1, $2, NULLIF($3, '')::inet, NULLIF($4, ''), $5
+		)
+	`, user.ID, metadata, registration.IPAddress, registration.UserAgent, registration.VerifiedAt); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	if err := r.fillGoogleUserAccess(ctx, &user); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
 	return user, nil
 }
 
@@ -647,6 +902,59 @@ func (r *AuthRepository) permissionSlugs(ctx context.Context, userID string) ([]
 	defer rows.Close()
 
 	return scanStrings(rows)
+}
+
+func (r *AuthRepository) fillGoogleUserAccess(ctx context.Context, user *service.GoogleAuthUser) error {
+	roles, err := r.roleSlugs(ctx, user.ID)
+	if err != nil {
+		return err
+	}
+	permissions, err := r.permissionSlugs(ctx, user.ID)
+	if err != nil {
+		return err
+	}
+	user.Roles = roles
+	user.Permissions = permissions
+	return nil
+}
+
+func (r *AuthRepository) nextAvailableUsername(ctx context.Context, tx pgx.Tx, base string) (string, error) {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = "google_user"
+	}
+	if len(base) > 80 {
+		base = base[:80]
+	}
+
+	for i := 0; i < 100; i++ {
+		candidate := base
+		if i > 0 {
+			suffix := fmt.Sprintf("_%d", i+1)
+			trimmedBase := base
+			if len(trimmedBase)+len(suffix) > 100 {
+				trimmedBase = trimmedBase[:100-len(suffix)]
+			}
+			candidate = trimmedBase + suffix
+		}
+
+		var exists bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM users
+				WHERE lower(username) = lower($1)
+					AND deleted_at IS NULL
+			)
+		`, candidate).Scan(&exists); err != nil {
+			return "", err
+		}
+		if !exists {
+			return candidate, nil
+		}
+	}
+
+	return "", errors.New("failed to generate unique username")
 }
 
 func scanStrings(rows pgx.Rows) ([]string, error) {

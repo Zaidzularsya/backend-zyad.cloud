@@ -127,6 +127,166 @@ func TestAuthServiceLoginRejectsInactiveStatus(t *testing.T) {
 	}
 }
 
+func TestAuthServiceGoogleAuthExistingIdentitySuccess(t *testing.T) {
+	repo := &fakeLoginRepository{
+		googleUserBySubject: GoogleAuthUser{
+			ID:          "user-1",
+			Name:        "Jane Doe",
+			Email:       "jane@example.com",
+			Username:    "jane",
+			Status:      model.UserStatusActive,
+			Roles:       []string{"member"},
+			Permissions: []string{"dashboard.read"},
+		},
+		findGoogleEmailErr: ErrGoogleEmailUserNotFound,
+		sessionID:          "session-google",
+	}
+	svc := newTestAuthService(t, repo)
+	svc.googleEnabled = true
+	svc.googleVerifier = &fakeGoogleVerifier{claims: coreauth.GoogleIDTokenClaims{
+		Subject:       "google-sub-1",
+		Email:         "jane@example.com",
+		EmailVerified: true,
+		Name:          "Jane Doe",
+	}}
+
+	result, err := svc.GoogleAuth(context.Background(), dto.GoogleAuthRequest{
+		IDToken:    "valid-google-token",
+		RememberMe: true,
+		DeviceName: "Chrome",
+	}, LoginHistoryRecord{IPAddress: "127.0.0.1", UserAgent: "test-agent"})
+	if err != nil {
+		t.Fatalf("google auth: %v", err)
+	}
+	if result.AccessToken == "" || result.RefreshToken == "" {
+		t.Fatal("expected auth tokens")
+	}
+	if result.IsNewUser {
+		t.Fatal("existing google identity should not be marked new")
+	}
+	if repo.googleSubjectLookup != "google-sub-1" {
+		t.Fatalf("subject lookup = %q", repo.googleSubjectLookup)
+	}
+	if repo.lastLoginUserID != "user-1" {
+		t.Fatalf("last login user = %q", repo.lastLoginUserID)
+	}
+	if len(repo.histories) == 0 || repo.histories[len(repo.histories)-1].Reason != "google" {
+		t.Fatalf("expected google login history, got %#v", repo.histories)
+	}
+}
+
+func TestAuthServiceGoogleAuthAutoRegistersActiveUser(t *testing.T) {
+	repo := &fakeLoginRepository{
+		findGoogleSubjectErr: ErrGoogleIdentityNotFound,
+		findGoogleEmailErr:   ErrGoogleEmailUserNotFound,
+		createdGoogleUser: GoogleAuthUser{
+			ID:          "user-new",
+			Name:        "New User",
+			Email:       "new@example.com",
+			Username:    "new",
+			Status:      model.UserStatusActive,
+			Roles:       []string{"member"},
+			Permissions: []string{},
+		},
+		sessionID: "session-new",
+	}
+	svc := newTestAuthService(t, repo)
+	svc.googleEnabled = true
+	svc.googleAutoRegister = true
+	svc.googleDefaultRole = "member"
+	svc.googleDefaultStatus = model.UserStatusActive
+	svc.googleVerifier = &fakeGoogleVerifier{claims: coreauth.GoogleIDTokenClaims{
+		Subject:       "google-sub-new",
+		Email:         "New@Example.com",
+		EmailVerified: true,
+		Name:          "New User",
+		Picture:       "https://example.com/avatar.png",
+	}}
+
+	result, err := svc.GoogleAuth(context.Background(), dto.GoogleAuthRequest{IDToken: "valid-google-token"}, LoginHistoryRecord{})
+	if err != nil {
+		t.Fatalf("google auth register: %v", err)
+	}
+	if !result.IsNewUser {
+		t.Fatal("expected new user flag")
+	}
+	if repo.googleRegistration.Subject != "google-sub-new" {
+		t.Fatalf("registration subject = %q", repo.googleRegistration.Subject)
+	}
+	if repo.googleRegistration.Email != "new@example.com" {
+		t.Fatalf("registration email = %q", repo.googleRegistration.Email)
+	}
+	if repo.googleRegistration.Status != model.UserStatusActive {
+		t.Fatalf("registration status = %q", repo.googleRegistration.Status)
+	}
+	if repo.googleRegistration.RoleSlug != "member" {
+		t.Fatalf("registration role = %q", repo.googleRegistration.RoleSlug)
+	}
+	if result.User.Status != "active" {
+		t.Fatalf("response status = %q", result.User.Status)
+	}
+}
+
+func TestAuthServiceGoogleAuthAutoRegistersAndProvisionsWorkspace(t *testing.T) {
+	repo := &fakeLoginRepository{
+		findGoogleSubjectErr: ErrGoogleIdentityNotFound,
+		findGoogleEmailErr:   ErrGoogleEmailUserNotFound,
+		createdGoogleUser: GoogleAuthUser{
+			ID:          "user-new",
+			Name:        "New Workspace Owner",
+			Email:       "new@example.com",
+			Username:    "new",
+			Status:      model.UserStatusActive,
+			Roles:       []string{"member"},
+			Permissions: []string{},
+		},
+		sessionID: "session-new",
+	}
+	provisioner := &fakeGoogleWorkspaceProvisioner{}
+	svc := newTestAuthService(t, repo)
+	svc.googleEnabled = true
+	svc.googleAutoRegister = true
+	svc.googleDefaultRole = "member"
+	svc.googleDefaultStatus = model.UserStatusActive
+	svc.googleWorkspace = provisioner
+	svc.googleVerifier = &fakeGoogleVerifier{claims: coreauth.GoogleIDTokenClaims{
+		Subject:       "google-sub-new",
+		Email:         "new@example.com",
+		EmailVerified: true,
+		Name:          "New Workspace Owner",
+	}}
+
+	_, err := svc.GoogleAuth(
+		context.Background(),
+		dto.GoogleAuthRequest{IDToken: "valid-google-token"},
+		LoginHistoryRecord{IPAddress: "127.0.0.1", UserAgent: "test-agent"},
+	)
+	if err != nil {
+		t.Fatalf("google auth register: %v", err)
+	}
+	if provisioner.userID != "user-new" ||
+		provisioner.sessionID != "session-new" ||
+		provisioner.workspaceName != "New Workspace Owner" ||
+		provisioner.metadata.IPAddress != "127.0.0.1" {
+		t.Fatalf("provisioner = %#v", provisioner)
+	}
+}
+
+func TestAuthServiceGoogleAuthRejectsDisabledConfig(t *testing.T) {
+	repo := &fakeLoginRepository{}
+	svc := newTestAuthService(t, repo)
+	svc.googleVerifier = &fakeGoogleVerifier{}
+
+	_, err := svc.GoogleAuth(context.Background(), dto.GoogleAuthRequest{IDToken: "valid-google-token"}, LoginHistoryRecord{})
+	if err == nil {
+		t.Fatal("expected google disabled error")
+	}
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "AUTH_GOOGLE_DISABLED" {
+		t.Fatalf("expected AUTH_GOOGLE_DISABLED, got %v", err)
+	}
+}
+
 func TestAuthServiceLogoutRevokesSession(t *testing.T) {
 	repo := &fakeLoginRepository{}
 	svc := newTestAuthService(t, repo)
@@ -772,6 +932,17 @@ func newTestAuthService(t *testing.T, repo LoginRepository) *AuthService {
 type fakeLoginRepository struct {
 	user                            LoginUser
 	findErr                         error
+	googleUserBySubject             GoogleAuthUser
+	googleUserByEmail               GoogleAuthUser
+	createdGoogleUser               GoogleAuthUser
+	findGoogleSubjectErr            error
+	findGoogleEmailErr              error
+	linkGoogleErr                   error
+	createGoogleErr                 error
+	googleSubjectLookup             string
+	googleEmailLookup               string
+	googleLink                      GoogleIdentityLink
+	googleRegistration              GoogleUserRegistration
 	passwordResetUser               PasswordResetUser
 	findPasswordResetErr            error
 	passwordResetTokenFound         PasswordResetToken
@@ -798,31 +969,105 @@ type fakeLoginRepository struct {
 	lastLoginUserID                 string
 	histories                       []LoginHistoryRecord
 	// new session management fields
-	sessions                        []CurrentSession
-	listSessionsErr                 error
-	revokedUserID                   string
-	revokeSessionErr                error
-	excludeSessionID                string
-	revokeAllErr                    error
+	sessions         []CurrentSession
+	listSessionsErr  error
+	revokedUserID    string
+	revokeSessionErr error
+	excludeSessionID string
+	revokeAllErr     error
 	// email verification mock fields
-	emailVerificationUser           EmailVerificationTargetUser
-	findEmailVerificationUserErr    error
-	emailVerificationToken          NewEmailVerificationToken
-	createVerificationTokenErr      error
-	emailVerificationTokenFound     EmailVerificationToken
-	findVerificationTokenErr        error
-	completedVerificationUser       EmailVerificationUser
-	completeVerificationErr         error
-	completedVerificationTokenHash  string
-	completedVerificationTime       time.Time
+	emailVerificationUser          EmailVerificationTargetUser
+	findEmailVerificationUserErr   error
+	emailVerificationToken         NewEmailVerificationToken
+	createVerificationTokenErr     error
+	emailVerificationTokenFound    EmailVerificationToken
+	findVerificationTokenErr       error
+	completedVerificationUser      EmailVerificationUser
+	completeVerificationErr        error
+	completedVerificationTokenHash string
+	completedVerificationTime      time.Time
 }
 
+type fakeGoogleVerifier struct {
+	claims coreauth.GoogleIDTokenClaims
+	err    error
+}
+
+type fakeGoogleWorkspaceProvisioner struct {
+	userID        string
+	sessionID     string
+	workspaceName string
+	metadata      LoginHistoryRecord
+	err           error
+}
+
+func (p *fakeGoogleWorkspaceProvisioner) ProvisionGoogleWorkspace(
+	_ context.Context,
+	userID string,
+	sessionID string,
+	workspaceName string,
+	metadata LoginHistoryRecord,
+) error {
+	p.userID = userID
+	p.sessionID = sessionID
+	p.workspaceName = workspaceName
+	p.metadata = metadata
+	return p.err
+}
+
+func (v *fakeGoogleVerifier) Verify(context.Context, string) (coreauth.GoogleIDTokenClaims, error) {
+	if v.err != nil {
+		return coreauth.GoogleIDTokenClaims{}, v.err
+	}
+	return v.claims, nil
+}
 
 func (r *fakeLoginRepository) FindLoginUserByIdentifier(context.Context, string) (LoginUser, error) {
 	if r.findErr != nil {
 		return LoginUser{}, r.findErr
 	}
 	return r.user, nil
+}
+
+func (r *fakeLoginRepository) FindGoogleUserBySubject(_ context.Context, subject string) (GoogleAuthUser, error) {
+	r.googleSubjectLookup = subject
+	if r.findGoogleSubjectErr != nil {
+		return GoogleAuthUser{}, r.findGoogleSubjectErr
+	}
+	return r.googleUserBySubject, nil
+}
+
+func (r *fakeLoginRepository) FindGoogleUserByEmail(_ context.Context, email string) (GoogleAuthUser, error) {
+	r.googleEmailLookup = email
+	if r.findGoogleEmailErr != nil {
+		return GoogleAuthUser{}, r.findGoogleEmailErr
+	}
+	return r.googleUserByEmail, nil
+}
+
+func (r *fakeLoginRepository) LinkGoogleIdentity(_ context.Context, link GoogleIdentityLink) (GoogleAuthUser, error) {
+	r.googleLink = link
+	if r.linkGoogleErr != nil {
+		return GoogleAuthUser{}, r.linkGoogleErr
+	}
+	user := r.googleUserByEmail
+	if user.ID == "" {
+		user = GoogleAuthUser{
+			ID:       link.UserID,
+			Email:    link.ProviderEmail,
+			Status:   model.UserStatusActive,
+			Username: "linked",
+		}
+	}
+	return user, nil
+}
+
+func (r *fakeLoginRepository) CreateGoogleUser(_ context.Context, registration GoogleUserRegistration) (GoogleAuthUser, error) {
+	r.googleRegistration = registration
+	if r.createGoogleErr != nil {
+		return GoogleAuthUser{}, r.createGoogleErr
+	}
+	return r.createdGoogleUser, nil
 }
 
 func (r *fakeLoginRepository) FindPasswordResetUserByEmail(context.Context, string) (PasswordResetUser, error) {
@@ -960,8 +1205,6 @@ func (r *fakeLoginRepository) FindEmailVerificationUserByEmail(_ context.Context
 	}
 	return r.emailVerificationUser, nil
 }
-
-
 
 type fakeNotificationPublisher struct {
 	called bool
@@ -1325,5 +1568,3 @@ func TestAuthServiceResendVerificationEmailGenericSuccessForUnknownEmail(t *test
 		t.Fatal("unexpected notification published for unknown email")
 	}
 }
-
-

@@ -128,7 +128,7 @@ func (r *defaultDomainRepository) ListBindings(ctx context.Context, scope corete
 		return nil, coretenant.ErrInvalidScope
 	}
 
-	var bindings []domain.DomainBinding
+	bindings := make([]domain.DomainBinding, 0)
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
 			SELECT id, organization_id, organization_domain_id, landing_page_id, is_primary, created_at, updated_at
@@ -174,7 +174,7 @@ func (r *defaultDomainRepository) ListAvailableDomains(ctx context.Context, scop
 		return nil, coretenant.ErrInvalidScope
 	}
 
-	var domains []domain.AvailableDomain
+	domains := make([]domain.AvailableDomain, 0)
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
 		// Find verified or active domains for this organization
 		rows, err := tx.Query(ctx, `

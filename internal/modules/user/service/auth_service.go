@@ -28,6 +28,9 @@ var ErrPasswordChangeUserNotFound = errors.New("password change user not found")
 var ErrSessionNotFound = errors.New("session not found")
 var ErrEmailVerificationTokenNotFound = errors.New("email verification token not found")
 var ErrEmailAlreadyVerified = errors.New("email already verified")
+var ErrGoogleIdentityNotFound = errors.New("google identity not found")
+var ErrGoogleEmailUserNotFound = errors.New("google email user not found")
+var ErrGoogleDefaultRoleNotFound = errors.New("google default role not found")
 
 const passwordResetRequestedEvent = "auth.password_reset_requested"
 const passwordChangedEvent = "auth.password_changed"
@@ -35,6 +38,10 @@ const emailVerificationRequestedEvent = "auth.email_verification"
 
 type LoginRepository interface {
 	FindLoginUserByIdentifier(ctx context.Context, identifier string) (LoginUser, error)
+	FindGoogleUserBySubject(ctx context.Context, subject string) (GoogleAuthUser, error)
+	FindGoogleUserByEmail(ctx context.Context, email string) (GoogleAuthUser, error)
+	LinkGoogleIdentity(ctx context.Context, link GoogleIdentityLink) (GoogleAuthUser, error)
+	CreateGoogleUser(ctx context.Context, registration GoogleUserRegistration) (GoogleAuthUser, error)
 	FindPasswordResetUserByEmail(ctx context.Context, email string) (PasswordResetUser, error)
 	FindPasswordResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error)
 	FindPasswordChangeUser(ctx context.Context, userID string) (PasswordChangeUser, error)
@@ -61,6 +68,20 @@ type NotificationEventPublisher interface {
 	Publish(ctx context.Context, event notificationpublisher.Event) (notificationdomain.OutboxEvent, error)
 }
 
+type GoogleTokenVerifier interface {
+	Verify(ctx context.Context, rawToken string) (coreauth.GoogleIDTokenClaims, error)
+}
+
+type GoogleWorkspaceProvisioner interface {
+	ProvisionGoogleWorkspace(
+		ctx context.Context,
+		userID string,
+		sessionID string,
+		workspaceName string,
+		metadata LoginHistoryRecord,
+	) error
+}
+
 type LoginUser struct {
 	ID           string
 	Name         string
@@ -71,6 +92,40 @@ type LoginUser struct {
 	DeletedAt    *time.Time
 	Roles        []string
 	Permissions  []string
+}
+
+type GoogleAuthUser struct {
+	ID              string
+	Name            string
+	Email           string
+	Username        string
+	Status          model.UserStatus
+	DeletedAt       *time.Time
+	EmailVerifiedAt *time.Time
+	Roles           []string
+	Permissions     []string
+}
+
+type GoogleIdentityLink struct {
+	UserID         string
+	ProviderUserID string
+	ProviderEmail  string
+	VerifiedAt     time.Time
+	IPAddress      string
+	UserAgent      string
+}
+
+type GoogleUserRegistration struct {
+	Subject      string
+	Email        string
+	Name         string
+	AvatarURL    string
+	UsernameBase string
+	Status       model.UserStatus
+	RoleSlug     string
+	VerifiedAt   time.Time
+	IPAddress    string
+	UserAgent    string
 }
 
 type NewSession struct {
@@ -149,8 +204,6 @@ type EmailVerificationTargetUser struct {
 	EmailVerifiedAt *time.Time
 }
 
-
-
 type RefreshSession struct {
 	TokenID           string
 	SessionID         string
@@ -226,6 +279,8 @@ type CurrentSession struct {
 type AuthService struct {
 	repo                  LoginRepository
 	notificationPublisher NotificationEventPublisher
+	googleVerifier        GoogleTokenVerifier
+	googleWorkspace       GoogleWorkspaceProvisioner
 	accessTokenManager    *coreauth.TokenManager
 	refreshTokenManager   *coreauth.TokenManager
 	accessTTL             time.Duration
@@ -234,6 +289,11 @@ type AuthService struct {
 	resetTokenTTL         time.Duration
 	verificationTokenTTL  time.Duration
 	passwordMinLength     int
+	googleEnabled         bool
+	googleAutoRegister    bool
+	googleAutoLinkEmail   bool
+	googleDefaultRole     string
+	googleDefaultStatus   model.UserStatus
 	appName               string
 	frontendURL           string
 	notificationLocale    string
@@ -282,6 +342,11 @@ func NewAuthService(repo LoginRepository, cfg config.Config) (*AuthService, erro
 		resetTokenTTL:        resetTokenTTL,
 		verificationTokenTTL: verificationTokenTTL,
 		passwordMinLength:    cfg.Auth.PasswordMinLength,
+		googleEnabled:        cfg.Auth.Google.Enabled,
+		googleAutoRegister:   cfg.Auth.Google.AutoRegister,
+		googleAutoLinkEmail:  cfg.Auth.Google.AutoLinkVerifiedEmail,
+		googleDefaultRole:    strings.TrimSpace(cfg.Auth.Google.DefaultRole),
+		googleDefaultStatus:  model.UserStatus(cfg.Auth.Google.DefaultStatus),
 		appName:              cfg.App.Name,
 		frontendURL:          cfg.App.FrontendURL,
 		notificationLocale:   cfg.Notification.DefaultLocale,
@@ -292,6 +357,14 @@ func NewAuthService(repo LoginRepository, cfg config.Config) (*AuthService, erro
 
 func (s *AuthService) SetNotificationPublisher(publisher NotificationEventPublisher) {
 	s.notificationPublisher = publisher
+}
+
+func (s *AuthService) SetGoogleTokenVerifier(verifier GoogleTokenVerifier) {
+	s.googleVerifier = verifier
+}
+
+func (s *AuthService) SetGoogleWorkspaceProvisioner(provisioner GoogleWorkspaceProvisioner) {
+	s.googleWorkspace = provisioner
 }
 
 func (s *AuthService) Login(ctx context.Context, req dto.LoginRequest, metadata LoginHistoryRecord) (dto.LoginResponse, error) {
@@ -408,6 +481,277 @@ func (s *AuthService) Login(ctx context.Context, req dto.LoginRequest, metadata 
 			Roles:       user.Roles,
 			Permissions: user.Permissions,
 		},
+	}, nil
+}
+
+func (s *AuthService) GoogleAuth(ctx context.Context, req dto.GoogleAuthRequest, metadata LoginHistoryRecord) (dto.GoogleAuthResponse, error) {
+	if !s.googleEnabled {
+		return dto.GoogleAuthResponse{}, coreerrors.New("AUTH_GOOGLE_DISABLED", "google authentication is disabled", http.StatusForbidden)
+	}
+	if s.googleVerifier == nil {
+		return dto.GoogleAuthResponse{}, coreerrors.New("AUTH_GOOGLE_DISABLED", "google authentication is not configured", http.StatusForbidden)
+	}
+
+	claims, err := s.googleVerifier.Verify(ctx, req.IDToken)
+	if err != nil {
+		code := "AUTH_GOOGLE_TOKEN_INVALID"
+		message := "google id token is invalid"
+		if errors.Is(err, coreauth.ErrGoogleIDTokenAudienceInvalid) {
+			code = "AUTH_GOOGLE_AUDIENCE_INVALID"
+			message = "google id token audience is invalid"
+		}
+		s.recordLoginAttempt(ctx, LoginHistoryRecord{
+			Identifier: "google",
+			Event:      model.LoginEventFailedLogin,
+			Success:    false,
+			IPAddress:  metadata.IPAddress,
+			UserAgent:  metadata.UserAgent,
+			DeviceName: metadata.DeviceName,
+			Reason:     "google_token_invalid",
+		})
+		return dto.GoogleAuthResponse{}, coreerrors.New(code, message, http.StatusUnauthorized)
+	}
+	if !claims.EmailVerified {
+		s.recordLoginAttempt(ctx, LoginHistoryRecord{
+			Identifier: strings.ToLower(claims.Email),
+			Event:      model.LoginEventFailedLogin,
+			Success:    false,
+			IPAddress:  metadata.IPAddress,
+			UserAgent:  metadata.UserAgent,
+			DeviceName: metadata.DeviceName,
+			Reason:     "google_email_unverified",
+		})
+		return dto.GoogleAuthResponse{}, coreerrors.New("AUTH_GOOGLE_EMAIL_UNVERIFIED", "google email is not verified", http.StatusUnprocessableEntity)
+	}
+
+	now := s.now().UTC()
+	user, isNewUser, err := s.resolveGoogleUser(ctx, claims, metadata, now)
+	if err != nil {
+		return dto.GoogleAuthResponse{}, err
+	}
+	if !googleUserCanLogin(user) {
+		s.recordLoginAttempt(ctx, LoginHistoryRecord{
+			UserID:     user.ID,
+			Identifier: strings.ToLower(user.Email),
+			Event:      model.LoginEventFailedLogin,
+			Success:    false,
+			IPAddress:  metadata.IPAddress,
+			UserAgent:  metadata.UserAgent,
+			DeviceName: metadata.DeviceName,
+			Reason:     string(user.Status),
+		})
+		return dto.GoogleAuthResponse{}, inactiveUserError(user.Status)
+	}
+
+	refreshTTL := s.refreshTTL
+	if req.RememberMe {
+		refreshTTL = s.rememberMeTTL
+	}
+	token, err := s.issueLoginTokens(ctx, loginTokenUser{
+		ID:          user.ID,
+		Name:        user.Name,
+		Email:       user.Email,
+		Username:    user.Username,
+		Status:      user.Status,
+		Roles:       user.Roles,
+		Permissions: user.Permissions,
+	}, refreshTTL, firstNonEmpty(req.DeviceName, metadata.DeviceName), metadata, now)
+	if err != nil {
+		return dto.GoogleAuthResponse{}, err
+	}
+	if isNewUser && s.googleWorkspace != nil {
+		if err := s.googleWorkspace.ProvisionGoogleWorkspace(
+			ctx,
+			user.ID,
+			token.SessionID,
+			firstNonEmpty(user.Name, user.Email),
+			metadata,
+		); err != nil {
+			return dto.GoogleAuthResponse{}, err
+		}
+	}
+
+	s.recordLoginAttempt(ctx, LoginHistoryRecord{
+		UserID:     user.ID,
+		Identifier: strings.ToLower(user.Email),
+		Event:      model.LoginEventLogin,
+		Success:    true,
+		IPAddress:  metadata.IPAddress,
+		UserAgent:  metadata.UserAgent,
+		DeviceName: metadata.DeviceName,
+		Reason:     "google",
+	})
+
+	return dto.GoogleAuthResponse{
+		AccessToken:  token.AccessToken,
+		RefreshToken: token.RefreshToken,
+		TokenType:    token.TokenType,
+		ExpiresIn:    token.ExpiresIn,
+		IsNewUser:    isNewUser,
+		User:         token.User,
+	}, nil
+}
+
+func (s *AuthService) resolveGoogleUser(
+	ctx context.Context,
+	claims coreauth.GoogleIDTokenClaims,
+	metadata LoginHistoryRecord,
+	now time.Time,
+) (GoogleAuthUser, bool, error) {
+	subject := strings.TrimSpace(claims.Subject)
+	email := strings.ToLower(strings.TrimSpace(claims.Email))
+	if subject == "" || email == "" {
+		return GoogleAuthUser{}, false, coreerrors.New("AUTH_GOOGLE_TOKEN_INVALID", "google id token is missing required claims", http.StatusUnauthorized)
+	}
+
+	user, err := s.repo.FindGoogleUserBySubject(ctx, subject)
+	if err == nil {
+		return user, false, nil
+	}
+	if !errors.Is(err, ErrGoogleIdentityNotFound) {
+		return GoogleAuthUser{}, false, coreerrors.Wrap("AUTH_GOOGLE_FAILED", "failed to authenticate with google", http.StatusInternalServerError, err)
+	}
+
+	user, err = s.repo.FindGoogleUserByEmail(ctx, email)
+	if err == nil {
+		if !s.googleAutoLinkEmail {
+			s.recordLoginAttempt(ctx, LoginHistoryRecord{
+				UserID:     user.ID,
+				Identifier: email,
+				Event:      model.LoginEventFailedLogin,
+				Success:    false,
+				IPAddress:  metadata.IPAddress,
+				UserAgent:  metadata.UserAgent,
+				DeviceName: metadata.DeviceName,
+				Reason:     "google_auto_link_disabled",
+			})
+			return GoogleAuthUser{}, false, coreerrors.New("AUTH_GOOGLE_EMAIL_CONFLICT", "google email is already used", http.StatusConflict)
+		}
+		linkedUser, err := s.repo.LinkGoogleIdentity(ctx, GoogleIdentityLink{
+			UserID:         user.ID,
+			ProviderUserID: subject,
+			ProviderEmail:  email,
+			VerifiedAt:     now,
+			IPAddress:      metadata.IPAddress,
+			UserAgent:      metadata.UserAgent,
+		})
+		if err != nil {
+			return GoogleAuthUser{}, false, coreerrors.Wrap("AUTH_GOOGLE_LINK_FAILED", "failed to link google identity", http.StatusInternalServerError, err)
+		}
+		return linkedUser, false, nil
+	}
+	if !errors.Is(err, ErrGoogleEmailUserNotFound) {
+		return GoogleAuthUser{}, false, coreerrors.Wrap("AUTH_GOOGLE_FAILED", "failed to authenticate with google", http.StatusInternalServerError, err)
+	}
+
+	if !s.googleAutoRegister {
+		s.recordLoginAttempt(ctx, LoginHistoryRecord{
+			Identifier: email,
+			Event:      model.LoginEventFailedLogin,
+			Success:    false,
+			IPAddress:  metadata.IPAddress,
+			UserAgent:  metadata.UserAgent,
+			DeviceName: metadata.DeviceName,
+			Reason:     "google_registration_disabled",
+		})
+		return GoogleAuthUser{}, false, coreerrors.New("AUTH_REGISTRATION_DISABLED", "google registration is disabled", http.StatusForbidden)
+	}
+
+	registeredUser, err := s.repo.CreateGoogleUser(ctx, GoogleUserRegistration{
+		Subject:      subject,
+		Email:        email,
+		Name:         firstNonEmpty(claims.Name, email),
+		AvatarURL:    claims.Picture,
+		UsernameBase: googleUsernameBase(email),
+		Status:       s.googleDefaultStatus,
+		RoleSlug:     s.googleDefaultRole,
+		VerifiedAt:   now,
+		IPAddress:    metadata.IPAddress,
+		UserAgent:    metadata.UserAgent,
+	})
+	if err != nil {
+		if errors.Is(err, ErrGoogleDefaultRoleNotFound) {
+			return GoogleAuthUser{}, false, coreerrors.Wrap("AUTH_GOOGLE_DEFAULT_ROLE_INVALID", "google default role is invalid", http.StatusInternalServerError, err)
+		}
+		return GoogleAuthUser{}, false, coreerrors.Wrap("AUTH_GOOGLE_REGISTER_FAILED", "failed to register google user", http.StatusInternalServerError, err)
+	}
+	return registeredUser, true, nil
+}
+
+type loginTokenUser struct {
+	ID          string
+	Name        string
+	Email       string
+	Username    string
+	Status      model.UserStatus
+	Roles       []string
+	Permissions []string
+}
+
+type loginTokenResult struct {
+	dto.LoginResponse
+	SessionID string
+}
+
+func (s *AuthService) issueLoginTokens(
+	ctx context.Context,
+	user loginTokenUser,
+	refreshTTL time.Duration,
+	deviceName string,
+	metadata LoginHistoryRecord,
+	now time.Time,
+) (loginTokenResult, error) {
+	refreshToken, err := coreauth.NewRandomToken(32)
+	if err != nil {
+		return loginTokenResult{}, coreerrors.Wrap("AUTH_TOKEN_CREATE_FAILED", "failed to create refresh token", http.StatusInternalServerError, err)
+	}
+	refreshTokenHash := coreauth.HashToken(refreshToken)
+	sessionID, err := s.repo.CreateSession(ctx, NewSession{
+		UserID:           user.ID,
+		RefreshTokenHash: refreshTokenHash,
+		DeviceName:       deviceName,
+		UserAgent:        metadata.UserAgent,
+		IPAddress:        metadata.IPAddress,
+		ExpiresAt:        now.Add(refreshTTL),
+	})
+	if err != nil {
+		return loginTokenResult{}, coreerrors.Wrap("AUTH_SESSION_CREATE_FAILED", "failed to create session", http.StatusInternalServerError, err)
+	}
+
+	accessToken, err := s.accessTokenManager.Generate(coreauth.Claims{
+		UserID:      user.ID,
+		SessionID:   sessionID,
+		Email:       user.Email,
+		Username:    user.Username,
+		Roles:       user.Roles,
+		Permissions: user.Permissions,
+		TokenType:   coreauth.TokenTypeAccess,
+	}, s.accessTTL)
+	if err != nil {
+		return loginTokenResult{}, coreerrors.Wrap("AUTH_TOKEN_CREATE_FAILED", "failed to create access token", http.StatusInternalServerError, err)
+	}
+
+	if err := s.repo.UpdateLastLogin(ctx, user.ID, now); err != nil {
+		return loginTokenResult{}, coreerrors.Wrap("AUTH_LAST_LOGIN_UPDATE_FAILED", "failed to update last login", http.StatusInternalServerError, err)
+	}
+
+	return loginTokenResult{
+		LoginResponse: dto.LoginResponse{
+			AccessToken:  accessToken,
+			RefreshToken: refreshToken,
+			TokenType:    "Bearer",
+			ExpiresIn:    int64(s.accessTTL.Seconds()),
+			User: dto.AuthUserView{
+				ID:          user.ID,
+				Name:        user.Name,
+				Email:       user.Email,
+				Username:    user.Username,
+				Status:      string(user.Status),
+				Roles:       user.Roles,
+				Permissions: user.Permissions,
+			},
+		},
+		SessionID: sessionID,
 	}, nil
 }
 
@@ -801,6 +1145,38 @@ func userCanLogin(user LoginUser) bool {
 	return user.DeletedAt == nil && user.Status.CanLogin()
 }
 
+func googleUserCanLogin(user GoogleAuthUser) bool {
+	return user.DeletedAt == nil && user.Status.CanLogin()
+}
+
+func googleUsernameBase(email string) string {
+	localPart, _, ok := strings.Cut(strings.ToLower(strings.TrimSpace(email)), "@")
+	if !ok {
+		localPart = strings.ToLower(strings.TrimSpace(email))
+	}
+	var b strings.Builder
+	for _, r := range localPart {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '_' || r == '-' || r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	base := strings.Trim(b.String(), "._-")
+	if base == "" {
+		return "google_user"
+	}
+	if len(base) > 80 {
+		return base[:80]
+	}
+	return base
+}
+
 func inactiveUserError(status model.UserStatus) error {
 	switch status {
 	case model.UserStatusInactive:
@@ -1039,5 +1415,3 @@ func (s *AuthService) emailVerificationURL(token string) string {
 	}
 	return base + "/verify-email?token=" + url.QueryEscape(token)
 }
-
-

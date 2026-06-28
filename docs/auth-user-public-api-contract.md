@@ -84,6 +84,12 @@ Refresh token dikirim melalui request body atau secure http-only cookie sesuai k
 | `AUTH_PASSWORD_CONFIRMATION_MISMATCH` | 422 | Konfirmasi password tidak sama |
 | `AUTH_PASSWORD_POLICY_FAILED` | 422 | Password tidak memenuhi policy |
 | `AUTH_OTP_INVALID` | 422 | OTP invalid |
+| `AUTH_GOOGLE_DISABLED` | 403 | Google auth tidak diaktifkan |
+| `AUTH_GOOGLE_TOKEN_INVALID` | 401 | Google ID token invalid atau expired |
+| `AUTH_GOOGLE_AUDIENCE_INVALID` | 401 | Google ID token audience tidak cocok |
+| `AUTH_GOOGLE_EMAIL_UNVERIFIED` | 422 | Email Google belum verified |
+| `AUTH_GOOGLE_EMAIL_CONFLICT` | 409 | Email Google sudah dipakai tetapi tidak memenuhi linking policy |
+| `AUTH_REGISTRATION_DISABLED` | 403 | Auto-register tidak diizinkan |
 
 ## Auth API
 
@@ -125,6 +131,53 @@ Response:
   }
 }
 ```
+
+### POST /auth/google
+
+Login atau register memakai Google account. Frontend mengirim Google ID token dari Google Identity Services; backend tetap memverifikasi token dan menerbitkan session internal.
+
+Request:
+
+```json
+{
+  "id_token": "google_id_token",
+  "remember_me": true,
+  "device_name": "Chrome on macOS",
+  "invite_token": "optional_invitation_token"
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "Google authentication successful",
+  "data": {
+    "access_token": "jwt_access_token",
+    "refresh_token": "refresh_token",
+    "token_type": "Bearer",
+    "expires_in": 900,
+    "is_new_user": false,
+    "user": {
+      "id": "uuid",
+      "name": "Jane Doe",
+      "email": "jane@example.com",
+      "username": "jane",
+      "status": "active",
+      "roles": ["member"],
+      "permissions": []
+    }
+  }
+}
+```
+
+Rules:
+
+- Backend wajib memverifikasi signature, issuer, audience, expiry, subject, dan email verification.
+- Google `sub` disimpan sebagai `auth_identities.provider_user_id`.
+- Auto-register dan auto-link mengikuti config policy backend.
+- Token Google plain tidak disimpan.
 
 ### POST /auth/logout
 

@@ -72,6 +72,15 @@ func ResolvePublicOrganization(
 			c.Abort()
 			return
 		}
+		if !resolved {
+			corehttp.Fail(c, coreerrors.New(
+				"PUBLIC_HOST_NOT_FOUND",
+				"public host is not registered",
+				http.StatusNotFound,
+			))
+			c.Abort()
+			return
+		}
 		if resolved && !SetTenantContext(c, tenantContext) {
 			corehttp.Fail(c, coreerrors.New(
 				"TENANT_CONTEXT_INVALID",

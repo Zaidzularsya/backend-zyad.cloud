@@ -674,17 +674,24 @@ Acceptance criteria:
 
 ### AUTH-0404: Social Login
 
+Status: in_progress.
+
 Scope:
 
-- `POST /auth/google`
+- `POST /auth/google` `done`
 - `POST /auth/github`
 - Tambahkan provider GitLab dan Facebook jika dibutuhkan.
-- Simpan identity di `auth_identities`.
+- Simpan identity di `auth_identities`. `done for google`
+
+Google account register/login dijabarkan lebih detail di:
+
+- `docs/google-auth-development-tasks.md`
+- `docs/google-auth-traceability-index.md`
 
 Acceptance criteria:
 
-- Provider identity unik.
-- Link ke user existing berdasarkan verified email sesuai policy.
+- Provider identity unik. `done for google`
+- Link ke user existing berdasarkan verified email sesuai policy. `done for google`
 
 ### AUTH-0405: Two Factor Authentication
 

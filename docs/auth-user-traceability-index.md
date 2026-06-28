@@ -18,6 +18,8 @@ Status:
 | `docs/auth-user-public-api-contract.md` | Kontrak API untuk Frontend dan aplikasi eksternal |
 | `docs/auth-user-migration-seed-plan.md` | Rencana migration dan seed |
 | `docs/migration-guide.md` | Cara menjalankan migration |
+| `docs/google-auth-development-tasks.md` | Breakdown detail register dan login dengan account Google |
+| `docs/google-auth-traceability-index.md` | Traceability detail Google account auth |
 
 ## Module Mapping
 
@@ -38,13 +40,14 @@ Status:
 | Login email password | 1.A Login | AUTH-0101 | `POST /auth/login` | `users`, `sessions`, `login_histories` | done |
 | Login username password | 1.A Login | AUTH-0101 | `POST /auth/login` | `users.username` | done |
 | Login WhatsApp OTP | 1.A Login | AUTH-0403 | WhatsApp OTP endpoints | `otp_codes` | planned |
-| Login Google | 1.A Login | AUTH-0404 | `POST /auth/google` | `auth_identities` | planned |
+| Login Google | 1.A Login | AUTH-0404, GAUTH-0001..GAUTH-0011 | `POST /auth/google` | `auth_identities`, `sessions`, `refresh_tokens`, `login_histories`, `audit_logs` | done |
 | Login GitHub/GitLab | 1.A Login | AUTH-0404 | Social login endpoints | `auth_identities` | planned |
 | Remember me | 1.A Login | AUTH-0101 | `remember_me` field | `sessions.expires_at` | done |
 | Login throttling | 1.A Login | AUTH-0307 | Error `RATE_LIMITED` | Redis or rate limit store | planned |
 | Captcha after failures | 1.A Login | AUTH-0307 | `captcha_required` flag | Login attempt store | planned |
 | Device tracking | 1.A Login | AUTH-0101 | Session response | `sessions`, `login_histories` | done |
 | Manual register | 1.B Register | AUTH-0401 | `POST /auth/register` | `users`, `user_profiles` | planned |
+| Register with Google account | 1.B Register | AUTH-0404, GAUTH-0006 | `POST /auth/google` | `users`, `user_profiles`, `auth_identities`, `user_roles` | done |
 | Register by admin | 1.B Register | USER-0203 | `POST /admin/users` | `users`, `user_profiles`, `auth_identities`, `user_roles`, `password_reset_tokens`, `audit_logs` | done |
 | Invite user | 1.B Register | AUTH-0402 | `POST /auth/invite/accept` | `user_invitations` | planned |
 | Email verification | 1.B Register | AUTH-0304 | Verify email endpoints | `email_verification_tokens` | done |
@@ -108,6 +111,7 @@ Status:
 | `POST /auth/refresh-token` | AUTH-0103 | done |
 | `GET /auth/me` | AUTH-0104 | done |
 | `POST /auth/register` | AUTH-0401 | planned |
+| `POST /auth/google` | AUTH-0404, GAUTH-0004, GAUTH-0005, GAUTH-0006, GAUTH-0008 | done |
 | `POST /auth/verify-email` | AUTH-0304 | done |
 | `POST /auth/resend-verification-email` | AUTH-0304 | done |
 | `POST /auth/forgot-password` | AUTH-0105 | done |
@@ -168,6 +172,8 @@ Status:
 | `000005_create_invitations_and_2fa_tables` | AUTH-0402, AUTH-0405 | planned |
 | `000006_create_organization_user_tables` | USER-0401 | planned |
 | `000011_seed_password_changed_notification_template` | AUTH-0107 | done |
+| No new migration required for Google auth MVP | GAUTH-0003 | done |
+| `000045_seed_member_role` | GAUTH-0006 | done |
 
 ## Seed Traceability
 
@@ -189,6 +195,8 @@ Status:
 | 2026-06-11 | Auth helper ditempatkan di `internal/core/auth`, business rule user di `internal/modules/user/service` | Mengikuti arsitektur repo dan menghindari core auth bergantung langsung pada HTTP/module detail |
 | 2026-06-11 | Seed super admin butuh env `SEED_ADMIN_USERNAME` dan `SEED_ADMIN_PASSWORD` tambahan | Request membutuhkan username dan password dari `.env`, tetapi `.env.example` belum menyediakan key tersebut |
 | 2026-06-11 | Public API contract dibuat sebagai dokumen terpisah dari task development | Frontend dan aplikasi eksternal butuh referensi kontrak yang mudah dibaca tanpa membaca task internal |
+| 2026-06-28 | Google account auth planning dipisah ke dokumen detail | `AUTH-0404` terlalu luas untuk register/login Google dan butuh traceability khusus sebelum implementasi |
+| 2026-06-28 | Google auth memakai `google.golang.org/api/idtoken` dan default user baru `active` | User memilih Google verifier package dan mengunci policy bisnis user Google baru langsung aktif |
 
 ## Development History
 
@@ -227,6 +235,8 @@ Status:
 | 2026-06-15 | Completed `MT-CORE-006` organization switch | `internal/modules/organization/{handler,service,repository}`, `internal/app`, `api/openapi.yaml`, multi-tenant and Auth/User docs | Added authenticated organization list and atomic session switch endpoints, active membership validation, switch audit metadata, and unit/handler/integration coverage |
 | 2026-06-15 | Completed organization role read-model follow-up | `internal/modules/organization/{repository,service}` | Self organization list and switch responses now include organization-scoped `role_ids` and `role_slugs`, covered by unit and PostgreSQL integration tests |
 | 2026-06-15 | Completed `MT-CORE-007` tenant-scoped permission evaluation | `internal/core/permission/{middleware,repository,service}`, `internal/modules/user/repository/auth_repository.go`, multi-tenant/Auth docs | Separated global and organization permission queries, added fail-closed organization permission middleware, prevented tenant permission leakage into auth payloads, and added cross-tenant unit/integration tests |
+| 2026-06-28 | Added Google account auth planning documentation | `docs/google-auth-development-tasks.md`, `docs/google-auth-traceability-index.md`, `docs/auth-user-development-tasks.md`, `docs/auth-user-traceability-index.md` | Menambahkan task detail dan index traceability untuk register/login dengan account Google |
+| 2026-06-28 | Implemented Google account register/login MVP | `internal/config`, `internal/core/auth`, `internal/modules/user`, `.env.example`, `api/openapi.yaml`, `docs/google-auth-development-tasks.md`, `docs/google-auth-traceability-index.md`, `docs/auth-user-public-api-contract.md`, `docs/auth-user-traceability-index.md` | Menambahkan config Google, verifier package resmi, endpoint `POST /api/v1/auth/google`, auto-link verified email, auto-register active user, session/token existing, audit/login history, tests, dan OpenAPI |
 
 ## Update Rules
 

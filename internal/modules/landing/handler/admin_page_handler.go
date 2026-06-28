@@ -83,9 +83,16 @@ func (h *AdminPageHandler) ListPages(c *gin.Context) {
 	if perPage <= 0 {
 		perPage = 10
 	}
+	isTemplate := query.IsTemplate
+	if isTemplate == nil {
+		defaultIsTemplate := false
+		isTemplate = &defaultIsTemplate
+	}
 
 	filter := repository.PageListFilter{
 		Status:         domain.PageStatus(query.Status),
+		PageType:       domain.PageType(query.PageType),
+		IsTemplate:     isTemplate,
 		IncludeDeleted: query.IncludeDeleted,
 		Limit:          perPage,
 		Offset:         (page - 1) * perPage,
@@ -99,26 +106,7 @@ func (h *AdminPageHandler) ListPages(c *gin.Context) {
 
 	var dtos []dto.PageResponse
 	for _, p := range pages {
-		dtos = append(dtos, dto.PageResponse{
-			ID:               p.ID,
-			Name:             p.Name,
-			Title:            p.Title,
-			Slug:             p.Slug,
-			PageType:         string(p.Type),
-			Status:           string(p.Status),
-			Visibility:       string(p.Visibility),
-			Locale:           p.Locale,
-			Timezone:         p.Timezone,
-			IsHomepage:       p.IsHomepage,
-			PublishedVersion: p.PublishedVersion,
-			PublishAt:        p.PublishAt,
-			UnpublishAt:      p.UnpublishAt,
-			PublishedAt:      p.PublishedAt,
-			SEO:              p.SEO,
-			CreatedAt:        p.CreatedAt,
-			UpdatedAt:        p.UpdatedAt,
-			DeletedAt:        p.DeletedAt,
-		})
+		dtos = append(dtos, pageResponseFromDomain(p))
 	}
 
 	totalPages := 0
@@ -163,6 +151,7 @@ func (h *AdminPageHandler) CreatePage(c *gin.Context) {
 		Locale:     req.Locale,
 		Timezone:   req.Timezone,
 		IsHomepage: req.IsHomepage,
+		IsTemplate: req.IsTemplate,
 		CreatedBy:  permissionmiddleware.UserID(c),
 	}
 
@@ -191,7 +180,31 @@ func (h *AdminPageHandler) GetPage(c *gin.Context) {
 		return
 	}
 
-	corehttp.OK(c, "Page retrieved successfully", page)
+	corehttp.OK(c, "Page retrieved successfully", pageResponseFromDomain(page))
+}
+
+func pageResponseFromDomain(page domain.LandingPage) dto.PageResponse {
+	return dto.PageResponse{
+		ID:               page.ID,
+		Name:             page.Name,
+		Title:            page.Title,
+		Slug:             page.Slug,
+		PageType:         string(page.Type),
+		Status:           string(page.Status),
+		Visibility:       string(page.Visibility),
+		Locale:           page.Locale,
+		Timezone:         page.Timezone,
+		IsHomepage:       page.IsHomepage,
+		IsTemplate:       page.IsTemplate,
+		PublishedVersion: page.PublishedVersion,
+		PublishAt:        page.PublishAt,
+		UnpublishAt:      page.UnpublishAt,
+		PublishedAt:      page.PublishedAt,
+		SEO:              page.SEO,
+		CreatedAt:        page.CreatedAt,
+		UpdatedAt:        page.UpdatedAt,
+		DeletedAt:        page.DeletedAt,
+	}
 }
 
 // UpdatePage godoc
@@ -232,6 +245,7 @@ func (h *AdminPageHandler) UpdatePage(c *gin.Context) {
 		Locale:     req.Locale,
 		Timezone:   req.Timezone,
 		IsHomepage: req.IsHomepage,
+		IsTemplate: req.IsTemplate,
 		UpdatedBy:  permissionmiddleware.UserID(c),
 	}
 

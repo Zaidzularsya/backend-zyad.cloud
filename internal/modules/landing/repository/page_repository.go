@@ -58,12 +58,12 @@ func (r *pageRepository) Create(ctx context.Context, scope coretenant.Scope, par
 	query := `
 		INSERT INTO landing_pages (
 			organization_id, name, title, slug, page_type, status,
-			visibility, seo, locale, timezone, is_homepage, created_by
+			visibility, seo, locale, timezone, is_homepage, is_template, created_by
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 		) RETURNING
 			id, organization_id, name, title, slug, page_type, status,
-			visibility, password_hash, seo, locale, timezone, is_homepage,
+			visibility, password_hash, seo, locale, timezone, is_homepage, is_template,
 			published_version, publish_at, unpublish_at, published_at,
 			created_by, updated_by, created_at, updated_at, deleted_at
 	`
@@ -90,11 +90,12 @@ func (r *pageRepository) Create(ctx context.Context, scope coretenant.Scope, par
 			params.Locale,
 			params.Timezone,
 			params.IsHomepage,
+			params.IsTemplate,
 			createdByInterface,
 		).Scan(
 			&page.ID, &page.OrganizationID, &page.Name, &page.Title, &page.Slug,
 			&page.Type, &page.Status, &page.Visibility, &passwordHash, &page.SEO,
-			&page.Locale, &page.Timezone, &page.IsHomepage,
+			&page.Locale, &page.Timezone, &page.IsHomepage, &page.IsTemplate,
 			&page.PublishedVersion, &page.PublishAt, &page.UnpublishAt, &page.PublishedAt,
 			&createdBy, &updatedBy, &page.CreatedAt, &page.UpdatedAt, &page.DeletedAt,
 		)
@@ -125,11 +126,24 @@ func (r *pageRepository) FindByID(ctx context.Context, scope coretenant.Scope, i
 	query := `
 		SELECT
 			id, organization_id, name, title, slug, page_type, status,
-			visibility, password_hash, seo, locale, timezone, is_homepage,
+			visibility, password_hash, seo, locale, timezone, is_homepage, is_template,
 			published_version, publish_at, unpublish_at, published_at,
 			created_by, updated_by, created_at, updated_at, deleted_at
 		FROM landing_pages
-		WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL
+		WHERE id = $1
+			AND deleted_at IS NULL
+			AND (
+				organization_id = $2
+				OR (
+					is_template = true
+					AND organization_id = (
+						SELECT id FROM organizations
+						WHERE type = 'platform'
+						ORDER BY created_at ASC
+						LIMIT 1
+					)
+				)
+			)
 	`
 
 	var page domain.LandingPage
@@ -140,7 +154,7 @@ func (r *pageRepository) FindByID(ctx context.Context, scope coretenant.Scope, i
 		return tx.QueryRow(ctx, query, id, scope.OrganizationID()).Scan(
 			&page.ID, &page.OrganizationID, &page.Name, &page.Title, &page.Slug,
 			&page.Type, &page.Status, &page.Visibility, &passwordHash, &page.SEO,
-			&page.Locale, &page.Timezone, &page.IsHomepage,
+			&page.Locale, &page.Timezone, &page.IsHomepage, &page.IsTemplate,
 			&page.PublishedVersion, &page.PublishAt, &page.UnpublishAt, &page.PublishedAt,
 			&createdBy, &updatedBy, &page.CreatedAt, &page.UpdatedAt, &page.DeletedAt,
 		)
@@ -169,7 +183,19 @@ func (r *pageRepository) List(ctx context.Context, scope coretenant.Scope, filte
 	}
 
 	var count int64
-	countQuery := `SELECT COUNT(*) FROM landing_pages WHERE organization_id = $1`
+	orgPredicate := "organization_id = $1"
+	if filter.IsTemplate != nil && *filter.IsTemplate {
+		orgPredicate = `(
+			organization_id = $1
+			OR organization_id = (
+				SELECT id FROM organizations
+				WHERE type = 'platform'
+				ORDER BY created_at ASC
+				LIMIT 1
+			)
+		)`
+	}
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM landing_pages WHERE %s", orgPredicate)
 	var countArgs []interface{}
 	countArgs = append(countArgs, scope.OrganizationID())
 
@@ -180,6 +206,14 @@ func (r *pageRepository) List(ctx context.Context, scope coretenant.Scope, filte
 	if filter.Status != "" {
 		countArgs = append(countArgs, filter.Status)
 		whereClauses = append(whereClauses, fmt.Sprintf("status = $%d", len(countArgs)))
+	}
+	if filter.PageType != "" {
+		countArgs = append(countArgs, filter.PageType)
+		whereClauses = append(whereClauses, fmt.Sprintf("page_type = $%d", len(countArgs)))
+	}
+	if filter.IsTemplate != nil {
+		countArgs = append(countArgs, *filter.IsTemplate)
+		whereClauses = append(whereClauses, fmt.Sprintf("is_template = $%d", len(countArgs)))
 	}
 
 	if len(whereClauses) > 0 {
@@ -202,11 +236,11 @@ func (r *pageRepository) List(ctx context.Context, scope coretenant.Scope, filte
 		query := `
 			SELECT
 				id, organization_id, name, title, slug, page_type, status,
-				visibility, password_hash, seo, locale, timezone, is_homepage,
+				visibility, password_hash, seo, locale, timezone, is_homepage, is_template,
 				published_version, publish_at, unpublish_at, published_at,
 				created_by, updated_by, created_at, updated_at, deleted_at
 			FROM landing_pages
-			WHERE organization_id = $1
+			WHERE ` + orgPredicate + `
 		`
 		if len(whereClauses) > 0 {
 			query += " AND " + strings.Join(whereClauses, " AND ")
@@ -239,7 +273,7 @@ func (r *pageRepository) List(ctx context.Context, scope coretenant.Scope, filte
 			err := rows.Scan(
 				&page.ID, &page.OrganizationID, &page.Name, &page.Title, &page.Slug,
 				&page.Type, &page.Status, &page.Visibility, &passwordHash, &page.SEO,
-				&page.Locale, &page.Timezone, &page.IsHomepage,
+				&page.Locale, &page.Timezone, &page.IsHomepage, &page.IsTemplate,
 				&page.PublishedVersion, &page.PublishAt, &page.UnpublishAt, &page.PublishedAt,
 				&createdBy, &updatedBy, &page.CreatedAt, &page.UpdatedAt, &page.DeletedAt,
 			)
@@ -339,6 +373,11 @@ func (r *pageRepository) Update(ctx context.Context, scope coretenant.Scope, id 
 		query += fmt.Sprintf(", is_homepage = $%d", argCount)
 		argCount++
 	}
+	if params.IsTemplate != nil {
+		args = append(args, *params.IsTemplate)
+		query += fmt.Sprintf(", is_template = $%d", argCount)
+		argCount++
+	}
 	if params.UpdatedBy != "" {
 		args = append(args, params.UpdatedBy)
 		query += fmt.Sprintf(", updated_by = $%d", argCount)
@@ -349,7 +388,7 @@ func (r *pageRepository) Update(ctx context.Context, scope coretenant.Scope, id 
 	query += fmt.Sprintf(" WHERE id = $%d AND organization_id = $%d AND deleted_at IS NULL RETURNING ", argCount, argCount+1)
 	query += `
 		id, organization_id, name, title, slug, page_type, status,
-		visibility, password_hash, seo, locale, timezone, is_homepage,
+		visibility, password_hash, seo, locale, timezone, is_homepage, is_template,
 		published_version, publish_at, unpublish_at, published_at,
 		created_by, updated_by, created_at, updated_at, deleted_at
 	`
@@ -362,7 +401,7 @@ func (r *pageRepository) Update(ctx context.Context, scope coretenant.Scope, id 
 		return tx.QueryRow(ctx, query, args...).Scan(
 			&page.ID, &page.OrganizationID, &page.Name, &page.Title, &page.Slug,
 			&page.Type, &page.Status, &page.Visibility, &passwordHash, &page.SEO,
-			&page.Locale, &page.Timezone, &page.IsHomepage,
+			&page.Locale, &page.Timezone, &page.IsHomepage, &page.IsTemplate,
 			&page.PublishedVersion, &page.PublishAt, &page.UnpublishAt, &page.PublishedAt,
 			&createdBy, &updatedBy, &page.CreatedAt, &page.UpdatedAt, &page.DeletedAt,
 		)
@@ -419,7 +458,7 @@ func (r *platformPageStore) FindByOrganizationAndID(ctx context.Context, organiz
 	query := `
 		SELECT
 			id, organization_id, name, title, slug, page_type, status,
-			visibility, password_hash, seo, locale, timezone, is_homepage,
+			visibility, password_hash, seo, locale, timezone, is_homepage, is_template,
 			published_version, publish_at, unpublish_at, published_at,
 			created_by, updated_by, created_at, updated_at, deleted_at
 		FROM landing_pages
@@ -444,7 +483,7 @@ func (r *platformPageStore) FindByOrganizationAndID(ctx context.Context, organiz
 	err = tx.QueryRow(ctx, query, id, organizationID).Scan(
 		&page.ID, &page.OrganizationID, &page.Name, &page.Title, &page.Slug,
 		&page.Type, &page.Status, &page.Visibility, &passwordHash, &page.SEO,
-		&page.Locale, &page.Timezone, &page.IsHomepage,
+		&page.Locale, &page.Timezone, &page.IsHomepage, &page.IsTemplate,
 		&page.PublishedVersion, &page.PublishAt, &page.UnpublishAt, &page.PublishedAt,
 		&createdBy, &updatedBy, &page.CreatedAt, &page.UpdatedAt, &page.DeletedAt,
 	)

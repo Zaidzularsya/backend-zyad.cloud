@@ -9,6 +9,62 @@ paths:
       responses:
         "200":
           description: Healthy response
+  /api/v1/auth/google:
+    post:
+      summary: Login or register using a Google account
+      operationId: googleAuth
+      tags:
+        - Auth
+      description: >
+        Frontend sends a Google ID token from Google Identity Services. Backend
+        verifies the token, links or registers the user based on policy, then
+        returns internal access and refresh tokens. When a new Google user is
+        auto-registered, backend also provisions a default customer workspace,
+        assigns the user as organization owner, and stores it as the active
+        session organization.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GoogleAuthRequest"
+      responses:
+        "200":
+          description: Google authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoogleAuthEnvelope"
+        "401":
+          description: Google ID token is invalid or expired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Google auth or auto-registration is disabled, or account cannot login
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Google email is already used and cannot be linked safely
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Request validation failed or Google email is not verified
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/auth/reset-password:
     post:
       summary: Reset password using a one-time token
@@ -1800,6 +1856,12 @@ paths:
         - Landing Pages
       security:
         - BearerAuth: []
+      parameters:
+        - name: is_template
+          in: query
+          schema:
+            type: boolean
+          description: Filter landing pages that are reusable templates.
       responses:
         "200":
           description: Landing pages retrieved successfully
@@ -1820,6 +1882,10 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                is_template:
+                  type: boolean
+                  default: false
       responses:
         "201":
           description: Landing page created successfully
@@ -1862,6 +1928,9 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                is_template:
+                  type: boolean
       responses:
         "200":
           description: Landing page updated successfully
@@ -4229,6 +4298,95 @@ components:
         avatar_url:
           type: string
           nullable: true
+    GoogleAuthRequest:
+      type: object
+      required:
+        - id_token
+      properties:
+        id_token:
+          type: string
+          description: Google ID token returned by Google Identity Services.
+        remember_me:
+          type: boolean
+          default: false
+        device_name:
+          type: string
+          maxLength: 150
+        invite_token:
+          type: string
+          description: Reserved for invitation-aware Google registration.
+    GoogleAuthEnvelope:
+      type: object
+      required:
+        - success
+        - message
+        - data
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: google authentication successful
+        data:
+          $ref: "#/components/schemas/GoogleAuthResponse"
+    GoogleAuthResponse:
+      type: object
+      required:
+        - access_token
+        - refresh_token
+        - token_type
+        - expires_in
+        - is_new_user
+        - user
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+          format: int64
+          example: 900
+        is_new_user:
+          type: boolean
+          description: True when backend auto-registered a new active Google user and provisioned its default workspace.
+        user:
+          $ref: "#/components/schemas/AuthUser"
+    AuthUser:
+      type: object
+      required:
+        - id
+        - name
+        - email
+        - status
+        - roles
+        - permissions
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        username:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive, pending, suspended, banned, deleted, invited]
+        roles:
+          type: array
+          items:
+            type: string
+        permissions:
+          type: array
+          items:
+            type: string
     ResetPasswordRequest:
       type: object
       required:

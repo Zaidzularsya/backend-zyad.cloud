@@ -77,6 +77,15 @@ type SwitchOrganizationRequest struct {
 	OrganizationID string `json:"organization_id" binding:"required"`
 }
 
+type CreateWorkspaceRequest struct {
+	Name     string         `json:"name" binding:"required"`
+	Slug     string         `json:"slug"`
+	Timezone string         `json:"timezone"`
+	Locale   string         `json:"locale"`
+	Region   string         `json:"region"`
+	Metadata map[string]any `json:"metadata"`
+}
+
 type CreateDomainRequest struct {
 	Type          string `json:"type" binding:"required"`
 	CanonicalHost string `json:"canonical_host" binding:"required"`

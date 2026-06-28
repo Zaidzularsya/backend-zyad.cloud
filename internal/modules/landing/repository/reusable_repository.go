@@ -85,9 +85,15 @@ func (r *reusableRepository) CreateSectionTemplate(ctx context.Context, scope co
 		return domain.SectionTemplate{}, err
 	}
 	t.OrganizationID = scope.OrganizationID()
-	if desc != nil { t.Description = *desc }
-	if createdBy != nil { t.CreatedBy = *createdBy }
-	if updatedBy != nil { t.UpdatedBy = *updatedBy }
+	if desc != nil {
+		t.Description = *desc
+	}
+	if createdBy != nil {
+		t.CreatedBy = *createdBy
+	}
+	if updatedBy != nil {
+		t.UpdatedBy = *updatedBy
+	}
 
 	return t, nil
 }
@@ -99,9 +105,19 @@ func (r *reusableRepository) GetSectionTemplate(ctx context.Context, scope coret
 
 	query := `
 		SELECT
-			id, name, description, section_type, content, style, created_by, updated_by, created_at, updated_at
+			id, organization_id, name, description, section_type, content, style, created_by, updated_by, created_at, updated_at
 		FROM landing_section_templates
-		WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL
+		WHERE id = $1
+			AND deleted_at IS NULL
+			AND (
+				organization_id = $2
+				OR organization_id = (
+					SELECT id FROM organizations
+					WHERE type = 'platform'
+					ORDER BY created_at ASC
+					LIMIT 1
+				)
+			)
 	`
 
 	var t domain.SectionTemplate
@@ -110,7 +126,7 @@ func (r *reusableRepository) GetSectionTemplate(ctx context.Context, scope coret
 
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, query, id, scope.OrganizationID()).Scan(
-			&t.ID, &t.Name, &desc, &t.SectionType, &t.Content, &t.Style,
+			&t.ID, &t.OrganizationID, &t.Name, &desc, &t.SectionType, &t.Content, &t.Style,
 			&createdBy, &updatedBy, &t.CreatedAt, &t.UpdatedAt,
 		)
 	})
@@ -118,10 +134,15 @@ func (r *reusableRepository) GetSectionTemplate(ctx context.Context, scope coret
 	if err != nil {
 		return domain.SectionTemplate{}, err
 	}
-	t.OrganizationID = scope.OrganizationID()
-	if desc != nil { t.Description = *desc }
-	if createdBy != nil { t.CreatedBy = *createdBy }
-	if updatedBy != nil { t.UpdatedBy = *updatedBy }
+	if desc != nil {
+		t.Description = *desc
+	}
+	if createdBy != nil {
+		t.CreatedBy = *createdBy
+	}
+	if updatedBy != nil {
+		t.UpdatedBy = *updatedBy
+	}
 
 	return t, nil
 }
@@ -133,9 +154,18 @@ func (r *reusableRepository) ListSectionTemplates(ctx context.Context, scope cor
 
 	query := `
 		SELECT
-			id, name, description, section_type, content, style, created_by, updated_by, created_at, updated_at
+			id, organization_id, name, description, section_type, content, style, created_by, updated_by, created_at, updated_at
 		FROM landing_section_templates
-		WHERE organization_id = $1 AND deleted_at IS NULL
+		WHERE deleted_at IS NULL
+			AND (
+				organization_id = $1
+				OR organization_id = (
+					SELECT id FROM organizations
+					WHERE type = 'platform'
+					ORDER BY created_at ASC
+					LIMIT 1
+				)
+			)
 	`
 	args := []interface{}{scope.OrganizationID()}
 
@@ -161,16 +191,21 @@ func (r *reusableRepository) ListSectionTemplates(ctx context.Context, scope cor
 			var desc *string
 
 			err := rows.Scan(
-				&t.ID, &t.Name, &desc, &t.SectionType, &t.Content, &t.Style,
+				&t.ID, &t.OrganizationID, &t.Name, &desc, &t.SectionType, &t.Content, &t.Style,
 				&createdBy, &updatedBy, &t.CreatedAt, &t.UpdatedAt,
 			)
 			if err != nil {
 				return err
 			}
-			t.OrganizationID = scope.OrganizationID()
-			if desc != nil { t.Description = *desc }
-			if createdBy != nil { t.CreatedBy = *createdBy }
-			if updatedBy != nil { t.UpdatedBy = *updatedBy }
+			if desc != nil {
+				t.Description = *desc
+			}
+			if createdBy != nil {
+				t.CreatedBy = *createdBy
+			}
+			if updatedBy != nil {
+				t.UpdatedBy = *updatedBy
+			}
 			templates = append(templates, t)
 		}
 		return rows.Err()
@@ -241,9 +276,15 @@ func (r *reusableRepository) UpdateSectionTemplate(ctx context.Context, scope co
 		return domain.SectionTemplate{}, err
 	}
 	t.OrganizationID = scope.OrganizationID()
-	if desc != nil { t.Description = *desc }
-	if createdBy != nil { t.CreatedBy = *createdBy }
-	if updatedBy != nil { t.UpdatedBy = *updatedBy }
+	if desc != nil {
+		t.Description = *desc
+	}
+	if createdBy != nil {
+		t.CreatedBy = *createdBy
+	}
+	if updatedBy != nil {
+		t.UpdatedBy = *updatedBy
+	}
 
 	return t, nil
 }
@@ -261,7 +302,9 @@ func (r *reusableRepository) DeleteSectionTemplate(ctx context.Context, scope co
 
 	return r.withTx(ctx, scope, func(tx pgx.Tx) error {
 		var ub interface{} = nil
-		if deletedBy != "" { ub = deletedBy }
+		if deletedBy != "" {
+			ub = deletedBy
+		}
 		cmdTag, err := tx.Exec(ctx, query, ub, id, scope.OrganizationID())
 		if err != nil {
 			return err
@@ -316,8 +359,12 @@ func (r *reusableRepository) CreateCTA(ctx context.Context, scope coretenant.Sco
 		return domain.LandingCTA{}, err
 	}
 	c.OrganizationID = scope.OrganizationID()
-	if createdBy != nil { c.CreatedBy = *createdBy }
-	if updatedBy != nil { c.UpdatedBy = *updatedBy }
+	if createdBy != nil {
+		c.CreatedBy = *createdBy
+	}
+	if updatedBy != nil {
+		c.UpdatedBy = *updatedBy
+	}
 
 	return c, nil
 }
@@ -348,8 +395,12 @@ func (r *reusableRepository) GetCTA(ctx context.Context, scope coretenant.Scope,
 		return domain.LandingCTA{}, err
 	}
 	c.OrganizationID = scope.OrganizationID()
-	if createdBy != nil { c.CreatedBy = *createdBy }
-	if updatedBy != nil { c.UpdatedBy = *updatedBy }
+	if createdBy != nil {
+		c.CreatedBy = *createdBy
+	}
+	if updatedBy != nil {
+		c.UpdatedBy = *updatedBy
+	}
 
 	return c, nil
 }
@@ -388,8 +439,12 @@ func (r *reusableRepository) ListCTAs(ctx context.Context, scope coretenant.Scop
 				return err
 			}
 			c.OrganizationID = scope.OrganizationID()
-			if createdBy != nil { c.CreatedBy = *createdBy }
-			if updatedBy != nil { c.UpdatedBy = *updatedBy }
+			if createdBy != nil {
+				c.CreatedBy = *createdBy
+			}
+			if updatedBy != nil {
+				c.UpdatedBy = *updatedBy
+			}
 			ctas = append(ctas, c)
 		}
 		return rows.Err()
@@ -465,8 +520,12 @@ func (r *reusableRepository) UpdateCTA(ctx context.Context, scope coretenant.Sco
 		return domain.LandingCTA{}, err
 	}
 	c.OrganizationID = scope.OrganizationID()
-	if createdBy != nil { c.CreatedBy = *createdBy }
-	if updatedBy != nil { c.UpdatedBy = *updatedBy }
+	if createdBy != nil {
+		c.CreatedBy = *createdBy
+	}
+	if updatedBy != nil {
+		c.UpdatedBy = *updatedBy
+	}
 
 	return c, nil
 }
@@ -484,7 +543,9 @@ func (r *reusableRepository) DeleteCTA(ctx context.Context, scope coretenant.Sco
 
 	return r.withTx(ctx, scope, func(tx pgx.Tx) error {
 		var ub interface{} = nil
-		if deletedBy != "" { ub = deletedBy }
+		if deletedBy != "" {
+			ub = deletedBy
+		}
 		cmdTag, err := tx.Exec(ctx, query, ub, id, scope.OrganizationID())
 		if err != nil {
 			return err
@@ -536,8 +597,12 @@ func (r *reusableRepository) CreateMenu(ctx context.Context, scope coretenant.Sc
 		return domain.LandingMenu{}, err
 	}
 	m.OrganizationID = scope.OrganizationID()
-	if createdBy != nil { m.CreatedBy = *createdBy }
-	if updatedBy != nil { m.UpdatedBy = *updatedBy }
+	if createdBy != nil {
+		m.CreatedBy = *createdBy
+	}
+	if updatedBy != nil {
+		m.UpdatedBy = *updatedBy
+	}
 
 	return m, nil
 }
@@ -568,8 +633,12 @@ func (r *reusableRepository) GetMenu(ctx context.Context, scope coretenant.Scope
 		return domain.LandingMenu{}, err
 	}
 	m.OrganizationID = scope.OrganizationID()
-	if createdBy != nil { m.CreatedBy = *createdBy }
-	if updatedBy != nil { m.UpdatedBy = *updatedBy }
+	if createdBy != nil {
+		m.CreatedBy = *createdBy
+	}
+	if updatedBy != nil {
+		m.UpdatedBy = *updatedBy
+	}
 
 	return m, nil
 }
@@ -608,8 +677,12 @@ func (r *reusableRepository) ListMenus(ctx context.Context, scope coretenant.Sco
 				return err
 			}
 			m.OrganizationID = scope.OrganizationID()
-			if createdBy != nil { m.CreatedBy = *createdBy }
-			if updatedBy != nil { m.UpdatedBy = *updatedBy }
+			if createdBy != nil {
+				m.CreatedBy = *createdBy
+			}
+			if updatedBy != nil {
+				m.UpdatedBy = *updatedBy
+			}
 			menus = append(menus, m)
 		}
 		return rows.Err()
@@ -670,8 +743,12 @@ func (r *reusableRepository) UpdateMenu(ctx context.Context, scope coretenant.Sc
 		return domain.LandingMenu{}, err
 	}
 	m.OrganizationID = scope.OrganizationID()
-	if createdBy != nil { m.CreatedBy = *createdBy }
-	if updatedBy != nil { m.UpdatedBy = *updatedBy }
+	if createdBy != nil {
+		m.CreatedBy = *createdBy
+	}
+	if updatedBy != nil {
+		m.UpdatedBy = *updatedBy
+	}
 
 	return m, nil
 }
@@ -689,7 +766,9 @@ func (r *reusableRepository) DeleteMenu(ctx context.Context, scope coretenant.Sc
 
 	return r.withTx(ctx, scope, func(tx pgx.Tx) error {
 		var ub interface{} = nil
-		if deletedBy != "" { ub = deletedBy }
+		if deletedBy != "" {
+			ub = deletedBy
+		}
 		cmdTag, err := tx.Exec(ctx, query, ub, id, scope.OrganizationID())
 		if err != nil {
 			return err
@@ -741,7 +820,9 @@ func (r *reusableRepository) CreateMenuItem(ctx context.Context, scope coretenan
 		return domain.LandingMenuItem{}, err
 	}
 	m.OrganizationID = scope.OrganizationID()
-	if parentID != nil { m.ParentID = parentID }
+	if parentID != nil {
+		m.ParentID = parentID
+	}
 
 	return m, nil
 }
@@ -772,7 +853,9 @@ func (r *reusableRepository) GetMenuItem(ctx context.Context, scope coretenant.S
 		return domain.LandingMenuItem{}, err
 	}
 	m.OrganizationID = scope.OrganizationID()
-	if parentID != nil { m.ParentID = parentID }
+	if parentID != nil {
+		m.ParentID = parentID
+	}
 
 	return m, nil
 }
@@ -844,7 +927,9 @@ func (r *reusableRepository) UpdateMenuItem(ctx context.Context, scope coretenan
 		return domain.LandingMenuItem{}, err
 	}
 	m.OrganizationID = scope.OrganizationID()
-	if parentID != nil { m.ParentID = parentID }
+	if parentID != nil {
+		m.ParentID = parentID
+	}
 
 	return m, nil
 }
@@ -883,7 +968,9 @@ func (r *reusableRepository) ListMenuItems(ctx context.Context, scope coretenant
 				return err
 			}
 			m.OrganizationID = scope.OrganizationID()
-			if parentID != nil { m.ParentID = parentID }
+			if parentID != nil {
+				m.ParentID = parentID
+			}
 			items = append(items, m)
 		}
 		return rows.Err()

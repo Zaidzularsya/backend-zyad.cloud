@@ -126,11 +126,18 @@ func (r *sectionRepository) ListByPage(ctx context.Context, scope coretenant.Sco
 
 	query := `
 		SELECT
-			id, landing_page_id, section_key, section_type, name,
-			sort_order, is_enabled, content, style, created_at, updated_at
-		FROM landing_page_sections
-		WHERE landing_page_id = $1 AND organization_id = $2 AND deleted_at IS NULL
-		ORDER BY sort_order ASC
+			s.id, s.landing_page_id, s.section_key, s.section_type, s.name,
+			s.sort_order, s.is_enabled, s.content, s.style, s.created_at, s.updated_at
+		FROM landing_page_sections s
+		JOIN landing_pages p ON p.organization_id = s.organization_id AND p.id = s.landing_page_id
+		LEFT JOIN organizations o ON o.id = p.organization_id
+		WHERE s.landing_page_id = $1
+			AND s.deleted_at IS NULL
+			AND (
+				s.organization_id = $2
+				OR (p.is_template = true AND o.type = 'platform')
+			)
+		ORDER BY s.sort_order ASC
 	`
 
 	var sections []domain.LandingSection

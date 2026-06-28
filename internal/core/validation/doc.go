@@ -1,3 +1,2 @@
+// Package validation holds reusable request validation helpers.
 package validation
-
-// Package validation will hold reusable request validation helpers.

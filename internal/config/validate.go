@@ -44,6 +44,10 @@ func (c SeedAdminConfig) Validate() error {
 }
 
 func (c AuthConfig) validate(env string) error {
+	if err := c.Google.validate(env); err != nil {
+		return fmt.Errorf("google auth config: %w", err)
+	}
+
 	if !isProduction(env) {
 		return nil
 	}
@@ -69,6 +73,25 @@ func (c AuthConfig) validate(env string) error {
 		return errors.New("JWT_SECRET and JWT_REFRESH_SECRET must be different in production")
 	}
 
+	return nil
+}
+
+func (c GoogleAuthConfig) validate(env string) error {
+	if c.DefaultStatus != "" && c.DefaultStatus != "pending" && c.DefaultStatus != "active" {
+		return errors.New("AUTH_GOOGLE_DEFAULT_STATUS must be pending or active")
+	}
+	if !c.Enabled {
+		return nil
+	}
+	if len(c.ClientIDs) == 0 {
+		return errors.New("AUTH_GOOGLE_CLIENT_IDS is required when AUTH_GOOGLE_ENABLED=true")
+	}
+	if c.AutoRegister && strings.TrimSpace(c.DefaultRole) == "" {
+		return errors.New("AUTH_GOOGLE_DEFAULT_ROLE is required when AUTH_GOOGLE_AUTO_REGISTER=true")
+	}
+	if isProduction(env) && len(c.ClientIDs) == 0 {
+		return errors.New("AUTH_GOOGLE_CLIENT_IDS is required in production when Google auth is enabled")
+	}
 	return nil
 }
 

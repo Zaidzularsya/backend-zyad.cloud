@@ -82,6 +82,7 @@ type LandingPage struct {
 	Locale           string
 	Timezone         string
 	IsHomepage       bool
+	IsTemplate       bool
 	PublishedVersion int
 	PublishAt        *time.Time
 	UnpublishAt      *time.Time

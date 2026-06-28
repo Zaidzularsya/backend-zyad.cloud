@@ -30,7 +30,7 @@ func (h *AdminBrandingHandler) RegisterRoutes(router *gin.RouterGroup, checker p
 	// Organization branding
 	router.GET("/admin/landing/branding", permissionmiddleware.Require(checker, "landing.branding.read"), h.GetDefaultBranding)
 	router.PATCH("/admin/landing/branding", permissionmiddleware.Require(checker, "landing.branding.update"), h.UpdateDefaultBranding)
-	
+
 	// Theme (subset of branding)
 	router.GET("/admin/landing/theme", permissionmiddleware.Require(checker, "landing.branding.read"), h.GetTheme)
 	router.PATCH("/admin/landing/theme", permissionmiddleware.Require(checker, "landing.theme.manage"), h.UpdateTheme)
@@ -55,7 +55,7 @@ func (h *AdminBrandingHandler) GetDefaultBranding(c *gin.Context) {
 		return
 	}
 
-	corehttp.OK(c, "Default branding retrieved successfully", branding)
+	corehttp.OK(c, "Default branding retrieved successfully", mapBrandingResponse(branding))
 }
 
 func (h *AdminBrandingHandler) UpdateDefaultBranding(c *gin.Context) {
@@ -78,7 +78,7 @@ func (h *AdminBrandingHandler) UpdateDefaultBranding(c *gin.Context) {
 		return
 	}
 
-	corehttp.OK(c, "Default branding updated successfully", branding)
+	corehttp.OK(c, "Default branding updated successfully", mapBrandingResponse(branding))
 }
 
 func (h *AdminBrandingHandler) GetTheme(c *gin.Context) {
@@ -124,7 +124,7 @@ func (h *AdminBrandingHandler) UpdateTheme(c *gin.Context) {
 		return
 	}
 
-	corehttp.OK(c, "Theme updated successfully", branding)
+	corehttp.OK(c, "Theme updated successfully", mapBrandingResponse(branding))
 }
 
 func (h *AdminBrandingHandler) GetPageBranding(c *gin.Context) {
@@ -141,7 +141,7 @@ func (h *AdminBrandingHandler) GetPageBranding(c *gin.Context) {
 		return
 	}
 
-	corehttp.OK(c, "Page branding retrieved successfully", branding)
+	corehttp.OK(c, "Page branding retrieved successfully", mapBrandingResponse(branding))
 }
 
 func (h *AdminBrandingHandler) UpdatePageBranding(c *gin.Context) {
@@ -165,7 +165,59 @@ func (h *AdminBrandingHandler) UpdatePageBranding(c *gin.Context) {
 		return
 	}
 
-	corehttp.OK(c, "Page branding override updated successfully", branding)
+	corehttp.OK(c, "Page branding override updated successfully", mapBrandingResponse(branding))
+}
+
+func mapBrandingResponse(branding domain.LandingBranding) dto.BrandingResponse {
+	socialLinks := make([]map[string]any, 0, len(branding.SocialLinks))
+	for _, link := range branding.SocialLinks {
+		socialLinks = append(socialLinks, map[string]any{
+			"platform": link.Platform,
+			"url":      link.URL,
+		})
+	}
+
+	return dto.BrandingResponse{
+		CompanyName:    branding.CompanyName,
+		Tagline:        branding.Tagline,
+		LogoLightURL:   branding.LogoLightURL,
+		LogoDarkURL:    branding.LogoDarkURL,
+		FaviconURL:     branding.FaviconURL,
+		SocialImageURL: branding.SocialImageURL,
+		Colors: map[string]any{
+			"primary":    branding.Colors.Primary,
+			"secondary":  branding.Colors.Secondary,
+			"accent":     branding.Colors.Accent,
+			"background": branding.Colors.Background,
+			"surface":    branding.Colors.Surface,
+			"text":       branding.Colors.Text,
+			"muted":      branding.Colors.Muted,
+		},
+		Typography: map[string]any{
+			"heading_font": branding.Typography.HeadingFont,
+			"body_font":    branding.Typography.BodyFont,
+		},
+		Shape: map[string]any{
+			"button_radius": branding.Shape.ButtonRadius,
+			"card_radius":   branding.Shape.CardRadius,
+		},
+		Layout: map[string]any{
+			"width":            branding.Layout.Width,
+			"spacing":          branding.Layout.Spacing,
+			"background_style": branding.Layout.BackgroundStyle,
+			"color_mode":       branding.Layout.ColorMode,
+			"header_style":     branding.Layout.HeaderStyle,
+			"footer_style":     branding.Layout.FooterStyle,
+		},
+		Contact: map[string]any{
+			"email":   branding.Contact.Email,
+			"phone":   branding.Contact.Phone,
+			"address": branding.Contact.Address,
+		},
+		SocialLinks: socialLinks,
+		CreatedAt:   branding.CreatedAt,
+		UpdatedAt:   branding.UpdatedAt,
+	}
 }
 
 func (h *AdminBrandingHandler) DeletePageBranding(c *gin.Context) {
@@ -184,16 +236,16 @@ func (h *AdminBrandingHandler) DeletePageBranding(c *gin.Context) {
 	corehttp.OK(c, "Page branding override removed successfully", nil)
 }
 
-func (h *AdminBrandingHandler) mapThemeBrandingRequestToParams(req dto.ThemeBrandingRequest, actorID string) repository.CreateBrandingParams {
+func (h *AdminBrandingHandler) mapThemeBrandingRequestToParams(req dto.ThemeBrandingRequest, _ string) repository.CreateBrandingParams {
 	var params repository.CreateBrandingParams
-	
+
 	params.CompanyName = req.CompanyName
 	params.Tagline = req.Tagline
 	params.LogoLightURL = req.LogoLightURL
 	params.LogoDarkURL = req.LogoDarkURL
 	params.FaviconURL = req.FaviconURL
 	params.SocialImageURL = req.SocialImageURL
-	
+
 	if req.Colors != nil {
 		b, _ := json.Marshal(req.Colors)
 		var colors domain.BrandingColors
@@ -230,9 +282,5 @@ func (h *AdminBrandingHandler) mapThemeBrandingRequestToParams(req dto.ThemeBran
 		json.Unmarshal(b, &links)
 		params.SocialLinks = links
 	}
-	
-	// Set CreatedBy if we decide to add it later to CreateBrandingParams, 
-	// wait, let's check if CreateBrandingParams has CreatedBy. The definition didn't have it.
-	// Oh wait, does it have CreatedBy? Let's check repository_contract.
 	return params
 }

@@ -103,6 +103,10 @@ type SwitchOrganizationResponse struct {
 	ExpiresIn           int64                    `json:"expires_in,omitempty"`
 }
 
+type CreateWorkspaceResponse struct {
+	CurrentOrganization UserOrganizationResponse `json:"current_organization"`
+}
+
 type DomainResponse struct {
 	ID                   string  `json:"id"`
 	OrganizationID       string  `json:"organization_id"`

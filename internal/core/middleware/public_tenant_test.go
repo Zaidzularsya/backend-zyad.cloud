@@ -61,7 +61,10 @@ func TestResolvePublicOrganizationUsesForwardedHostFromTrustedProxy(t *testing.T
 
 func TestResolvePublicOrganizationIgnoresForwardedHostFromUntrustedProxy(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	resolver := &fakePublicHostResolver{}
+	resolver := &fakePublicHostResolver{
+		tenantContext: mustPublicTenantContext(t),
+		resolved:      true,
+	}
 	middleware, err := ResolvePublicOrganization(resolver, PublicHostOptions{
 		TrustForwardedHost: true,
 		TrustedProxyCIDRs:  []string{"10.0.0.0/8"},
@@ -109,7 +112,10 @@ func TestResolvePublicOrganizationRejectsInvalidForwardedHostFromTrustedProxy(t 
 
 func TestResolvePublicOrganizationIgnoresInvalidForwardedHostFromUntrustedProxy(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	resolver := &fakePublicHostResolver{}
+	resolver := &fakePublicHostResolver{
+		tenantContext: mustPublicTenantContext(t),
+		resolved:      true,
+	}
 	middleware, err := ResolvePublicOrganization(resolver, PublicHostOptions{
 		TrustForwardedHost: true,
 		TrustedProxyCIDRs:  []string{"10.0.0.0/8"},
@@ -128,6 +134,27 @@ func TestResolvePublicOrganizationIgnoresInvalidForwardedHostFromUntrustedProxy(
 
 	if rec.Code != http.StatusNoContent || resolver.resolvedHost != "origin.example.test" {
 		t.Fatalf("status/host = %d, %q", rec.Code, resolver.resolvedHost)
+	}
+}
+
+func TestResolvePublicOrganizationRejectsUnknownHost(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	middleware, err := ResolvePublicOrganization(
+		&fakePublicHostResolver{},
+		PublicHostOptions{},
+	)
+	if err != nil {
+		t.Fatalf("ResolvePublicOrganization() error = %v", err)
+	}
+
+	router := gin.New()
+	router.GET("/", middleware, func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	req := httptest.NewRequest(http.MethodGet, "http://unknown.example.test/", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d", rec.Code)
 	}
 }
 

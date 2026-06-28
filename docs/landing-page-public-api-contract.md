@@ -77,6 +77,7 @@ Page summary:
   "visibility": "public",
   "locale": "id-ID",
   "is_homepage": false,
+  "is_template": false,
   "publish_at": null,
   "unpublish_at": null,
   "published_version": 3,
@@ -156,7 +157,7 @@ Branding:
 
 Permission: `landing.page.read`.
 
-Query: `page`, `per_page`, `search`, `status`, `page_type`, `sort_by`, `sort_order`, `include_deleted`.
+Query: `page`, `per_page`, `search`, `status`, `page_type`, `is_template`, `sort_by`, `sort_order`, `include_deleted`.
 
 ### POST /admin/landing-pages
 
@@ -170,7 +171,8 @@ Permission: `landing.page.create`.
   "page_type": "campaign",
   "visibility": "public",
   "locale": "id-ID",
-  "is_homepage": false
+  "is_homepage": false,
+  "is_template": false
 }
 ```
 

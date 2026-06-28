@@ -22,6 +22,7 @@ type PageResponse struct {
 	Locale           string         `json:"locale"`
 	Timezone         string         `json:"timezone"`
 	IsHomepage       bool           `json:"is_homepage"`
+	IsTemplate       bool           `json:"is_template"`
 	PublishedVersion int            `json:"published_version"`
 	PublishAt        *time.Time     `json:"publish_at,omitempty"`
 	UnpublishAt      *time.Time     `json:"unpublish_at,omitempty"`
@@ -224,15 +225,15 @@ type RevisionResponse struct {
 
 // ScheduleResponse represents scheduled action jobs.
 type ScheduleResponse struct {
-	ID            string     `json:"id"`
-	LandingPageID string     `json:"landing_page_id"`
-	Action        string     `json:"action"`
-	ScheduledAt   time.Time  `json:"scheduled_at"`
-	Status        string     `json:"status"`
-	ErrorMessage  string     `json:"error_message,omitempty"`
-	Attempts      int        `json:"attempts"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	ID            string    `json:"id"`
+	LandingPageID string    `json:"landing_page_id"`
+	Action        string    `json:"action"`
+	ScheduledAt   time.Time `json:"scheduled_at"`
+	Status        string    `json:"status"`
+	ErrorMessage  string    `json:"error_message,omitempty"`
+	Attempts      int       `json:"attempts"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // LeadIntegrationResponse represents configured lead webhook targets.
@@ -272,13 +273,13 @@ type PublicPageDetails struct {
 
 // PublicResolveResponse represents the aggregate public payload envelope.
 type PublicResolveResponse struct {
-	Page         PublicPageDetails  `json:"page"`
-	Branding     BrandingResponse   `json:"branding"`
-	SEO          map[string]any     `json:"seo"`
-	Sections     []SectionResponse  `json:"sections"`
-	Forms        []FormResponse     `json:"forms"`
-	CanonicalURL string             `json:"canonical_url"`
-	PublishedAt  time.Time          `json:"published_at"`
+	Page         PublicPageDetails `json:"page"`
+	Branding     BrandingResponse  `json:"branding"`
+	SEO          map[string]any    `json:"seo"`
+	Sections     []SectionResponse `json:"sections"`
+	Forms        []FormResponse    `json:"forms"`
+	CanonicalURL string            `json:"canonical_url"`
+	PublishedAt  time.Time         `json:"published_at"`
 }
 
 // PublicSubmissionResponse is returned upon success.

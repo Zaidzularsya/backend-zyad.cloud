@@ -76,6 +76,14 @@ func LoadAuth() AuthConfig {
 		PasswordMinLength:          getEnvInt("AUTH_PASSWORD_MIN_LENGTH", 8),
 		CookieSecret:               getEnv("COOKIE_SECRET", ""),
 		CookieExpiresIn:            getEnv("COOKIE_EXPIRES_IN", "24h"),
+		Google: GoogleAuthConfig{
+			Enabled:               getEnvBool("AUTH_GOOGLE_ENABLED", false),
+			ClientIDs:             getEnvList("AUTH_GOOGLE_CLIENT_IDS", nil),
+			AutoRegister:          getEnvBool("AUTH_GOOGLE_AUTO_REGISTER", true),
+			AutoLinkVerifiedEmail: getEnvBool("AUTH_GOOGLE_AUTO_LINK_VERIFIED_EMAIL", true),
+			DefaultRole:           getEnv("AUTH_GOOGLE_DEFAULT_ROLE", "member"),
+			DefaultStatus:         strings.ToLower(getEnv("AUTH_GOOGLE_DEFAULT_STATUS", "active")),
+		},
 	}
 }
 

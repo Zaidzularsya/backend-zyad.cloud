@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -47,39 +48,37 @@ func (h *PublicLandingHandler) RegisterRoutes(router *gin.RouterGroup) {
 }
 
 func (h *PublicLandingHandler) Resolve(c *gin.Context) {
-	scope, err := coretenant.RequireScope(c.Request.Context())
+	tenantContext, err := coretenant.RequireContext(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	scope, err := coretenant.NewScope(tenantContext)
 	if err != nil {
 		corehttp.Fail(c, err)
 		return
 	}
 
 	slug := c.Query("slug")
-	// If custom domain is passed in Host or specific header:
-	customDomain := c.Request.Host
-	// Support x-forwarded-host if running behind proxy
-	if forwardedHost := c.GetHeader("X-Forwarded-Host"); forwardedHost != "" {
-		customDomain = forwardedHost
-	}
+	customDomain := tenantContext.RequestHost()
 
 	var resolved service.ResolvedPage
 	var resolveErr error
 
-	// Priority: Domain first, then slug
-	if customDomain != "" && customDomain != "localhost" && customDomain != "localhost:8080" { // simple check
-		resolved, resolveErr = h.resolverSvc.ResolveByDomain(c.Request.Context(), scope, customDomain, "")
-		// Fallback to slug if domain not found and slug is provided
-		if resolveErr != nil && slug != "" {
-			resolved, resolveErr = h.resolverSvc.ResolveBySlug(c.Request.Context(), scope, slug, "")
-		}
-	} else if slug != "" {
+	// Priority: explicit slug first, then custom domain.
+	// Frontend API calls use the API host (e.g. zyad.local.test:3000). If we resolve
+	// domain first, a slug request can accidentally return the page bound to that host.
+	if slug != "" {
 		resolved, resolveErr = h.resolverSvc.ResolveBySlug(c.Request.Context(), scope, slug, "")
+	} else if customDomain != "" && customDomain != "localhost" && customDomain != "localhost:8080" { // simple check
+		resolved, resolveErr = h.resolverSvc.ResolveByDomain(c.Request.Context(), scope, customDomain, "")
 	} else {
 		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "Slug or valid domain is required", http.StatusBadRequest))
 		return
 	}
 
 	if resolveErr != nil {
-		corehttp.Fail(c, coreerrors.New("INTERNAL_ERROR", resolveErr.Error(), http.StatusInternalServerError))
+		corehttp.Fail(c, publicResolveError(resolveErr))
 		return
 	}
 
@@ -87,7 +86,12 @@ func (h *PublicLandingHandler) Resolve(c *gin.Context) {
 }
 
 func (h *PublicLandingHandler) Preview(c *gin.Context) {
-	scope, err := coretenant.RequireScope(c.Request.Context())
+	tenantContext, err := coretenant.RequireContext(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	scope, err := coretenant.NewScope(tenantContext)
 	if err != nil {
 		corehttp.Fail(c, err)
 		return
@@ -100,28 +104,22 @@ func (h *PublicLandingHandler) Preview(c *gin.Context) {
 		return
 	}
 
-	customDomain := c.Request.Host
-	if forwardedHost := c.GetHeader("X-Forwarded-Host"); forwardedHost != "" {
-		customDomain = forwardedHost
-	}
+	customDomain := tenantContext.RequestHost()
 
 	var resolved service.ResolvedPage
 	var resolveErr error
 
-	if customDomain != "" && customDomain != "localhost" && customDomain != "localhost:8080" {
-		resolved, resolveErr = h.resolverSvc.ResolveByDomain(c.Request.Context(), scope, customDomain, token)
-		if resolveErr != nil && slug != "" {
-			resolved, resolveErr = h.resolverSvc.ResolveBySlug(c.Request.Context(), scope, slug, token)
-		}
-	} else if slug != "" {
+	if slug != "" {
 		resolved, resolveErr = h.resolverSvc.ResolveBySlug(c.Request.Context(), scope, slug, token)
+	} else if customDomain != "" && customDomain != "localhost" && customDomain != "localhost:8080" {
+		resolved, resolveErr = h.resolverSvc.ResolveByDomain(c.Request.Context(), scope, customDomain, token)
 	} else {
 		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "Slug or valid domain is required", http.StatusBadRequest))
 		return
 	}
 
 	if resolveErr != nil {
-		corehttp.Fail(c, coreerrors.New("INTERNAL_ERROR", resolveErr.Error(), http.StatusInternalServerError))
+		corehttp.Fail(c, publicResolveError(resolveErr))
 		return
 	}
 
@@ -150,6 +148,17 @@ func (h *PublicLandingHandler) RequestAccess(c *gin.Context) {
 	}
 
 	corehttp.OK(c, "Access granted", gin.H{"access_token": token})
+}
+
+func publicResolveError(err error) error {
+	switch {
+	case errors.Is(err, service.ErrPageNotFound):
+		return coreerrors.New("PUBLIC_PAGE_NOT_FOUND", "landing page was not found", http.StatusNotFound)
+	case errors.Is(err, service.ErrPageNotPublished):
+		return coreerrors.New("PUBLIC_PAGE_NOT_FOUND", "landing page was not found", http.StatusNotFound)
+	default:
+		return coreerrors.New("INTERNAL_ERROR", err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (h *PublicLandingHandler) SubmitForm(c *gin.Context) {

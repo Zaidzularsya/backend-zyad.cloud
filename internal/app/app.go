@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"zyad.cloud/internal/config"
+	coreauth "zyad.cloud/internal/core/auth"
 	notificationdispatcher "zyad.cloud/internal/core/notification/dispatcher"
 	"zyad.cloud/internal/core/notification/domain"
 	notificationhandler "zyad.cloud/internal/core/notification/handler"
@@ -18,12 +19,13 @@ import (
 	permissionhandler "zyad.cloud/internal/core/permission/handler"
 	permissionrepo "zyad.cloud/internal/core/permission/repository"
 	permissionservice "zyad.cloud/internal/core/permission/service"
-	organizationhandler "zyad.cloud/internal/modules/organization/handler"
-	organizationrepo "zyad.cloud/internal/modules/organization/repository"
-	organizationservice "zyad.cloud/internal/modules/organization/service"
+	corevalidation "zyad.cloud/internal/core/validation"
 	landinghandler "zyad.cloud/internal/modules/landing/handler"
 	landingrepo "zyad.cloud/internal/modules/landing/repository"
 	landingservice "zyad.cloud/internal/modules/landing/service"
+	organizationhandler "zyad.cloud/internal/modules/organization/handler"
+	organizationrepo "zyad.cloud/internal/modules/organization/repository"
+	organizationservice "zyad.cloud/internal/modules/organization/service"
 	userhandler "zyad.cloud/internal/modules/user/handler"
 	userrepo "zyad.cloud/internal/modules/user/repository"
 	userservice "zyad.cloud/internal/modules/user/service"
@@ -50,6 +52,7 @@ func New(ctx context.Context) (*App, error) {
 	}
 
 	log := logger.New(cfg.App.Env)
+	corevalidation.RegisterGinValidators()
 
 	var db *database.Pool
 	var redisClient *redisplatform.Client
@@ -97,6 +100,9 @@ func New(ctx context.Context) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create auth service: %w", err)
 	}
+	if cfg.Auth.Google.Enabled {
+		authService.SetGoogleTokenVerifier(coreauth.NewGoogleIDTokenVerifier(cfg.Auth.Google.ClientIDs))
+	}
 	authService.SetNotificationPublisher(notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts))
 	authHandler := userhandler.NewAuthHandler(authService)
 	userRepo := userrepo.NewUserRepository(db)
@@ -120,6 +126,15 @@ func New(ctx context.Context) (*App, error) {
 	organizationSwitchHandler := organizationhandler.NewSwitchHandler(
 		organizationSwitchService,
 	)
+	organizationOnboardingService := organizationservice.NewOnboardingService(
+		organizationrepo.NewOnboardingRepository(db),
+	)
+	authService.SetGoogleWorkspaceProvisioner(
+		googleWorkspaceProvisioner{onboarding: organizationOnboardingService},
+	)
+	organizationOnboardingHandler := organizationhandler.NewOnboardingHandler(
+		organizationOnboardingService,
+	)
 	organizationLifecycleService := organizationservice.NewLifecycleService(
 		organizationrepo.NewLifecycleRepository(db),
 	)
@@ -129,6 +144,11 @@ func New(ctx context.Context) (*App, error) {
 	organizationPlatformService := organizationservice.NewPlatformService(
 		organizationrepo.NewOrganizationRepository(db),
 		organizationLifecycleService,
+	)
+	organizationDomainService := organizationservice.NewDomainService(
+		organizationrepo.NewDomainRepository(db),
+		organizationservice.NewDNSDomainVerifier(nil),
+		cfg.MultiTenant.PlatformPrimaryDomain,
 	)
 	organizationPlatformHandler := organizationhandler.NewPlatformHandler(
 		organizationPlatformService,
@@ -143,11 +163,6 @@ func New(ctx context.Context) (*App, error) {
 	organizationSelfHandler := organizationhandler.NewSelfHandler(
 		organizationSelfService,
 		permService,
-	)
-	organizationDomainService := organizationservice.NewDomainService(
-		organizationrepo.NewDomainRepository(db),
-		organizationservice.NewDNSDomainVerifier(nil),
-		cfg.MultiTenant.PlatformPrimaryDomain,
 	)
 	organizationDomainHandler := organizationhandler.NewDomainHandler(
 		organizationDomainService,
@@ -235,6 +250,7 @@ func New(ctx context.Context) (*App, error) {
 		OrganizationDomainHandler:        organizationDomainHandler,
 		OrganizationEntitlementHandler:   organizationEntitlementHandler,
 		OrganizationImpersonationHandler: organizationImpersonationHandler,
+		OrganizationOnboardingHandler:    organizationOnboardingHandler,
 		OrganizationPlatformHandler:      organizationPlatformHandler,
 		OrganizationSelfHandler:          organizationSelfHandler,
 		OrganizationSwitchHandler:        organizationSwitchHandler,

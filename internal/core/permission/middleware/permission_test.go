@@ -17,6 +17,14 @@ type organizationCheckerStub struct {
 	permissions    []string
 }
 
+type combinedCheckerStub struct {
+	orgErr    error
+	globalErr error
+
+	orgCalled    bool
+	globalCalled bool
+}
+
 func (s *organizationCheckerStub) CanOrganization(
 	_ context.Context,
 	userID string,
@@ -27,6 +35,25 @@ func (s *organizationCheckerStub) CanOrganization(
 	s.organizationID = organizationID
 	s.permissions = permissions
 	return nil
+}
+
+func (s *combinedCheckerStub) CanOrganization(
+	_ context.Context,
+	_ string,
+	_ string,
+	_ []string,
+) error {
+	s.orgCalled = true
+	return s.orgErr
+}
+
+func (s *combinedCheckerStub) Can(
+	_ context.Context,
+	_ string,
+	_ []string,
+) error {
+	s.globalCalled = true
+	return s.globalErr
 }
 
 func TestRequireOrganizationUsesVerifiedTenantContext(t *testing.T) {
@@ -76,6 +103,34 @@ func TestRequireOrganizationRejectsMissingTenantContext(t *testing.T) {
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/resource", nil))
 
 	if recorder.Code != http.StatusForbidden || checker.organizationID != "" {
+		t.Fatalf("response/checker = %d / %#v", recorder.Code, checker)
+	}
+}
+
+func TestRequireOrganizationOrGlobalFallsBackToGlobalPermission(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	checker := &combinedCheckerStub{orgErr: coretenant.ErrInvalidScope}
+	tenantContext := permissionTenantContext(t)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		SetUserID(c, "user-1")
+		c.Request = c.Request.WithContext(
+			coretenant.WithContext(c.Request.Context(), tenantContext),
+		)
+		c.Next()
+	})
+	router.GET(
+		"/resource",
+		RequireOrganizationOrGlobal(checker, "organization.domain.manage"),
+		func(c *gin.Context) { c.Status(http.StatusNoContent) },
+	)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/resource", nil))
+
+	if recorder.Code != http.StatusNoContent ||
+		!checker.orgCalled ||
+		!checker.globalCalled {
 		t.Fatalf("response/checker = %d / %#v", recorder.Code, checker)
 	}
 }

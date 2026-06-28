@@ -23,6 +23,7 @@ func NewAuthHandler(authService *service.AuthService) *AuthHandler {
 
 func (h *AuthHandler) RegisterRoutes(router gin.IRoutes) {
 	router.POST("/auth/login", h.Login)
+	router.POST("/auth/google", h.GoogleAuth)
 	router.POST("/auth/logout", h.Logout)
 	router.POST("/auth/refresh-token", h.RefreshToken)
 	router.POST("/auth/forgot-password", h.ForgotPassword)
@@ -58,6 +59,26 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	corehttp.OK(c, "login successful", result)
+}
+
+func (h *AuthHandler) GoogleAuth(c *gin.Context) {
+	var req dto.GoogleAuthRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		return
+	}
+
+	result, err := h.service.GoogleAuth(c.Request.Context(), req, service.LoginHistoryRecord{
+		IPAddress:  c.ClientIP(),
+		UserAgent:  c.Request.UserAgent(),
+		DeviceName: req.DeviceName,
+	})
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+
+	corehttp.OK(c, "google authentication successful", result)
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
@@ -297,5 +318,3 @@ func (h *AuthHandler) ResendVerificationEmail(c *gin.Context) {
 
 	corehttp.OK(c, "if the email is pending verification, a verification email has been sent", nil)
 }
-
-

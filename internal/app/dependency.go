@@ -5,11 +5,11 @@ import (
 
 	"zyad.cloud/internal/config"
 	"zyad.cloud/internal/core/middleware"
-	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	notificationhandler "zyad.cloud/internal/core/notification/handler"
 	permissionhandler "zyad.cloud/internal/core/permission/handler"
-	organizationhandler "zyad.cloud/internal/modules/organization/handler"
+	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	landinghandler "zyad.cloud/internal/modules/landing/handler"
+	organizationhandler "zyad.cloud/internal/modules/organization/handler"
 	userhandler "zyad.cloud/internal/modules/user/handler"
 	pgdatabase "zyad.cloud/internal/platform/database"
 	"zyad.cloud/internal/platform/redis"
@@ -29,6 +29,7 @@ type Dependencies struct {
 	OrganizationDomainHandler        *organizationhandler.DomainHandler
 	OrganizationEntitlementHandler   *organizationhandler.EntitlementHandler
 	OrganizationImpersonationHandler *organizationhandler.ImpersonationHandler
+	OrganizationOnboardingHandler    *organizationhandler.OnboardingHandler
 	OrganizationPlatformHandler      *organizationhandler.PlatformHandler
 	OrganizationSelfHandler          *organizationhandler.SelfHandler
 	OrganizationSwitchHandler        *organizationhandler.SwitchHandler

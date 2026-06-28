@@ -83,6 +83,9 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.OrganizationSwitchHandler != nil {
 		deps.OrganizationSwitchHandler.RegisterRoutes(protected)
 	}
+	if deps.OrganizationOnboardingHandler != nil {
+		deps.OrganizationOnboardingHandler.RegisterRoutes(protected)
+	}
 	if deps.OrganizationPlatformHandler != nil {
 		deps.OrganizationPlatformHandler.RegisterRoutes(protected)
 	}

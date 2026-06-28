@@ -88,6 +88,34 @@ func TestMultiTenantConfigAcceptsValidProductionConfig(t *testing.T) {
 	}
 }
 
+func TestGoogleAuthConfigRequiresClientIDWhenEnabled(t *testing.T) {
+	cfg := GoogleAuthConfig{
+		Enabled:       true,
+		AutoRegister:  true,
+		DefaultRole:   "member",
+		DefaultStatus: "active",
+	}
+
+	if err := cfg.validate("development"); err == nil {
+		t.Fatal("expected enabled google auth without client id to be invalid")
+	}
+}
+
+func TestGoogleAuthConfigAcceptsActiveAutoRegister(t *testing.T) {
+	cfg := GoogleAuthConfig{
+		Enabled:               true,
+		ClientIDs:             []string{"google-client-id.apps.googleusercontent.com"},
+		AutoRegister:          true,
+		AutoLinkVerifiedEmail: true,
+		DefaultRole:           "member",
+		DefaultStatus:         "active",
+	}
+
+	if err := cfg.validate("production"); err != nil {
+		t.Fatalf("expected google auth config to be valid, got %v", err)
+	}
+}
+
 func validProductionMultiTenantConfig() MultiTenantConfig {
 	return MultiTenantConfig{
 		PlatformOrganizationID:   "00000000-0000-0000-0000-000000000001",

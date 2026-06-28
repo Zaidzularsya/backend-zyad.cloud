@@ -90,8 +90,8 @@ func (s *resolverService) resolvePageData(ctx context.Context, scope tenant.Scop
 
 	if isDraftPreview {
 		// Fetch active working data
-		sections, _ := s.resolverRepo.ResolveSections(ctx, scope, page.ID)
-		forms, _ := s.resolverRepo.ResolveForms(ctx, scope, page.ID)
+		sections := s.resolveSections(ctx, scope, page.ID)
+		forms := s.resolveForms(ctx, scope, page.ID)
 		branding, _ := s.resolverRepo.ResolveBranding(ctx, scope, page.ID)
 		if branding.ID == "" {
 			branding, _ = s.brandingRepo.GetDefault(ctx, scope)
@@ -111,8 +111,8 @@ func (s *resolverService) resolvePageData(ctx context.Context, scope tenant.Scop
 	versions, err := s.resolverRepo.ResolveVersions(ctx, scope, page.ID)
 	if err != nil || len(versions) == 0 {
 		// If no versions found but status is published, fallback to active working data (should not happen normally)
-		sections, _ := s.resolverRepo.ResolveSections(ctx, scope, page.ID)
-		forms, _ := s.resolverRepo.ResolveForms(ctx, scope, page.ID)
+		sections := s.resolveSections(ctx, scope, page.ID)
+		forms := s.resolveForms(ctx, scope, page.ID)
 		branding, _ := s.resolverRepo.ResolveBranding(ctx, scope, page.ID)
 		if branding.ID == "" {
 			branding, _ = s.brandingRepo.GetDefault(ctx, scope)
@@ -127,6 +127,15 @@ func (s *resolverService) resolvePageData(ctx context.Context, scope tenant.Scop
 	}
 
 	latestVersion := versions[0]
+	sections := []domain.LandingSection{}
+	forms := []domain.LandingForm{}
+
+	if !snapshotHasItems(latestVersion.Snapshot, "sections") {
+		sections = s.resolveSections(ctx, scope, page.ID)
+	}
+	if !snapshotHasItems(latestVersion.Snapshot, "forms") {
+		forms = s.resolveForms(ctx, scope, page.ID)
+	}
 
 	// Also fetch branding (branding is usually dynamic and not always fully snapshotted or applied globally)
 	branding, _ := s.resolverRepo.ResolveBranding(ctx, scope, page.ID)
@@ -136,11 +145,51 @@ func (s *resolverService) resolvePageData(ctx context.Context, scope tenant.Scop
 
 	return ResolvedPage{
 		Page:     page,
+		Sections: sections,
+		Forms:    forms,
 		Snapshot: latestVersion.Snapshot,
 		Branding: branding,
 		Menus:    s.resolveMenus(ctx, scope),
 		IsDraft:  false,
 	}, nil
+}
+
+func (s *resolverService) resolveSections(ctx context.Context, scope tenant.Scope, pageID string) []domain.LandingSection {
+	sections, err := s.resolverRepo.ResolveSections(ctx, scope, pageID)
+	if err != nil {
+		return []domain.LandingSection{}
+	}
+	return sections
+}
+
+func (s *resolverService) resolveForms(ctx context.Context, scope tenant.Scope, pageID string) []domain.LandingForm {
+	forms, err := s.resolverRepo.ResolveForms(ctx, scope, pageID)
+	if err != nil {
+		return []domain.LandingForm{}
+	}
+	return forms
+}
+
+func snapshotHasItems(snapshot map[string]any, key string) bool {
+	if snapshot == nil {
+		return false
+	}
+
+	value, exists := snapshot[key]
+	if !exists || value == nil {
+		return false
+	}
+
+	switch items := value.(type) {
+	case []any:
+		return len(items) > 0
+	case []domain.LandingSection:
+		return len(items) > 0
+	case []domain.LandingForm:
+		return len(items) > 0
+	default:
+		return true
+	}
 }
 
 func (s *resolverService) resolveMenus(ctx context.Context, scope tenant.Scope) []ResolvedMenu {

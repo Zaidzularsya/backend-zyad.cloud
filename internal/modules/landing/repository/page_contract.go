@@ -9,6 +9,8 @@ import (
 
 type PageListFilter struct {
 	Status         domain.PageStatus
+	PageType       domain.PageType
+	IsTemplate     *bool
 	IncludeDeleted bool
 	Limit          int
 	Offset         int
@@ -27,21 +29,23 @@ type CreatePageParams struct {
 	Locale     string
 	Timezone   string
 	IsHomepage bool
+	IsTemplate bool
 	CreatedBy  string
 }
 
 type UpdatePageParams struct {
-	Name       *string
-	Title      *string
-	Slug       *string
-	Type       *domain.PageType
-	Status     *domain.PageStatus
+	Name         *string
+	Title        *string
+	Slug         *string
+	Type         *domain.PageType
+	Status       *domain.PageStatus
 	Visibility   *domain.PageVisibility
 	PasswordHash *string
 	SEO          map[string]any
 	Locale       *string
 	Timezone     *string
 	IsHomepage   *bool
+	IsTemplate   *bool
 	UpdatedBy    string
 }
 

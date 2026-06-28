@@ -9,6 +9,7 @@ type PageListQuery struct {
 	Search         string `form:"search"`
 	Status         string `form:"status"`
 	PageType       string `form:"page_type"`
+	IsTemplate     *bool  `form:"is_template"`
 	SortBy         string `form:"sort_by"`
 	SortOrder      string `form:"sort_order"`
 	IncludeDeleted bool   `form:"include_deleted"`
@@ -24,6 +25,7 @@ type CreatePageRequest struct {
 	Locale     string `json:"locale"`
 	Timezone   string `json:"timezone"`
 	IsHomepage bool   `json:"is_homepage"`
+	IsTemplate bool   `json:"is_template"`
 }
 
 // UpdatePageRequest binds the partial payload for updating a landing page.
@@ -36,6 +38,7 @@ type UpdatePageRequest struct {
 	Locale     *string         `json:"locale"`
 	Timezone   *string         `json:"timezone"`
 	IsHomepage *bool           `json:"is_homepage"`
+	IsTemplate *bool           `json:"is_template"`
 	Settings   *map[string]any `json:"settings" binding:"omitnil"`
 }
 
@@ -154,16 +157,16 @@ type ReplaceFormFieldsRequest struct {
 
 // SubmissionListQuery binds query filters for form submissions.
 type SubmissionListQuery struct {
-	Page          int       `form:"page"`
-	PerPage       int       `form:"per_page"`
-	LandingPageID string    `form:"landing_page_id"`
-	FormID        string    `form:"form_id"`
-	Status        string    `form:"status"`
-	UTMSource     string    `form:"utm_source"`
-	UTMCampaign   string    `form:"utm_campaign"`
-	Search        string    `form:"search"`
-	SortBy        string    `form:"sort_by"`
-	SortOrder     string    `form:"sort_order"`
+	Page          int        `form:"page"`
+	PerPage       int        `form:"per_page"`
+	LandingPageID string     `form:"landing_page_id"`
+	FormID        string     `form:"form_id"`
+	Status        string     `form:"status"`
+	UTMSource     string     `form:"utm_source"`
+	UTMCampaign   string     `form:"utm_campaign"`
+	Search        string     `form:"search"`
+	SortBy        string     `form:"sort_by"`
+	SortOrder     string     `form:"sort_order"`
 	DateFrom      *time.Time `form:"date_from"`
 	DateTo        *time.Time `form:"date_to"`
 }
@@ -289,11 +292,11 @@ type PublicSubmissionRequest struct {
 
 // PublicAnalyticsEventRequest tracks visitor interaction.
 type PublicAnalyticsEventRequest struct {
-	Event      string         `json:"event" binding:"required"`
-	PageID     string         `json:"page_id" binding:"required"`
-	PageVersion int           `json:"page_version" binding:"required,min=1"`
-	SectionKey string         `json:"section_key"`
-	TargetKey  string         `json:"target_key"`
-	SessionID  string         `json:"session_id"`
-	Context    map[string]any `json:"context"`
+	Event       string         `json:"event" binding:"required"`
+	PageID      string         `json:"page_id" binding:"required"`
+	PageVersion int            `json:"page_version" binding:"required,min=1"`
+	SectionKey  string         `json:"section_key"`
+	TargetKey   string         `json:"target_key"`
+	SessionID   string         `json:"session_id"`
+	Context     map[string]any `json:"context"`
 }

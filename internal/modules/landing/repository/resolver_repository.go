@@ -24,19 +24,22 @@ func (r *resolverRepository) ResolveBySlug(ctx context.Context, scope coretenant
 		SELECT 
 			id, organization_id, name, title, slug, page_type, status,
 			visibility, password_hash, seo, locale, timezone,
-			is_homepage, created_by, created_at, updated_at
+			is_homepage, is_template, created_by, created_at, updated_at
 		FROM landing_pages
-		WHERE slug = $1 AND deleted_at IS NULL
+		WHERE organization_id = $1
+			AND lower(slug) = lower($2)
+			AND deleted_at IS NULL
+			AND is_template = false
 	`
 
 	var page domain.LandingPage
 	var passwordHash *string
 	var createdBy *string
 	err := r.within(ctx, scope, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, query, slug).Scan(
+		return tx.QueryRow(ctx, query, scope.OrganizationID(), slug).Scan(
 			&page.ID, &page.OrganizationID, &page.Name, &page.Title, &page.Slug,
 			&page.Type, &page.Status, &page.Visibility, &passwordHash,
-			&page.SEO, &page.Locale, &page.Timezone, &page.IsHomepage,
+			&page.SEO, &page.Locale, &page.Timezone, &page.IsHomepage, &page.IsTemplate,
 			&createdBy, &page.CreatedAt, &page.UpdatedAt,
 		)
 	})
@@ -56,16 +59,32 @@ func (r *resolverRepository) ResolveBySlug(ctx context.Context, scope coretenant
 }
 
 func (r *resolverRepository) ResolveByDomain(ctx context.Context, scope coretenant.Scope, customDomain string) (domain.LandingPage, error) {
-	// 1. Resolve organization_domains first, then join with landing_domain_bindings and landing_pages.
+	// Explicit page binding wins. When no binding exists, the tenant primary domain
+	// falls back to the published homepage so first-domain setup works out of the box.
 	query := `
 		SELECT 
 			p.id, p.organization_id, p.name, p.title, p.slug, p.page_type, p.status,
 			p.visibility, p.password_hash, p.seo, p.locale, p.timezone,
-			p.is_homepage, p.created_by, p.created_at, p.updated_at
-		FROM landing_domain_bindings b
-		JOIN organization_domains d ON b.organization_domain_id = d.id
-		JOIN landing_pages p ON b.landing_page_id = p.id
-		WHERE d.canonical_host = $1 AND d.status = 'verified' AND p.deleted_at IS NULL
+			p.is_homepage, p.is_template, p.created_by, p.created_at, p.updated_at
+		FROM organization_domains d
+		JOIN landing_pages p ON p.organization_id = d.organization_id
+		LEFT JOIN landing_domain_bindings b
+			ON b.organization_domain_id = d.id
+			AND b.landing_page_id = p.id
+		WHERE d.canonical_host = $1
+			AND d.status = 'active'
+			AND d.deleted_at IS NULL
+			AND p.deleted_at IS NULL
+			AND p.is_template = false
+			AND (
+				b.id IS NOT NULL
+				OR (d.is_primary = true AND p.is_homepage = true)
+			)
+		ORDER BY
+			CASE WHEN b.is_primary = true THEN 0 WHEN b.id IS NOT NULL THEN 1 ELSE 2 END,
+			p.is_homepage DESC,
+			p.created_at ASC
+		LIMIT 1
 	`
 
 	var page domain.LandingPage
@@ -75,7 +94,7 @@ func (r *resolverRepository) ResolveByDomain(ctx context.Context, scope coretena
 		return tx.QueryRow(ctx, query, customDomain).Scan(
 			&page.ID, &page.OrganizationID, &page.Name, &page.Title, &page.Slug,
 			&page.Type, &page.Status, &page.Visibility, &passwordHash,
-			&page.SEO, &page.Locale, &page.Timezone, &page.IsHomepage,
+			&page.SEO, &page.Locale, &page.Timezone, &page.IsHomepage, &page.IsTemplate,
 			&createdBy, &page.CreatedAt, &page.UpdatedAt,
 		)
 	})

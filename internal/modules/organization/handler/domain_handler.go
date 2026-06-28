@@ -38,12 +38,12 @@ type OrganizationDomainService interface {
 
 type DomainHandler struct {
 	service OrganizationDomainService
-	checker permissionmiddleware.OrganizationPermissionChecker
+	checker permissionmiddleware.CombinedPermissionChecker
 }
 
 func NewDomainHandler(
 	service OrganizationDomainService,
-	checker permissionmiddleware.OrganizationPermissionChecker,
+	checker permissionmiddleware.CombinedPermissionChecker,
 ) *DomainHandler {
 	return &DomainHandler{service: service, checker: checker}
 }
@@ -52,8 +52,7 @@ func (h *DomainHandler) RegisterRoutes(router *gin.RouterGroup) {
 	group := router.Group("/organization/domains")
 	group.Use(
 		middleware.RequireActiveTenant(),
-		middleware.RequireCustomerTenant(),
-		permissionmiddleware.RequireOrganization(
+		permissionmiddleware.RequireOrganizationOrGlobal(
 			h.checker,
 			"organization.domain.manage",
 		),

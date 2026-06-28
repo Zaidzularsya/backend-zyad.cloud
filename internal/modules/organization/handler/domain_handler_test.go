@@ -78,6 +78,15 @@ type domainPermissionCheckerStub struct {
 	permissions    []string
 }
 
+func (s *domainPermissionCheckerStub) Can(
+	_ context.Context,
+	_ string,
+	permissions []string,
+) error {
+	s.permissions = append(s.permissions, permissions...)
+	return nil
+}
+
 func (s *domainPermissionCheckerStub) CanOrganization(
 	_ context.Context,
 	_ string,
@@ -157,7 +166,7 @@ func TestDomainHandlerVerifyScopesDomainToCurrentOrganization(t *testing.T) {
 func domainHandlerRouter(
 	t *testing.T,
 	service OrganizationDomainService,
-	checker permissionmiddleware.OrganizationPermissionChecker,
+	checker permissionmiddleware.CombinedPermissionChecker,
 ) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)

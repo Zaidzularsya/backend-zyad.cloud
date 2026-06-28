@@ -2,14 +2,20 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 	"time"
 
+	coreerrors "zyad.cloud/internal/core/errors"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/landing/domain"
 	"zyad.cloud/internal/modules/landing/repository"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type pageService struct {
@@ -27,10 +33,12 @@ func NewPageService(pageRepo repository.PageRepository, sectionRepo repository.S
 func (s *pageService) Create(ctx context.Context, scope coretenant.Scope, params repository.CreatePageParams) (domain.LandingPage, error) {
 	// Sanitize and generate a safe slug
 	params.Slug = generateSafeSlug(params.Slug, params.Title)
-	
-	// Handle basic slug conflict by appending random if needed, but for MVP we rely on DB unique constraint
-	// If DB throws unique constraint violation, handler can map it to 409 Conflict.
-	return s.pageRepo.Create(ctx, scope, params)
+
+	page, err := s.pageRepo.Create(ctx, scope, params)
+	if err != nil {
+		return domain.LandingPage{}, mapPagePersistenceError(err)
+	}
+	return page, nil
 }
 
 func (s *pageService) Get(ctx context.Context, scope coretenant.Scope, id string) (domain.LandingPage, error) {
@@ -46,11 +54,18 @@ func (s *pageService) Update(ctx context.Context, scope coretenant.Scope, id str
 		safeSlug := generateSafeSlug(*params.Slug, "")
 		params.Slug = &safeSlug
 	}
-	return s.pageRepo.Update(ctx, scope, id, params)
+	page, err := s.pageRepo.Update(ctx, scope, id, params)
+	if err != nil {
+		return domain.LandingPage{}, mapPagePersistenceError(err)
+	}
+	return page, nil
 }
 
 func (s *pageService) Delete(ctx context.Context, scope coretenant.Scope, id string) error {
-	return s.pageRepo.Delete(ctx, scope, id)
+	if err := s.pageRepo.Delete(ctx, scope, id); err != nil {
+		return mapPagePersistenceError(err)
+	}
+	return nil
 }
 
 func (s *pageService) Duplicate(ctx context.Context, scope coretenant.Scope, params DuplicatePageParams) (domain.LandingPage, error) {
@@ -62,7 +77,7 @@ func (s *pageService) Duplicate(ctx context.Context, scope coretenant.Scope, par
 
 	// 2. Generate new slug
 	newSlug := fmt.Sprintf("%s-copy-%d", originalPage.Slug, time.Now().Unix())
-	
+
 	// 3. Create new page as Draft
 	createParams := repository.CreatePageParams{
 		Name:       originalPage.Name + " (Copy)",
@@ -74,6 +89,7 @@ func (s *pageService) Duplicate(ctx context.Context, scope coretenant.Scope, par
 		Locale:     originalPage.Locale,
 		Timezone:   originalPage.Timezone,
 		IsHomepage: false,
+		IsTemplate: false,
 		CreatedBy:  params.UserID,
 	}
 
@@ -111,7 +127,7 @@ func (s *pageService) Archive(ctx context.Context, scope coretenant.Scope, id st
 		Status:    &status,
 		UpdatedBy: updatedBy,
 	})
-	return err
+	return mapPagePersistenceError(err)
 }
 
 func (s *pageService) Restore(ctx context.Context, scope coretenant.Scope, id string, updatedBy string) error {
@@ -120,7 +136,7 @@ func (s *pageService) Restore(ctx context.Context, scope coretenant.Scope, id st
 		Status:    &status,
 		UpdatedBy: updatedBy,
 	})
-	return err
+	return mapPagePersistenceError(err)
 }
 
 var nonAlphanumericRegex = regexp.MustCompile(`[^a-z0-9]+`)
@@ -137,4 +153,60 @@ func generateSafeSlug(slug string, title string) string {
 		target = fmt.Sprintf("page-%d", time.Now().Unix())
 	}
 	return target
+}
+
+func mapPagePersistenceError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return coreerrors.New(
+			"PAGE_NOT_FOUND",
+			"landing page not found or already deleted",
+			http.StatusNotFound,
+		)
+	}
+
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+
+	switch pgErr.Code {
+	case "23505":
+		switch pgErr.ConstraintName {
+		case "idx_landing_pages_organization_slug_active_unique":
+			return coreerrors.New(
+				"PAGE_SLUG_ALREADY_EXISTS",
+				"landing page slug already exists in this organization",
+				http.StatusConflict,
+			)
+		case "idx_landing_pages_organization_homepage_unique":
+			return coreerrors.New(
+				"PAGE_HOMEPAGE_ALREADY_EXISTS",
+				"organization already has an active homepage landing page",
+				http.StatusConflict,
+			)
+		default:
+			return coreerrors.New(
+				"PAGE_ALREADY_EXISTS",
+				"landing page conflicts with an existing record",
+				http.StatusConflict,
+			)
+		}
+	case "23503":
+		return coreerrors.New(
+			"PAGE_REFERENCE_INVALID",
+			"landing page references an invalid organization or user",
+			http.StatusUnprocessableEntity,
+		)
+	case "23514":
+		return coreerrors.New(
+			"PAGE_DATA_INVALID",
+			"landing page data violates a database constraint",
+			http.StatusUnprocessableEntity,
+		)
+	default:
+		return err
+	}
 }
