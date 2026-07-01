@@ -20,6 +20,9 @@ import (
 	permissionrepo "zyad.cloud/internal/core/permission/repository"
 	permissionservice "zyad.cloud/internal/core/permission/service"
 	corevalidation "zyad.cloud/internal/core/validation"
+	billinghandler "zyad.cloud/internal/modules/billing/handler"
+	billingrepo "zyad.cloud/internal/modules/billing/repository"
+	billingservice "zyad.cloud/internal/modules/billing/service"
 	landinghandler "zyad.cloud/internal/modules/landing/handler"
 	landingrepo "zyad.cloud/internal/modules/landing/repository"
 	landingservice "zyad.cloud/internal/modules/landing/service"
@@ -69,6 +72,41 @@ func New(ctx context.Context) (*App, error) {
 	permRepo := permissionrepo.New(db)
 	permService := permissionservice.New(permRepo)
 	permHandler := permissionhandler.New(permService)
+
+	billingPlanRepo := billingrepo.NewPlanRepository(db)
+	billingFeatureRepo := billingrepo.NewFeatureRepository(db)
+	billingPlanEntitlementRepo := billingrepo.NewPlanEntitlementRepository(db)
+	billingSubscriptionRepo := billingrepo.NewSubscriptionRepository(db)
+	billingInvoiceRepo := billingrepo.NewInvoiceRepository(db)
+	billingPaymentRepo := billingrepo.NewPaymentRepository(db)
+	billingEntitlementSink := billingrepo.NewEntitlementSink(db)
+
+	billingPlanService := billingservice.NewPlanService(billingPlanRepo)
+	billingFeatureService := billingservice.NewFeatureService(billingFeatureRepo)
+	billingPlanEntitlementService := billingservice.NewPlanEntitlementService(
+		billingPlanEntitlementRepo,
+		billingFeatureRepo,
+	)
+	billingSubscriptionService := billingservice.NewSubscriptionService(
+		billingSubscriptionRepo,
+		billingPlanEntitlementRepo,
+		billingEntitlementSink,
+	)
+	billingInvoiceService := billingservice.NewInvoiceService(billingInvoiceRepo)
+	billingPaymentService := billingservice.NewPaymentService(
+		billingPaymentRepo,
+		billingInvoiceRepo,
+		billingSubscriptionService,
+	)
+	platformBillingHandler := billinghandler.NewPlatformBillingHandler(
+		billingPlanService,
+		billingFeatureService,
+		billingPlanEntitlementService,
+		billingSubscriptionService,
+		billingInvoiceService,
+		billingPaymentService,
+		permService,
+	)
 
 	templateRepo := notificationrepo.NewTemplateRepository(db)
 	templateRegistry := notificationtemplate.NewVariableRegistry()
@@ -145,37 +183,58 @@ func New(ctx context.Context) (*App, error) {
 		organizationrepo.NewOrganizationRepository(db),
 		organizationLifecycleService,
 	)
-	organizationDomainService := organizationservice.NewDomainService(
-		organizationrepo.NewDomainRepository(db),
-		organizationservice.NewDNSDomainVerifier(nil),
-		cfg.MultiTenant.PlatformPrimaryDomain,
-	)
 	organizationPlatformHandler := organizationhandler.NewPlatformHandler(
 		organizationPlatformService,
 		permService,
 	)
 	organizationMembershipRepository := organizationrepo.NewMembershipServiceRepository(db)
+	organizationEntitlementRepository := organizationrepo.NewEntitlementRepository(db)
+	organizationEntitlementRuntimeService := organizationservice.NewEntitlementService(
+		organizationEntitlementRepository,
+	)
+	organizationEntitlementService := organizationservice.NewEntitlementAPIService(
+		organizationEntitlementRepository,
+		organizationEntitlementRuntimeService,
+	)
+	organizationEntitlementHandler := organizationhandler.NewEntitlementHandler(
+		organizationEntitlementService,
+		permService,
+		permService,
+	)
+	billingGuardService := billingservice.NewBillingGuardService(
+		billingSubscriptionRepo,
+		organizationEntitlementRuntimeService,
+	)
 	organizationSelfService := organizationservice.NewSelfService(
 		organizationrepo.NewSelfRepository(db),
-		organizationservice.NewMembershipService(organizationMembershipRepository),
+		organizationservice.NewMembershipService(
+			organizationMembershipRepository,
+			organizationservice.WithMembershipBillingGuard(billingGuardService),
+		),
 		organizationMembershipRepository,
 	)
 	organizationSelfHandler := organizationhandler.NewSelfHandler(
 		organizationSelfService,
 		permService,
 	)
+	organizationDomainService := organizationservice.NewDomainService(
+		organizationrepo.NewDomainRepository(db),
+		organizationservice.NewDNSDomainVerifier(nil),
+		cfg.MultiTenant.PlatformPrimaryDomain,
+		organizationservice.WithDomainBillingGuard(billingGuardService),
+	)
 	organizationDomainHandler := organizationhandler.NewDomainHandler(
 		organizationDomainService,
 		permService,
 	)
-	organizationEntitlementRepository := organizationrepo.NewEntitlementRepository(db)
-	organizationEntitlementService := organizationservice.NewEntitlementAPIService(
-		organizationEntitlementRepository,
-		organizationservice.NewEntitlementService(organizationEntitlementRepository),
-	)
-	organizationEntitlementHandler := organizationhandler.NewEntitlementHandler(
+	tenantBillingService := billingservice.NewTenantBillingService(
+		billingSubscriptionService,
+		billingPlanService,
+		billingInvoiceService,
 		organizationEntitlementService,
-		permService,
+	)
+	tenantBillingHandler := billinghandler.NewTenantBillingHandler(
+		tenantBillingService,
 		permService,
 	)
 	organizationImpersonationHandler := organizationhandler.NewImpersonationHandler(
@@ -196,11 +255,23 @@ func New(ctx context.Context) (*App, error) {
 	landingVisibilitySvc := landingservice.NewVisibilityService(landingPageRepo, landingPlatformRepo, redisClient, cfg)
 	landingRevisionSvc := landingservice.NewRevisionService(landingRevisionRepo, landingPageRepo)
 	landingPublishSvc := landingservice.NewPublishService(db, landingPageRepo, landingSectionRepo, landingFormRepo, landingBrandingRepo, landingVersionRepo, cfg.App.Secret)
-	landingPageSvc := landingservice.NewPageService(landingPageRepo, landingSectionRepo)
-	landingSectionSvc := landingservice.NewSectionService(landingSectionRepo)
+	landingPageSvc := landingservice.NewPageService(
+		landingPageRepo,
+		landingSectionRepo,
+		landingservice.WithLandingPageQuotaGuard(billingGuardService),
+	)
+	landingSectionSvc := landingservice.NewSectionService(
+		landingSectionRepo,
+		landingservice.WithLandingSectionQuotaGuard(billingGuardService),
+	)
 
 	landingDomainRepo := landingrepo.NewDomainRepository(db)
-	landingDomainSvc := landingservice.NewDomainService(landingDomainRepo, landingPageRepo, db)
+	landingDomainSvc := landingservice.NewDomainService(
+		landingDomainRepo,
+		landingPageRepo,
+		db,
+		landingservice.WithLandingDomainFeatureGate(billingGuardService),
+	)
 	landingBrandingSvc := landingservice.NewBrandingService(landingBrandingRepo)
 	landingFormSvc := landingservice.NewFormService(landingFormRepo)
 	landingSubmissionRepo := landingrepo.NewSubmissionRepository(db)
@@ -211,7 +282,11 @@ func New(ctx context.Context) (*App, error) {
 	landingIntegrationRepo := landingrepo.NewIntegrationRepository(db)
 
 	landingCTASvc := landingservice.NewCTAService(landingReusableRepo)
-	landingTemplateSvc := landingservice.NewTemplateService(landingReusableRepo, landingSectionRepo)
+	landingTemplateSvc := landingservice.NewTemplateService(
+		landingReusableRepo,
+		landingSectionRepo,
+		landingservice.WithTemplateSectionQuotaGuard(billingGuardService),
+	)
 	landingMediaSvc := landingservice.NewMediaService(landingMediaRepo)
 	landingNavigationSvc := landingservice.NewNavigationService(landingReusableRepo)
 	landingDeliverySvc := landingservice.NewDeliveryService(landingIntegrationRepo, landingSubmissionRepo)
@@ -247,6 +322,8 @@ func New(ctx context.Context) (*App, error) {
 		NotificationTemplateHandler:      templateHandler,
 		NotificationVariableHandler:      variableHandler,
 		PermissionHandler:                permHandler,
+		PlatformBillingHandler:           platformBillingHandler,
+		TenantBillingHandler:             tenantBillingHandler,
 		OrganizationDomainHandler:        organizationDomainHandler,
 		OrganizationEntitlementHandler:   organizationEntitlementHandler,
 		OrganizationImpersonationHandler: organizationImpersonationHandler,

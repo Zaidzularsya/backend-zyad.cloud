@@ -104,6 +104,12 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.PermissionHandler != nil {
 		deps.PermissionHandler.RegisterRoutes(protected)
 	}
+	if deps.PlatformBillingHandler != nil {
+		deps.PlatformBillingHandler.RegisterRoutes(protected)
+	}
+	if deps.TenantBillingHandler != nil {
+		deps.TenantBillingHandler.RegisterRoutes(protected)
+	}
 	if deps.NotificationTemplateHandler != nil {
 		deps.NotificationTemplateHandler.RegisterRoutes(protected)
 	}

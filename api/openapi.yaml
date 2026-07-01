@@ -3386,6 +3386,1016 @@ paths:
       responses:
         "200":
           description: Public landing event tracked successfully
+  /api/v1/platform/billing/plans:
+    get:
+      summary: List billing plans
+      operationId: listBillingPlans
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+        - name: type
+          in: query
+          schema:
+            $ref: "#/components/schemas/BillingPlanType"
+        - name: is_public
+          in: query
+          schema:
+            type: boolean
+        - name: is_active
+          in: query
+          schema:
+            type: boolean
+        - name: include_deleted
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: sort
+          in: query
+          schema:
+            type: string
+        - name: direction
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+      responses:
+        "200":
+          description: Billing plans retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingPlanListEnvelope"
+        "403":
+          description: Missing platform.billing.plan.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create a billing plan
+      operationId: createBillingPlan
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBillingPlanRequest"
+      responses:
+        "201":
+          description: Billing plan created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingPlanEnvelope"
+        "403":
+          description: Missing platform.billing.plan.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid billing plan payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/billing/plans/{id}:
+    get:
+      summary: Get a billing plan
+      operationId: getBillingPlan
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BillingPlanID"
+      responses:
+        "200":
+          description: Billing plan retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingPlanEnvelope"
+        "403":
+          description: Missing platform.billing.plan.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Billing plan not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      summary: Update a billing plan
+      operationId: updateBillingPlan
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BillingPlanID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateBillingPlanRequest"
+      responses:
+        "200":
+          description: Billing plan updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingPlanEnvelope"
+        "403":
+          description: Missing platform.billing.plan.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Billing plan not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid billing plan payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      summary: Soft delete a billing plan
+      operationId: deleteBillingPlan
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BillingPlanID"
+      responses:
+        "200":
+          description: Billing plan deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "403":
+          description: Missing platform.billing.plan.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Billing plan not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/billing/plans/{id}/prices:
+    get:
+      summary: List billing plan prices
+      operationId: listBillingPlanPrices
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BillingPlanID"
+        - name: include_deleted
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Billing plan prices retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingPlanPriceListEnvelope"
+        "403":
+          description: Missing platform.billing.plan_price.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Billing plan not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create a billing plan price
+      operationId: createBillingPlanPrice
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BillingPlanID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBillingPlanPriceRequest"
+      responses:
+        "201":
+          description: Billing plan price created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingPlanPriceEnvelope"
+        "403":
+          description: Missing platform.billing.plan_price.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Billing plan not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid billing plan price payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/billing/plans/{id}/prices/{priceId}:
+    patch:
+      summary: Update a billing plan price
+      operationId: updateBillingPlanPrice
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BillingPlanID"
+        - $ref: "#/components/parameters/BillingPlanPriceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateBillingPlanPriceRequest"
+      responses:
+        "200":
+          description: Billing plan price updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingPlanPriceEnvelope"
+        "403":
+          description: Missing platform.billing.plan_price.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Billing plan or billing plan price not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid billing plan price payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      summary: Soft delete a billing plan price
+      operationId: deleteBillingPlanPrice
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BillingPlanID"
+        - $ref: "#/components/parameters/BillingPlanPriceID"
+      responses:
+        "200":
+          description: Billing plan price deleted successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "403":
+          description: Missing platform.billing.plan_price.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Billing plan or billing plan price not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/billing/plans/{id}/entitlements:
+    get:
+      summary: List plan entitlements
+      operationId: listBillingPlanEntitlements
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BillingPlanID"
+      responses:
+        "200":
+          description: Billing plan entitlements retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingPlanEntitlementListEnvelope"
+        "403":
+          description: Missing platform.billing.entitlement.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Billing plan not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      summary: Replace plan entitlements
+      operationId: replaceBillingPlanEntitlements
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BillingPlanID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplaceBillingPlanEntitlementsRequest"
+      responses:
+        "200":
+          description: Billing plan entitlements updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingPlanEntitlementListEnvelope"
+        "403":
+          description: Missing platform.billing.entitlement.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Billing plan not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid entitlement payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/billing/features:
+    get:
+      summary: List billing features
+      operationId: listBillingFeatures
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+        - name: module
+          in: query
+          schema:
+            type: string
+        - name: is_active
+          in: query
+          schema:
+            type: boolean
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Billing features retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingFeatureListEnvelope"
+        "403":
+          description: Missing platform.billing.feature.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create a billing feature
+      operationId: createBillingFeature
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBillingFeatureRequest"
+      responses:
+        "201":
+          description: Billing feature created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingFeatureEnvelope"
+        "403":
+          description: Missing platform.billing.feature.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid billing feature payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/billing/features/{id}:
+    patch:
+      summary: Update a billing feature
+      operationId: updateBillingFeature
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BillingFeatureID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateBillingFeatureRequest"
+      responses:
+        "200":
+          description: Billing feature updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingFeatureEnvelope"
+        "403":
+          description: Missing platform.billing.feature.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Billing feature not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid billing feature payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/billing/subscriptions:
+    get:
+      summary: List billing subscriptions
+      operationId: listBillingSubscriptions
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+        - name: organization_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: plan_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/BillingSubscriptionStatus"
+      responses:
+        "200":
+          description: Billing subscriptions retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingSubscriptionListEnvelope"
+        "403":
+          description: Missing platform.billing.subscription.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create a billing subscription
+      operationId: createBillingSubscription
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBillingSubscriptionRequest"
+      responses:
+        "201":
+          description: Billing subscription created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingSubscriptionEnvelope"
+        "403":
+          description: Missing platform.billing.subscription.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid billing subscription payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/billing/subscriptions/{id}:
+    patch:
+      summary: Update a billing subscription
+      operationId: updateBillingSubscription
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BillingSubscriptionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateBillingSubscriptionRequest"
+      responses:
+        "200":
+          description: Billing subscription updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingSubscriptionEnvelope"
+        "403":
+          description: Missing platform.billing.subscription.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Billing subscription not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid billing subscription payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/billing/subscriptions/{id}/cancel:
+    post:
+      summary: Cancel a billing subscription
+      operationId: cancelBillingSubscription
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BillingSubscriptionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelBillingSubscriptionRequest"
+      responses:
+        "200":
+          description: Billing subscription canceled successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingSubscriptionEnvelope"
+        "403":
+          description: Missing platform.billing.subscription.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Billing subscription not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/billing/subscriptions/{id}/suspend:
+    post:
+      summary: Suspend a billing subscription
+      operationId: suspendBillingSubscription
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BillingSubscriptionID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelBillingSubscriptionRequest"
+      responses:
+        "200":
+          description: Billing subscription suspended successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingSubscriptionEnvelope"
+        "403":
+          description: Missing platform.billing.subscription.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Billing subscription not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/billing/invoices:
+    get:
+      summary: List billing invoices
+      operationId: listBillingInvoices
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+        - name: organization_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: subscription_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/BillingInvoiceStatus"
+      responses:
+        "200":
+          description: Billing invoices retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingInvoiceListEnvelope"
+        "403":
+          description: Missing platform.billing.invoice.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create a billing invoice
+      operationId: createBillingInvoice
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBillingInvoiceRequest"
+      responses:
+        "201":
+          description: Billing invoice created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingInvoiceEnvelope"
+        "403":
+          description: Missing platform.billing.invoice.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid billing invoice payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/billing/invoices/{id}/mark-paid:
+    post:
+      summary: Mark a billing invoice as paid
+      operationId: markBillingInvoicePaid
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BillingInvoiceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarkBillingInvoicePaidRequest"
+      responses:
+        "200":
+          description: Billing invoice marked as paid successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingPaymentEnvelope"
+        "403":
+          description: Missing platform.billing.payment.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Billing invoice not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Billing payment already processed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/app/billing/current-plan:
+    get:
+      summary: Get current organization billing plan
+      operationId: getCurrentBillingPlan
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Current billing plan retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingCurrentPlanEnvelope"
+        "403":
+          description: Missing organization.billing.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Billing subscription not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/app/billing/usage:
+    get:
+      summary: Check current organization billing usage
+      operationId: checkBillingUsage
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: feature_key
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: metric_key
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit_key
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: period_start
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - name: period_end
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Billing usage retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingUsageEnvelope"
+        "403":
+          description: Missing organization.billing.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid usage query
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/app/billing/invoices:
+    get:
+      summary: List current organization billing invoices
+      operationId: listCurrentOrganizationBillingInvoices
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/BillingInvoiceStatus"
+      responses:
+        "200":
+          description: Billing invoices retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingInvoiceListEnvelope"
+        "403":
+          description: Missing organization.billing.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/app/billing/upgrade:
+    post:
+      summary: Create a billing upgrade invoice for the current organization
+      operationId: requestBillingUpgrade
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpgradeBillingSubscriptionRequest"
+      responses:
+        "201":
+          description: Billing upgrade invoice created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingInvoiceEnvelope"
+        "403":
+          description: Missing organization.billing.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Current subscription or target plan not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid upgrade request payload or unavailable target plan price
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/app/billing/cancel:
+    post:
+      summary: Schedule current organization subscription for cancellation
+      operationId: cancelCurrentBillingSubscription
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelBillingSubscriptionRequest"
+      responses:
+        "200":
+          description: Billing subscription scheduled for cancellation successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingSubscriptionEnvelope"
+        "403":
+          description: Missing organization.billing.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Billing subscription not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   parameters:
     OrganizationID:
@@ -3403,6 +4413,41 @@ components:
         type: string
         format: uuid
     DomainID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BillingPlanID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BillingPlanPriceID:
+      name: priceId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BillingFeatureID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BillingSubscriptionID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BillingInvoiceID:
       name: id
       in: path
       required: true
@@ -4121,6 +5166,907 @@ components:
           type: string
         data:
           $ref: "#/components/schemas/OrganizationUsage"
+    BillingPlanType:
+      type: string
+      enum: [free, trial, paid, enterprise]
+    BillingInterval:
+      type: string
+      enum: [monthly, yearly, one_time, custom]
+    BillingSubscriptionInterval:
+      type: string
+      enum: [monthly, yearly, custom]
+    BillingFeatureValueType:
+      type: string
+      enum: [boolean, integer, string, decimal]
+    BillingFeatureResetStrategy:
+      type: string
+      enum: [never, monthly, yearly, custom]
+    BillingSubscriptionStatus:
+      type: string
+      enum: [trialing, active, past_due, grace_period, suspended, canceled, expired]
+    BillingInvoiceStatus:
+      type: string
+      enum: [draft, open, paid, void, expired, failed]
+    BillingPaymentStatus:
+      type: string
+      enum: [pending, paid, failed, expired, refunded]
+    BillingPaymentProvider:
+      type: string
+      enum: [manual, xendit, midtrans]
+    BillingInvoiceItemType:
+      type: string
+      enum: [subscription, addon, adjustment, tax, discount]
+    BillingPlanPrice:
+      type: object
+      required:
+        - id
+        - plan_id
+        - billing_interval
+        - currency
+        - amount
+        - is_active
+        - metadata
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        plan_id:
+          type: string
+          format: uuid
+        billing_interval:
+          $ref: "#/components/schemas/BillingInterval"
+        currency:
+          type: string
+        amount:
+          type: string
+        is_active:
+          type: boolean
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+    BillingPlan:
+      type: object
+      required:
+        - id
+        - code
+        - name
+        - plan_type
+        - is_public
+        - is_active
+        - sort_order
+        - metadata
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        plan_type:
+          $ref: "#/components/schemas/BillingPlanType"
+        is_public:
+          type: boolean
+        is_active:
+          type: boolean
+        sort_order:
+          type: integer
+        metadata:
+          type: object
+          additionalProperties: true
+        prices:
+          type: array
+          items:
+            $ref: "#/components/schemas/BillingPlanPrice"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+    BillingFeature:
+      type: object
+      required:
+        - id
+        - feature_key
+        - module
+        - name
+        - value_type
+        - reset_strategy
+        - is_active
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        feature_key:
+          type: string
+        module:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        value_type:
+          $ref: "#/components/schemas/BillingFeatureValueType"
+        unit:
+          type: string
+        reset_strategy:
+          $ref: "#/components/schemas/BillingFeatureResetStrategy"
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    BillingPlanEntitlement:
+      type: object
+      required:
+        - id
+        - plan_id
+        - feature_id
+        - feature_key
+        - limits
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        plan_id:
+          type: string
+          format: uuid
+        feature_id:
+          type: string
+          format: uuid
+        feature_key:
+          type: string
+        value_bool:
+          type: boolean
+          nullable: true
+        value_int:
+          type: integer
+          format: int64
+          nullable: true
+        value_decimal:
+          type: string
+          nullable: true
+        value_string:
+          type: string
+          nullable: true
+        limits:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    BillingSubscription:
+      type: object
+      required:
+        - id
+        - organization_id
+        - plan_id
+        - status
+        - billing_interval
+        - cancel_at_period_end
+        - metadata
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        plan_id:
+          type: string
+          format: uuid
+        plan:
+          $ref: "#/components/schemas/BillingPlan"
+        status:
+          $ref: "#/components/schemas/BillingSubscriptionStatus"
+        billing_interval:
+          $ref: "#/components/schemas/BillingSubscriptionInterval"
+        current_period_start:
+          type: string
+          format: date-time
+          nullable: true
+        current_period_end:
+          type: string
+          format: date-time
+          nullable: true
+        trial_start:
+          type: string
+          format: date-time
+          nullable: true
+        trial_end:
+          type: string
+          format: date-time
+          nullable: true
+        cancel_at_period_end:
+          type: boolean
+        canceled_at:
+          type: string
+          format: date-time
+          nullable: true
+        suspended_at:
+          type: string
+          format: date-time
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    BillingInvoiceItem:
+      type: object
+      required:
+        - id
+        - invoice_id
+        - item_type
+        - description
+        - quantity
+        - unit_amount
+        - total_amount
+        - metadata
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        invoice_id:
+          type: string
+          format: uuid
+        item_type:
+          $ref: "#/components/schemas/BillingInvoiceItemType"
+        description:
+          type: string
+        quantity:
+          type: string
+        unit_amount:
+          type: string
+        total_amount:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    BillingInvoice:
+      type: object
+      required:
+        - id
+        - organization_id
+        - invoice_number
+        - status
+        - currency
+        - subtotal_amount
+        - discount_amount
+        - tax_amount
+        - total_amount
+        - metadata
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        subscription_id:
+          type: string
+          format: uuid
+          nullable: true
+        invoice_number:
+          type: string
+        status:
+          $ref: "#/components/schemas/BillingInvoiceStatus"
+        currency:
+          type: string
+        subtotal_amount:
+          type: string
+        discount_amount:
+          type: string
+        tax_amount:
+          type: string
+        total_amount:
+          type: string
+        due_date:
+          type: string
+          format: date-time
+          nullable: true
+        paid_at:
+          type: string
+          format: date-time
+          nullable: true
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/BillingInvoiceItem"
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    BillingPayment:
+      type: object
+      required:
+        - id
+        - invoice_id
+        - organization_id
+        - provider
+        - status
+        - amount
+        - currency
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        invoice_id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        provider:
+          $ref: "#/components/schemas/BillingPaymentProvider"
+        provider_reference:
+          type: string
+        payment_method:
+          type: string
+        status:
+          $ref: "#/components/schemas/BillingPaymentStatus"
+        amount:
+          type: string
+        currency:
+          type: string
+        paid_at:
+          type: string
+          format: date-time
+          nullable: true
+        raw_payload:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    BillingUsageItem:
+      type: object
+      required:
+        - feature_key
+        - used_value
+      properties:
+        feature_key:
+          type: string
+        metric_key:
+          type: string
+        used_value:
+          type: string
+        limit_value:
+          type: string
+          nullable: true
+        remaining_value:
+          type: string
+          nullable: true
+        period_start:
+          type: string
+          format: date-time
+          nullable: true
+        period_end:
+          type: string
+          format: date-time
+          nullable: true
+    BillingCurrentPlan:
+      type: object
+      required:
+        - subscription
+      properties:
+        subscription:
+          $ref: "#/components/schemas/BillingSubscription"
+        usage:
+          type: array
+          items:
+            $ref: "#/components/schemas/BillingUsageItem"
+    BillingPlanPriceRequest:
+      type: object
+      required:
+        - billing_interval
+        - amount
+      properties:
+        billing_interval:
+          $ref: "#/components/schemas/BillingInterval"
+        currency:
+          type: string
+        amount:
+          type: string
+        is_active:
+          type: boolean
+        metadata:
+          type: object
+          additionalProperties: true
+    CreateBillingPlanPriceRequest:
+      allOf:
+        - $ref: "#/components/schemas/BillingPlanPriceRequest"
+    UpdateBillingPlanPriceRequest:
+      type: object
+      minProperties: 1
+      properties:
+        billing_interval:
+          $ref: "#/components/schemas/BillingInterval"
+        currency:
+          type: string
+        amount:
+          type: string
+        is_active:
+          type: boolean
+        metadata:
+          type: object
+          additionalProperties: true
+    CreateBillingPlanRequest:
+      type: object
+      required:
+        - code
+        - name
+        - plan_type
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        plan_type:
+          $ref: "#/components/schemas/BillingPlanType"
+        is_public:
+          type: boolean
+        is_active:
+          type: boolean
+        sort_order:
+          type: integer
+        metadata:
+          type: object
+          additionalProperties: true
+        prices:
+          type: array
+          items:
+            $ref: "#/components/schemas/BillingPlanPriceRequest"
+    UpdateBillingPlanRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        plan_type:
+          $ref: "#/components/schemas/BillingPlanType"
+        is_public:
+          type: boolean
+        is_active:
+          type: boolean
+        sort_order:
+          type: integer
+        metadata:
+          type: object
+          additionalProperties: true
+    CreateBillingFeatureRequest:
+      type: object
+      required:
+        - feature_key
+        - module
+        - name
+        - value_type
+      properties:
+        feature_key:
+          type: string
+        module:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        value_type:
+          $ref: "#/components/schemas/BillingFeatureValueType"
+        unit:
+          type: string
+        reset_strategy:
+          $ref: "#/components/schemas/BillingFeatureResetStrategy"
+        is_active:
+          type: boolean
+    UpdateBillingFeatureRequest:
+      type: object
+      minProperties: 1
+      properties:
+        module:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        value_type:
+          $ref: "#/components/schemas/BillingFeatureValueType"
+        unit:
+          type: string
+        reset_strategy:
+          $ref: "#/components/schemas/BillingFeatureResetStrategy"
+        is_active:
+          type: boolean
+    BillingPlanEntitlementValueRequest:
+      type: object
+      required:
+        - feature_key
+      properties:
+        feature_key:
+          type: string
+        value_bool:
+          type: boolean
+        value_int:
+          type: integer
+          format: int64
+        value_decimal:
+          type: string
+        value_string:
+          type: string
+        limits:
+          type: object
+          additionalProperties: true
+    ReplaceBillingPlanEntitlementsRequest:
+      type: object
+      required:
+        - entitlements
+      properties:
+        entitlements:
+          type: array
+          items:
+            $ref: "#/components/schemas/BillingPlanEntitlementValueRequest"
+    CreateBillingSubscriptionRequest:
+      type: object
+      required:
+        - organization_id
+        - plan_id
+        - billing_interval
+      properties:
+        organization_id:
+          type: string
+          format: uuid
+        plan_id:
+          type: string
+          format: uuid
+        billing_interval:
+          $ref: "#/components/schemas/BillingSubscriptionInterval"
+        status:
+          $ref: "#/components/schemas/BillingSubscriptionStatus"
+        current_period_start:
+          type: string
+          format: date-time
+        current_period_end:
+          type: string
+          format: date-time
+        trial_start:
+          type: string
+          format: date-time
+        trial_end:
+          type: string
+          format: date-time
+        cancel_at_period_end:
+          type: boolean
+        metadata:
+          type: object
+          additionalProperties: true
+    UpdateBillingSubscriptionRequest:
+      type: object
+      minProperties: 1
+      properties:
+        plan_id:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/BillingSubscriptionStatus"
+        billing_interval:
+          $ref: "#/components/schemas/BillingSubscriptionInterval"
+        current_period_start:
+          type: string
+          format: date-time
+        current_period_end:
+          type: string
+          format: date-time
+        trial_start:
+          type: string
+          format: date-time
+        trial_end:
+          type: string
+          format: date-time
+        cancel_at_period_end:
+          type: boolean
+        metadata:
+          type: object
+          additionalProperties: true
+        reason:
+          type: string
+    CreateBillingInvoiceItemRequest:
+      type: object
+      required:
+        - item_type
+        - description
+        - unit_amount
+      properties:
+        item_type:
+          $ref: "#/components/schemas/BillingInvoiceItemType"
+        description:
+          type: string
+        quantity:
+          type: string
+        unit_amount:
+          type: string
+        metadata:
+          type: object
+          additionalProperties: true
+    CreateBillingInvoiceRequest:
+      type: object
+      required:
+        - organization_id
+        - items
+      properties:
+        organization_id:
+          type: string
+          format: uuid
+        subscription_id:
+          type: string
+          format: uuid
+        currency:
+          type: string
+        due_date:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CreateBillingInvoiceItemRequest"
+        metadata:
+          type: object
+          additionalProperties: true
+    MarkBillingInvoicePaidRequest:
+      type: object
+      properties:
+        provider:
+          $ref: "#/components/schemas/BillingPaymentProvider"
+        provider_reference:
+          type: string
+        payment_method:
+          type: string
+        amount:
+          type: string
+        currency:
+          type: string
+        paid_at:
+          type: string
+          format: date-time
+        raw_payload:
+          type: object
+          additionalProperties: true
+    CancelBillingSubscriptionRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+    UpgradeBillingSubscriptionRequest:
+      type: object
+      required:
+        - plan_id
+      properties:
+        plan_id:
+          type: string
+          format: uuid
+        billing_interval:
+          $ref: "#/components/schemas/BillingSubscriptionInterval"
+        reason:
+          type: string
+    BillingPlanEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/BillingPlan"
+    BillingPlanPriceEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/BillingPlanPrice"
+    BillingPlanPriceListEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/BillingPlanPrice"
+    BillingPlanListEnvelope:
+      type: object
+      required: [success, message, data, meta]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/BillingPlan"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+    BillingFeatureEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/BillingFeature"
+    BillingFeatureListEnvelope:
+      type: object
+      required: [success, message, data, meta]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/BillingFeature"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+    BillingPlanEntitlementListEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/BillingPlanEntitlement"
+    BillingSubscriptionEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/BillingSubscription"
+    BillingSubscriptionListEnvelope:
+      type: object
+      required: [success, message, data, meta]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/BillingSubscription"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+    BillingInvoiceEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/BillingInvoice"
+    BillingInvoiceListEnvelope:
+      type: object
+      required: [success, message, data, meta]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/BillingInvoice"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+    BillingPaymentEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/BillingPayment"
+    BillingUsageEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/BillingUsageItem"
+    BillingCurrentPlanEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/BillingCurrentPlan"
     StartOrganizationImpersonationRequest:
       type: object
       required: [reason, expires_at]

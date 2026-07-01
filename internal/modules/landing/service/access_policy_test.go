@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	coretenant "zyad.cloud/internal/core/tenant"
+	coreerrors "zyad.cloud/internal/core/errors"
 	landingdomain "zyad.cloud/internal/modules/landing/domain"
 	organizationmodel "zyad.cloud/internal/modules/organization/model"
 )
@@ -145,6 +146,39 @@ func TestAccessPolicyPublicScopeAcceptsPlatformHostContext(t *testing.T) {
 	if scope.OrganizationID() != accessPolicyOrganizationID ||
 		features.featureKey != landingdomain.FeatureLandingEnabled {
 		t.Fatalf("scope=%#v features=%#v", scope, features)
+	}
+}
+
+func TestAccessPolicyAdminScopePropagatesSuspendedSubscription(t *testing.T) {
+	permissions := &accessPolicyPermissionChecker{}
+	features := &accessPolicyFeatureGate{
+		err: coreerrors.New(
+			"SUBSCRIPTION_SUSPENDED",
+			"billing subscription is suspended",
+			403,
+		),
+	}
+	policy := NewAccessPolicy(permissions, features)
+
+	_, err := policy.AdminScope(
+		context.Background(),
+		accessPolicyTenantContext(
+			t,
+			coretenant.OrganizationTypeCustomer,
+			coretenant.ResolutionSourceSession,
+		),
+		accessPolicyUserID,
+		landingdomain.PermissionPageRead,
+	)
+	if err == nil {
+		t.Fatal("AdminScope() expected suspended subscription error")
+	}
+	appErr, ok := err.(*coreerrors.AppError)
+	if !ok {
+		t.Fatalf("error type = %T, want *AppError", err)
+	}
+	if appErr.Code != "SUBSCRIPTION_SUSPENDED" {
+		t.Fatalf("error code = %s, want SUBSCRIPTION_SUSPENDED", appErr.Code)
 	}
 }
 

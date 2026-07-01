@@ -14,6 +14,7 @@ import (
 
 type domainStoreStub struct {
 	domain             model.OrganizationDomain
+	domains            []model.OrganizationDomain
 	createParams       repository.CreateDomainParams
 	verificationParams repository.UpdateDomainVerificationParams
 	activated          bool
@@ -53,6 +54,9 @@ func (s *domainStoreStub) ListByOrganization(
 	string,
 	repository.DomainListFilter,
 ) ([]model.OrganizationDomain, int64, error) {
+	if s.domains != nil {
+		return s.domains, int64(len(s.domains)), nil
+	}
 	return []model.OrganizationDomain{s.domain}, 1, nil
 }
 
@@ -105,6 +109,44 @@ type domainVerifierStub struct {
 	err          error
 	recordName   string
 	expectedHash string
+}
+
+type domainBillingGuardStub struct {
+	featureOrganizationID string
+	featureKey            string
+	featureErr            error
+	quotaOrganizationID   string
+	quotaFeatureKey       string
+	quotaLimitKey         string
+	quotaUsed             int64
+	quotaDelta            int64
+	quotaErr              error
+}
+
+func (g *domainBillingGuardStub) RequireFeature(
+	_ context.Context,
+	organizationID string,
+	featureKey string,
+) (model.Entitlement, error) {
+	g.featureOrganizationID = organizationID
+	g.featureKey = featureKey
+	return model.Entitlement{OrganizationID: organizationID, FeatureKey: featureKey}, g.featureErr
+}
+
+func (g *domainBillingGuardStub) RequireQuotaValue(
+	_ context.Context,
+	organizationID string,
+	featureKey string,
+	limitKey string,
+	usedValue int64,
+	delta int64,
+) error {
+	g.quotaOrganizationID = organizationID
+	g.quotaFeatureKey = featureKey
+	g.quotaLimitKey = limitKey
+	g.quotaUsed = usedValue
+	g.quotaDelta = delta
+	return g.quotaErr
 }
 
 func (v *domainVerifierStub) VerifyTXT(
@@ -278,5 +320,74 @@ func TestDomainServiceRejectsInvalidHostAndPrematurePrimary(t *testing.T) {
 	)
 	if err == nil {
 		t.Fatal("Create() error = nil, want premature primary rejection")
+	}
+}
+
+func TestDomainServiceCreateCustomChecksBillingGuard(t *testing.T) {
+	store := &domainStoreStub{
+		domains: []model.OrganizationDomain{
+			{ID: "active-1", Type: model.DomainTypeCustom, Status: model.DomainStatusActive},
+			{ID: "verified-1", Type: model.DomainTypeCustom, Status: model.DomainStatusVerified},
+			{ID: "pending-1", Type: model.DomainTypeCustom, Status: model.DomainStatusPending},
+		},
+	}
+	guard := &domainBillingGuardStub{}
+	service := NewDomainService(
+		store,
+		nil,
+		"example.test",
+		WithDomainBillingGuard(guard),
+	)
+	service.generateToken = func(int) (string, error) {
+		return "plain-domain-token", nil
+	}
+
+	_, err := service.Create(
+		context.Background(),
+		"11111111-1111-1111-1111-111111111111",
+		dto.CreateDomainRequest{
+			Type:          "custom",
+			CanonicalHost: "www.example.com",
+		},
+		"33333333-3333-3333-3333-333333333333",
+	)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if guard.featureOrganizationID != "11111111-1111-1111-1111-111111111111" ||
+		guard.featureKey != featureDomainEnabled ||
+		guard.quotaOrganizationID != "11111111-1111-1111-1111-111111111111" ||
+		guard.quotaFeatureKey != featureDomainMaxCustomDomains ||
+		guard.quotaLimitKey != "limit" ||
+		guard.quotaUsed != 2 ||
+		guard.quotaDelta != 1 {
+		t.Fatalf("guard = %#v", guard)
+	}
+}
+
+func TestDomainServiceCreateCustomStopsWhenBillingGuardFails(t *testing.T) {
+	store := &domainStoreStub{}
+	guard := &domainBillingGuardStub{featureErr: errors.New("feature disabled")}
+	service := NewDomainService(
+		store,
+		nil,
+		"example.test",
+		WithDomainBillingGuard(guard),
+	)
+
+	_, err := service.Create(
+		context.Background(),
+		"11111111-1111-1111-1111-111111111111",
+		dto.CreateDomainRequest{
+			Type:          "custom",
+			CanonicalHost: "www.example.com",
+		},
+		"33333333-3333-3333-3333-333333333333",
+	)
+	if err == nil {
+		t.Fatal("Create() error = nil, want billing guard error")
+	}
+	if store.createParams.OrganizationID != "" {
+		t.Fatalf("Create() should not persist domain when guard fails: %#v", store.createParams)
 	}
 }

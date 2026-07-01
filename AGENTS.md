@@ -154,6 +154,9 @@ Dokumen revamp dan traceability ada di:
 - `docs/auth-user-migration-seed-plan.md` untuk rencana migration dan seed super admin Auth/User.
 - `docs/notification-development-tasks.md` untuk breakdown task development core notification dan provider adapter.
 - `docs/notification-traceability-index.md` untuk traceability requirement, config, API, migration, dan status Notification.
+- `docs/billing-plan-concept-reference.md` untuk konsep domain Plan, Billing, Subscription, Entitlement, Quota, Invoice, dan Payment.
+- `docs/billing-plan-development-tasks.md` untuk breakdown pekerjaan module `internal/modules/billing`.
+- `docs/billing-plan-development-traceability.md` untuk traceability requirement, migration, seed, API, permission, test, dan status Billing Plan.
 
 ## Auth dan User Workflow
 
@@ -175,3 +178,16 @@ Saat mengerjakan core notification, jadikan urutan baca berikut sebagai acuan:
 3. `docs/notification-development-tasks.md` untuk breakdown pekerjaan.
 4. `docs/notification-traceability-index.md` untuk melacak requirement, config, API, migration, dan status.
 5. `docs/migration-guide.md` sebelum membuat migration notification.
+
+## Billing Plan Workflow
+
+Saat mengerjakan Plan, Billing, Subscription, Entitlement, Quota, Invoice, dan Payment, jadikan urutan baca berikut sebagai acuan:
+
+1. `README.md` untuk konteks platform multi-tenant.
+2. `docs/reference-plan-billing-subscribe.md` untuk source requirement awal.
+3. `docs/billing-plan-concept-reference.md` untuk konsep domain dan integrasi dengan repository existing.
+4. `docs/billing-plan-development-tasks.md` untuk breakdown pekerjaan.
+5. `docs/billing-plan-development-traceability.md` untuk melacak requirement, migration, seed, API, permission, dan test.
+6. `docs/migration-guide.md` sebelum membuat migration billing.
+
+Catatan penting: runtime entitlement dan usage quota sudah ada di `organization_entitlements` dan `organization_usage_counters`. Jangan membuat source of truth kedua tanpa migration deprecation yang eksplisit.

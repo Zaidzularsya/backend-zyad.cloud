@@ -21,16 +21,45 @@ import (
 type pageService struct {
 	pageRepo    repository.PageRepository
 	sectionRepo repository.SectionRepository
+	quotaGuard  LandingPageQuotaGuard
 }
 
-func NewPageService(pageRepo repository.PageRepository, sectionRepo repository.SectionRepository) PageService {
-	return &pageService{
-		pageRepo:    pageRepo,
-		sectionRepo: sectionRepo,
+type LandingPageQuotaGuard interface {
+	RequireQuotaValue(
+		context.Context,
+		string,
+		string,
+		string,
+		int64,
+		int64,
+	) error
+}
+
+type PageServiceOption func(*pageService)
+
+func WithLandingPageQuotaGuard(guard LandingPageQuotaGuard) PageServiceOption {
+	return func(service *pageService) {
+		service.quotaGuard = guard
 	}
 }
 
+func NewPageService(pageRepo repository.PageRepository, sectionRepo repository.SectionRepository, options ...PageServiceOption) PageService {
+	service := &pageService{
+		pageRepo:    pageRepo,
+		sectionRepo: sectionRepo,
+	}
+	for _, option := range options {
+		option(service)
+	}
+	return service
+}
+
 func (s *pageService) Create(ctx context.Context, scope coretenant.Scope, params repository.CreatePageParams) (domain.LandingPage, error) {
+	if !params.IsTemplate {
+		if err := s.requireCreateQuota(ctx, scope); err != nil {
+			return domain.LandingPage{}, err
+		}
+	}
 	// Sanitize and generate a safe slug
 	params.Slug = generateSafeSlug(params.Slug, params.Title)
 
@@ -39,6 +68,28 @@ func (s *pageService) Create(ctx context.Context, scope coretenant.Scope, params
 		return domain.LandingPage{}, mapPagePersistenceError(err)
 	}
 	return page, nil
+}
+
+func (s *pageService) requireCreateQuota(ctx context.Context, scope coretenant.Scope) error {
+	if s.quotaGuard == nil {
+		return nil
+	}
+	isTemplate := false
+	_, total, err := s.pageRepo.List(ctx, scope, repository.PageListFilter{
+		IsTemplate: &isTemplate,
+		Limit:      1,
+	})
+	if err != nil {
+		return mapPagePersistenceError(err)
+	}
+	return s.quotaGuard.RequireQuotaValue(
+		ctx,
+		scope.OrganizationID(),
+		domain.FeatureLandingMaxPages,
+		"limit",
+		total,
+		1,
+	)
 }
 
 func (s *pageService) Get(ctx context.Context, scope coretenant.Scope, id string) (domain.LandingPage, error) {
@@ -75,10 +126,19 @@ func (s *pageService) Duplicate(ctx context.Context, scope coretenant.Scope, par
 		return domain.LandingPage{}, err
 	}
 
-	// 2. Generate new slug
+	// 2. Load sections first so quota can be checked before creating the duplicate page.
+	sections, err := s.sectionRepo.ListByPage(ctx, scope, originalPage.ID)
+	if err != nil {
+		return domain.LandingPage{}, err
+	}
+	if err := s.requireDuplicateSectionQuota(ctx, scope, len(sections)); err != nil {
+		return domain.LandingPage{}, err
+	}
+
+	// 3. Generate new slug
 	newSlug := fmt.Sprintf("%s-copy-%d", originalPage.Slug, time.Now().Unix())
 
-	// 3. Create new page as Draft
+	// 4. Create new page as Draft
 	createParams := repository.CreatePageParams{
 		Name:       originalPage.Name + " (Copy)",
 		Title:      originalPage.Title,
@@ -98,27 +158,42 @@ func (s *pageService) Duplicate(ctx context.Context, scope coretenant.Scope, par
 		return domain.LandingPage{}, err
 	}
 
-	// 4. Duplicate sections
-	sections, err := s.sectionRepo.ListByPage(ctx, scope, originalPage.ID)
-	if err == nil {
-		for _, sec := range sections {
-			_, _ = s.sectionRepo.Create(ctx, scope, repository.CreateSectionParams{
-				LandingPageID: newPage.ID,
-				Key:           sec.Key,
-				Type:          sec.Type,
-				Name:          sec.Name,
-				SortOrder:     sec.SortOrder,
-				IsEnabled:     sec.IsEnabled,
-				Content:       sec.Content,
-				Style:         sec.Style,
-				CreatedBy:     params.UserID,
-			})
-			// Ignoring individual section copy errors to ensure page creation completes.
-			// Ideally handled in DB transaction.
-		}
+	// 5. Duplicate sections
+	for _, sec := range sections {
+		_, _ = s.sectionRepo.Create(ctx, scope, repository.CreateSectionParams{
+			LandingPageID: newPage.ID,
+			Key:           sec.Key,
+			Type:          sec.Type,
+			Name:          sec.Name,
+			SortOrder:     sec.SortOrder,
+			IsEnabled:     sec.IsEnabled,
+			Content:       sec.Content,
+			Style:         sec.Style,
+			CreatedBy:     params.UserID,
+		})
+		// Ignoring individual section copy errors to ensure page creation completes.
+		// Ideally handled in DB transaction.
 	}
 
 	return newPage, nil
+}
+
+func (s *pageService) requireDuplicateSectionQuota(
+	ctx context.Context,
+	scope coretenant.Scope,
+	sectionCount int,
+) error {
+	if s.quotaGuard == nil || sectionCount <= 0 {
+		return nil
+	}
+	return s.quotaGuard.RequireQuotaValue(
+		ctx,
+		scope.OrganizationID(),
+		domain.FeatureLandingMaxSections,
+		"limit",
+		0,
+		int64(sectionCount),
+	)
 }
 
 func (s *pageService) Archive(ctx context.Context, scope coretenant.Scope, id string, updatedBy string) error {

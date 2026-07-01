@@ -12,18 +12,70 @@ import (
 
 type sectionService struct {
 	sectionRepo repository.SectionRepository
+	quotaGuard  LandingSectionQuotaGuard
 }
 
-func NewSectionService(sectionRepo repository.SectionRepository) SectionService {
-	return &sectionService{
-		sectionRepo: sectionRepo,
+type LandingSectionQuotaGuard interface {
+	RequireQuotaValue(
+		context.Context,
+		string,
+		string,
+		string,
+		int64,
+		int64,
+	) error
+}
+
+type SectionServiceOption func(*sectionService)
+
+func WithLandingSectionQuotaGuard(guard LandingSectionQuotaGuard) SectionServiceOption {
+	return func(service *sectionService) {
+		service.quotaGuard = guard
 	}
 }
 
+func NewSectionService(
+	sectionRepo repository.SectionRepository,
+	options ...SectionServiceOption,
+) SectionService {
+	service := &sectionService{
+		sectionRepo: sectionRepo,
+	}
+	for _, option := range options {
+		option(service)
+	}
+	return service
+}
+
 func (s *sectionService) Create(ctx context.Context, scope coretenant.Scope, params repository.CreateSectionParams) (domain.LandingSection, error) {
+	if err := s.requireCreateQuota(ctx, scope, params.LandingPageID); err != nil {
+		return domain.LandingSection{}, err
+	}
 	// Sanitize content
 	params.Content = s.sanitizeMap(params.Content)
 	return s.sectionRepo.Create(ctx, scope, params)
+}
+
+func (s *sectionService) requireCreateQuota(
+	ctx context.Context,
+	scope coretenant.Scope,
+	pageID string,
+) error {
+	if s.quotaGuard == nil {
+		return nil
+	}
+	sections, err := s.sectionRepo.ListByPage(ctx, scope, pageID)
+	if err != nil {
+		return err
+	}
+	return s.quotaGuard.RequireQuotaValue(
+		ctx,
+		scope.OrganizationID(),
+		domain.FeatureLandingMaxSections,
+		"limit",
+		int64(len(sections)),
+		1,
+	)
 }
 
 func (s *sectionService) Get(ctx context.Context, scope coretenant.Scope, id string) (domain.LandingSection, error) {

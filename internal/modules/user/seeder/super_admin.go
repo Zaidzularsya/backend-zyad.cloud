@@ -42,6 +42,21 @@ var basePermissions = []PermissionSeed{
 	{Slug: "audit.read", Description: "Read audit logs"},
 	{Slug: "organization.user.read", Description: "Read organization users"},
 	{Slug: "organization.user.manage", Description: "Manage organization users"},
+	{Slug: "platform.billing.plan.read", Description: "Read billing plan catalog"},
+	{Slug: "platform.billing.plan.manage", Description: "Manage billing plans"},
+	{Slug: "platform.billing.plan_price.read", Description: "Read billing plan prices"},
+	{Slug: "platform.billing.plan_price.manage", Description: "Manage billing plan prices"},
+	{Slug: "platform.billing.feature.read", Description: "Read billing feature catalog"},
+	{Slug: "platform.billing.feature.manage", Description: "Manage billing feature catalog"},
+	{Slug: "platform.billing.entitlement.read", Description: "Read billing plan entitlements"},
+	{Slug: "platform.billing.entitlement.manage", Description: "Manage billing plan entitlements"},
+	{Slug: "platform.billing.subscription.read", Description: "Read organization subscriptions"},
+	{Slug: "platform.billing.subscription.manage", Description: "Manage organization subscriptions"},
+	{Slug: "platform.billing.invoice.read", Description: "Read billing invoices"},
+	{Slug: "platform.billing.invoice.manage", Description: "Manage billing invoices"},
+	{Slug: "platform.billing.payment.manage", Description: "Manage billing payments"},
+	{Slug: "organization.billing.read", Description: "Read current organization billing"},
+	{Slug: "organization.billing.manage", Description: "Manage current organization billing requests"},
 }
 
 func SeedSuperAdmin(ctx context.Context, db *database.Pool, cfg config.SeedAdminConfig) (Result, error) {

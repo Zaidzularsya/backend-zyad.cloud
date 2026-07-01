@@ -1,0 +1,20 @@
+- main [ref=e3]:
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - img [ref=e8]
+      - heading "Masuk ke workspace" [level=1] [ref=e12]
+      - paragraph [ref=e13]: Gunakan akun organisasi Zyad Cloud Anda.
+    - generic [ref=e14]:
+      - generic [ref=e15]:
+        - generic [ref=e16]: Email
+        - textbox "Email" [ref=e17]:
+          - /placeholder: nama@perusahaan.com
+      - generic [ref=e18]:
+        - generic [ref=e19]: Password
+        - textbox "Password" [ref=e20]:
+          - /placeholder: Minimal 8 karakter
+      - generic [ref=e21]:
+        - checkbox "Ingat perangkat ini" [ref=e22]
+        - text: Ingat perangkat ini
+      - button "Masuk" [ref=e23]
+    - generic [ref=e26]: atau

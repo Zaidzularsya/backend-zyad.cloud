@@ -177,6 +177,20 @@ Gunakan urutan berikut saat mengerjakan module Landing Page:
 
 Target canonical module adalah `internal/modules/landing`.
 
+### Billing Plan Workflow
+
+Gunakan urutan berikut saat mengerjakan Plan, Billing, Subscription, Entitlement, Quota, Invoice, dan Payment:
+
+1. `README.md` untuk konteks platform multi-tenant dan module billing.
+2. `AGENTS.md` untuk batas layer, migration, dan gaya kerja repository.
+3. `docs/reference-plan-billing-subscribe.md` untuk source requirement awal.
+4. `docs/billing-plan-concept-reference.md` untuk konsep domain, boundary, table, service, API, dan integrasi existing.
+5. `docs/billing-plan-development-tasks.md` untuk breakdown pekerjaan bertahap.
+6. `docs/billing-plan-development-traceability.md` untuk traceability requirement, migration, seed, API, permission, dan test.
+7. `docs/migration-guide.md` sebelum membuat migration billing.
+
+Target canonical module adalah `internal/modules/billing`. Runtime entitlement dan usage quota harus selaras dengan `organization_entitlements` dan `organization_usage_counters` existing.
+
 ---
 
 ## 🧪 Development Commands

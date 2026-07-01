@@ -88,3 +88,23 @@ docs/multi-tenant-schema-query-audit.md
 ```
 
 Migration organization dan tenant context harus diselesaikan sebelum migration module baru mengandalkan `organization_id`. Backfill platform/customer ownership wajib dibuat eksplisit; jangan memakai `organization_id NULL` untuk mewakili platform organization.
+
+## Rencana Migration Billing Plan
+
+Konsep, task, dan traceability Plan/Billing/Subscription ada di:
+
+```bash
+docs/billing-plan-concept-reference.md
+docs/billing-plan-development-tasks.md
+docs/billing-plan-development-traceability.md
+```
+
+Dokumentasi billing ini lahir saat migration terakhir masih `000049`, dan implementasi billing saat ini sudah memakai `000050` sampai `000056` untuk plan catalog, subscriptions, invoices/payments, events, permission seed, feature/plan seed, dan plan entitlement seed.
+
+Runtime entitlement dan usage counter sudah tersedia di:
+
+```bash
+migrations/000016_create_organization_entitlements.up.sql
+```
+
+Jangan membuat `billing_organization_entitlements` atau `billing_usage_counters` pada MVP tanpa rencana deprecation/migration yang eksplisit untuk menghindari dua source of truth.

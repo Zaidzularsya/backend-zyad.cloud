@@ -15,6 +15,8 @@ type fakeMembershipStore struct {
 	inviteParams   repository.InviteMembershipParams
 	inviteResult   model.Membership
 	inviteErr      error
+	listResult     []model.Membership
+	listTotal      int64
 	acceptParams   repository.AcceptMembershipParams
 	acceptResult   model.Membership
 	statusParams   repository.ChangeMembershipStatusParams
@@ -69,7 +71,45 @@ func (f *fakeMembershipStore) ListByOrganization(
 	_ string,
 	_ repository.MembershipListFilter,
 ) ([]model.Membership, int64, error) {
-	return nil, 0, nil
+	return f.listResult, f.listTotal, nil
+}
+
+type membershipBillingGuardStub struct {
+	featureOrganizationID string
+	featureKey            string
+	featureErr            error
+	quotaOrganizationID   string
+	quotaFeatureKey       string
+	quotaLimitKey         string
+	quotaUsed             int64
+	quotaDelta            int64
+	quotaErr              error
+}
+
+func (g *membershipBillingGuardStub) RequireFeature(
+	_ context.Context,
+	organizationID string,
+	featureKey string,
+) (model.Entitlement, error) {
+	g.featureOrganizationID = organizationID
+	g.featureKey = featureKey
+	return model.Entitlement{OrganizationID: organizationID, FeatureKey: featureKey}, g.featureErr
+}
+
+func (g *membershipBillingGuardStub) RequireQuotaValue(
+	_ context.Context,
+	organizationID string,
+	featureKey string,
+	limitKey string,
+	usedValue int64,
+	delta int64,
+) error {
+	g.quotaOrganizationID = organizationID
+	g.quotaFeatureKey = featureKey
+	g.quotaLimitKey = limitKey
+	g.quotaUsed = usedValue
+	g.quotaDelta = delta
+	return g.quotaErr
 }
 
 func TestMembershipServiceInviteHashesTokenAndNormalizesRoles(t *testing.T) {
@@ -129,5 +169,55 @@ func TestMembershipServiceMapsLastOwnerConflict(t *testing.T) {
 	var appErr *coreerrors.AppError
 	if !errors.As(err, &appErr) || appErr.Code != "MEMBERSHIP_LAST_OWNER_REQUIRED" {
 		t.Fatalf("ChangeStatus() error = %v", err)
+	}
+}
+
+func TestMembershipServiceInviteChecksBillingGuard(t *testing.T) {
+	store := &fakeMembershipStore{
+		inviteResult: model.Membership{ID: "membership-1"},
+		listResult: []model.Membership{
+			{ID: "active-1", Status: model.MembershipStatusActive},
+			{ID: "active-2", Status: model.MembershipStatusActive},
+			{ID: "invited-1", Status: model.MembershipStatusInvited},
+		},
+	}
+	guard := &membershipBillingGuardStub{}
+	service := NewMembershipService(store, WithMembershipBillingGuard(guard))
+	service.generateToken = func(int) (string, error) { return "plain-token", nil }
+
+	_, err := service.Invite(context.Background(), InviteMemberInput{
+		OrganizationID: "11111111-1111-1111-1111-111111111111",
+		Email:          "member@example.test",
+		ActorUserID:    "22222222-2222-2222-2222-222222222222",
+	})
+	if err != nil {
+		t.Fatalf("Invite() error = %v", err)
+	}
+	if guard.featureOrganizationID != "11111111-1111-1111-1111-111111111111" ||
+		guard.featureKey != featureUsersInviteUser ||
+		guard.quotaOrganizationID != "11111111-1111-1111-1111-111111111111" ||
+		guard.quotaFeatureKey != featureUsersMaxUsers ||
+		guard.quotaLimitKey != "limit" ||
+		guard.quotaUsed != 2 ||
+		guard.quotaDelta != 1 {
+		t.Fatalf("guard = %#v", guard)
+	}
+}
+
+func TestMembershipServiceInviteStopsWhenBillingGuardFails(t *testing.T) {
+	store := &fakeMembershipStore{}
+	guard := &membershipBillingGuardStub{featureErr: errors.New("feature disabled")}
+	service := NewMembershipService(store, WithMembershipBillingGuard(guard))
+
+	_, err := service.Invite(context.Background(), InviteMemberInput{
+		OrganizationID: "11111111-1111-1111-1111-111111111111",
+		Email:          "member@example.test",
+		ActorUserID:    "22222222-2222-2222-2222-222222222222",
+	})
+	if err == nil {
+		t.Fatal("Invite() error = nil, want guard error")
+	}
+	if store.inviteParams.OrganizationID != "" {
+		t.Fatalf("Invite() should not persist invite when guard fails: %#v", store.inviteParams)
 	}
 }

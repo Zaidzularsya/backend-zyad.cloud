@@ -55,23 +55,53 @@ type DomainStore interface {
 type DomainService struct {
 	store                 DomainStore
 	verifier              DomainVerifier
+	guard                 DomainBillingGuard
 	platformPrimaryDomain string
 	now                   func() time.Time
 	generateToken         func(int) (string, error)
+}
+
+type DomainBillingGuard interface {
+	RequireFeature(
+		context.Context,
+		string,
+		string,
+	) (model.Entitlement, error)
+	RequireQuotaValue(
+		context.Context,
+		string,
+		string,
+		string,
+		int64,
+		int64,
+	) error
+}
+
+type DomainServiceOption func(*DomainService)
+
+func WithDomainBillingGuard(guard DomainBillingGuard) DomainServiceOption {
+	return func(service *DomainService) {
+		service.guard = guard
+	}
 }
 
 func NewDomainService(
 	store DomainStore,
 	verifier DomainVerifier,
 	platformPrimaryDomain string,
+	options ...DomainServiceOption,
 ) *DomainService {
-	return &DomainService{
+	service := &DomainService{
 		store:                 store,
 		verifier:              verifier,
 		platformPrimaryDomain: normalizeDomainHost(platformPrimaryDomain),
 		now:                   time.Now,
 		generateToken:         coreauth.NewRandomToken,
 	}
+	for _, option := range options {
+		option(service)
+	}
+	return service
 }
 
 func (s *DomainService) List(
@@ -162,6 +192,11 @@ func (s *DomainService) Create(
 			)
 		}
 	}
+	if domainType == model.DomainTypeCustom {
+		if err := s.requireCustomDomainCreate(ctx, strings.TrimSpace(organizationID)); err != nil {
+			return dto.DomainChallengeResponse{}, err
+		}
+	}
 	token, err := s.generateToken(32)
 	if err != nil {
 		return dto.DomainChallengeResponse{}, coreerrors.Wrap(
@@ -192,6 +227,50 @@ func (s *DomainService) Create(
 		RecordName:    verificationRecordName(domain.CanonicalHost),
 		RecordValue:   token,
 	}, nil
+}
+
+const (
+	featureDomainEnabled          = "domain.enabled"
+	featureDomainMaxCustomDomains = "domain.max_custom_domains"
+)
+
+func (s *DomainService) requireCustomDomainCreate(
+	ctx context.Context,
+	organizationID string,
+) error {
+	if s == nil || s.guard == nil {
+		return nil
+	}
+	if _, err := s.guard.RequireFeature(ctx, organizationID, featureDomainEnabled); err != nil {
+		return err
+	}
+	domains, _, err := s.store.ListByOrganization(ctx, organizationID, repository.DomainListFilter{
+		Type:           model.DomainTypeCustom,
+		IncludeDeleted: false,
+		Limit:          100,
+		Offset:         0,
+	})
+	if err != nil {
+		return mapDomainError(
+			"DOMAIN_LIST_FAILED",
+			"failed to list organization domains",
+			err,
+		)
+	}
+	var used int64
+	for _, domain := range domains {
+		if domain.Status == model.DomainStatusVerified || domain.Status == model.DomainStatusActive {
+			used++
+		}
+	}
+	return s.guard.RequireQuotaValue(
+		ctx,
+		organizationID,
+		featureDomainMaxCustomDomains,
+		"limit",
+		used,
+		1,
+	)
 }
 
 func (s *DomainService) Verify(

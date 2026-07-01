@@ -8,6 +8,7 @@ import (
 	notificationhandler "zyad.cloud/internal/core/notification/handler"
 	permissionhandler "zyad.cloud/internal/core/permission/handler"
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
+	billinghandler "zyad.cloud/internal/modules/billing/handler"
 	landinghandler "zyad.cloud/internal/modules/landing/handler"
 	organizationhandler "zyad.cloud/internal/modules/organization/handler"
 	userhandler "zyad.cloud/internal/modules/user/handler"
@@ -26,6 +27,8 @@ type Dependencies struct {
 	NotificationTemplateHandler      *notificationhandler.TemplateHandler
 	NotificationVariableHandler      *notificationhandler.VariableHandler
 	PermissionHandler                *permissionhandler.Handler
+	PlatformBillingHandler           *billinghandler.PlatformBillingHandler
+	TenantBillingHandler             *billinghandler.TenantBillingHandler
 	OrganizationDomainHandler        *organizationhandler.DomainHandler
 	OrganizationEntitlementHandler   *organizationhandler.EntitlementHandler
 	OrganizationImpersonationHandler *organizationhandler.ImpersonationHandler

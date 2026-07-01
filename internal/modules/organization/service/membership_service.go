@@ -73,16 +73,45 @@ type TransferOwnershipInput struct {
 
 type MembershipService struct {
 	store         MembershipStore
+	guard         MembershipBillingGuard
 	now           func() time.Time
 	generateToken func(int) (string, error)
 }
 
-func NewMembershipService(store MembershipStore) *MembershipService {
-	return &MembershipService{
+type MembershipBillingGuard interface {
+	RequireFeature(
+		context.Context,
+		string,
+		string,
+	) (model.Entitlement, error)
+	RequireQuotaValue(
+		context.Context,
+		string,
+		string,
+		string,
+		int64,
+		int64,
+	) error
+}
+
+type MembershipServiceOption func(*MembershipService)
+
+func WithMembershipBillingGuard(guard MembershipBillingGuard) MembershipServiceOption {
+	return func(service *MembershipService) {
+		service.guard = guard
+	}
+}
+
+func NewMembershipService(store MembershipStore, options ...MembershipServiceOption) *MembershipService {
+	service := &MembershipService{
 		store:         store,
 		now:           time.Now,
 		generateToken: coreauth.NewRandomToken,
 	}
+	for _, option := range options {
+		option(service)
+	}
+	return service
 }
 
 func (s *MembershipService) Invite(
@@ -110,6 +139,9 @@ func (s *MembershipService) Invite(
 	if !expiresAt.After(now) {
 		return InviteMemberResult{}, validationError("expires_at must be in the future")
 	}
+	if err := s.requireInviteCapacity(ctx, strings.TrimSpace(input.OrganizationID)); err != nil {
+		return InviteMemberResult{}, err
+	}
 	token, err := s.generateToken(32)
 	if err != nil {
 		return InviteMemberResult{}, coreerrors.Wrap(
@@ -134,6 +166,50 @@ func (s *MembershipService) Invite(
 		)
 	}
 	return InviteMemberResult{Membership: membership, Token: token}, nil
+}
+
+const (
+	featureUsersInviteUser = "users.invite_user"
+	featureUsersMaxUsers   = "users.max_users"
+)
+
+func (s *MembershipService) requireInviteCapacity(
+	ctx context.Context,
+	organizationID string,
+) error {
+	if s == nil || s.guard == nil {
+		return nil
+	}
+	if _, err := s.guard.RequireFeature(ctx, organizationID, featureUsersInviteUser); err != nil {
+		return err
+	}
+	memberships, _, err := s.store.ListByOrganization(ctx, organizationID, repository.MembershipListFilter{
+		Status:         model.MembershipStatusActive,
+		IncludeRemoved: false,
+		Limit:          1000,
+		Offset:         0,
+	})
+	if err != nil {
+		return mapMembershipError(
+			"MEMBERSHIP_LIST_FAILED",
+			"failed to list members",
+			err,
+		)
+	}
+	var used int64
+	for _, membership := range memberships {
+		if membership.IsActive() {
+			used++
+		}
+	}
+	return s.guard.RequireQuotaValue(
+		ctx,
+		organizationID,
+		featureUsersMaxUsers,
+		"limit",
+		used,
+		1,
+	)
 }
 
 func (s *MembershipService) Accept(

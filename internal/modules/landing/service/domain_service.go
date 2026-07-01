@@ -8,6 +8,7 @@ import (
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/landing/domain"
 	"zyad.cloud/internal/modules/landing/repository"
+	organizationmodel "zyad.cloud/internal/modules/organization/model"
 	"zyad.cloud/internal/platform/database"
 )
 
@@ -15,21 +16,46 @@ type defaultDomainService struct {
 	repo     repository.DomainRepository
 	pageRepo repository.PageRepository
 	db       *database.Pool
+	features DomainFeatureGate
+}
+
+type DomainFeatureGate interface {
+	RequireFeature(
+		context.Context,
+		string,
+		string,
+	) (organizationmodel.Entitlement, error)
+}
+
+type DomainServiceOption func(*defaultDomainService)
+
+func WithLandingDomainFeatureGate(features DomainFeatureGate) DomainServiceOption {
+	return func(service *defaultDomainService) {
+		service.features = features
+	}
 }
 
 func NewDomainService(
 	repo repository.DomainRepository,
 	pageRepo repository.PageRepository,
 	db *database.Pool,
+	options ...DomainServiceOption,
 ) DomainService {
-	return &defaultDomainService{
+	service := &defaultDomainService{
 		repo:     repo,
 		pageRepo: pageRepo,
 		db:       db,
 	}
+	for _, option := range options {
+		option(service)
+	}
+	return service
 }
 
 func (s *defaultDomainService) BindDomain(ctx context.Context, scope coretenant.Scope, params BindDomainParams) (domain.DomainBinding, error) {
+	if err := s.requireCustomDomainFeature(ctx, scope.OrganizationID()); err != nil {
+		return domain.DomainBinding{}, err
+	}
 	// First check if the domain exists and is verified in the organization
 	availableDomains, err := s.ListAvailableDomains(ctx, scope)
 	if err != nil {
@@ -94,4 +120,15 @@ func (s *defaultDomainService) ListBindings(ctx context.Context, scope coretenan
 
 func (s *defaultDomainService) ListAvailableDomains(ctx context.Context, scope coretenant.Scope) ([]domain.AvailableDomain, error) {
 	return s.repo.ListAvailableDomains(ctx, scope)
+}
+
+func (s *defaultDomainService) requireCustomDomainFeature(
+	ctx context.Context,
+	organizationID string,
+) error {
+	if s == nil || s.features == nil {
+		return nil
+	}
+	_, err := s.features.RequireFeature(ctx, organizationID, domain.FeatureLandingCustomDomain)
+	return err
 }
