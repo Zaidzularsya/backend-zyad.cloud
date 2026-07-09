@@ -1,5 +1,15 @@
 # Billing Plan Concept Reference
 
+> **Catatan riwayat (refactor domain-split)**: Dokumen ini adalah rujukan desain awal sebelum modul
+> `billing` dipecah menjadi 3 domain eksplisit (Product/Catalog, Subscription, Billing). Tabel
+> `billing_plans`, `billing_plan_prices`, `billing_features`, `billing_plan_entitlements` di dokumen ini
+> sudah digantikan oleh `product_plans`, `product_plan_prices`, `product_features`,
+> `product_plan_entitlements`; tabel `billing_subscriptions`/`billing_subscription_events` digantikan oleh
+> `customer_subscriptions`/`subscription_events`. Struktur final ada di
+> [product-subscription-billing-concept.md](product-subscription-billing-concept.md). Dokumen ini
+> dipertahankan sebagai riwayat/rujukan konsep bisnis awal (masih valid untuk requirement/flow bisnis),
+> bukan untuk struktur tabel/kode saat ini.
+
 Dokumen ini menetapkan konsep Plan, Billing, Subscription, Entitlement,
 Quota, Invoice, dan Payment untuk Zyad Cloud.
 

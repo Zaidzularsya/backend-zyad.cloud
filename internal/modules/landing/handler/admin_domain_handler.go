@@ -9,6 +9,7 @@ import (
 	corehttp "zyad.cloud/internal/core/http"
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	coretenant "zyad.cloud/internal/core/tenant"
+	"zyad.cloud/internal/modules/landing/domain"
 	"zyad.cloud/internal/modules/landing/dto"
 	"zyad.cloud/internal/modules/landing/service"
 )
@@ -25,7 +26,7 @@ func NewAdminDomainHandler(domainSvc service.DomainService) *AdminDomainHandler 
 
 func (h *AdminDomainHandler) RegisterRoutes(router *gin.RouterGroup, checker permissionmiddleware.PermissionChecker) {
 	router.GET("/admin/landing/domains/available", permissionmiddleware.Require(checker, "landing.domain.read"), h.ListAvailableDomains)
-	
+
 	router.GET("/admin/landing/domain-bindings", permissionmiddleware.Require(checker, "landing.domain.read"), h.ListDomainBindings)
 	router.POST("/admin/landing/domain-bindings", permissionmiddleware.Require(checker, "landing.domain.manage"), h.CreateDomainBinding)
 	router.PATCH("/admin/landing/domain-bindings/:id", permissionmiddleware.Require(checker, "landing.domain.manage"), h.UpdateDomainBinding)
@@ -56,16 +57,13 @@ func (h *AdminDomainHandler) ListDomainBindings(c *gin.Context) {
 	}
 
 	pageID := c.Query("landing_page_id")
-	if pageID == "" {
-		// MVP: Require pageID for now, or implement a global list.
-		// Contract states `GET /admin/landing/domain-bindings`, which implies it could list globally.
-		// But DomainService only has `ListBindings(ctx, scope, pageID string)`. 
-		// For now, let's require landing_page_id.
-		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "landing_page_id query parameter is required", http.StatusUnprocessableEntity))
-		return
-	}
 
-	bindings, err := h.domainSvc.ListBindings(c.Request.Context(), scope, pageID)
+	var bindings []domain.DomainBinding
+	if pageID == "" {
+		bindings, err = h.domainSvc.ListAllBindings(c.Request.Context(), scope)
+	} else {
+		bindings, err = h.domainSvc.ListBindings(c.Request.Context(), scope, pageID)
+	}
 	if err != nil {
 		corehttp.Fail(c, err)
 		return
@@ -110,7 +108,7 @@ func (h *AdminDomainHandler) UpdateDomainBinding(c *gin.Context) {
 	}
 
 	bindingID := c.Param("id")
-	
+
 	var req dto.DomainBindingRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
@@ -125,7 +123,7 @@ func (h *AdminDomainHandler) UpdateDomainBinding(c *gin.Context) {
 			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "landing_page_id is required to set primary binding", http.StatusUnprocessableEntity))
 			return
 		}
-		
+
 		err = h.domainSvc.SetPrimaryBinding(c.Request.Context(), scope, req.LandingPageID, bindingID)
 		if err != nil {
 			corehttp.Fail(c, err)

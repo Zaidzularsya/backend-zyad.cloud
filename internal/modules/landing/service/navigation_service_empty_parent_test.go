@@ -10,7 +10,8 @@ import (
 )
 
 type fakeNavigationRepository struct {
-	updateCalled bool
+	updateCalled      bool
+	getMenuItemResult domain.LandingMenuItem
 }
 
 func (f *fakeNavigationRepository) CreateSectionTemplate(context.Context, coretenant.Scope, repository.CreateSectionTemplateParams) (domain.SectionTemplate, error) {
@@ -78,7 +79,7 @@ func (f *fakeNavigationRepository) CreateMenuItem(context.Context, coretenant.Sc
 }
 
 func (f *fakeNavigationRepository) GetMenuItem(context.Context, coretenant.Scope, string) (domain.LandingMenuItem, error) {
-	return domain.LandingMenuItem{}, nil
+	return f.getMenuItemResult, nil
 }
 
 func (f *fakeNavigationRepository) ListMenuItems(context.Context, coretenant.Scope, string) ([]domain.LandingMenuItem, error) {
@@ -100,7 +101,7 @@ func (f *fakeNavigationRepository) DeleteMenuItem(context.Context, coretenant.Sc
 
 func TestUpdateMenuItemIgnoresEmptyParentID(t *testing.T) {
 	repo := &fakeNavigationRepository{}
-	svc := NewNavigationService(repo)
+	svc := NewNavigationService(repo, nil)
 
 	scope, err := coretenant.NewScope(mustTenantContext())
 	if err != nil {

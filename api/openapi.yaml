@@ -2240,6 +2240,11 @@ paths:
           description: Sections retrieved successfully
     post:
       summary: Create landing page section
+      description: >-
+        For sections with type "pricing", content.source may be "custom" (default) or
+        "platform_catalog". Setting source to "platform_catalog" is only allowed for the
+        platform organization; other organizations receive a 400 PRICING_SOURCE_NOT_ALLOWED
+        error.
       operationId: createLandingPageSection
       tags:
         - Landing Sections
@@ -2312,6 +2317,11 @@ paths:
   /api/v1/admin/landing-pages/{id}/sections/{sectionId}:
     patch:
       summary: Update landing page section
+      description: >-
+        For sections with type "pricing", content.source may be "custom" (default) or
+        "platform_catalog". Setting source to "platform_catalog" is only allowed for the
+        platform organization; other organizations receive a 400 PRICING_SOURCE_NOT_ALLOWED
+        error.
       operationId: updateLandingPageSection
       tags:
         - Landing Sections
@@ -3386,12 +3396,29 @@ paths:
       responses:
         "200":
           description: Public landing event tracked successfully
-  /api/v1/platform/billing/plans:
+  /api/v1/public/catalog/plans:
+    get:
+      summary: List publicly published product plans
+      description: >-
+        Returns platform product plans with is_public=true and is_active=true, ordered by
+        sort_order. No authentication required. Intended for the landing page Pricing section
+        when content.source is "platform_catalog".
+      operationId: listPublicCatalogPlans
+      tags:
+        - Public Product Catalog
+      responses:
+        "200":
+          description: Public product plans retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicProductPlanListEnvelope"
+  /api/v1/platform/product/plans:
     get:
       summary: List billing plans
-      operationId: listBillingPlans
+      operationId: listProductPlans
       tags:
-        - Billing
+        - Product
       security:
         - BearerAuth: []
       parameters:
@@ -3406,7 +3433,7 @@ paths:
         - name: type
           in: query
           schema:
-            $ref: "#/components/schemas/BillingPlanType"
+            $ref: "#/components/schemas/ProductPlanType"
         - name: is_public
           in: query
           schema:
@@ -3439,18 +3466,18 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BillingPlanListEnvelope"
+                $ref: "#/components/schemas/ProductPlanListEnvelope"
         "403":
-          description: Missing platform.billing.plan.read permission
+          description: Missing platform.product.plan.read permission
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
     post:
       summary: Create a billing plan
-      operationId: createBillingPlan
+      operationId: createProductPlan
       tags:
-        - Billing
+        - Product
       security:
         - BearerAuth: []
       requestBody:
@@ -3458,16 +3485,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateBillingPlanRequest"
+              $ref: "#/components/schemas/CreateProductPlanRequest"
       responses:
         "201":
           description: Billing plan created successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BillingPlanEnvelope"
+                $ref: "#/components/schemas/ProductPlanEnvelope"
         "403":
-          description: Missing platform.billing.plan.manage permission
+          description: Missing platform.product.plan.manage permission
           content:
             application/json:
               schema:
@@ -3478,25 +3505,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-  /api/v1/platform/billing/plans/{id}:
+  /api/v1/platform/product/plans/{id}:
     get:
       summary: Get a billing plan
-      operationId: getBillingPlan
+      operationId: getProductPlan
       tags:
-        - Billing
+        - Product
       security:
         - BearerAuth: []
       parameters:
-        - $ref: "#/components/parameters/BillingPlanID"
+        - $ref: "#/components/parameters/ProductPlanID"
       responses:
         "200":
           description: Billing plan retrieved successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BillingPlanEnvelope"
+                $ref: "#/components/schemas/ProductPlanEnvelope"
         "403":
-          description: Missing platform.billing.plan.read permission
+          description: Missing platform.product.plan.read permission
           content:
             application/json:
               schema:
@@ -3509,28 +3536,28 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
     patch:
       summary: Update a billing plan
-      operationId: updateBillingPlan
+      operationId: updateProductPlan
       tags:
-        - Billing
+        - Product
       security:
         - BearerAuth: []
       parameters:
-        - $ref: "#/components/parameters/BillingPlanID"
+        - $ref: "#/components/parameters/ProductPlanID"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UpdateBillingPlanRequest"
+              $ref: "#/components/schemas/UpdateProductPlanRequest"
       responses:
         "200":
           description: Billing plan updated successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BillingPlanEnvelope"
+                $ref: "#/components/schemas/ProductPlanEnvelope"
         "403":
-          description: Missing platform.billing.plan.manage permission
+          description: Missing platform.product.plan.manage permission
           content:
             application/json:
               schema:
@@ -3549,13 +3576,13 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
     delete:
       summary: Soft delete a billing plan
-      operationId: deleteBillingPlan
+      operationId: deleteProductPlan
       tags:
-        - Billing
+        - Product
       security:
         - BearerAuth: []
       parameters:
-        - $ref: "#/components/parameters/BillingPlanID"
+        - $ref: "#/components/parameters/ProductPlanID"
       responses:
         "200":
           description: Billing plan deleted successfully
@@ -3564,7 +3591,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/SuccessResponse"
         "403":
-          description: Missing platform.billing.plan.manage permission
+          description: Missing platform.product.plan.manage permission
           content:
             application/json:
               schema:
@@ -3575,16 +3602,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-  /api/v1/platform/billing/plans/{id}/prices:
+  /api/v1/platform/product/plans/{id}/prices:
     get:
       summary: List billing plan prices
-      operationId: listBillingPlanPrices
+      operationId: listProductPlanPrices
       tags:
-        - Billing
+        - Product
       security:
         - BearerAuth: []
       parameters:
-        - $ref: "#/components/parameters/BillingPlanID"
+        - $ref: "#/components/parameters/ProductPlanID"
         - name: include_deleted
           in: query
           schema:
@@ -3596,9 +3623,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BillingPlanPriceListEnvelope"
+                $ref: "#/components/schemas/ProductPlanPriceListEnvelope"
         "403":
-          description: Missing platform.billing.plan_price.read permission
+          description: Missing platform.product.plan_price.read permission
           content:
             application/json:
               schema:
@@ -3611,28 +3638,28 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
     post:
       summary: Create a billing plan price
-      operationId: createBillingPlanPrice
+      operationId: createProductPlanPrice
       tags:
-        - Billing
+        - Product
       security:
         - BearerAuth: []
       parameters:
-        - $ref: "#/components/parameters/BillingPlanID"
+        - $ref: "#/components/parameters/ProductPlanID"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateBillingPlanPriceRequest"
+              $ref: "#/components/schemas/CreateProductPlanPriceRequest"
       responses:
         "201":
           description: Billing plan price created successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BillingPlanPriceEnvelope"
+                $ref: "#/components/schemas/ProductPlanPriceEnvelope"
         "403":
-          description: Missing platform.billing.plan_price.manage permission
+          description: Missing platform.product.plan_price.manage permission
           content:
             application/json:
               schema:
@@ -3649,32 +3676,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-  /api/v1/platform/billing/plans/{id}/prices/{priceId}:
+  /api/v1/platform/product/plans/{id}/prices/{priceId}:
     patch:
       summary: Update a billing plan price
-      operationId: updateBillingPlanPrice
+      operationId: updateProductPlanPrice
       tags:
-        - Billing
+        - Product
       security:
         - BearerAuth: []
       parameters:
-        - $ref: "#/components/parameters/BillingPlanID"
-        - $ref: "#/components/parameters/BillingPlanPriceID"
+        - $ref: "#/components/parameters/ProductPlanID"
+        - $ref: "#/components/parameters/ProductPlanPriceID"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UpdateBillingPlanPriceRequest"
+              $ref: "#/components/schemas/UpdateProductPlanPriceRequest"
       responses:
         "200":
           description: Billing plan price updated successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BillingPlanPriceEnvelope"
+                $ref: "#/components/schemas/ProductPlanPriceEnvelope"
         "403":
-          description: Missing platform.billing.plan_price.manage permission
+          description: Missing platform.product.plan_price.manage permission
           content:
             application/json:
               schema:
@@ -3693,14 +3720,14 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
     delete:
       summary: Soft delete a billing plan price
-      operationId: deleteBillingPlanPrice
+      operationId: deleteProductPlanPrice
       tags:
-        - Billing
+        - Product
       security:
         - BearerAuth: []
       parameters:
-        - $ref: "#/components/parameters/BillingPlanID"
-        - $ref: "#/components/parameters/BillingPlanPriceID"
+        - $ref: "#/components/parameters/ProductPlanID"
+        - $ref: "#/components/parameters/ProductPlanPriceID"
       responses:
         "200":
           description: Billing plan price deleted successfully
@@ -3709,7 +3736,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/SuccessResponse"
         "403":
-          description: Missing platform.billing.plan_price.manage permission
+          description: Missing platform.product.plan_price.manage permission
           content:
             application/json:
               schema:
@@ -3720,25 +3747,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-  /api/v1/platform/billing/plans/{id}/entitlements:
+  /api/v1/platform/product/plans/{id}/entitlements:
     get:
       summary: List plan entitlements
-      operationId: listBillingPlanEntitlements
+      operationId: listProductPlanEntitlements
       tags:
-        - Billing
+        - Product
       security:
         - BearerAuth: []
       parameters:
-        - $ref: "#/components/parameters/BillingPlanID"
+        - $ref: "#/components/parameters/ProductPlanID"
       responses:
         "200":
           description: Billing plan entitlements retrieved successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BillingPlanEntitlementListEnvelope"
+                $ref: "#/components/schemas/ProductPlanEntitlementListEnvelope"
         "403":
-          description: Missing platform.billing.entitlement.read permission
+          description: Missing platform.product.entitlement.read permission
           content:
             application/json:
               schema:
@@ -3751,28 +3778,28 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
     put:
       summary: Replace plan entitlements
-      operationId: replaceBillingPlanEntitlements
+      operationId: replaceProductPlanEntitlements
       tags:
-        - Billing
+        - Product
       security:
         - BearerAuth: []
       parameters:
-        - $ref: "#/components/parameters/BillingPlanID"
+        - $ref: "#/components/parameters/ProductPlanID"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ReplaceBillingPlanEntitlementsRequest"
+              $ref: "#/components/schemas/ReplaceProductPlanEntitlementsRequest"
       responses:
         "200":
           description: Billing plan entitlements updated successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BillingPlanEntitlementListEnvelope"
+                $ref: "#/components/schemas/ProductPlanEntitlementListEnvelope"
         "403":
-          description: Missing platform.billing.entitlement.manage permission
+          description: Missing platform.product.entitlement.manage permission
           content:
             application/json:
               schema:
@@ -3789,12 +3816,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-  /api/v1/platform/billing/features:
+  /api/v1/platform/product/features:
     get:
       summary: List billing features
-      operationId: listBillingFeatures
+      operationId: listProductFeatures
       tags:
-        - Billing
+        - Product
       security:
         - BearerAuth: []
       parameters:
@@ -3824,18 +3851,18 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BillingFeatureListEnvelope"
+                $ref: "#/components/schemas/ProductFeatureListEnvelope"
         "403":
-          description: Missing platform.billing.feature.read permission
+          description: Missing platform.product.feature.read permission
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
     post:
       summary: Create a billing feature
-      operationId: createBillingFeature
+      operationId: createProductFeature
       tags:
-        - Billing
+        - Product
       security:
         - BearerAuth: []
       requestBody:
@@ -3843,16 +3870,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateBillingFeatureRequest"
+              $ref: "#/components/schemas/CreateProductFeatureRequest"
       responses:
         "201":
           description: Billing feature created successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BillingFeatureEnvelope"
+                $ref: "#/components/schemas/ProductFeatureEnvelope"
         "403":
-          description: Missing platform.billing.feature.manage permission
+          description: Missing platform.product.feature.manage permission
           content:
             application/json:
               schema:
@@ -3863,31 +3890,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-  /api/v1/platform/billing/features/{id}:
+  /api/v1/platform/product/features/{id}:
     patch:
       summary: Update a billing feature
-      operationId: updateBillingFeature
+      operationId: updateProductFeature
       tags:
-        - Billing
+        - Product
       security:
         - BearerAuth: []
       parameters:
-        - $ref: "#/components/parameters/BillingFeatureID"
+        - $ref: "#/components/parameters/ProductFeatureID"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UpdateBillingFeatureRequest"
+              $ref: "#/components/schemas/UpdateProductFeatureRequest"
       responses:
         "200":
           description: Billing feature updated successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BillingFeatureEnvelope"
+                $ref: "#/components/schemas/ProductFeatureEnvelope"
         "403":
-          description: Missing platform.billing.feature.manage permission
+          description: Missing platform.product.feature.manage permission
           content:
             application/json:
               schema:
@@ -3904,12 +3931,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-  /api/v1/platform/billing/subscriptions:
+  /api/v1/platform/subscriptions:
     get:
       summary: List billing subscriptions
-      operationId: listBillingSubscriptions
+      operationId: listCustomerSubscriptions
       tags:
-        - Billing
+        - Subscription
       security:
         - BearerAuth: []
       parameters:
@@ -3934,25 +3961,25 @@ paths:
         - name: status
           in: query
           schema:
-            $ref: "#/components/schemas/BillingSubscriptionStatus"
+            $ref: "#/components/schemas/CustomerSubscriptionStatus"
       responses:
         "200":
           description: Billing subscriptions retrieved successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BillingSubscriptionListEnvelope"
+                $ref: "#/components/schemas/CustomerSubscriptionListEnvelope"
         "403":
-          description: Missing platform.billing.subscription.read permission
+          description: Missing platform.subscription.read permission
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
     post:
       summary: Create a billing subscription
-      operationId: createBillingSubscription
+      operationId: createCustomerSubscription
       tags:
-        - Billing
+        - Subscription
       security:
         - BearerAuth: []
       requestBody:
@@ -3960,16 +3987,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateBillingSubscriptionRequest"
+              $ref: "#/components/schemas/CreateCustomerSubscriptionRequest"
       responses:
         "201":
           description: Billing subscription created successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BillingSubscriptionEnvelope"
+                $ref: "#/components/schemas/CustomerSubscriptionEnvelope"
         "403":
-          description: Missing platform.billing.subscription.manage permission
+          description: Missing platform.subscription.manage permission
           content:
             application/json:
               schema:
@@ -3980,31 +4007,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-  /api/v1/platform/billing/subscriptions/{id}:
+  /api/v1/platform/subscriptions/{id}:
     patch:
       summary: Update a billing subscription
-      operationId: updateBillingSubscription
+      operationId: updateCustomerSubscription
       tags:
-        - Billing
+        - Subscription
       security:
         - BearerAuth: []
       parameters:
-        - $ref: "#/components/parameters/BillingSubscriptionID"
+        - $ref: "#/components/parameters/CustomerSubscriptionID"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UpdateBillingSubscriptionRequest"
+              $ref: "#/components/schemas/UpdateCustomerSubscriptionRequest"
       responses:
         "200":
           description: Billing subscription updated successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BillingSubscriptionEnvelope"
+                $ref: "#/components/schemas/CustomerSubscriptionEnvelope"
         "403":
-          description: Missing platform.billing.subscription.manage permission
+          description: Missing platform.subscription.manage permission
           content:
             application/json:
               schema:
@@ -4021,31 +4048,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-  /api/v1/platform/billing/subscriptions/{id}/cancel:
+  /api/v1/platform/subscriptions/{id}/cancel:
     post:
       summary: Cancel a billing subscription
-      operationId: cancelBillingSubscription
+      operationId: cancelCustomerSubscription
       tags:
-        - Billing
+        - Subscription
       security:
         - BearerAuth: []
       parameters:
-        - $ref: "#/components/parameters/BillingSubscriptionID"
+        - $ref: "#/components/parameters/CustomerSubscriptionID"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CancelBillingSubscriptionRequest"
+              $ref: "#/components/schemas/CancelCustomerSubscriptionRequest"
       responses:
         "200":
           description: Billing subscription canceled successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BillingSubscriptionEnvelope"
+                $ref: "#/components/schemas/CustomerSubscriptionEnvelope"
         "403":
-          description: Missing platform.billing.subscription.manage permission
+          description: Missing platform.subscription.manage permission
           content:
             application/json:
               schema:
@@ -4056,31 +4083,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-  /api/v1/platform/billing/subscriptions/{id}/suspend:
+  /api/v1/platform/subscriptions/{id}/suspend:
     post:
       summary: Suspend a billing subscription
-      operationId: suspendBillingSubscription
+      operationId: suspendCustomerSubscription
       tags:
-        - Billing
+        - Subscription
       security:
         - BearerAuth: []
       parameters:
-        - $ref: "#/components/parameters/BillingSubscriptionID"
+        - $ref: "#/components/parameters/CustomerSubscriptionID"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CancelBillingSubscriptionRequest"
+              $ref: "#/components/schemas/CancelCustomerSubscriptionRequest"
       responses:
         "200":
           description: Billing subscription suspended successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BillingSubscriptionEnvelope"
+                $ref: "#/components/schemas/CustomerSubscriptionEnvelope"
         "403":
-          description: Missing platform.billing.subscription.manage permission
+          description: Missing platform.subscription.manage permission
           content:
             application/json:
               schema:
@@ -4211,7 +4238,7 @@ paths:
   /api/v1/app/billing/current-plan:
     get:
       summary: Get current organization billing plan
-      operationId: getCurrentBillingPlan
+      operationId: getCurrentProductPlan
       tags:
         - Billing
       security:
@@ -4337,7 +4364,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UpgradeBillingSubscriptionRequest"
+              $ref: "#/components/schemas/UpgradeCustomerSubscriptionRequest"
       responses:
         "201":
           description: Billing upgrade invoice created successfully
@@ -4366,7 +4393,7 @@ paths:
   /api/v1/app/billing/cancel:
     post:
       summary: Schedule current organization subscription for cancellation
-      operationId: cancelCurrentBillingSubscription
+      operationId: cancelCurrentCustomerSubscription
       tags:
         - Billing
       security:
@@ -4376,14 +4403,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CancelBillingSubscriptionRequest"
+              $ref: "#/components/schemas/CancelCustomerSubscriptionRequest"
       responses:
         "200":
           description: Billing subscription scheduled for cancellation successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BillingSubscriptionEnvelope"
+                $ref: "#/components/schemas/CustomerSubscriptionEnvelope"
         "403":
           description: Missing organization.billing.manage permission
           content:
@@ -4419,28 +4446,28 @@ components:
       schema:
         type: string
         format: uuid
-    BillingPlanID:
+    ProductPlanID:
       name: id
       in: path
       required: true
       schema:
         type: string
         format: uuid
-    BillingPlanPriceID:
+    ProductPlanPriceID:
       name: priceId
       in: path
       required: true
       schema:
         type: string
         format: uuid
-    BillingFeatureID:
+    ProductFeatureID:
       name: id
       in: path
       required: true
       schema:
         type: string
         format: uuid
-    BillingSubscriptionID:
+    CustomerSubscriptionID:
       name: id
       in: path
       required: true
@@ -5166,22 +5193,22 @@ components:
           type: string
         data:
           $ref: "#/components/schemas/OrganizationUsage"
-    BillingPlanType:
+    ProductPlanType:
       type: string
       enum: [free, trial, paid, enterprise]
-    BillingInterval:
+    ProductPlanBillingInterval:
       type: string
       enum: [monthly, yearly, one_time, custom]
-    BillingSubscriptionInterval:
+    CustomerSubscriptionInterval:
       type: string
       enum: [monthly, yearly, custom]
-    BillingFeatureValueType:
+    ProductFeatureValueType:
       type: string
       enum: [boolean, integer, string, decimal]
-    BillingFeatureResetStrategy:
+    ProductFeatureResetStrategy:
       type: string
       enum: [never, monthly, yearly, custom]
-    BillingSubscriptionStatus:
+    CustomerSubscriptionStatus:
       type: string
       enum: [trialing, active, past_due, grace_period, suspended, canceled, expired]
     BillingInvoiceStatus:
@@ -5196,7 +5223,7 @@ components:
     BillingInvoiceItemType:
       type: string
       enum: [subscription, addon, adjustment, tax, discount]
-    BillingPlanPrice:
+    ProductPlanPrice:
       type: object
       required:
         - id
@@ -5216,7 +5243,7 @@ components:
           type: string
           format: uuid
         billing_interval:
-          $ref: "#/components/schemas/BillingInterval"
+          $ref: "#/components/schemas/ProductPlanBillingInterval"
         currency:
           type: string
         amount:
@@ -5236,7 +5263,7 @@ components:
           type: string
           format: date-time
           nullable: true
-    BillingPlan:
+    ProductPlan:
       type: object
       required:
         - id
@@ -5260,7 +5287,7 @@ components:
         description:
           type: string
         plan_type:
-          $ref: "#/components/schemas/BillingPlanType"
+          $ref: "#/components/schemas/ProductPlanType"
         is_public:
           type: boolean
         is_active:
@@ -5273,7 +5300,7 @@ components:
         prices:
           type: array
           items:
-            $ref: "#/components/schemas/BillingPlanPrice"
+            $ref: "#/components/schemas/ProductPlanPrice"
         created_at:
           type: string
           format: date-time
@@ -5284,7 +5311,7 @@ components:
           type: string
           format: date-time
           nullable: true
-    BillingFeature:
+    ProductFeature:
       type: object
       required:
         - id
@@ -5309,11 +5336,11 @@ components:
         description:
           type: string
         value_type:
-          $ref: "#/components/schemas/BillingFeatureValueType"
+          $ref: "#/components/schemas/ProductFeatureValueType"
         unit:
           type: string
         reset_strategy:
-          $ref: "#/components/schemas/BillingFeatureResetStrategy"
+          $ref: "#/components/schemas/ProductFeatureResetStrategy"
         is_active:
           type: boolean
         created_at:
@@ -5322,7 +5349,7 @@ components:
         updated_at:
           type: string
           format: date-time
-    BillingPlanEntitlement:
+    ProductPlanEntitlement:
       type: object
       required:
         - id
@@ -5366,7 +5393,7 @@ components:
         updated_at:
           type: string
           format: date-time
-    BillingSubscription:
+    CustomerSubscription:
       type: object
       required:
         - id
@@ -5389,11 +5416,11 @@ components:
           type: string
           format: uuid
         plan:
-          $ref: "#/components/schemas/BillingPlan"
+          $ref: "#/components/schemas/ProductPlan"
         status:
-          $ref: "#/components/schemas/BillingSubscriptionStatus"
+          $ref: "#/components/schemas/CustomerSubscriptionStatus"
         billing_interval:
-          $ref: "#/components/schemas/BillingSubscriptionInterval"
+          $ref: "#/components/schemas/CustomerSubscriptionInterval"
         current_period_start:
           type: string
           format: date-time
@@ -5608,19 +5635,19 @@ components:
         - subscription
       properties:
         subscription:
-          $ref: "#/components/schemas/BillingSubscription"
+          $ref: "#/components/schemas/CustomerSubscription"
         usage:
           type: array
           items:
             $ref: "#/components/schemas/BillingUsageItem"
-    BillingPlanPriceRequest:
+    ProductPlanPriceRequest:
       type: object
       required:
         - billing_interval
         - amount
       properties:
         billing_interval:
-          $ref: "#/components/schemas/BillingInterval"
+          $ref: "#/components/schemas/ProductPlanBillingInterval"
         currency:
           type: string
         amount:
@@ -5630,15 +5657,15 @@ components:
         metadata:
           type: object
           additionalProperties: true
-    CreateBillingPlanPriceRequest:
+    CreateProductPlanPriceRequest:
       allOf:
-        - $ref: "#/components/schemas/BillingPlanPriceRequest"
-    UpdateBillingPlanPriceRequest:
+        - $ref: "#/components/schemas/ProductPlanPriceRequest"
+    UpdateProductPlanPriceRequest:
       type: object
       minProperties: 1
       properties:
         billing_interval:
-          $ref: "#/components/schemas/BillingInterval"
+          $ref: "#/components/schemas/ProductPlanBillingInterval"
         currency:
           type: string
         amount:
@@ -5648,7 +5675,7 @@ components:
         metadata:
           type: object
           additionalProperties: true
-    CreateBillingPlanRequest:
+    CreateProductPlanRequest:
       type: object
       required:
         - code
@@ -5662,7 +5689,7 @@ components:
         description:
           type: string
         plan_type:
-          $ref: "#/components/schemas/BillingPlanType"
+          $ref: "#/components/schemas/ProductPlanType"
         is_public:
           type: boolean
         is_active:
@@ -5675,8 +5702,8 @@ components:
         prices:
           type: array
           items:
-            $ref: "#/components/schemas/BillingPlanPriceRequest"
-    UpdateBillingPlanRequest:
+            $ref: "#/components/schemas/ProductPlanPriceRequest"
+    UpdateProductPlanRequest:
       type: object
       minProperties: 1
       properties:
@@ -5685,7 +5712,7 @@ components:
         description:
           type: string
         plan_type:
-          $ref: "#/components/schemas/BillingPlanType"
+          $ref: "#/components/schemas/ProductPlanType"
         is_public:
           type: boolean
         is_active:
@@ -5695,7 +5722,7 @@ components:
         metadata:
           type: object
           additionalProperties: true
-    CreateBillingFeatureRequest:
+    CreateProductFeatureRequest:
       type: object
       required:
         - feature_key
@@ -5712,14 +5739,14 @@ components:
         description:
           type: string
         value_type:
-          $ref: "#/components/schemas/BillingFeatureValueType"
+          $ref: "#/components/schemas/ProductFeatureValueType"
         unit:
           type: string
         reset_strategy:
-          $ref: "#/components/schemas/BillingFeatureResetStrategy"
+          $ref: "#/components/schemas/ProductFeatureResetStrategy"
         is_active:
           type: boolean
-    UpdateBillingFeatureRequest:
+    UpdateProductFeatureRequest:
       type: object
       minProperties: 1
       properties:
@@ -5730,14 +5757,14 @@ components:
         description:
           type: string
         value_type:
-          $ref: "#/components/schemas/BillingFeatureValueType"
+          $ref: "#/components/schemas/ProductFeatureValueType"
         unit:
           type: string
         reset_strategy:
-          $ref: "#/components/schemas/BillingFeatureResetStrategy"
+          $ref: "#/components/schemas/ProductFeatureResetStrategy"
         is_active:
           type: boolean
-    BillingPlanEntitlementValueRequest:
+    ProductPlanEntitlementValueRequest:
       type: object
       required:
         - feature_key
@@ -5756,7 +5783,7 @@ components:
         limits:
           type: object
           additionalProperties: true
-    ReplaceBillingPlanEntitlementsRequest:
+    ReplaceProductPlanEntitlementsRequest:
       type: object
       required:
         - entitlements
@@ -5764,8 +5791,8 @@ components:
         entitlements:
           type: array
           items:
-            $ref: "#/components/schemas/BillingPlanEntitlementValueRequest"
-    CreateBillingSubscriptionRequest:
+            $ref: "#/components/schemas/ProductPlanEntitlementValueRequest"
+    CreateCustomerSubscriptionRequest:
       type: object
       required:
         - organization_id
@@ -5779,9 +5806,9 @@ components:
           type: string
           format: uuid
         billing_interval:
-          $ref: "#/components/schemas/BillingSubscriptionInterval"
+          $ref: "#/components/schemas/CustomerSubscriptionInterval"
         status:
-          $ref: "#/components/schemas/BillingSubscriptionStatus"
+          $ref: "#/components/schemas/CustomerSubscriptionStatus"
         current_period_start:
           type: string
           format: date-time
@@ -5799,7 +5826,7 @@ components:
         metadata:
           type: object
           additionalProperties: true
-    UpdateBillingSubscriptionRequest:
+    UpdateCustomerSubscriptionRequest:
       type: object
       minProperties: 1
       properties:
@@ -5807,9 +5834,9 @@ components:
           type: string
           format: uuid
         status:
-          $ref: "#/components/schemas/BillingSubscriptionStatus"
+          $ref: "#/components/schemas/CustomerSubscriptionStatus"
         billing_interval:
-          $ref: "#/components/schemas/BillingSubscriptionInterval"
+          $ref: "#/components/schemas/CustomerSubscriptionInterval"
         current_period_start:
           type: string
           format: date-time
@@ -5890,12 +5917,12 @@ components:
         raw_payload:
           type: object
           additionalProperties: true
-    CancelBillingSubscriptionRequest:
+    CancelCustomerSubscriptionRequest:
       type: object
       properties:
         reason:
           type: string
-    UpgradeBillingSubscriptionRequest:
+    UpgradeCustomerSubscriptionRequest:
       type: object
       required:
         - plan_id
@@ -5904,10 +5931,10 @@ components:
           type: string
           format: uuid
         billing_interval:
-          $ref: "#/components/schemas/BillingSubscriptionInterval"
+          $ref: "#/components/schemas/CustomerSubscriptionInterval"
         reason:
           type: string
-    BillingPlanEnvelope:
+    ProductPlanEnvelope:
       type: object
       required: [success, message, data]
       properties:
@@ -5916,8 +5943,8 @@ components:
         message:
           type: string
         data:
-          $ref: "#/components/schemas/BillingPlan"
-    BillingPlanPriceEnvelope:
+          $ref: "#/components/schemas/ProductPlan"
+    ProductPlanPriceEnvelope:
       type: object
       required: [success, message, data]
       properties:
@@ -5926,8 +5953,8 @@ components:
         message:
           type: string
         data:
-          $ref: "#/components/schemas/BillingPlanPrice"
-    BillingPlanPriceListEnvelope:
+          $ref: "#/components/schemas/ProductPlanPrice"
+    ProductPlanPriceListEnvelope:
       type: object
       required: [success, message, data]
       properties:
@@ -5938,8 +5965,8 @@ components:
         data:
           type: array
           items:
-            $ref: "#/components/schemas/BillingPlanPrice"
-    BillingPlanListEnvelope:
+            $ref: "#/components/schemas/ProductPlanPrice"
+    ProductPlanListEnvelope:
       type: object
       required: [success, message, data, meta]
       properties:
@@ -5950,10 +5977,57 @@ components:
         data:
           type: array
           items:
-            $ref: "#/components/schemas/BillingPlan"
+            $ref: "#/components/schemas/ProductPlan"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
-    BillingFeatureEnvelope:
+    PublicProductPlanPrice:
+      type: object
+      required:
+        - billing_interval
+        - currency
+        - amount
+      properties:
+        billing_interval:
+          type: string
+        currency:
+          type: string
+        amount:
+          type: string
+    PublicProductPlanBenefit:
+      type: object
+      required:
+        - label
+      properties:
+        label:
+          type: string
+        value:
+          type: string
+    PublicProductPlan:
+      type: object
+      required:
+        - code
+        - name
+        - sort_order
+        - prices
+        - benefits
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        sort_order:
+          type: integer
+        benefits:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublicProductPlanBenefit"
+        prices:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublicProductPlanPrice"
+    PublicProductPlanListEnvelope:
       type: object
       required: [success, message, data]
       properties:
@@ -5962,8 +6036,20 @@ components:
         message:
           type: string
         data:
-          $ref: "#/components/schemas/BillingFeature"
-    BillingFeatureListEnvelope:
+          type: array
+          items:
+            $ref: "#/components/schemas/PublicProductPlan"
+    ProductFeatureEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/ProductFeature"
+    ProductFeatureListEnvelope:
       type: object
       required: [success, message, data, meta]
       properties:
@@ -5974,10 +6060,10 @@ components:
         data:
           type: array
           items:
-            $ref: "#/components/schemas/BillingFeature"
+            $ref: "#/components/schemas/ProductFeature"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
-    BillingPlanEntitlementListEnvelope:
+    ProductPlanEntitlementListEnvelope:
       type: object
       required: [success, message, data]
       properties:
@@ -5988,8 +6074,8 @@ components:
         data:
           type: array
           items:
-            $ref: "#/components/schemas/BillingPlanEntitlement"
-    BillingSubscriptionEnvelope:
+            $ref: "#/components/schemas/ProductPlanEntitlement"
+    CustomerSubscriptionEnvelope:
       type: object
       required: [success, message, data]
       properties:
@@ -5998,8 +6084,8 @@ components:
         message:
           type: string
         data:
-          $ref: "#/components/schemas/BillingSubscription"
-    BillingSubscriptionListEnvelope:
+          $ref: "#/components/schemas/CustomerSubscription"
+    CustomerSubscriptionListEnvelope:
       type: object
       required: [success, message, data, meta]
       properties:
@@ -6010,7 +6096,7 @@ components:
         data:
           type: array
           items:
-            $ref: "#/components/schemas/BillingSubscription"
+            $ref: "#/components/schemas/CustomerSubscription"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
     BillingInvoiceEnvelope:

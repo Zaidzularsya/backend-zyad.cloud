@@ -19,9 +19,10 @@ import (
 )
 
 type pageService struct {
-	pageRepo    repository.PageRepository
-	sectionRepo repository.SectionRepository
-	quotaGuard  LandingPageQuotaGuard
+	pageRepo     repository.PageRepository
+	sectionRepo  repository.SectionRepository
+	brandingRepo repository.BrandingRepository
+	quotaGuard   LandingPageQuotaGuard
 }
 
 type LandingPageQuotaGuard interface {
@@ -40,6 +41,15 @@ type PageServiceOption func(*pageService)
 func WithLandingPageQuotaGuard(guard LandingPageQuotaGuard) PageServiceOption {
 	return func(service *pageService) {
 		service.quotaGuard = guard
+	}
+}
+
+// WithLandingPageBrandingRepo enables copying a source page's per-page branding
+// override when duplicating a page or instantiating one from a template. It is
+// optional: without it, branding copy is simply skipped.
+func WithLandingPageBrandingRepo(brandingRepo repository.BrandingRepository) PageServiceOption {
+	return func(service *pageService) {
+		service.brandingRepo = brandingRepo
 	}
 }
 
@@ -139,7 +149,7 @@ func (s *pageService) Duplicate(ctx context.Context, scope coretenant.Scope, par
 	newSlug := fmt.Sprintf("%s-copy-%d", originalPage.Slug, time.Now().Unix())
 
 	// 4. Create new page as Draft
-	createParams := repository.CreatePageParams{
+	newPage, err := s.pageRepo.Create(ctx, scope, repository.CreatePageParams{
 		Name:       originalPage.Name + " (Copy)",
 		Title:      originalPage.Title,
 		Slug:       newSlug,
@@ -151,16 +161,91 @@ func (s *pageService) Duplicate(ctx context.Context, scope coretenant.Scope, par
 		IsHomepage: false,
 		IsTemplate: false,
 		CreatedBy:  params.UserID,
-	}
-
-	newPage, err := s.pageRepo.Create(ctx, scope, createParams)
+	})
 	if err != nil {
 		return domain.LandingPage{}, err
 	}
 
-	// 5. Duplicate sections
+	// 5. Copy sections, SEO, and branding override onto the duplicate.
+	return s.copyPageComposition(ctx, scope, originalPage, newPage, sections, params.UserID, true)
+}
+
+// InstantiateFromTemplate creates a brand new page seeded from an existing
+// page-level template (IsTemplate=true), copying its sections, SEO, and
+// optionally its per-page branding override in one call.
+func (s *pageService) InstantiateFromTemplate(
+	ctx context.Context,
+	scope coretenant.Scope,
+	params InstantiatePageFromTemplateParams,
+) (domain.LandingPage, error) {
+	templatePage, err := s.pageRepo.FindByID(ctx, scope, params.TemplatePageID)
+	if err != nil {
+		return domain.LandingPage{}, err
+	}
+	if !templatePage.IsTemplate {
+		return domain.LandingPage{}, coreerrors.New(
+			"PAGE_NOT_TEMPLATE",
+			"source page is not a template",
+			http.StatusUnprocessableEntity,
+		)
+	}
+
+	if err := s.requireCreateQuota(ctx, scope); err != nil {
+		return domain.LandingPage{}, err
+	}
+
+	sections, err := s.sectionRepo.ListByPage(ctx, scope, templatePage.ID)
+	if err != nil {
+		return domain.LandingPage{}, err
+	}
+	if err := s.requireDuplicateSectionQuota(ctx, scope, len(sections)); err != nil {
+		return domain.LandingPage{}, err
+	}
+
+	newPage, err := s.pageRepo.Create(ctx, scope, repository.CreatePageParams{
+		Name:       params.Name,
+		Title:      params.Title,
+		Slug:       generateSafeSlug(params.Slug, params.Title),
+		Type:       templatePage.Type,
+		Status:     domain.PageStatusDraft,
+		Visibility: params.Visibility,
+		Locale:     params.Locale,
+		Timezone:   params.Timezone,
+		IsHomepage: false,
+		IsTemplate: false,
+		CreatedBy:  params.CreatedBy,
+	})
+	if err != nil {
+		return domain.LandingPage{}, mapPagePersistenceError(err)
+	}
+
+	page, err := s.copyPageComposition(ctx, scope, templatePage, newPage, sections, params.CreatedBy, params.IncludeBranding)
+	if err != nil {
+		return domain.LandingPage{}, mapPagePersistenceError(err)
+	}
+	return page, nil
+}
+
+// copyPageComposition copies sections, SEO, and (optionally) a per-page
+// branding override from sourcePage onto newPage. It is the shared primitive
+// behind both Duplicate and InstantiateFromTemplate.
+//
+// No cross-repository transaction manager exists in this module yet, so this
+// is sequential-calls-plus-defensive-rollback rather than a single DB
+// transaction: if section copying fails partway through, the just-created
+// page is deleted rather than left half-composed. SEO/branding copy failures
+// are non-fatal (best-effort) since the page is already usable without them.
+func (s *pageService) copyPageComposition(
+	ctx context.Context,
+	scope coretenant.Scope,
+	sourcePage domain.LandingPage,
+	newPage domain.LandingPage,
+	sections []domain.LandingSection,
+	userID string,
+	includeBranding bool,
+) (domain.LandingPage, error) {
 	for _, sec := range sections {
-		_, _ = s.sectionRepo.Create(ctx, scope, repository.CreateSectionParams{
+		if _, err := s.sectionRepo.Create(ctx, scope, repository.CreateSectionParams{
 			LandingPageID: newPage.ID,
 			Key:           sec.Key,
 			Type:          sec.Type,
@@ -169,10 +254,40 @@ func (s *pageService) Duplicate(ctx context.Context, scope coretenant.Scope, par
 			IsEnabled:     sec.IsEnabled,
 			Content:       sec.Content,
 			Style:         sec.Style,
-			CreatedBy:     params.UserID,
-		})
-		// Ignoring individual section copy errors to ensure page creation completes.
-		// Ideally handled in DB transaction.
+			CreatedBy:     userID,
+		}); err != nil {
+			_ = s.pageRepo.Delete(ctx, scope, newPage.ID)
+			return domain.LandingPage{}, err
+		}
+	}
+
+	if len(sourcePage.SEO) > 0 {
+		if updated, err := s.pageRepo.Update(ctx, scope, newPage.ID, repository.UpdatePageParams{
+			SEO:       sourcePage.SEO,
+			UpdatedBy: userID,
+		}); err == nil {
+			newPage = updated
+		}
+	}
+
+	if includeBranding && s.brandingRepo != nil {
+		if sourceBranding, err := s.brandingRepo.GetByPage(ctx, scope, sourcePage.ID); err == nil {
+			_, _ = s.brandingRepo.Upsert(ctx, scope, repository.CreateBrandingParams{
+				LandingPageID:  &newPage.ID,
+				CompanyName:    &sourceBranding.CompanyName,
+				Tagline:        &sourceBranding.Tagline,
+				LogoLightURL:   &sourceBranding.LogoLightURL,
+				LogoDarkURL:    &sourceBranding.LogoDarkURL,
+				FaviconURL:     &sourceBranding.FaviconURL,
+				SocialImageURL: &sourceBranding.SocialImageURL,
+				Colors:         &sourceBranding.Colors,
+				Typography:     &sourceBranding.Typography,
+				Shape:          &sourceBranding.Shape,
+				Layout:         &sourceBranding.Layout,
+				Contact:        &sourceBranding.Contact,
+				SocialLinks:    sourceBranding.SocialLinks,
+			})
+		}
 	}
 
 	return newPage, nil

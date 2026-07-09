@@ -56,7 +56,12 @@ func (h *AdminSectionHandler) ListSections(c *gin.Context) {
 
 // CreateSection godoc
 func (h *AdminSectionHandler) CreateSection(c *gin.Context) {
-	scope, err := coretenant.RequireScope(c.Request.Context())
+	tenantContext, err := coretenant.RequireContext(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	scope, err := coretenant.NewScope(tenantContext)
 	if err != nil {
 		corehttp.Fail(c, err)
 		return
@@ -80,7 +85,7 @@ func (h *AdminSectionHandler) CreateSection(c *gin.Context) {
 		Style:         req.Style,
 	}
 
-	section, err := h.sectionSvc.Create(c.Request.Context(), scope, params)
+	section, err := h.sectionSvc.Create(c.Request.Context(), scope, tenantContext.OrganizationType(), params)
 	if err != nil {
 		corehttp.Fail(c, err)
 		return
@@ -91,7 +96,12 @@ func (h *AdminSectionHandler) CreateSection(c *gin.Context) {
 
 // UpdateSection godoc
 func (h *AdminSectionHandler) UpdateSection(c *gin.Context) {
-	scope, err := coretenant.RequireScope(c.Request.Context())
+	tenantContext, err := coretenant.RequireContext(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	scope, err := coretenant.NewScope(tenantContext)
 	if err != nil {
 		corehttp.Fail(c, err)
 		return
@@ -121,7 +131,7 @@ func (h *AdminSectionHandler) UpdateSection(c *gin.Context) {
 		UpdatedBy: permissionmiddleware.UserID(c),
 	}
 
-	section, err := h.sectionSvc.Update(c.Request.Context(), scope, sectionID, params)
+	section, err := h.sectionSvc.Update(c.Request.Context(), scope, tenantContext.OrganizationType(), sectionID, params)
 	if err != nil {
 		corehttp.Fail(c, err)
 		return

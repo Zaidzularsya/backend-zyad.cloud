@@ -110,6 +110,7 @@ Keputusan dan status:
 - Target canonical adalah `internal/modules/landing`.
 - Placeholder `internal/modules/landingpage` sudah dipindahkan pada 2026-06-13.
 - Jangan mempertahankan dua package aktif karena akan membingungkan route registration dan ownership.
+- 2026-07-03: direktori kosong `internal/modules/landingpage` dihapus, begitu juga indirection `landing/routes/routes.go` dan `landing/module.go` yang tidak pernah dipakai (route registration sebenarnya langsung terjadi di `internal/app/router.go` per-handler). Jangan buat ulang wrapper module/routes untuk landing.
 
 ## Tenant Boundary
 

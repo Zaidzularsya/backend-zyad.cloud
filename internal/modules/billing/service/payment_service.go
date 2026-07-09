@@ -32,8 +32,19 @@ type PaymentInvoiceStore interface {
 	UpdateStatus(ctx context.Context, params repository.UpdateInvoiceStatusParams) (model.Invoice, error)
 }
 
+// SubscriptionUpgradeInvoice is the minimal invoice shape the subscription
+// domain needs to activate a plan upgrade after payment. It intentionally
+// mirrors subscriptionservice.SubscriptionInvoice's fields so billing's own
+// model.Invoice can be adapted to it without billing importing subscription's
+// model package (and vice versa, avoiding an import cycle).
+type SubscriptionUpgradeInvoice struct {
+	OrganizationID string
+	SubscriptionID *string
+	Metadata       map[string]any
+}
+
 type PaymentSubscriptionUpgradeActivator interface {
-	ActivateUpgradeByInvoice(ctx context.Context, invoice model.Invoice, paidAt time.Time) error
+	ActivateUpgradeByInvoice(ctx context.Context, invoice SubscriptionUpgradeInvoice, paidAt time.Time) error
 }
 
 type PaymentService struct {
@@ -274,7 +285,11 @@ func (s *PaymentService) activateInvoiceUpgrade(
 	if !isUpgradeRequestMetadata(invoice.Metadata) {
 		return nil
 	}
-	return s.subscriptionUpgrades.ActivateUpgradeByInvoice(ctx, invoice, paidAt)
+	return s.subscriptionUpgrades.ActivateUpgradeByInvoice(ctx, SubscriptionUpgradeInvoice{
+		OrganizationID: invoice.OrganizationID,
+		SubscriptionID: invoice.SubscriptionID,
+		Metadata:       invoice.Metadata,
+	}, paidAt)
 }
 
 func isUpgradeRequestMetadata(metadata map[string]any) bool {

@@ -277,9 +277,10 @@ func (h *AdminBrandingHandler) mapThemeBrandingRequestToParams(req dto.ThemeBran
 		params.Contact = &contact
 	}
 	if req.SocialLinks != nil {
-		b, _ := json.Marshal(req.SocialLinks)
-		var links []domain.BrandingSocialLink
-		json.Unmarshal(b, &links)
+		links := make([]domain.BrandingSocialLink, 0, len(*req.SocialLinks))
+		for _, link := range *req.SocialLinks {
+			links = append(links, domain.BrandingSocialLink{Platform: link.Platform, URL: link.URL})
+		}
 		params.SocialLinks = links
 	}
 	return params

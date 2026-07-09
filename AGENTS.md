@@ -10,7 +10,10 @@
 ## Scope repo
 - Bacalah dokumen `README.md` terlebih dahulu untuk memahami konteks dari repo.
 - Dokumentasi development berada di `docs/`.
-- 
+- Untuk gambaran lintas-modul (stack, arsitektur, module map, database, permission, traceability, task
+  lanjutan), baca dulu 8 dokumen konteks: `docs/repository-context.md`, `docs/development-guide.md`,
+  `docs/module-map.md`, `docs/api-contract-review.md`, `docs/database-context.md`,
+  `docs/permission-context.md`, `docs/development-traceability.md`, `docs/next-development-tasks.md`.
 
 ## Development pattern
 - Setiap module berada di `internal/modules/<module_name>`.
@@ -84,31 +87,36 @@ backend-go/
 │   │
 │   ├── core/
 │   │   ├── auth/
+│   │   ├── cache/
 │   │   ├── crypto/
 │   │   ├── errors/
+│   │   ├── event/
 │   │   ├── http/
 │   │   ├── idempotency/
 │   │   ├── middleware/
+│   │   ├── notification/     # handler/service/repository/dispatcher/publisher/consumer
 │   │   ├── permission/
+│   │   ├── tenant/           # tipe Context multi-tenant (OrganizationID, ResolutionSource, dll)
 │   │   └── validation/
 │   │
 │   ├── modules/
-│   │   ├── account/
-│   │   ├── asset/
-│   │   ├── billing/
-│   │   ├── contract/
-│   │   ├── dashboard/
-│   │   ├── landingpage/
-│   │   ├── mikrotik/
-│   │   ├── newsaggregator/
-│   │   ├── order/
-│   │   ├── organization/
-│   │   ├── payment/
-│   │   ├── product/
-│   │   ├── provisioning/
-│   │   ├── radius/
-│   │   ├── resource/
-│   │   └── user/
+│   │   ├── account/          # STUB
+│   │   ├── asset/            # STUB
+│   │   ├── billing/          # WIP — dto/, handler/, model/, repository/, service/
+│   │   ├── contract/         # STUB
+│   │   ├── dashboard/        # STUB
+│   │   ├── landing/          # STABIL — modul kanonik landing page
+│   │   ├── landingpage/      # KOSONG (0 file) — sisa scaffold lama, JANGAN dipakai sebagai target module
+│   │   ├── mikrotik/         # STUB
+│   │   ├── newsaggregator/   # STUB
+│   │   ├── order/            # STUB
+│   │   ├── organization/     # STABIL — multi-tenant core
+│   │   ├── payment/          # STUB (fungsi payment nyata ada di modul billing + internal/platform/xendit)
+│   │   ├── product/          # STUB
+│   │   ├── provisioning/     # STUB
+│   │   ├── radius/           # STUB
+│   │   ├── resource/         # STUB
+│   │   └── user/             # STABIL — auth + user management
 │   │
 │   └── shared/
 │       ├── pagination/
@@ -147,6 +155,7 @@ internal/modules/module_name/
 
 Dokumen revamp dan traceability ada di:
 
+- `docs/module-map.md` untuk status semua 18 module (stabil/WIP/stub) sebelum mulai mengerjakan module manapun.
 - `docs/migration-guide.md` untuk urutan dan cara menjalankan migration.
 - `docs/auth-user-development-tasks.md` untuk breakdown task development module `internal/core/auth` dan `internal/modules/user`.
 - `docs/auth-user-traceability-index.md` untuk index traceability requirement, API, migration, seed, dan status Auth/User.

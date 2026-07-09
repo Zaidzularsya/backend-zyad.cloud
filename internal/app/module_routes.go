@@ -6,7 +6,6 @@ import (
 	"zyad.cloud/internal/modules/billing"
 	"zyad.cloud/internal/modules/contract"
 	"zyad.cloud/internal/modules/dashboard"
-	"zyad.cloud/internal/modules/landing"
 	"zyad.cloud/internal/modules/mikrotik"
 	"zyad.cloud/internal/modules/newsaggregator"
 	"zyad.cloud/internal/modules/order"
@@ -27,7 +26,6 @@ func registerModuleRoutes(router gin.IRoutes) {
 	billing.RegisterRoutes(router)
 	contract.RegisterRoutes(router)
 	dashboard.RegisterRoutes(router)
-	landing.RegisterRoutes(router)
 	mikrotik.RegisterRoutes(router)
 	newsaggregator.RegisterRoutes(router)
 	order.RegisterRoutes(router)

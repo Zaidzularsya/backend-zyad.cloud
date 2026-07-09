@@ -118,6 +118,10 @@ func (s *defaultDomainService) ListBindings(ctx context.Context, scope coretenan
 	return s.repo.ListBindings(ctx, scope, pageID)
 }
 
+func (s *defaultDomainService) ListAllBindings(ctx context.Context, scope coretenant.Scope) ([]domain.DomainBinding, error) {
+	return s.repo.ListAllBindings(ctx, scope)
+}
+
 func (s *defaultDomainService) ListAvailableDomains(ctx context.Context, scope coretenant.Scope) ([]domain.AvailableDomain, error) {
 	return s.repo.ListAvailableDomains(ctx, scope)
 }

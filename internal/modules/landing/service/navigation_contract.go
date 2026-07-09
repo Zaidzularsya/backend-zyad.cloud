@@ -10,9 +10,10 @@ import (
 )
 
 var (
-	ErrInvalidMenuLocation = errors.New("invalid menu location")
-	ErrInvalidLinkType     = errors.New("invalid link type")
-	ErrMaxMenuDepth        = errors.New("maximum menu depth exceeded")
+	ErrInvalidMenuLocation            = errors.New("invalid menu location")
+	ErrInvalidLinkType                = errors.New("invalid link type")
+	ErrMaxMenuDepth                   = errors.New("maximum menu depth exceeded")
+	ErrInvalidInternalPageDestination = errors.New("internal page destination does not match any page in this organization")
 )
 
 const MaxMenuDepth = 3

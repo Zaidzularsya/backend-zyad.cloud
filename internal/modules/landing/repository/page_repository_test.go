@@ -171,6 +171,82 @@ func TestPageRepositoryLifecycleAndIsolationIntegration(t *testing.T) {
 	}
 }
 
+func TestPageRepositorySettingsRoundtripIntegration(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	repo := repository.NewPageRepository(db)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+
+	_, err := db.Exec(ctx, `
+		INSERT INTO organizations (id, type, slug, name, status)
+		VALUES ($1, 'customer', 'organization-settings', 'Organization Settings', 'active')
+		ON CONFLICT DO NOTHING
+	`, tenants.A.OrganizationID)
+	if err != nil {
+		t.Fatalf("failed to insert mock organization: %v", err)
+	}
+
+	slug := strings.ReplaceAll("page-"+testutil.UniqueCode("settings"), ".", "-")
+
+	created, err := repo.Create(ctx, tenants.A.Scope, repository.CreatePageParams{
+		Name:       "Settings Page",
+		Title:      "Settings Page",
+		Slug:       slug,
+		Type:       domain.PageTypeCampaign,
+		Status:     domain.PageStatusDraft,
+		Visibility: domain.PageVisibilityPublic,
+		Locale:     "id-ID",
+		Timezone:   "Asia/Jakarta",
+		Settings: &domain.PageSettings{
+			PublishRequireApproval: true,
+			LeadNotificationEmails: []string{"ops@example.com"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create page with settings: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		_, _ = db.Exec(cleanupCtx, "DELETE FROM landing_pages WHERE id = $1", created.ID)
+	})
+
+	if !created.Settings.PublishRequireApproval {
+		t.Errorf("expected PublishRequireApproval true after Create, got false")
+	}
+	if len(created.Settings.LeadNotificationEmails) != 1 || created.Settings.LeadNotificationEmails[0] != "ops@example.com" {
+		t.Errorf("expected LeadNotificationEmails to persist, got %+v", created.Settings.LeadNotificationEmails)
+	}
+
+	found, err := repo.FindByID(ctx, tenants.A.Scope, created.ID)
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if !found.Settings.PublishRequireApproval {
+		t.Errorf("expected PublishRequireApproval true after FindByID, got false")
+	}
+
+	updatedSettings := domain.PageSettings{
+		FooterCopyrightText: "© 2026 Acme",
+		TrustBadges:         []domain.TrustBadge{{ImageURL: "https://example.com/badge.png", Label: "ISO 27001"}},
+	}
+	updated, err := repo.Update(ctx, tenants.A.Scope, created.ID, repository.UpdatePageParams{
+		Settings:  &updatedSettings,
+		UpdatedBy: created.CreatedBy,
+	})
+	if err != nil {
+		t.Fatalf("Update page settings: %v", err)
+	}
+	if updated.Settings.FooterCopyrightText != "© 2026 Acme" {
+		t.Errorf("expected FooterCopyrightText to be updated, got %q", updated.Settings.FooterCopyrightText)
+	}
+	if len(updated.Settings.TrustBadges) != 1 || updated.Settings.TrustBadges[0].Label != "ISO 27001" {
+		t.Errorf("expected TrustBadges to be updated, got %+v", updated.Settings.TrustBadges)
+	}
+	if updated.Settings.PublishRequireApproval {
+		t.Errorf("expected PublishRequireApproval to be replaced (false) since Update replaces settings wholesale, got true")
+	}
+}
+
 type pageIsolationAdapter struct {
 	repo repository.PageRepository
 	ids  map[string]string

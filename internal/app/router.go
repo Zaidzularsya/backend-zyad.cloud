@@ -68,6 +68,9 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.UserAuthHandler != nil {
 		deps.UserAuthHandler.RegisterRoutes(api)
 	}
+	if deps.PublicProductHandler != nil {
+		deps.PublicProductHandler.RegisterRoutes(api)
+	}
 
 	protected := api.Group("")
 	protected.Use(
@@ -104,6 +107,12 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.PermissionHandler != nil {
 		deps.PermissionHandler.RegisterRoutes(protected)
 	}
+	if deps.PlatformProductHandler != nil {
+		deps.PlatformProductHandler.RegisterRoutes(protected)
+	}
+	if deps.PlatformSubscriptionHandler != nil {
+		deps.PlatformSubscriptionHandler.RegisterRoutes(protected)
+	}
 	if deps.PlatformBillingHandler != nil {
 		deps.PlatformBillingHandler.RegisterRoutes(protected)
 	}
@@ -126,6 +135,9 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		deps.NotificationHandler.RegisterInternalRoutes(protected)
 	}
 	// Landing Page API (Admin)
+	// Routes are registered directly here per-handler rather than through a
+	// module.go/routes.go indirection — the landing module intentionally has
+	// no such wrapper; don't recreate one.
 	if deps.LandingAdminPageHandler != nil {
 		deps.LandingAdminPageHandler.RegisterRoutes(protected, deps.PermissionChecker)
 	}

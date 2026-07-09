@@ -2,13 +2,39 @@ package service
 
 import (
 	"context"
+	"net/http"
 	"regexp"
 	"strings"
 
+	coreerrors "zyad.cloud/internal/core/errors"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/landing/domain"
 	"zyad.cloud/internal/modules/landing/repository"
 )
+
+const pricingSourcePlatformCatalog = "platform_catalog"
+
+func errPricingSourceNotAllowed() error {
+	return coreerrors.New(
+		"PRICING_SOURCE_NOT_ALLOWED",
+		"only the platform organization may use source=platform_catalog for a pricing section",
+		http.StatusBadRequest,
+	)
+}
+
+func validatePricingSource(sectionType domain.SectionType, content map[string]any, organizationType coretenant.OrganizationType) error {
+	if sectionType != domain.SectionTypePricing || content == nil {
+		return nil
+	}
+	source, _ := content["source"].(string)
+	if source != pricingSourcePlatformCatalog {
+		return nil
+	}
+	if organizationType != coretenant.OrganizationTypePlatform {
+		return errPricingSourceNotAllowed()
+	}
+	return nil
+}
 
 type sectionService struct {
 	sectionRepo repository.SectionRepository
@@ -47,7 +73,10 @@ func NewSectionService(
 	return service
 }
 
-func (s *sectionService) Create(ctx context.Context, scope coretenant.Scope, params repository.CreateSectionParams) (domain.LandingSection, error) {
+func (s *sectionService) Create(ctx context.Context, scope coretenant.Scope, organizationType coretenant.OrganizationType, params repository.CreateSectionParams) (domain.LandingSection, error) {
+	if err := validatePricingSource(params.Type, params.Content, organizationType); err != nil {
+		return domain.LandingSection{}, err
+	}
 	if err := s.requireCreateQuota(ctx, scope, params.LandingPageID); err != nil {
 		return domain.LandingSection{}, err
 	}
@@ -86,8 +115,15 @@ func (s *sectionService) ListByPage(ctx context.Context, scope coretenant.Scope,
 	return s.sectionRepo.ListByPage(ctx, scope, pageID)
 }
 
-func (s *sectionService) Update(ctx context.Context, scope coretenant.Scope, id string, params repository.UpdateSectionParams) (domain.LandingSection, error) {
+func (s *sectionService) Update(ctx context.Context, scope coretenant.Scope, organizationType coretenant.OrganizationType, id string, params repository.UpdateSectionParams) (domain.LandingSection, error) {
 	if params.Content != nil {
+		existing, err := s.sectionRepo.FindByID(ctx, scope, id)
+		if err != nil {
+			return domain.LandingSection{}, err
+		}
+		if err := validatePricingSource(existing.Type, params.Content, organizationType); err != nil {
+			return domain.LandingSection{}, err
+		}
 		params.Content = s.sanitizeMap(params.Content)
 	}
 	return s.sectionRepo.Update(ctx, scope, id, params)

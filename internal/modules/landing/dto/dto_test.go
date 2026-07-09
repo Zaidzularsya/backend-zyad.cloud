@@ -22,7 +22,10 @@ func TestPageResponseSerialization(t *testing.T) {
 		Timezone:   "Asia/Jakarta",
 		CreatedAt:  now,
 		UpdatedAt:  now,
-		Settings:   map[string]any{"color": "blue"},
+		Settings: dto.PageSettingsResponse{
+			FooterCopyrightText: "© 2026 Acme",
+			TrustBadges:         []dto.TrustBadgeItem{{ImageURL: "https://example.com/badge.png", Label: "ISO 27001"}},
+		},
 	}
 
 	data, err := json.Marshal(resp)
@@ -35,8 +38,11 @@ func TestPageResponseSerialization(t *testing.T) {
 		t.Fatalf("Unmarshal() error = %v", err)
 	}
 
-	if decoded.ID != resp.ID || decoded.Name != resp.Name || decoded.Settings["color"] != "blue" {
+	if decoded.ID != resp.ID || decoded.Name != resp.Name || decoded.Settings.FooterCopyrightText != "© 2026 Acme" {
 		t.Errorf("Decoded output does not match input: %+v", decoded)
+	}
+	if len(decoded.Settings.TrustBadges) != 1 || decoded.Settings.TrustBadges[0].Label != "ISO 27001" {
+		t.Errorf("Decoded trust badges do not match input: %+v", decoded.Settings.TrustBadges)
 	}
 }
 

@@ -29,6 +29,12 @@ import (
 	organizationhandler "zyad.cloud/internal/modules/organization/handler"
 	organizationrepo "zyad.cloud/internal/modules/organization/repository"
 	organizationservice "zyad.cloud/internal/modules/organization/service"
+	producthandler "zyad.cloud/internal/modules/product/handler"
+	productrepo "zyad.cloud/internal/modules/product/repository"
+	productservice "zyad.cloud/internal/modules/product/service"
+	subscriptionhandler "zyad.cloud/internal/modules/subscription/handler"
+	subscriptionrepo "zyad.cloud/internal/modules/subscription/repository"
+	subscriptionservice "zyad.cloud/internal/modules/subscription/service"
 	userhandler "zyad.cloud/internal/modules/user/handler"
 	userrepo "zyad.cloud/internal/modules/user/repository"
 	userservice "zyad.cloud/internal/modules/user/service"
@@ -73,36 +79,43 @@ func New(ctx context.Context) (*App, error) {
 	permService := permissionservice.New(permRepo)
 	permHandler := permissionhandler.New(permService)
 
-	billingPlanRepo := billingrepo.NewPlanRepository(db)
-	billingFeatureRepo := billingrepo.NewFeatureRepository(db)
-	billingPlanEntitlementRepo := billingrepo.NewPlanEntitlementRepository(db)
-	billingSubscriptionRepo := billingrepo.NewSubscriptionRepository(db)
+	productPlanRepo := productrepo.NewPlanRepository(db)
+	productFeatureRepo := productrepo.NewFeatureRepository(db)
+	productPlanEntitlementRepo := productrepo.NewPlanEntitlementRepository(db)
+	subscriptionRepo := subscriptionrepo.NewSubscriptionRepository(db)
 	billingInvoiceRepo := billingrepo.NewInvoiceRepository(db)
 	billingPaymentRepo := billingrepo.NewPaymentRepository(db)
-	billingEntitlementSink := billingrepo.NewEntitlementSink(db)
+	subscriptionEntitlementSink := subscriptionrepo.NewEntitlementSink(db)
 
-	billingPlanService := billingservice.NewPlanService(billingPlanRepo)
-	billingFeatureService := billingservice.NewFeatureService(billingFeatureRepo)
-	billingPlanEntitlementService := billingservice.NewPlanEntitlementService(
-		billingPlanEntitlementRepo,
-		billingFeatureRepo,
+	productPlanService := productservice.NewPlanService(productPlanRepo, productPlanEntitlementRepo)
+	productFeatureService := productservice.NewFeatureService(productFeatureRepo)
+	productPlanEntitlementService := productservice.NewPlanEntitlementService(
+		productPlanEntitlementRepo,
+		productFeatureRepo,
 	)
-	billingSubscriptionService := billingservice.NewSubscriptionService(
-		billingSubscriptionRepo,
-		billingPlanEntitlementRepo,
-		billingEntitlementSink,
+	subscriptionService := subscriptionservice.NewSubscriptionService(
+		subscriptionRepo,
+		productPlanEntitlementRepo,
+		subscriptionEntitlementSink,
 	)
 	billingInvoiceService := billingservice.NewInvoiceService(billingInvoiceRepo)
 	billingPaymentService := billingservice.NewPaymentService(
 		billingPaymentRepo,
 		billingInvoiceRepo,
-		billingSubscriptionService,
+		subscriptionUpgradeActivatorAdapter{subscriptions: subscriptionService},
+	)
+	platformProductHandler := producthandler.NewPlatformProductHandler(
+		productPlanService,
+		productFeatureService,
+		productPlanEntitlementService,
+		permService,
+	)
+	publicProductHandler := producthandler.NewPublicProductHandler(productPlanService)
+	platformSubscriptionHandler := subscriptionhandler.NewPlatformSubscriptionHandler(
+		subscriptionService,
+		permService,
 	)
 	platformBillingHandler := billinghandler.NewPlatformBillingHandler(
-		billingPlanService,
-		billingFeatureService,
-		billingPlanEntitlementService,
-		billingSubscriptionService,
 		billingInvoiceService,
 		billingPaymentService,
 		permService,
@@ -201,15 +214,15 @@ func New(ctx context.Context) (*App, error) {
 		permService,
 		permService,
 	)
-	billingGuardService := billingservice.NewBillingGuardService(
-		billingSubscriptionRepo,
+	subscriptionGuardService := subscriptionservice.NewSubscriptionGuardService(
+		subscriptionRepo,
 		organizationEntitlementRuntimeService,
 	)
 	organizationSelfService := organizationservice.NewSelfService(
 		organizationrepo.NewSelfRepository(db),
 		organizationservice.NewMembershipService(
 			organizationMembershipRepository,
-			organizationservice.WithMembershipBillingGuard(billingGuardService),
+			organizationservice.WithMembershipBillingGuard(subscriptionGuardService),
 		),
 		organizationMembershipRepository,
 	)
@@ -221,15 +234,15 @@ func New(ctx context.Context) (*App, error) {
 		organizationrepo.NewDomainRepository(db),
 		organizationservice.NewDNSDomainVerifier(nil),
 		cfg.MultiTenant.PlatformPrimaryDomain,
-		organizationservice.WithDomainBillingGuard(billingGuardService),
+		organizationservice.WithDomainBillingGuard(subscriptionGuardService),
 	)
 	organizationDomainHandler := organizationhandler.NewDomainHandler(
 		organizationDomainService,
 		permService,
 	)
 	tenantBillingService := billingservice.NewTenantBillingService(
-		billingSubscriptionService,
-		billingPlanService,
+		subscriptionService,
+		productPlanService,
 		billingInvoiceService,
 		organizationEntitlementService,
 	)
@@ -258,11 +271,12 @@ func New(ctx context.Context) (*App, error) {
 	landingPageSvc := landingservice.NewPageService(
 		landingPageRepo,
 		landingSectionRepo,
-		landingservice.WithLandingPageQuotaGuard(billingGuardService),
+		landingservice.WithLandingPageQuotaGuard(subscriptionGuardService),
+		landingservice.WithLandingPageBrandingRepo(landingBrandingRepo),
 	)
 	landingSectionSvc := landingservice.NewSectionService(
 		landingSectionRepo,
-		landingservice.WithLandingSectionQuotaGuard(billingGuardService),
+		landingservice.WithLandingSectionQuotaGuard(subscriptionGuardService),
 	)
 
 	landingDomainRepo := landingrepo.NewDomainRepository(db)
@@ -270,7 +284,7 @@ func New(ctx context.Context) (*App, error) {
 		landingDomainRepo,
 		landingPageRepo,
 		db,
-		landingservice.WithLandingDomainFeatureGate(billingGuardService),
+		landingservice.WithLandingDomainFeatureGate(subscriptionGuardService),
 	)
 	landingBrandingSvc := landingservice.NewBrandingService(landingBrandingRepo)
 	landingFormSvc := landingservice.NewFormService(landingFormRepo)
@@ -285,10 +299,10 @@ func New(ctx context.Context) (*App, error) {
 	landingTemplateSvc := landingservice.NewTemplateService(
 		landingReusableRepo,
 		landingSectionRepo,
-		landingservice.WithTemplateSectionQuotaGuard(billingGuardService),
+		landingservice.WithTemplateSectionQuotaGuard(subscriptionGuardService),
 	)
 	landingMediaSvc := landingservice.NewMediaService(landingMediaRepo)
-	landingNavigationSvc := landingservice.NewNavigationService(landingReusableRepo)
+	landingNavigationSvc := landingservice.NewNavigationService(landingReusableRepo, landingPageRepo)
 	landingDeliverySvc := landingservice.NewDeliveryService(landingIntegrationRepo, landingSubmissionRepo)
 
 	landingAdminPageHandler := landinghandler.NewAdminPageHandler(landingPageSvc, landingVisibilitySvc, landingRevisionSvc, landingPublishSvc)
@@ -322,6 +336,9 @@ func New(ctx context.Context) (*App, error) {
 		NotificationTemplateHandler:      templateHandler,
 		NotificationVariableHandler:      variableHandler,
 		PermissionHandler:                permHandler,
+		PlatformProductHandler:           platformProductHandler,
+		PublicProductHandler:             publicProductHandler,
+		PlatformSubscriptionHandler:      platformSubscriptionHandler,
 		PlatformBillingHandler:           platformBillingHandler,
 		TenantBillingHandler:             tenantBillingHandler,
 		OrganizationDomainHandler:        organizationDomainHandler,

@@ -8,6 +8,7 @@ import (
 	"zyad.cloud/internal/core/middleware"
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	"zyad.cloud/internal/modules/billing/dto"
+	subscriptiondto "zyad.cloud/internal/modules/subscription/dto"
 	"zyad.cloud/internal/shared/response"
 
 	"github.com/gin-gonic/gin"
@@ -36,7 +37,7 @@ type TenantBillingService interface {
 		organizationID string,
 		actorUserID string,
 		reason string,
-	) (dto.SubscriptionResponse, error)
+	) (subscriptiondto.SubscriptionResponse, error)
 }
 
 type TenantBillingHandler struct {

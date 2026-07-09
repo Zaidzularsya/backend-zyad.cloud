@@ -10,13 +10,15 @@ import (
 
 	"zyad.cloud/internal/modules/billing/dto"
 	organizationdto "zyad.cloud/internal/modules/organization/dto"
+	productdto "zyad.cloud/internal/modules/product/dto"
+	subscriptiondto "zyad.cloud/internal/modules/subscription/dto"
 )
 
 type stubTenantBillingSubscriptionReader struct {
-	subscription       dto.SubscriptionResponse
-	latestSubscription dto.SubscriptionResponse
+	subscription       subscriptiondto.SubscriptionResponse
+	latestSubscription subscriptiondto.SubscriptionResponse
 	usableErr          error
-	changeResult       dto.SubscriptionResponse
+	changeResult       subscriptiondto.SubscriptionResponse
 	organizationID     string
 	changedID          string
 	changedActorUserID string
@@ -26,14 +28,14 @@ type stubTenantBillingSubscriptionReader struct {
 func (s *stubTenantBillingSubscriptionReader) FindUsableByOrganization(
 	context.Context,
 	string,
-) (dto.SubscriptionResponse, error) {
+) (subscriptiondto.SubscriptionResponse, error) {
 	return s.subscription, s.usableErr
 }
 
 func (s *stubTenantBillingSubscriptionReader) FindLatestByOrganization(
 	context.Context,
 	string,
-) (dto.SubscriptionResponse, error) {
+) (subscriptiondto.SubscriptionResponse, error) {
 	if s.latestSubscription.ID != "" {
 		return s.latestSubscription, nil
 	}
@@ -46,7 +48,7 @@ func (s *stubTenantBillingSubscriptionReader) ScheduleCancellation(
 	id string,
 	actorUserID string,
 	reason string,
-) (dto.SubscriptionResponse, error) {
+) (subscriptiondto.SubscriptionResponse, error) {
 	s.organizationID = organizationID
 	s.changedID = id
 	s.changedActorUserID = actorUserID
@@ -55,14 +57,14 @@ func (s *stubTenantBillingSubscriptionReader) ScheduleCancellation(
 }
 
 type stubTenantBillingPlanReader struct {
-	plan dto.PlanResponse
+	plan productdto.PlanResponse
 }
 
 func (s *stubTenantBillingPlanReader) FindByID(
 	context.Context,
 	string,
 	bool,
-) (dto.PlanResponse, error) {
+) (productdto.PlanResponse, error) {
 	return s.plan, nil
 }
 
@@ -161,12 +163,12 @@ func TestTenantBillingServiceCheckUsageMapsOrganizationUsage(t *testing.T) {
 
 func TestTenantBillingServiceCancelCurrentSubscriptionUsesCurrentOrganization(t *testing.T) {
 	subscriptionReader := &stubTenantBillingSubscriptionReader{
-		subscription: dto.SubscriptionResponse{
+		subscription: subscriptiondto.SubscriptionResponse{
 			ID:             "subscription-1",
 			OrganizationID: "organization-1",
 			Status:         "active",
 		},
-		changeResult: dto.SubscriptionResponse{
+		changeResult: subscriptiondto.SubscriptionResponse{
 			ID:                "subscription-1",
 			OrganizationID:    "organization-1",
 			Status:            "active",
@@ -198,7 +200,7 @@ func TestTenantBillingServiceCancelCurrentSubscriptionUsesCurrentOrganization(t 
 func TestTenantBillingServiceCurrentPlanFallsBackToLatestSubscription(t *testing.T) {
 	subscriptionReader := &stubTenantBillingSubscriptionReader{
 		usableErr: pgx.ErrNoRows,
-		latestSubscription: dto.SubscriptionResponse{
+		latestSubscription: subscriptiondto.SubscriptionResponse{
 			ID:             "subscription-2",
 			OrganizationID: "organization-1",
 			PlanID:         "plan-2",
@@ -206,7 +208,7 @@ func TestTenantBillingServiceCurrentPlanFallsBackToLatestSubscription(t *testing
 		},
 	}
 	planReader := &stubTenantBillingPlanReader{
-		plan: dto.PlanResponse{ID: "plan-2", Name: "Growth"},
+		plan: productdto.PlanResponse{ID: "plan-2", Name: "Growth"},
 	}
 	service := NewTenantBillingService(subscriptionReader, planReader, nil, nil)
 
@@ -223,7 +225,7 @@ func TestTenantBillingServiceCurrentPlanFallsBackToLatestSubscription(t *testing
 
 func TestTenantBillingServiceCurrentPlanIncludesUsageSummary(t *testing.T) {
 	subscriptionReader := &stubTenantBillingSubscriptionReader{
-		subscription: dto.SubscriptionResponse{
+		subscription: subscriptiondto.SubscriptionResponse{
 			ID:             "subscription-1",
 			OrganizationID: "organization-1",
 			PlanID:         "plan-growth",
@@ -231,7 +233,7 @@ func TestTenantBillingServiceCurrentPlanIncludesUsageSummary(t *testing.T) {
 		},
 	}
 	planReader := &stubTenantBillingPlanReader{
-		plan: dto.PlanResponse{ID: "plan-growth", Name: "Growth"},
+		plan: productdto.PlanResponse{ID: "plan-growth", Name: "Growth"},
 	}
 	usageReader := &stubTenantBillingUsageReader{
 		results: map[string]organizationdto.UsageResponse{
@@ -276,7 +278,7 @@ func TestTenantBillingServiceCurrentPlanIncludesUsageSummary(t *testing.T) {
 
 func TestTenantBillingServiceCurrentPlanSkipsUsageSummaryErrors(t *testing.T) {
 	subscriptionReader := &stubTenantBillingSubscriptionReader{
-		subscription: dto.SubscriptionResponse{
+		subscription: subscriptiondto.SubscriptionResponse{
 			ID:             "subscription-1",
 			OrganizationID: "organization-1",
 			Status:         "active",
@@ -313,7 +315,7 @@ func TestTenantBillingServiceCurrentPlanSkipsUsageSummaryErrors(t *testing.T) {
 func TestTenantBillingServiceRequestUpgradeCreatesInvoice(t *testing.T) {
 	interval := "yearly"
 	subscriptionReader := &stubTenantBillingSubscriptionReader{
-		latestSubscription: dto.SubscriptionResponse{
+		latestSubscription: subscriptiondto.SubscriptionResponse{
 			ID:              "subscription-1",
 			OrganizationID:  "organization-1",
 			PlanID:          "plan-starter",
@@ -322,13 +324,13 @@ func TestTenantBillingServiceRequestUpgradeCreatesInvoice(t *testing.T) {
 		},
 	}
 	planReader := &stubTenantBillingPlanReader{
-		plan: dto.PlanResponse{
+		plan: productdto.PlanResponse{
 			ID:       "plan-growth",
 			Code:     "growth",
 			Name:     "Growth",
 			IsPublic: true,
 			IsActive: true,
-			Prices: []dto.PlanPriceResponse{
+			Prices: []productdto.PlanPriceResponse{
 				{BillingInterval: "monthly", Currency: "IDR", Amount: "199000.00", IsActive: true},
 				{BillingInterval: "yearly", Currency: "IDR", Amount: "1999000.00", IsActive: true},
 			},

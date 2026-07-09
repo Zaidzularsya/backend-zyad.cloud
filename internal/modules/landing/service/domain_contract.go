@@ -27,6 +27,10 @@ type DomainService interface {
 	// ListBindings returns all domain bindings for a landing page.
 	ListBindings(ctx context.Context, scope coretenant.Scope, pageID string) ([]domain.DomainBinding, error)
 
+	// ListAllBindings returns every domain binding owned by the organization,
+	// across all landing pages.
+	ListAllBindings(ctx context.Context, scope coretenant.Scope) ([]domain.DomainBinding, error)
+
 	// ListAvailableDomains returns all verified organization domains that can be bound.
 	ListAvailableDomains(ctx context.Context, scope coretenant.Scope) ([]domain.AvailableDomain, error)
 }

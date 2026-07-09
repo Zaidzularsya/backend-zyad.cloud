@@ -11,6 +11,8 @@ import (
 	billinghandler "zyad.cloud/internal/modules/billing/handler"
 	landinghandler "zyad.cloud/internal/modules/landing/handler"
 	organizationhandler "zyad.cloud/internal/modules/organization/handler"
+	producthandler "zyad.cloud/internal/modules/product/handler"
+	subscriptionhandler "zyad.cloud/internal/modules/subscription/handler"
 	userhandler "zyad.cloud/internal/modules/user/handler"
 	pgdatabase "zyad.cloud/internal/platform/database"
 	"zyad.cloud/internal/platform/redis"
@@ -27,6 +29,9 @@ type Dependencies struct {
 	NotificationTemplateHandler      *notificationhandler.TemplateHandler
 	NotificationVariableHandler      *notificationhandler.VariableHandler
 	PermissionHandler                *permissionhandler.Handler
+	PlatformProductHandler           *producthandler.PlatformProductHandler
+	PublicProductHandler             *producthandler.PublicProductHandler
+	PlatformSubscriptionHandler      *subscriptionhandler.PlatformSubscriptionHandler
 	PlatformBillingHandler           *billinghandler.PlatformBillingHandler
 	TenantBillingHandler             *billinghandler.TenantBillingHandler
 	OrganizationDomainHandler        *organizationhandler.DomainHandler

@@ -11,6 +11,7 @@ import (
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/billing/dto"
+	subscriptiondto "zyad.cloud/internal/modules/subscription/dto"
 
 	"github.com/gin-gonic/gin"
 )
@@ -74,11 +75,11 @@ func (s *tenantBillingHandlerServiceStub) CancelCurrentSubscription(
 	organizationID string,
 	actorUserID string,
 	reason string,
-) (dto.SubscriptionResponse, error) {
+) (subscriptiondto.SubscriptionResponse, error) {
 	s.organizationID = organizationID
 	s.cancelActorID = actorUserID
 	s.cancelReason = reason
-	return dto.SubscriptionResponse{
+	return subscriptiondto.SubscriptionResponse{
 		OrganizationID:    organizationID,
 		Status:            "active",
 		CancelAtPeriodEnd: true,

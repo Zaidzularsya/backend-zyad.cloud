@@ -61,13 +61,3 @@ type LandingBranding struct {
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 }
-
-type LandingDomainBinding struct {
-	ID                   string
-	OrganizationID       string
-	OrganizationDomainID string
-	LandingPageID        string
-	IsPrimary            bool
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
-}

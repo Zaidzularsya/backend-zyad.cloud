@@ -96,13 +96,13 @@ func (s *stubPaymentInvoiceStore) FindByID(context.Context, string, string) (mod
 
 type stubPaymentSubscriptionUpgradeActivator struct {
 	calls       int
-	lastInvoice model.Invoice
+	lastInvoice SubscriptionUpgradeInvoice
 	lastPaidAt  time.Time
 }
 
 func (s *stubPaymentSubscriptionUpgradeActivator) ActivateUpgradeByInvoice(
 	_ context.Context,
-	invoice model.Invoice,
+	invoice SubscriptionUpgradeInvoice,
 	paidAt time.Time,
 ) error {
 	s.calls++
@@ -270,7 +270,9 @@ func TestPaymentServiceMarkInvoicePaidActivatesUpgradeInvoice(t *testing.T) {
 	if activator.calls != 1 {
 		t.Fatalf("upgrade activator calls = %d, want 1", activator.calls)
 	}
-	if activator.lastInvoice.ID != "invoice-upgrade-1" {
+	if activator.lastInvoice.OrganizationID != "organization-1" ||
+		activator.lastInvoice.SubscriptionID == nil ||
+		*activator.lastInvoice.SubscriptionID != "subscription-1" {
 		t.Fatalf("last invoice = %#v", activator.lastInvoice)
 	}
 	if !activator.lastPaidAt.Equal(now) {

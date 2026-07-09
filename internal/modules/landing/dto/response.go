@@ -10,28 +10,37 @@ type PaginationMeta struct {
 	TotalPages int   `json:"total_pages"`
 }
 
+// PageSettingsResponse represents the typed, validated landing page settings.
+type PageSettingsResponse struct {
+	PublishRequireApproval bool             `json:"publish_require_approval"`
+	LeadNotificationEmails []string         `json:"lead_notification_emails"`
+	FooterCopyrightText    string           `json:"footer_copyright_text"`
+	TrustBadges            []TrustBadgeItem `json:"trust_badges"`
+	AnalyticsHooks         map[string]any   `json:"analytics_hooks,omitempty"`
+}
+
 // PageResponse represents the details of a landing page.
 type PageResponse struct {
-	ID               string         `json:"id"`
-	Name             string         `json:"name"`
-	Title            string         `json:"title"`
-	Slug             string         `json:"slug"`
-	PageType         string         `json:"page_type"`
-	Status           string         `json:"status"`
-	Visibility       string         `json:"visibility"`
-	Locale           string         `json:"locale"`
-	Timezone         string         `json:"timezone"`
-	IsHomepage       bool           `json:"is_homepage"`
-	IsTemplate       bool           `json:"is_template"`
-	PublishedVersion int            `json:"published_version"`
-	PublishAt        *time.Time     `json:"publish_at,omitempty"`
-	UnpublishAt      *time.Time     `json:"unpublish_at,omitempty"`
-	PublishedAt      *time.Time     `json:"published_at,omitempty"`
-	Settings         map[string]any `json:"settings"`
-	SEO              map[string]any `json:"seo,omitempty"`
-	CreatedAt        time.Time      `json:"created_at"`
-	UpdatedAt        time.Time      `json:"updated_at"`
-	DeletedAt        *time.Time     `json:"deleted_at,omitempty"`
+	ID               string               `json:"id"`
+	Name             string               `json:"name"`
+	Title            string               `json:"title"`
+	Slug             string               `json:"slug"`
+	PageType         string               `json:"page_type"`
+	Status           string               `json:"status"`
+	Visibility       string               `json:"visibility"`
+	Locale           string               `json:"locale"`
+	Timezone         string               `json:"timezone"`
+	IsHomepage       bool                 `json:"is_homepage"`
+	IsTemplate       bool                 `json:"is_template"`
+	PublishedVersion int                  `json:"published_version"`
+	PublishAt        *time.Time           `json:"publish_at,omitempty"`
+	UnpublishAt      *time.Time           `json:"unpublish_at,omitempty"`
+	PublishedAt      *time.Time           `json:"published_at,omitempty"`
+	Settings         PageSettingsResponse `json:"settings"`
+	SEO              map[string]any       `json:"seo,omitempty"`
+	CreatedAt        time.Time            `json:"created_at"`
+	UpdatedAt        time.Time            `json:"updated_at"`
+	DeletedAt        *time.Time           `json:"deleted_at,omitempty"`
 }
 
 // PageListResponse wraps pages and metadata.

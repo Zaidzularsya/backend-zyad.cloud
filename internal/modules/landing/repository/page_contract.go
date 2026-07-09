@@ -26,6 +26,7 @@ type CreatePageParams struct {
 	Status     domain.PageStatus
 	Visibility domain.PageVisibility
 	SEO        map[string]any
+	Settings   *domain.PageSettings
 	Locale     string
 	Timezone   string
 	IsHomepage bool
@@ -42,6 +43,7 @@ type UpdatePageParams struct {
 	Visibility   *domain.PageVisibility
 	PasswordHash *string
 	SEO          map[string]any
+	Settings     *domain.PageSettings
 	Locale       *string
 	Timezone     *string
 	IsHomepage   *bool
@@ -54,6 +56,7 @@ type UpdatePageParams struct {
 type PageRepository interface {
 	Create(context.Context, coretenant.Scope, CreatePageParams) (domain.LandingPage, error)
 	FindByID(context.Context, coretenant.Scope, string) (domain.LandingPage, error)
+	FindBySlug(context.Context, coretenant.Scope, string) (domain.LandingPage, error)
 	List(context.Context, coretenant.Scope, PageListFilter) ([]domain.LandingPage, int64, error)
 	Update(context.Context, coretenant.Scope, string, UpdatePageParams) (domain.LandingPage, error)
 	Delete(context.Context, coretenant.Scope, string) error

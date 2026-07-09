@@ -1,5 +1,10 @@
 # Billing Plan Development Tasks
 
+> **Catatan riwayat (refactor domain-split)**: Breakdown di dokumen ini sudah selesai dieksekusi
+> dan modulnya kemudian di-refactor menjadi 3 domain (Product/Catalog, Subscription, Billing) — lihat
+> [product-subscription-billing-refactor-plan.md](product-subscription-billing-refactor-plan.md) untuk
+> checklist refactor tersebut. Dokumen ini dipertahankan sebagai riwayat breakdown kerja awal.
+
 Dokumen ini adalah breakdown development untuk:
 
 ```txt

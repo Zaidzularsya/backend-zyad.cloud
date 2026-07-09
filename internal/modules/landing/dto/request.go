@@ -15,31 +15,63 @@ type PageListQuery struct {
 	IncludeDeleted bool   `form:"include_deleted"`
 }
 
+// TrustBadgeItem binds a single footer trust badge.
+type TrustBadgeItem struct {
+	ImageURL string `json:"image_url"`
+	Label    string `json:"label"`
+}
+
+// PageSettingsRequest binds the typed, validated landing page settings payload.
+// When present on an update, it replaces the settings object wholesale (matching
+// how SEO/branding sub-objects are replaced elsewhere in this module).
+type PageSettingsRequest struct {
+	PublishRequireApproval bool             `json:"publish_require_approval"`
+	LeadNotificationEmails []string         `json:"lead_notification_emails"`
+	FooterCopyrightText    string           `json:"footer_copyright_text"`
+	TrustBadges            []TrustBadgeItem `json:"trust_badges"`
+	AnalyticsHooks         map[string]any   `json:"analytics_hooks"`
+}
+
 // CreatePageRequest binds the payload for creating a landing page.
 type CreatePageRequest struct {
-	Name       string `json:"name" binding:"required,min=1,max=200"`
-	Title      string `json:"title" binding:"required,min=1,max=255"`
-	Slug       string `json:"slug" binding:"required,lowercase,alphanumhyphen"`
-	PageType   string `json:"page_type" binding:"required"`
-	Visibility string `json:"visibility" binding:"required"`
-	Locale     string `json:"locale"`
-	Timezone   string `json:"timezone"`
-	IsHomepage bool   `json:"is_homepage"`
-	IsTemplate bool   `json:"is_template"`
+	Name       string               `json:"name" binding:"required,min=1,max=200"`
+	Title      string               `json:"title" binding:"required,min=1,max=255"`
+	Slug       string               `json:"slug" binding:"required,lowercase,alphanumhyphen"`
+	PageType   string               `json:"page_type" binding:"required"`
+	Visibility string               `json:"visibility" binding:"required"`
+	Locale     string               `json:"locale"`
+	Timezone   string               `json:"timezone"`
+	IsHomepage bool                 `json:"is_homepage"`
+	IsTemplate bool                 `json:"is_template"`
+	Settings   *PageSettingsRequest `json:"settings" binding:"omitnil"`
 }
 
 // UpdatePageRequest binds the partial payload for updating a landing page.
 type UpdatePageRequest struct {
-	Name       *string         `json:"name" binding:"omitnil,min=1,max=200"`
-	Title      *string         `json:"title" binding:"omitnil,min=1,max=255"`
-	Slug       *string         `json:"slug" binding:"omitnil,lowercase,alphanumhyphen"`
-	PageType   *string         `json:"page_type"`
-	Visibility *string         `json:"visibility"`
-	Locale     *string         `json:"locale"`
-	Timezone   *string         `json:"timezone"`
-	IsHomepage *bool           `json:"is_homepage"`
-	IsTemplate *bool           `json:"is_template"`
-	Settings   *map[string]any `json:"settings" binding:"omitnil"`
+	Name       *string              `json:"name" binding:"omitnil,min=1,max=200"`
+	Title      *string              `json:"title" binding:"omitnil,min=1,max=255"`
+	Slug       *string              `json:"slug" binding:"omitnil,lowercase,alphanumhyphen"`
+	PageType   *string              `json:"page_type"`
+	Visibility *string              `json:"visibility"`
+	Locale     *string              `json:"locale"`
+	Timezone   *string              `json:"timezone"`
+	IsHomepage *bool                `json:"is_homepage"`
+	IsTemplate *bool                `json:"is_template"`
+	Settings   *PageSettingsRequest `json:"settings" binding:"omitnil"`
+}
+
+// CreatePageFromTemplateRequest binds the payload for creating a new page
+// seeded from an existing page-level template (IsTemplate=true), copying its
+// sections, SEO, and optionally its per-page branding override in one call.
+type CreatePageFromTemplateRequest struct {
+	TemplatePageID  string `json:"template_page_id" binding:"required,uuid"`
+	Name            string `json:"name" binding:"required,min=1,max=200"`
+	Title           string `json:"title" binding:"required,min=1,max=255"`
+	Slug            string `json:"slug" binding:"required,lowercase,alphanumhyphen"`
+	Visibility      string `json:"visibility" binding:"required"`
+	Locale          string `json:"locale"`
+	Timezone        string `json:"timezone"`
+	IncludeBranding bool   `json:"include_branding"`
 }
 
 // UpdatePageAccessRequest binds request for updating visibility and password.
@@ -182,20 +214,28 @@ type CreateSubmissionNoteRequest struct {
 	Note string `json:"note" binding:"required,min=1"`
 }
 
+// SocialLinkRequest binds a single social link entry. Platform is a free-text
+// key (e.g. "instagram", "whatsapp") — there is no closed enum since brands
+// can link to any platform.
+type SocialLinkRequest struct {
+	Platform string `json:"platform" binding:"required"`
+	URL      string `json:"url" binding:"required"`
+}
+
 // ThemeBrandingRequest binds theme configuration.
 type ThemeBrandingRequest struct {
-	CompanyName    *string         `json:"company_name"`
-	Tagline        *string         `json:"tagline"`
-	LogoLightURL   *string         `json:"logo_light_url"`
-	LogoDarkURL    *string         `json:"logo_dark_url"`
-	FaviconURL     *string         `json:"favicon_url"`
-	SocialImageURL *string         `json:"social_image_url"`
-	Colors         *map[string]any `json:"colors" binding:"omitnil"`
-	Typography     *map[string]any `json:"typography" binding:"omitnil"`
-	Shape          *map[string]any `json:"shape" binding:"omitnil"`
-	Layout         *map[string]any `json:"layout" binding:"omitnil"`
-	Contact        *map[string]any `json:"contact" binding:"omitnil"`
-	SocialLinks    *[]any          `json:"social_links" binding:"omitnil"`
+	CompanyName    *string              `json:"company_name"`
+	Tagline        *string              `json:"tagline"`
+	LogoLightURL   *string              `json:"logo_light_url"`
+	LogoDarkURL    *string              `json:"logo_dark_url"`
+	FaviconURL     *string              `json:"favicon_url"`
+	SocialImageURL *string              `json:"social_image_url"`
+	Colors         *map[string]any      `json:"colors" binding:"omitnil"`
+	Typography     *map[string]any      `json:"typography" binding:"omitnil"`
+	Shape          *map[string]any      `json:"shape" binding:"omitnil"`
+	Layout         *map[string]any      `json:"layout" binding:"omitnil"`
+	Contact        *map[string]any      `json:"contact" binding:"omitnil"`
+	SocialLinks    *[]SocialLinkRequest `json:"social_links" binding:"omitnil,dive"`
 }
 
 // CTARequest binds Call to Action payloads.

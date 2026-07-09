@@ -130,7 +130,7 @@ func TestBrandingRepositoryIntegration(t *testing.T) {
 	brandingRepo := repository.NewBrandingRepository(db)
 
 	companyName := "Org A Company"
-	
+
 	// 1. Upsert Default Branding
 	brandA, err := brandingRepo.Upsert(ctx, tenants.A.Scope, repository.CreateBrandingParams{
 		CompanyName: &companyName,
@@ -197,35 +197,5 @@ func TestBrandingRepositoryIntegration(t *testing.T) {
 	}
 	if pageBrandA.CompanyName != updatedPageBrandName {
 		t.Fatalf("Expected %s, got %s", updatedPageBrandName, pageBrandA.CompanyName)
-	}
-
-	// 6. Test Domain Bindings (Requires organization_domains setup)
-	_, err = db.Exec(ctx, `
-		INSERT INTO organization_domains (id, organization_id, type, canonical_host, status, verified_at)
-		VALUES 
-		('11111111-1111-1111-1111-111111111111', $1, 'custom', 'test.com', 'verified', NOW())
-		ON CONFLICT DO NOTHING
-	`, tenants.A.OrganizationID)
-	if err != nil {
-		t.Fatalf("failed to insert mock organization domain: %v", err)
-	}
-
-	bindingA, err := brandingRepo.CreateBinding(ctx, tenants.A.Scope, repository.CreateDomainBindingParams{
-		OrganizationDomainID: "11111111-1111-1111-1111-111111111111",
-		LandingPageID:        pageA.ID,
-		IsPrimary:            true,
-	})
-	if err != nil {
-		t.Fatalf("Create domain binding: %v", err)
-	}
-
-	err = brandingRepo.SetPrimaryBinding(ctx, tenants.A.Scope, pageA.ID, bindingA.ID)
-	if err != nil {
-		t.Fatalf("Set primary binding: %v", err)
-	}
-
-	err = brandingRepo.DeleteBinding(ctx, tenants.A.Scope, bindingA.ID)
-	if err != nil {
-		t.Fatalf("Delete domain binding: %v", err)
 	}
 }

@@ -1,5 +1,11 @@
 # Billing Plan Development Traceability
 
+> **Catatan riwayat (refactor domain-split)**: Migration, permission slug, dan API path yang dirujuk di
+> dokumen ini (`billing_plans`, `billing_subscriptions`, `platform.billing.plan.*`, dst,
+> `/platform/billing/plans`) sudah digantikan hasil refactor domain-split. Traceability final ada di
+> [product-subscription-billing-traceability.md](product-subscription-billing-traceability.md). Dokumen ini
+> dipertahankan sebagai riwayat pelacakan requirement→implementasi versi awal.
+
 Dokumen ini menghubungkan requirement Plan, Billing, Subscription, Entitlement,
 Quota, Invoice, dan Payment ke task, database, service, API, migration, seed,
 test, dan status implementasi.

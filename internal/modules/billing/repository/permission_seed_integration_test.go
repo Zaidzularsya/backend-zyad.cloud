@@ -19,16 +19,6 @@ func TestBillingPermissionSeedIntegration(t *testing.T) {
 		name  string
 		scope string
 	}{
-		{name: "platform.billing.plan.read", scope: "all"},
-		{name: "platform.billing.plan.manage", scope: "all"},
-		{name: "platform.billing.plan_price.read", scope: "all"},
-		{name: "platform.billing.plan_price.manage", scope: "all"},
-		{name: "platform.billing.feature.read", scope: "all"},
-		{name: "platform.billing.feature.manage", scope: "all"},
-		{name: "platform.billing.entitlement.read", scope: "all"},
-		{name: "platform.billing.entitlement.manage", scope: "all"},
-		{name: "platform.billing.subscription.read", scope: "all"},
-		{name: "platform.billing.subscription.manage", scope: "all"},
 		{name: "platform.billing.invoice.read", scope: "all"},
 		{name: "platform.billing.invoice.manage", scope: "all"},
 		{name: "platform.billing.payment.manage", scope: "all"},
@@ -52,10 +42,8 @@ func TestBillingPermissionSeedIntegration(t *testing.T) {
 	}
 
 	platformPermissions := []string{
-		"platform.billing.plan.read",
-		"platform.billing.plan.manage",
-		"platform.billing.plan_price.read",
-		"platform.billing.plan_price.manage",
+		"platform.billing.invoice.read",
+		"platform.billing.invoice.manage",
 	}
 	for _, permission := range platformPermissions {
 		var count int

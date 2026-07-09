@@ -57,7 +57,7 @@ func TestSectionServiceIntegration(t *testing.T) {
 	}
 
 	// 1. Create Section with XSS
-	sec, err := sectionSvc.Create(ctx, tenants.A.Scope, repository.CreateSectionParams{
+	sec, err := sectionSvc.Create(ctx, tenants.A.Scope, tenants.A.Context.OrganizationType(), repository.CreateSectionParams{
 		LandingPageID: page.ID,
 		Key:           "hero-1",
 		Type:          domain.SectionTypeHero,

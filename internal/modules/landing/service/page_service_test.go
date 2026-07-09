@@ -16,10 +16,13 @@ import (
 )
 
 type pageServicePageRepoStub struct {
-	listTotal    int64
-	createCalled bool
-	listCalled   bool
-	findByIDPage landingdomain.LandingPage
+	listTotal      int64
+	createCalled   bool
+	listCalled     bool
+	findByIDPage   landingdomain.LandingPage
+	updateCalled   bool
+	receivedUpdate repository.UpdatePageParams
+	deleteCalled   bool
 }
 
 func (s *pageServicePageRepoStub) Create(
@@ -42,6 +45,14 @@ func (s *pageServicePageRepoStub) FindByID(
 	return s.findByIDPage, nil
 }
 
+func (s *pageServicePageRepoStub) FindBySlug(
+	context.Context,
+	coretenant.Scope,
+	string,
+) (landingdomain.LandingPage, error) {
+	return s.findByIDPage, nil
+}
+
 func (s *pageServicePageRepoStub) List(
 	context.Context,
 	coretenant.Scope,
@@ -52,21 +63,29 @@ func (s *pageServicePageRepoStub) List(
 }
 
 func (s *pageServicePageRepoStub) Update(
-	context.Context,
-	coretenant.Scope,
-	string,
-	repository.UpdatePageParams,
+	_ context.Context,
+	_ coretenant.Scope,
+	_ string,
+	params repository.UpdatePageParams,
 ) (landingdomain.LandingPage, error) {
-	return landingdomain.LandingPage{}, nil
+	s.updateCalled = true
+	s.receivedUpdate = params
+	page := landingdomain.LandingPage{ID: "page-1", Slug: "test-page"}
+	if params.SEO != nil {
+		page.SEO = params.SEO
+	}
+	return page, nil
 }
 
 func (s *pageServicePageRepoStub) Delete(context.Context, coretenant.Scope, string) error {
+	s.deleteCalled = true
 	return nil
 }
 
 type pageServiceSectionRepoStub struct {
 	listByPageItems []landingdomain.LandingSection
 	createCount     int
+	createErr       error
 }
 
 func (s *pageServiceSectionRepoStub) Create(
@@ -74,6 +93,9 @@ func (s *pageServiceSectionRepoStub) Create(
 	coretenant.Scope,
 	repository.CreateSectionParams,
 ) (landingdomain.LandingSection, error) {
+	if s.createErr != nil {
+		return landingdomain.LandingSection{}, s.createErr
+	}
 	s.createCount++
 	return landingdomain.LandingSection{}, nil
 }
@@ -113,6 +135,42 @@ func (s *pageServiceSectionRepoStub) Reorder(
 }
 
 func (s *pageServiceSectionRepoStub) Delete(context.Context, coretenant.Scope, string) error {
+	return nil
+}
+
+type pageServiceBrandingRepoStub struct {
+	getByPageResult landingdomain.LandingBranding
+	getByPageErr    error
+	upsertCalled    bool
+	receivedUpsert  repository.CreateBrandingParams
+}
+
+func (s *pageServiceBrandingRepoStub) Upsert(
+	_ context.Context,
+	_ coretenant.Scope,
+	params repository.CreateBrandingParams,
+) (landingdomain.LandingBranding, error) {
+	s.upsertCalled = true
+	s.receivedUpsert = params
+	return landingdomain.LandingBranding{}, nil
+}
+
+func (s *pageServiceBrandingRepoStub) GetDefault(
+	context.Context,
+	coretenant.Scope,
+) (landingdomain.LandingBranding, error) {
+	return landingdomain.LandingBranding{}, nil
+}
+
+func (s *pageServiceBrandingRepoStub) GetByPage(
+	context.Context,
+	coretenant.Scope,
+	string,
+) (landingdomain.LandingBranding, error) {
+	return s.getByPageResult, s.getByPageErr
+}
+
+func (s *pageServiceBrandingRepoStub) DeleteByPage(context.Context, coretenant.Scope, string) error {
 	return nil
 }
 
@@ -267,6 +325,144 @@ func TestPageServiceDuplicateStopsWhenSectionQuotaExceeded(t *testing.T) {
 	}
 	if sectionRepo.createCount != 0 {
 		t.Fatalf("section create count = %d, want 0", sectionRepo.createCount)
+	}
+}
+
+func TestPageServiceDuplicateCopiesSEOAndBranding(t *testing.T) {
+	pageRepo := &pageServicePageRepoStub{
+		findByIDPage: landingdomain.LandingPage{
+			ID:   "page-source",
+			Name: "Source",
+			Slug: "source-page",
+			SEO:  map[string]any{"meta_title": "Hello"},
+		},
+	}
+	sectionRepo := &pageServiceSectionRepoStub{
+		listByPageItems: []landingdomain.LandingSection{{ID: "section-1"}},
+	}
+	brandingRepo := &pageServiceBrandingRepoStub{
+		getByPageResult: landingdomain.LandingBranding{CompanyName: "Acme"},
+	}
+	service := NewPageService(
+		pageRepo,
+		sectionRepo,
+		WithLandingPageBrandingRepo(brandingRepo),
+	)
+
+	page, err := service.Duplicate(context.Background(), mustLandingScope(t), DuplicatePageParams{
+		PageID: "page-source",
+		UserID: "user-1",
+	})
+	if err != nil {
+		t.Fatalf("Duplicate() error = %v", err)
+	}
+	if !pageRepo.updateCalled || pageRepo.receivedUpdate.SEO["meta_title"] != "Hello" {
+		t.Fatalf("expected SEO to be copied onto duplicate, got update=%#v", pageRepo.receivedUpdate)
+	}
+	if page.SEO["meta_title"] != "Hello" {
+		t.Fatalf("expected returned page to carry copied SEO, got %#v", page.SEO)
+	}
+	if !brandingRepo.upsertCalled {
+		t.Fatal("expected branding to be copied onto duplicate")
+	}
+	if brandingRepo.receivedUpsert.LandingPageID == nil || *brandingRepo.receivedUpsert.LandingPageID != "page-1" {
+		t.Fatalf("expected branding upsert to target the new page, got %#v", brandingRepo.receivedUpsert.LandingPageID)
+	}
+	if brandingRepo.receivedUpsert.CompanyName == nil || *brandingRepo.receivedUpsert.CompanyName != "Acme" {
+		t.Fatalf("expected branding company name to be copied, got %#v", brandingRepo.receivedUpsert.CompanyName)
+	}
+}
+
+func TestPageServiceInstantiateFromTemplateCreatesPageWithSections(t *testing.T) {
+	pageRepo := &pageServicePageRepoStub{
+		findByIDPage: landingdomain.LandingPage{
+			ID:         "template-1",
+			Name:       "Template",
+			Slug:       "template-1",
+			Type:       landingdomain.PageTypeCampaign,
+			IsTemplate: true,
+		},
+	}
+	sectionRepo := &pageServiceSectionRepoStub{
+		listByPageItems: []landingdomain.LandingSection{
+			{ID: "section-1"},
+			{ID: "section-2"},
+		},
+	}
+	service := NewPageService(pageRepo, sectionRepo)
+
+	_, err := service.InstantiateFromTemplate(context.Background(), mustLandingScope(t), InstantiatePageFromTemplateParams{
+		TemplatePageID: "template-1",
+		Name:           "My New Page",
+		Title:          "My New Page",
+		Slug:           "my-new-page",
+		Visibility:     landingdomain.PageVisibilityPublic,
+		CreatedBy:      "user-1",
+	})
+	if err != nil {
+		t.Fatalf("InstantiateFromTemplate() error = %v", err)
+	}
+	if !pageRepo.createCalled {
+		t.Fatal("InstantiateFromTemplate() should create a new page")
+	}
+	if sectionRepo.createCount != 2 {
+		t.Fatalf("section create count = %d, want 2", sectionRepo.createCount)
+	}
+}
+
+func TestPageServiceInstantiateFromTemplateRejectsNonTemplateSource(t *testing.T) {
+	pageRepo := &pageServicePageRepoStub{
+		findByIDPage: landingdomain.LandingPage{
+			ID:         "page-1",
+			IsTemplate: false,
+		},
+	}
+	service := NewPageService(pageRepo, &pageServiceSectionRepoStub{})
+
+	_, err := service.InstantiateFromTemplate(context.Background(), mustLandingScope(t), InstantiatePageFromTemplateParams{
+		TemplatePageID: "page-1",
+		Name:           "My New Page",
+		Title:          "My New Page",
+		Slug:           "my-new-page",
+		Visibility:     landingdomain.PageVisibilityPublic,
+		CreatedBy:      "user-1",
+	})
+	if err == nil {
+		t.Fatal("expected error when source page is not a template")
+	}
+	if pageRepo.createCalled {
+		t.Fatal("should not create a new page when source is not a template")
+	}
+}
+
+func TestPageServiceInstantiateFromTemplateRollsBackOnSectionCreateFailure(t *testing.T) {
+	pageRepo := &pageServicePageRepoStub{
+		findByIDPage: landingdomain.LandingPage{
+			ID:         "template-1",
+			Slug:       "template-1",
+			IsTemplate: true,
+		},
+	}
+	sectionCreateErr := errors.New("section create failed")
+	sectionRepo := &pageServiceSectionRepoStub{
+		listByPageItems: []landingdomain.LandingSection{{ID: "section-1"}},
+		createErr:       sectionCreateErr,
+	}
+	service := NewPageService(pageRepo, sectionRepo)
+
+	_, err := service.InstantiateFromTemplate(context.Background(), mustLandingScope(t), InstantiatePageFromTemplateParams{
+		TemplatePageID: "template-1",
+		Name:           "My New Page",
+		Title:          "My New Page",
+		Slug:           "my-new-page",
+		Visibility:     landingdomain.PageVisibilityPublic,
+		CreatedBy:      "user-1",
+	})
+	if !errors.Is(err, sectionCreateErr) {
+		t.Fatalf("expected section create error to propagate, got %v", err)
+	}
+	if !pageRepo.deleteCalled {
+		t.Fatal("expected the newly created page to be rolled back (deleted) when section copy fails")
 	}
 }
 

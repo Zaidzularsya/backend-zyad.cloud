@@ -134,6 +134,56 @@ func TestAdminPageHandlerListCanRequestTemplatePages(t *testing.T) {
 	}
 }
 
+func TestAdminPageHandlerUpdatePagePersistsSettings(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	pageSvc := &fakePageService{
+		updatePage: domain.LandingPage{
+			ID: "11111111-1111-1111-1111-111111111111",
+			Settings: domain.PageSettings{
+				FooterCopyrightText: "© 2026 Acme",
+			},
+		},
+	}
+	handler := NewAdminPageHandler(pageSvc, nil, nil, nil)
+
+	router := gin.New()
+	router.PATCH("/admin/landing-pages/:id", func(c *gin.Context) {
+		tenantContext := verifiedTenantContext(t)
+		c.Request = c.Request.WithContext(coretenant.WithContext(c.Request.Context(), tenantContext))
+		permissionmiddleware.SetUserID(c, "33333333-3333-3333-3333-333333333333")
+		handler.UpdatePage(c)
+	})
+
+	body := `{
+		"settings": {
+			"footer_copyright_text": "© 2026 Acme",
+			"lead_notification_emails": ["ops@example.com"]
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPatch, "/admin/landing-pages/11111111-1111-1111-1111-111111111111", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body %s", recorder.Code, recorder.Body.String())
+	}
+	if pageSvc.receivedUpdate.Settings == nil {
+		t.Fatal("expected Settings to be mapped into UpdatePageParams, got nil (regression of the Settings-drop bug)")
+	}
+	if pageSvc.receivedUpdate.Settings.FooterCopyrightText != "© 2026 Acme" {
+		t.Fatalf("expected FooterCopyrightText to be mapped, got %q", pageSvc.receivedUpdate.Settings.FooterCopyrightText)
+	}
+	if len(pageSvc.receivedUpdate.Settings.LeadNotificationEmails) != 1 || pageSvc.receivedUpdate.Settings.LeadNotificationEmails[0] != "ops@example.com" {
+		t.Fatalf("expected LeadNotificationEmails to be mapped, got %+v", pageSvc.receivedUpdate.Settings.LeadNotificationEmails)
+	}
+	if !strings.Contains(recorder.Body.String(), "Acme") {
+		t.Fatalf("expected response body to reflect updated settings, got %s", recorder.Body.String())
+	}
+}
+
 func verifiedTenantContext(t *testing.T) coretenant.Context {
 	t.Helper()
 	tenantContext, err := coretenant.NewVerifiedContext(coretenant.VerifiedContextInput{
@@ -154,6 +204,8 @@ type fakePageService struct {
 	createPage     domain.LandingPage
 	receivedCreate repository.CreatePageParams
 	receivedList   repository.PageListFilter
+	receivedUpdate repository.UpdatePageParams
+	updatePage     domain.LandingPage
 }
 
 func (s *fakePageService) Create(
@@ -183,12 +235,13 @@ func (s *fakePageService) List(
 }
 
 func (s *fakePageService) Update(
-	context.Context,
-	coretenant.Scope,
-	string,
-	repository.UpdatePageParams,
+	_ context.Context,
+	_ coretenant.Scope,
+	_ string,
+	params repository.UpdatePageParams,
 ) (domain.LandingPage, error) {
-	return domain.LandingPage{}, nil
+	s.receivedUpdate = params
+	return s.updatePage, nil
 }
 
 func (s *fakePageService) Delete(context.Context, coretenant.Scope, string) error {
@@ -199,6 +252,14 @@ func (s *fakePageService) Duplicate(
 	context.Context,
 	coretenant.Scope,
 	service.DuplicatePageParams,
+) (domain.LandingPage, error) {
+	return domain.LandingPage{}, nil
+}
+
+func (s *fakePageService) InstantiateFromTemplate(
+	context.Context,
+	coretenant.Scope,
+	service.InstantiatePageFromTemplateParams,
 ) (domain.LandingPage, error) {
 	return domain.LandingPage{}, nil
 }

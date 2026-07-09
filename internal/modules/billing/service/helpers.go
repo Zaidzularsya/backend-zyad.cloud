@@ -18,13 +18,6 @@ func normalizePage(page, perPage int) (int, int) {
 	return page, perPage
 }
 
-func boolDefault(value *bool, fallback bool) bool {
-	if value == nil {
-		return fallback
-	}
-	return *value
-}
-
 func trimOptionalString(value *string) *string {
 	if value == nil {
 		return nil
@@ -50,17 +43,4 @@ func parseOptionalTime(value *string) (*time.Time, error) {
 	}
 	utc := parsed.UTC()
 	return &utc, nil
-}
-
-func defaultPeriodEnd(start time.Time, interval string) *time.Time {
-	var end time.Time
-	switch interval {
-	case "yearly":
-		end = start.AddDate(1, 0, 0)
-	case "custom":
-		return nil
-	default:
-		end = start.AddDate(0, 1, 0)
-	}
-	return &end
 }

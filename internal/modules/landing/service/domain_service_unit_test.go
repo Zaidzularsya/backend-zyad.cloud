@@ -13,6 +13,7 @@ import (
 
 type landingDomainRepoStub struct {
 	availableDomains []landingdomain.AvailableDomain
+	allBindings      []landingdomain.DomainBinding
 	bindCalled       bool
 }
 
@@ -41,6 +42,13 @@ func (s *landingDomainRepoStub) ListBindings(
 	return nil, nil
 }
 
+func (s *landingDomainRepoStub) ListAllBindings(
+	context.Context,
+	coretenant.Scope,
+) ([]landingdomain.DomainBinding, error) {
+	return s.allBindings, nil
+}
+
 func (s *landingDomainRepoStub) ListAvailableDomains(
 	context.Context,
 	coretenant.Scope,
@@ -59,6 +67,14 @@ func (s *landingDomainPageRepoStub) Create(
 }
 
 func (s *landingDomainPageRepoStub) FindByID(
+	context.Context,
+	coretenant.Scope,
+	string,
+) (landingdomain.LandingPage, error) {
+	return landingdomain.LandingPage{ID: "page-1"}, nil
+}
+
+func (s *landingDomainPageRepoStub) FindBySlug(
 	context.Context,
 	coretenant.Scope,
 	string,
@@ -160,5 +176,23 @@ func TestDomainServiceBindDomainAllowsFeatureEnabled(t *testing.T) {
 	}
 	if result.ID != "binding-1" || !repo.bindCalled {
 		t.Fatalf("result = %#v repo=%#v", result, repo)
+	}
+}
+
+func TestDomainServiceListAllBindingsPassesThrough(t *testing.T) {
+	repo := &landingDomainRepoStub{
+		allBindings: []landingdomain.DomainBinding{
+			{ID: "binding-1", LandingPageID: "page-1"},
+			{ID: "binding-2", LandingPageID: "page-2"},
+		},
+	}
+	service := NewDomainService(repo, &landingDomainPageRepoStub{}, nil)
+
+	bindings, err := service.ListAllBindings(context.Background(), mustLandingScope(t))
+	if err != nil {
+		t.Fatalf("ListAllBindings() error = %v", err)
+	}
+	if len(bindings) != 2 {
+		t.Fatalf("expected 2 bindings across all pages, got %d", len(bindings))
 	}
 }

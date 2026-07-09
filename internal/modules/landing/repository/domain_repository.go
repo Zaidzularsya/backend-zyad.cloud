@@ -169,6 +169,51 @@ func (r *defaultDomainRepository) ListBindings(ctx context.Context, scope corete
 	return bindings, nil
 }
 
+func (r *defaultDomainRepository) ListAllBindings(ctx context.Context, scope coretenant.Scope) ([]domain.DomainBinding, error) {
+	if !scope.IsValid() {
+		return nil, coretenant.ErrInvalidScope
+	}
+
+	bindings := make([]domain.DomainBinding, 0)
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT id, organization_id, organization_domain_id, landing_page_id, is_primary, created_at, updated_at
+			FROM landing_domain_bindings
+			ORDER BY created_at ASC
+		`)
+		if err != nil {
+			return fmt.Errorf("list all domain bindings: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var b domain.DomainBinding
+			if err := rows.Scan(
+				&b.ID,
+				&b.OrganizationID,
+				&b.OrganizationDomainID,
+				&b.LandingPageID,
+				&b.IsPrimary,
+				&b.CreatedAt,
+				&b.UpdatedAt,
+			); err != nil {
+				return fmt.Errorf("scan domain binding: %w", err)
+			}
+			bindings = append(bindings, b)
+		}
+
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("iterate domain bindings: %w", err)
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+	return bindings, nil
+}
+
 func (r *defaultDomainRepository) ListAvailableDomains(ctx context.Context, scope coretenant.Scope) ([]domain.AvailableDomain, error) {
 	if !scope.IsValid() {
 		return nil, coretenant.ErrInvalidScope

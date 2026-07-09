@@ -12,22 +12,24 @@ import (
 	"zyad.cloud/internal/modules/billing/dto"
 	"zyad.cloud/internal/modules/billing/model"
 	organizationdto "zyad.cloud/internal/modules/organization/dto"
+	productdto "zyad.cloud/internal/modules/product/dto"
+	subscriptiondto "zyad.cloud/internal/modules/subscription/dto"
 )
 
 type TenantBillingSubscriptionReader interface {
-	FindUsableByOrganization(ctx context.Context, organizationID string) (dto.SubscriptionResponse, error)
-	FindLatestByOrganization(ctx context.Context, organizationID string) (dto.SubscriptionResponse, error)
+	FindUsableByOrganization(ctx context.Context, organizationID string) (subscriptiondto.SubscriptionResponse, error)
+	FindLatestByOrganization(ctx context.Context, organizationID string) (subscriptiondto.SubscriptionResponse, error)
 	ScheduleCancellation(
 		ctx context.Context,
 		organizationID string,
 		id string,
 		actorUserID string,
 		reason string,
-	) (dto.SubscriptionResponse, error)
+	) (subscriptiondto.SubscriptionResponse, error)
 }
 
 type TenantBillingPlanReader interface {
-	FindByID(ctx context.Context, id string, includePrices bool) (dto.PlanResponse, error)
+	FindByID(ctx context.Context, id string, includePrices bool) (productdto.PlanResponse, error)
 }
 
 type TenantBillingInvoiceReader interface {
@@ -231,13 +233,13 @@ func (s *TenantBillingService) CancelCurrentSubscription(
 	organizationID string,
 	actorUserID string,
 	reason string,
-) (dto.SubscriptionResponse, error) {
+) (subscriptiondto.SubscriptionResponse, error) {
 	subscription, err := s.subscriptions.FindUsableByOrganization(ctx, strings.TrimSpace(organizationID))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return dto.SubscriptionResponse{}, mapSubscriptionError(err)
+			return subscriptiondto.SubscriptionResponse{}, mapSubscriptionError(err)
 		}
-		return dto.SubscriptionResponse{}, err
+		return subscriptiondto.SubscriptionResponse{}, err
 	}
 	return s.subscriptions.ScheduleCancellation(
 		ctx,
@@ -264,17 +266,17 @@ func stringPointer(value string) *string {
 	return &trimmed
 }
 
-func matchingPlanPrice(prices []dto.PlanPriceResponse, billingInterval string) (dto.PlanPriceResponse, error) {
+func matchingPlanPrice(prices []productdto.PlanPriceResponse, billingInterval string) (productdto.PlanPriceResponse, error) {
 	billingInterval = strings.TrimSpace(billingInterval)
 	if billingInterval == "" {
-		return dto.PlanPriceResponse{}, validationError("billing interval is required")
+		return productdto.PlanPriceResponse{}, validationError("billing interval is required")
 	}
 	for _, price := range prices {
 		if strings.EqualFold(strings.TrimSpace(price.BillingInterval), billingInterval) && price.IsActive {
 			return price, nil
 		}
 	}
-	return dto.PlanPriceResponse{}, validationError("target plan price for billing interval is not available")
+	return productdto.PlanPriceResponse{}, validationError("target plan price for billing interval is not available")
 }
 
 func upgradeInvoiceDescription(planName string, billingInterval string) string {

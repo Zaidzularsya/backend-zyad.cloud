@@ -38,7 +38,8 @@ func TestNavigationServiceIntegration(t *testing.T) {
 	}
 
 	reusableRepo := repository.NewReusableRepository(db)
-	navService := service.NewNavigationService(reusableRepo)
+	pageRepo := repository.NewPageRepository(db)
+	navService := service.NewNavigationService(reusableRepo, pageRepo)
 
 	userID := "11111111-1111-1111-1111-111111111111"
 
@@ -68,7 +69,7 @@ func TestNavigationServiceIntegration(t *testing.T) {
 		item1, err = navService.CreateMenuItem(ctx, tenants.A.Scope, repository.CreateMenuItemParams{
 			MenuID:      menu.ID,
 			Label:       "Root",
-			LinkType:    domain.LinkTypeInternalPage,
+			LinkType:    domain.LinkTypeAnchor,
 			Destination: "/",
 			Target:      domain.CTATargetSelf,
 			SortOrder:   1,
@@ -83,7 +84,7 @@ func TestNavigationServiceIntegration(t *testing.T) {
 			MenuID:      menu.ID,
 			ParentID:    &item1.ID,
 			Label:       "Child 1",
-			LinkType:    domain.LinkTypeInternalPage,
+			LinkType:    domain.LinkTypeAnchor,
 			Destination: "/child",
 			Target:      domain.CTATargetSelf,
 			SortOrder:   1,
@@ -98,7 +99,7 @@ func TestNavigationServiceIntegration(t *testing.T) {
 			MenuID:      menu.ID,
 			ParentID:    &item2.ID,
 			Label:       "Child 2",
-			LinkType:    domain.LinkTypeInternalPage,
+			LinkType:    domain.LinkTypeAnchor,
 			Destination: "/child/2",
 			Target:      domain.CTATargetSelf,
 			SortOrder:   1,
@@ -113,7 +114,7 @@ func TestNavigationServiceIntegration(t *testing.T) {
 			MenuID:      menu.ID,
 			ParentID:    &item3.ID,
 			Label:       "Child 3",
-			LinkType:    domain.LinkTypeInternalPage,
+			LinkType:    domain.LinkTypeAnchor,
 			Destination: "/child/3",
 			Target:      domain.CTATargetSelf,
 			SortOrder:   1,
@@ -131,7 +132,7 @@ func TestNavigationServiceIntegration(t *testing.T) {
 		item4, err := navService.CreateMenuItem(ctx, tenants.A.Scope, repository.CreateMenuItemParams{
 			MenuID:      menu.ID,
 			Label:       "Independent",
-			LinkType:    domain.LinkTypeInternalPage,
+			LinkType:    domain.LinkTypeAnchor,
 			Destination: "/ind",
 			Target:      domain.CTATargetSelf,
 			SortOrder:   2,

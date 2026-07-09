@@ -169,12 +169,24 @@ func (r *brandingRepository) Upsert(ctx context.Context, scope coretenant.Scope,
 
 	branding.OrganizationID = scope.OrganizationID()
 	branding.LandingPageID = pageID
-	if companyName != nil { branding.CompanyName = *companyName }
-	if tagline != nil { branding.Tagline = *tagline }
-	if logoLight != nil { branding.LogoLightURL = *logoLight }
-	if logoDark != nil { branding.LogoDarkURL = *logoDark }
-	if favicon != nil { branding.FaviconURL = *favicon }
-	if socialImage != nil { branding.SocialImageURL = *socialImage }
+	if companyName != nil {
+		branding.CompanyName = *companyName
+	}
+	if tagline != nil {
+		branding.Tagline = *tagline
+	}
+	if logoLight != nil {
+		branding.LogoLightURL = *logoLight
+	}
+	if logoDark != nil {
+		branding.LogoDarkURL = *logoDark
+	}
+	if favicon != nil {
+		branding.FaviconURL = *favicon
+	}
+	if socialImage != nil {
+		branding.SocialImageURL = *socialImage
+	}
 
 	return branding, nil
 }
@@ -212,12 +224,24 @@ func (r *brandingRepository) GetDefault(ctx context.Context, scope coretenant.Sc
 
 	branding.OrganizationID = scope.OrganizationID()
 	branding.LandingPageID = pageID
-	if companyName != nil { branding.CompanyName = *companyName }
-	if tagline != nil { branding.Tagline = *tagline }
-	if logoLight != nil { branding.LogoLightURL = *logoLight }
-	if logoDark != nil { branding.LogoDarkURL = *logoDark }
-	if favicon != nil { branding.FaviconURL = *favicon }
-	if socialImage != nil { branding.SocialImageURL = *socialImage }
+	if companyName != nil {
+		branding.CompanyName = *companyName
+	}
+	if tagline != nil {
+		branding.Tagline = *tagline
+	}
+	if logoLight != nil {
+		branding.LogoLightURL = *logoLight
+	}
+	if logoDark != nil {
+		branding.LogoDarkURL = *logoDark
+	}
+	if favicon != nil {
+		branding.FaviconURL = *favicon
+	}
+	if socialImage != nil {
+		branding.SocialImageURL = *socialImage
+	}
 
 	return branding, nil
 }
@@ -255,12 +279,24 @@ func (r *brandingRepository) GetByPage(ctx context.Context, scope coretenant.Sco
 
 	branding.OrganizationID = scope.OrganizationID()
 	branding.LandingPageID = retPageID
-	if companyName != nil { branding.CompanyName = *companyName }
-	if tagline != nil { branding.Tagline = *tagline }
-	if logoLight != nil { branding.LogoLightURL = *logoLight }
-	if logoDark != nil { branding.LogoDarkURL = *logoDark }
-	if favicon != nil { branding.FaviconURL = *favicon }
-	if socialImage != nil { branding.SocialImageURL = *socialImage }
+	if companyName != nil {
+		branding.CompanyName = *companyName
+	}
+	if tagline != nil {
+		branding.Tagline = *tagline
+	}
+	if logoLight != nil {
+		branding.LogoLightURL = *logoLight
+	}
+	if logoDark != nil {
+		branding.LogoDarkURL = *logoDark
+	}
+	if favicon != nil {
+		branding.FaviconURL = *favicon
+	}
+	if socialImage != nil {
+		branding.SocialImageURL = *socialImage
+	}
 
 	return branding, nil
 }
@@ -283,170 +319,6 @@ func (r *brandingRepository) DeleteByPage(ctx context.Context, scope coretenant.
 		if cmdTag.RowsAffected() == 0 {
 			return pgx.ErrNoRows
 		}
-		return nil
-	})
-}
-
-func (r *brandingRepository) CreateBinding(ctx context.Context, scope coretenant.Scope, params CreateDomainBindingParams) (domain.LandingDomainBinding, error) {
-	if !scope.IsValid() {
-		return domain.LandingDomainBinding{}, coretenant.ErrInvalidScope
-	}
-
-	query := `
-		INSERT INTO landing_domain_bindings (
-			organization_id, organization_domain_id, landing_page_id, is_primary
-		) VALUES (
-			$1, $2, $3, $4
-		) RETURNING
-			id, organization_domain_id, landing_page_id, is_primary, created_at, updated_at
-	`
-
-	var binding domain.LandingDomainBinding
-
-	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, query,
-			scope.OrganizationID(),
-			params.OrganizationDomainID,
-			params.LandingPageID,
-			params.IsPrimary,
-		).Scan(
-			&binding.ID, &binding.OrganizationDomainID, &binding.LandingPageID,
-			&binding.IsPrimary, &binding.CreatedAt, &binding.UpdatedAt,
-		)
-	})
-
-	if err != nil {
-		return domain.LandingDomainBinding{}, err
-	}
-	binding.OrganizationID = scope.OrganizationID()
-
-	return binding, nil
-}
-
-func (r *brandingRepository) ListBindings(ctx context.Context, scope coretenant.Scope, pageID string) ([]domain.LandingDomainBinding, error) {
-	if !scope.IsValid() {
-		return nil, coretenant.ErrInvalidScope
-	}
-
-	query := `
-		SELECT
-			id, organization_domain_id, landing_page_id, is_primary, created_at, updated_at
-		FROM landing_domain_bindings
-		WHERE organization_id = $1 AND landing_page_id = $2
-		ORDER BY created_at ASC
-	`
-
-	var bindings []domain.LandingDomainBinding
-
-	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, query, scope.OrganizationID(), pageID)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var b domain.LandingDomainBinding
-			err := rows.Scan(
-				&b.ID, &b.OrganizationDomainID, &b.LandingPageID,
-				&b.IsPrimary, &b.CreatedAt, &b.UpdatedAt,
-			)
-			if err != nil {
-				return err
-			}
-			b.OrganizationID = scope.OrganizationID()
-			bindings = append(bindings, b)
-		}
-		return rows.Err()
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	return bindings, nil
-}
-
-func (r *brandingRepository) GetBindingByDomain(ctx context.Context, scope coretenant.Scope, domainID string) (domain.LandingDomainBinding, error) {
-	if !scope.IsValid() {
-		return domain.LandingDomainBinding{}, coretenant.ErrInvalidScope
-	}
-
-	query := `
-		SELECT
-			id, organization_domain_id, landing_page_id, is_primary, created_at, updated_at
-		FROM landing_domain_bindings
-		WHERE organization_id = $1 AND organization_domain_id = $2
-	`
-
-	var binding domain.LandingDomainBinding
-
-	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, query, scope.OrganizationID(), domainID).Scan(
-			&binding.ID, &binding.OrganizationDomainID, &binding.LandingPageID,
-			&binding.IsPrimary, &binding.CreatedAt, &binding.UpdatedAt,
-		)
-	})
-
-	if err != nil {
-		return domain.LandingDomainBinding{}, err
-	}
-	binding.OrganizationID = scope.OrganizationID()
-
-	return binding, nil
-}
-
-func (r *brandingRepository) DeleteBinding(ctx context.Context, scope coretenant.Scope, id string) error {
-	if !scope.IsValid() {
-		return coretenant.ErrInvalidScope
-	}
-
-	query := `
-		DELETE FROM landing_domain_bindings
-		WHERE id = $1 AND organization_id = $2
-	`
-
-	return r.withTx(ctx, scope, func(tx pgx.Tx) error {
-		cmdTag, err := tx.Exec(ctx, query, id, scope.OrganizationID())
-		if err != nil {
-			return err
-		}
-		if cmdTag.RowsAffected() == 0 {
-			return pgx.ErrNoRows
-		}
-		return nil
-	})
-}
-
-func (r *brandingRepository) SetPrimaryBinding(ctx context.Context, scope coretenant.Scope, pageID string, id string) error {
-	if !scope.IsValid() {
-		return coretenant.ErrInvalidScope
-	}
-
-	return r.withTx(ctx, scope, func(tx pgx.Tx) error {
-		query1 := `
-			UPDATE landing_domain_bindings
-			SET is_primary = false, updated_at = NOW()
-			WHERE organization_id = $1 AND landing_page_id = $2 AND is_primary = true
-		`
-		_, err := tx.Exec(ctx, query1, scope.OrganizationID(), pageID)
-		if err != nil {
-			return err
-		}
-
-		query2 := `
-			UPDATE landing_domain_bindings
-			SET is_primary = true, updated_at = NOW()
-			WHERE id = $1 AND organization_id = $2 AND landing_page_id = $3
-		`
-		cmdTag, err := tx.Exec(ctx, query2, id, scope.OrganizationID(), pageID)
-		if err != nil {
-			return err
-		}
-		if cmdTag.RowsAffected() == 0 {
-			return pgx.ErrNoRows
-		}
-
 		return nil
 	})
 }

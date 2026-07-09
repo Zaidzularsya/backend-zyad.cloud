@@ -1,5 +1,10 @@
 # MASTER PROMPT — Generate Development Documentation for Plan, Billing, Subscription, Entitlement & Quota Module
 
+> **Catatan riwayat (refactor domain-split)**: Ini adalah requirement/prompt asal yang memicu pembuatan
+> modul `billing` (sebelum dipecah menjadi domain Product/Catalog, Subscription, Billing). Lihat
+> [product-subscription-billing-concept.md](product-subscription-billing-concept.md) untuk struktur final.
+> Dokumen ini dipertahankan sebagai riwayat requirement awal.
+
 Kamu adalah senior software architect dan technical writer yang membantu saya menyusun dokumentasi development untuk platform multi-tenant SaaS.
 
 Saya sedang membangun platform bernama `zyad.cloud` dengan backend Go, PostgreSQL, dan arsitektur modular. Platform ini mendukung multi-tenant organization, landing page management, CRM, POS, membership, media manager, permission/RBAC, custom domain, dan modul-modul SaaS lain.

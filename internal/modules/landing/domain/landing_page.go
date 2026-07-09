@@ -68,6 +68,23 @@ func (p PageType) IsValid() bool {
 	}
 }
 
+type TrustBadge struct {
+	ImageURL string `json:"image_url"`
+	Label    string `json:"label"`
+}
+
+// PageSettings is the typed, validated shape for landing_pages.settings.
+// It intentionally excludes concerns (workspace access, role scope,
+// approval flow, analytics hooks) that require subsystems that don't
+// exist yet; AnalyticsHooks stays an opaque passthrough for forward-compat.
+type PageSettings struct {
+	PublishRequireApproval bool           `json:"publish_require_approval"`
+	LeadNotificationEmails []string       `json:"lead_notification_emails"`
+	FooterCopyrightText    string         `json:"footer_copyright_text"`
+	TrustBadges            []TrustBadge   `json:"trust_badges"`
+	AnalyticsHooks         map[string]any `json:"analytics_hooks,omitempty"`
+}
+
 type LandingPage struct {
 	ID               string
 	OrganizationID   string
@@ -79,6 +96,7 @@ type LandingPage struct {
 	Visibility       PageVisibility
 	PasswordHash     string
 	SEO              map[string]any
+	Settings         PageSettings
 	Locale           string
 	Timezone         string
 	IsHomepage       bool

@@ -44,6 +44,7 @@ func (h *AdminPageHandler) RegisterRoutes(router *gin.RouterGroup, checker permi
 
 	group.GET("", permissionmiddleware.Require(checker, "landing.page.read"), h.ListPages)
 	group.POST("", permissionmiddleware.Require(checker, "landing.page.create"), h.CreatePage)
+	group.POST("/from-template", permissionmiddleware.Require(checker, "landing.page.create"), h.CreatePageFromTemplate)
 	group.GET("/:id", permissionmiddleware.Require(checker, "landing.page.read"), h.GetPage)
 	group.PATCH("/:id", permissionmiddleware.Require(checker, "landing.page.update"), h.UpdatePage)
 	group.DELETE("/:id", permissionmiddleware.Require(checker, "landing.page.delete"), h.DeletePage)
@@ -154,6 +155,10 @@ func (h *AdminPageHandler) CreatePage(c *gin.Context) {
 		IsTemplate: req.IsTemplate,
 		CreatedBy:  permissionmiddleware.UserID(c),
 	}
+	if req.Settings != nil {
+		settings := pageSettingsToDomain(*req.Settings)
+		params.Settings = &settings
+	}
 
 	page, err := h.pageSvc.Create(c.Request.Context(), scope, params)
 	if err != nil {
@@ -161,7 +166,41 @@ func (h *AdminPageHandler) CreatePage(c *gin.Context) {
 		return
 	}
 
-	response.JSON(c, http.StatusCreated, "Page created successfully", page, nil)
+	response.JSON(c, http.StatusCreated, "Page created successfully", pageResponseFromDomain(page), nil)
+}
+
+// CreatePageFromTemplate godoc
+// @Summary Create a new landing page from a page-level template
+func (h *AdminPageHandler) CreatePageFromTemplate(c *gin.Context) {
+	scope, err := coretenant.RequireScope(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+
+	var req dto.CreatePageFromTemplateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		return
+	}
+
+	page, err := h.pageSvc.InstantiateFromTemplate(c.Request.Context(), scope, service.InstantiatePageFromTemplateParams{
+		TemplatePageID:  req.TemplatePageID,
+		Name:            req.Name,
+		Title:           req.Title,
+		Slug:            req.Slug,
+		Visibility:      domain.PageVisibility(req.Visibility),
+		Locale:          req.Locale,
+		Timezone:        req.Timezone,
+		IncludeBranding: req.IncludeBranding,
+		CreatedBy:       permissionmiddleware.UserID(c),
+	})
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+
+	response.JSON(c, http.StatusCreated, "Page created from template successfully", pageResponseFromDomain(page), nil)
 }
 
 // GetPage godoc
@@ -183,6 +222,34 @@ func (h *AdminPageHandler) GetPage(c *gin.Context) {
 	corehttp.OK(c, "Page retrieved successfully", pageResponseFromDomain(page))
 }
 
+func pageSettingsFromDomain(settings domain.PageSettings) dto.PageSettingsResponse {
+	badges := make([]dto.TrustBadgeItem, 0, len(settings.TrustBadges))
+	for _, b := range settings.TrustBadges {
+		badges = append(badges, dto.TrustBadgeItem{ImageURL: b.ImageURL, Label: b.Label})
+	}
+	return dto.PageSettingsResponse{
+		PublishRequireApproval: settings.PublishRequireApproval,
+		LeadNotificationEmails: settings.LeadNotificationEmails,
+		FooterCopyrightText:    settings.FooterCopyrightText,
+		TrustBadges:            badges,
+		AnalyticsHooks:         settings.AnalyticsHooks,
+	}
+}
+
+func pageSettingsToDomain(req dto.PageSettingsRequest) domain.PageSettings {
+	badges := make([]domain.TrustBadge, 0, len(req.TrustBadges))
+	for _, b := range req.TrustBadges {
+		badges = append(badges, domain.TrustBadge{ImageURL: b.ImageURL, Label: b.Label})
+	}
+	return domain.PageSettings{
+		PublishRequireApproval: req.PublishRequireApproval,
+		LeadNotificationEmails: req.LeadNotificationEmails,
+		FooterCopyrightText:    req.FooterCopyrightText,
+		TrustBadges:            badges,
+		AnalyticsHooks:         req.AnalyticsHooks,
+	}
+}
+
 func pageResponseFromDomain(page domain.LandingPage) dto.PageResponse {
 	return dto.PageResponse{
 		ID:               page.ID,
@@ -200,6 +267,7 @@ func pageResponseFromDomain(page domain.LandingPage) dto.PageResponse {
 		PublishAt:        page.PublishAt,
 		UnpublishAt:      page.UnpublishAt,
 		PublishedAt:      page.PublishedAt,
+		Settings:         pageSettingsFromDomain(page.Settings),
 		SEO:              page.SEO,
 		CreatedAt:        page.CreatedAt,
 		UpdatedAt:        page.UpdatedAt,
@@ -247,6 +315,10 @@ func (h *AdminPageHandler) UpdatePage(c *gin.Context) {
 		IsHomepage: req.IsHomepage,
 		IsTemplate: req.IsTemplate,
 		UpdatedBy:  permissionmiddleware.UserID(c),
+	}
+	if req.Settings != nil {
+		settings := pageSettingsToDomain(*req.Settings)
+		params.Settings = &settings
 	}
 
 	page, err := h.pageSvc.Update(c.Request.Context(), scope, pageID, params)

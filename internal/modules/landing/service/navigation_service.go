@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
+
+	"github.com/jackc/pgx/v5"
 
 	"zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/landing/domain"
@@ -9,13 +12,30 @@ import (
 )
 
 type navigationService struct {
-	repo repository.ReusableRepository
+	repo     repository.ReusableRepository
+	pageRepo repository.PageRepository
 }
 
-func NewNavigationService(repo repository.ReusableRepository) NavigationService {
+func NewNavigationService(repo repository.ReusableRepository, pageRepo repository.PageRepository) NavigationService {
 	return &navigationService{
-		repo: repo,
+		repo:     repo,
+		pageRepo: pageRepo,
 	}
+}
+
+// validateInternalPageDestination confirms destination resolves, by slug, to
+// a real page in the same tenant. Internal-page menu items store the target
+// page's slug (not its ID) as Destination. This is a write-time existence
+// check only — whether the target is currently published is a render-time
+// concern for the public resolver, not an authoring-time restriction.
+func (s *navigationService) validateInternalPageDestination(ctx context.Context, scope tenant.Scope, destination string) error {
+	if _, err := s.pageRepo.FindBySlug(ctx, scope, destination); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrInvalidInternalPageDestination
+		}
+		return err
+	}
+	return nil
 }
 
 // Menus
@@ -74,6 +94,12 @@ func (s *navigationService) CreateMenuItem(ctx context.Context, scope tenant.Sco
 		return domain.LandingMenuItem{}, ErrInvalidLinkType
 	}
 
+	if params.LinkType == domain.LinkTypeInternalPage {
+		if err := s.validateInternalPageDestination(ctx, scope, params.Destination); err != nil {
+			return domain.LandingMenuItem{}, err
+		}
+	}
+
 	if params.ParentID != nil && *params.ParentID != "" {
 		if err := s.checkDepth(ctx, scope, *params.ParentID, 1); err != nil {
 			return domain.LandingMenuItem{}, err
@@ -114,6 +140,22 @@ func (s *navigationService) UpdateMenuItem(ctx context.Context, scope tenant.Sco
 
 		if err := s.checkDepth(ctx, scope, *params.ParentID, 1); err != nil {
 			return domain.LandingMenuItem{}, err
+		}
+	}
+
+	if params.Destination != nil {
+		linkType := params.LinkType
+		if linkType == nil {
+			existing, err := s.repo.GetMenuItem(ctx, scope, id)
+			if err != nil {
+				return domain.LandingMenuItem{}, err
+			}
+			linkType = &existing.LinkType
+		}
+		if *linkType == domain.LinkTypeInternalPage {
+			if err := s.validateInternalPageDestination(ctx, scope, *params.Destination); err != nil {
+				return domain.LandingMenuItem{}, err
+			}
 		}
 	}
 

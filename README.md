@@ -1,154 +1,168 @@
-# Multi-Tenant IT Solution Platform (Golang-Based)
+# Multi-Tenant SaaS Platform (Golang-Based)
 
-Platform multi-tenant berbasis **Golang** yang dirancang khusus untuk menyediakan solusi IT terintegrasi (*SaaS & Custom IT Solutions*) bagi berbagai tenant. Platform ini memungkinkan penyediaan produk instan seperti Landing Page, Company Profile, Membership, hingga Point of Sales (POS) dalam satu ekosistem yang terisolasi dan aman.
-
----
-
-## 🚀 Fitur Utama & Modul Inti
-
-### 1. Multi-Tenancy Architecture
-Mendukung isolasi data tingkat tinggi untuk setiap tenant dengan pendekatan fleksibel:
-*   **Strategi Isolasi Data:**
-    *   *Shared Database, Shared Schema (Row-level security via Tenant ID)*: Cocok untuk tenant skala kecil-menengah untuk menghemat resource.
-    *   *Database-per-Tenant (Isolated)*: Mendukung koneksi database terpisah untuk tenant skala Enterprise yang membutuhkan kepatuhan keamanan data ketat.
-*   **Tenant Resolution Middleware:**
-    *   Mengidentifikasi tenant berdasarkan **Subdomain** (`tenant1.platform.com`), **Custom Domain** (`www.tenantcustom.com`), atau **HTTP Header** (`X-Tenant-ID`).
-    *   Menginjeksikan koneksi database tenant ke dalam context request Golang (`context.Context`).
-
-### 2. Flexible Auth (Social Media Integration)
-Sistem autentikasi yang fleksibel dan aman yang mendukung autentikasi tradisional serta OAuth2:
-*   **Metode Auth:**
-    *   Username & Password (terenkripsi menggunakan `bcrypt`).
-    *   Social Login OAuth2 (Google, Facebook, GitHub) menggunakan pustaka Golang seperti **Goth** atau custom handler.
-*   **JWT & Session Management:**
-    *   Menggunakan JWT (JSON Web Tokens) stateless dengan rotasi Refresh Token yang disimpan di Redis untuk logout instan dan keamanan maksimal.
-    *   Mendukung Single Sign-On (SSO) lintas domain/subdomain tenant jika dikonfigurasi.
-
-### 3. CRM (Customer Relationship Management) Module
-Modul terpusat untuk membantu tenant mengelola interaksi pelanggan mereka:
-*   **Lead & Contact Management:** Melacak data prospek dan pelanggan.
-*   **Sales Pipeline / Kanban Board:** Visualisasi proses penjualan dari prospek hingga deal.
-*   **Interaction Logs:** Pencatatan otomatis riwayat komunikasi (email, chat, POS transaksi).
-*   **Customer Segmentation & Analytics:** Pengelompokan pelanggan berdasarkan aktivitas pembelian dan loyalitas.
-
-### 4. Permission Management (RBAC/ABAC)
-Kontrol akses granular untuk memastikan keamanan data internal tenant:
-*   **Role-Based Access Control (RBAC):** Definisi role default (Super Admin, Tenant Admin, Manager, Cashier, Member).
-*   **Attribute-Based Access Control (ABAC):** Pembatasan akses berdasarkan kondisi tertentu (misal: jam kerja, IP address, atau kepemilikan data).
-*   **Enforcer Engine:** Integrasi dengan **Casbin** (go-casbin) untuk manajemen policy permission yang dinamis tanpa perlu deploy ulang kode.
+Platform multi-tenant berbasis **Golang** untuk landing page builder, manajemen organisasi, dan billing
+berlangganan. Dokumen ini mendeskripsikan **kondisi implementasi aktual** (diverifikasi terhadap kode per
+2026-07-01) — untuk gambaran arsitektur lebih dalam, baca [docs/repository-context.md](docs/repository-context.md).
 
 ---
 
-## 📦 Custom Product IT Solution (Tenant Modules)
+## 🚀 Modul yang Sudah Berjalan
 
-Setiap tenant dapat mengaktifkan atau menonaktifkan modul produk berikut secara modular:
+### 1. Multi-Tenancy (`internal/modules/organization`)
+- Isolasi data lewat kolom `organization_id` di setiap tabel domain bisnis, ditambah **Row-Level Security
+  PostgreSQL** khusus untuk tabel `landing_*` (tabel `organization_*`/`billing_*` mengandalkan filter
+  manual di repository — lihat [docs/database-context.md](docs/database-context.md)).
+- **Tenant Resolution** lewat 3 jalur: session user login, **subdomain**/**custom domain** (public host),
+  dan worker/internal context. Diimplementasikan di
+  `internal/modules/organization/service/{authenticated_resolver,public_host_resolver}.go` dan
+  `internal/core/middleware/tenant.go`.
+- Kolom `data_placement` (`shared`/`dedicated`) di tabel `organizations` menyiapkan skema untuk rencana
+  database-per-tenant di masa depan. **Keputusan saat ini (Confirmed, 2026-07-01): platform memakai shared
+  database untuk semua tenant.** Mode `dedicated` adalah *future capability* yang **belum** diimplementasikan
+  di level koneksi database — fokus implementasi sekarang adalah isolasi lewat `organization_id`/`tenant_id`
+  plus query filtering dan authorization guard yang aman. Detail: [docs/database-context.md](docs/database-context.md).
 
-1.  **Landing Page Generator**
-    *   CRM dinamis untuk membuat landing page promo dengan template editor.
-    *   Optimasi SEO bawaan (sitemap generator, meta tag editor, schema markup).
-    *   Integrasi lead capture form langsung ke CRM.
-2.  **Company Profile Page**
-    *   Manajemen portofolio, layanan, blog/artikel, dan tim.
-    *   Halaman statis & dinamis dengan performa tinggi (mendukung static site generation/caching).
-3.  **Module Membership (Loyalty Program)**
-    *   Pendaftaran member/pelanggan tenant dengan tiering system (Silver, Gold, Platinum).
-    *   Sistem poin reward berdasarkan transaksi POS atau pembelian online.
-    *   Kupon promo dan manajemen voucher digital.
-4.  **Module POS (Point of Sales)**
-    *   Antarmuka kasir cepat (optimized for tablet/desktop web).
-    *   Manajemen Inventori (stok real-time, alert stok menipis, mutasi stok).
-    *   Dukungan multi-outlet / multi-cabang per tenant.
-    *   Integrasi dengan Membership untuk klaim poin/diskon saat checkout.
+### 2. Autentikasi (`internal/modules/user`, `internal/core/auth`)
+- Login **username/password** (bcrypt) dan **Google OAuth** (opsional, `AUTH_GOOGLE_ENABLED`).
+- **JWT** (access + refresh token, HMAC-SHA256) — refresh token disimpan dalam bentuk hash di
+  **PostgreSQL** (tabel `sessions`/`refresh_tokens`), bukan Redis.
+- **Redis saat ini hanya dipakai untuk session storage** (Confirmed). Pemakaian Redis sebagai cache umum,
+  queue, atau rate limiting adalah *future improvement*, belum diimplementasikan.
+- Detail lengkap di [docs/permission-context.md](docs/permission-context.md).
+
+### 3. RBAC Custom (`internal/core/permission`)
+- 3 layer: `roles ↔ role_permissions ↔ permissions`, `user_roles` (global atau per-organization), dan
+  override langsung `user_permissions` (allow/deny).
+- Naming convention permission: `module.resource.action` (mis. `landing.page.create`,
+  `organization.billing.manage`).
+- Implementasi custom Go — **bukan** Casbin/go-casbin.
+- Detail lengkap di [docs/permission-context.md](docs/permission-context.md).
 
 ---
 
-## 🏗️ Rancangan Arsitektur Folder (Clean/Hexagonal Architecture)
+## 📦 Produk yang Sudah Diimplementasikan
 
-Kami merekomendasikan struktur folder standar industri Golang (`golang-standards/project-layout`) dengan pendekatan **Clean Architecture** untuk memisahkan logika bisnis dari library eksternal/framework:
+1. **Landing Page Builder** (`internal/modules/landing`) — modul paling matang dan aktif dikembangkan.
+   Page, section, template, form/lead capture, branding, domain binding, publish/schedule, revision,
+   analytics dasar. Lihat [docs/reference-landing-page.md](docs/reference-landing-page.md).
+2. **Billing & Subscription** (`internal/modules/billing`) — plan catalog, subscription, invoice, payment,
+   feature entitlement. **Status: WIP**, integrasi payment gateway (Xendit) belum lengkap. Lihat
+   [docs/billing-plan-concept-reference.md](docs/billing-plan-concept-reference.md).
+3. **Organization Management** — onboarding organisasi, membership, domain custom + verifikasi, entitlement.
 
+13 modul lain di `internal/modules/` (`account`, `asset`, `contract`, `dashboard`, `mikrotik`,
+`newsaggregator`, `order`, `payment`, `product`, `provisioning`, `radius`, `resource`, dan folder legacy
+kosong `landingpage`) masih berupa **scaffold kosong** — lihat [docs/module-map.md](docs/module-map.md)
+untuk status lengkap sebelum mengasumsikan salah satunya sudah berjalan.
+
+---
+
+## 🗺️ Roadmap / Belum Diimplementasikan
+
+Bagian ini berisi arah produk yang pernah direncanakan tapi **belum ada di kode saat ini**. Dipertahankan
+sebagai catatan arah bisnis, bukan status implementasi — jangan dijadikan acuan requirement teknis tanpa
+konfirmasi ulang dengan pemilik produk.
+
+- **CRM (Customer Relationship Management)**: lead & contact management, sales pipeline/kanban,
+  interaction log, customer segmentation.
+- **Company Profile Page**: manajemen portofolio/layanan/blog/tim sebagai varian produk landing page.
+- **Module Membership (Loyalty Program)**: tiering system, poin reward, kupon/voucher digital.
+- **Module POS (Point of Sales)**: kasir, manajemen inventori, multi-outlet, integrasi membership.
+- **Dynamic Custom Domain & Automatic SSL Provisioning** otomatis via Traefik/Caddy + Let's Encrypt
+  (saat ini domain binding & verifikasi sudah ada di modul organization, tapi provisioning SSL otomatis
+  penuh **perlu diverifikasi** cakupannya).
+- **Event-Driven Architecture dengan Message Broker** (RabbitMQ/Kafka) — saat ini event/notification
+  memakai pola outbox internal (`internal/core/notification`), belum memakai message broker eksternal.
+- **Multi-Language / i18n** untuk konten tenant.
+
+---
+
+## 🏗️ Struktur Folder Aktual
+
+Struktur berikut adalah hasil pembacaan langsung dari repository (bukan rancangan/rekomendasi) — modular
+monolith dengan layering `handler → service → repository` per modul. Detail lengkap tiap folder ada di
+[docs/repository-context.md](docs/repository-context.md).
 
 ```text
-backend-go/
-├── api/                         # Spesifikasi API seperti OpenAPI/Swagger
-│   └── openapi.yaml
+zyad.cloud/
+├── api/                         # Spesifikasi API
+│   ├── openapi.yaml              # Spec utama (~6968 baris, OpenAPI 3.0.3)
+│   └── openapi-landing.yaml      # Draft stub lama (Confirmed: belum digabung) — akan di-merge ke openapi.yaml
 │
-├── cmd/                         # Entry point aplikasi
-│   └── api/
-│       └── main.go              # File utama untuk menjalankan HTTP API server
+├── cmd/                         # Entry point aplikasi (4 binary terpisah)
+│   ├── api/main.go               # HTTP API server
+│   ├── migrate/main.go           # Migration runner (-direction up|down, -dir, -steps)
+│   ├── seed/main.go              # Seed runner (-name super-admin | platform-organization)
+│   └── worker/main.go            # Notification worker (-once untuk single batch)
 │
-├── internal/                    # Kode privat aplikasi yang tidak bisa di-import project lain
-│   ├── app/                     # Bootstrap aplikasi, dependency injection, router, dan server
-│   │   ├── app.go               # Struktur utama aplikasi
-│   │   ├── dependency.go        # Wiring dependency: config, database, service, handler
-│   │   ├── router.go            # Registrasi route dan middleware global
-│   │   └── server.go            # Konfigurasi dan lifecycle HTTP server
+├── internal/                    # Kode privat aplikasi
+│   ├── app/                      # Bootstrap, dependency injection manual, router, server
+│   │   ├── app.go                  # App struct, New()/Run(), wiring seluruh dependency
+│   │   ├── dependency.go           # struct Dependencies yang dioper ke router
+│   │   ├── router.go               # Registrasi route + middleware global (Gin)
+│   │   ├── server.go               # Lifecycle HTTP server (graceful shutdown)
+│   │   └── module_routes.go        # Registrasi RegisterRoutes() semua modul
 │   │
-│   ├── config/                  # Load dan mapping konfigurasi aplikasi
-│   │   ├── config.go            # Root config yang menggabungkan semua konfigurasi
-│   │   ├── app.go               # Konfigurasi aplikasi: env, port, debug, app URL
-│   │   ├── auth.go              # Konfigurasi auth: JWT, token TTL, password hash
-│   │   ├── database.go          # Konfigurasi koneksi database
-│   │   ├── redis.go             # Konfigurasi Redis
-│   │   ├── mikrotik.go          # Konfigurasi integrasi MikroTik
-│   │   ├── xendit.go            # Konfigurasi payment gateway Xendit
-│   │   └── whatsapp.go          # Konfigurasi WhatsApp gateway
+│   ├── config/                   # Config loader custom (env var + .env), TANPA viper/envconfig
+│   │   ├── config.go                # Root struct Config
+│   │   ├── load.go                  # Fungsi LoadXxx() per section + parsing .env
+│   │   └── validate.go              # Validasi config untuk startup
 │   │
-│   ├── platform/                # Adapter/integrasi teknis ke infrastruktur eksternal
-│   │   ├── database/            # Koneksi database, pool, transaction helper
-│   │   ├── logger/              # Logger aplikasi
-│   │   ├── mail/                # Email sender dan template email
-│   │   ├── mikrotik/            # Client API MikroTik
-│   │   ├── redis/               # Redis client/helper
-│   │   ├── storage/             # File storage/local/S3-compatible storage
-│   │   ├── whatsapp/            # Client WhatsApp gateway
-│   │   └── xendit/              # Client Xendit/payment gateway
+│   ├── platform/                 # Adapter infrastruktur eksternal
+│   │   ├── database/                # Pool pgx, migration runner, tenant transaction, RLS test
+│   │   ├── logger/, mail/, metrics/, mikrotik/, redis/, storage/, whatsapp/, xendit/
 │   │
-│   ├── core/                    # Fondasi teknis internal yang dipakai lintas module
-│   │   ├── auth/                # JWT, password hashing, current user, auth helper
-│   │   ├── crypto/              # Helper kriptografi/token/random string
-│   │   ├── errors/              # Error standar aplikasi dan error mapping
-│   │   ├── http/                # Helper HTTP request/response/context
-│   │   ├── idempotency/         # Pencegah duplicate request untuk order/payment/webhook
-│   │   ├── middleware/          # Middleware global: auth, logging, recovery, CORS, rate limit
-│   │   ├── permission/          # RBAC/permission checker, policy, middleware permission
-│   │   └── validation/          # Helper validasi request dan format error validasi
+│   ├── core/                     # Fondasi lintas modul
+│   │   ├── auth/                    # JWT (HMAC-SHA256), Google OAuth verify, password hashing
+│   │   ├── cache/                   # Abstraksi cache
+│   │   ├── crypto/                  # Token/random string generator
+│   │   ├── errors/                  # Error standar + mapping ke HTTP response
+│   │   ├── event/                   # Publish/subscribe event internal
+│   │   ├── http/                    # Helper response (OK/Error envelope)
+│   │   ├── idempotency/             # Pencegah duplicate request (order/payment)
+│   │   ├── middleware/              # Authenticate, ResolveOrganization, CORS, RequestID, Recovery
+│   │   ├── notification/            # Sistem notifikasi: handler/service/repository/dispatcher/consumer
+│   │   ├── permission/              # RBAC custom: handler/service/repository/middleware
+│   │   ├── tenant/                  # Tipe Context multi-tenant (OrganizationID, ResolutionSource, dll)
+│   │   └── validation/              # Custom Gin validator
 │   │
-│   ├── modules/                 # Module fitur/domain bisnis aplikasi
-│   │   ├── account/             # Akun, profil, credential, preferensi akun
-│   │   ├── asset/               # Aset fisik/digital seperti router, ODP, perangkat
-│   │   ├── billing/             # Tagihan, invoice, siklus billing, status pembayaran
-│   │   ├── contract/            # Kontrak pelanggan dan dokumen kontrak
-│   │   ├── dashboard/           # Statistik, grafik, dan ringkasan dashboard
-│   │   ├── landing/             # Konten landing page, form lead, branding, dan halaman publik
-│   │   ├── mikrotik/            # Data router MikroTik dari sisi aplikasi
-│   │   ├── newsaggregator/      # Agregasi berita/konten eksternal
-│   │   ├── order/               # Order lifecycle, order item, approval, cancellation
-│   │   ├── organization/        # Tenant, perusahaan, cabang, struktur organisasi
-│   │   ├── payment/             # Payment, webhook, reconciliation, payment gateway
-│   │   ├── product/             # Produk, paket internet, harga, benefit
-│   │   ├── provisioning/        # Aktivasi/deaktivasi layanan ke sistem teknis
-│   │   ├── radius/              # RADIUS user, profile, session, accounting, AAA
-│   │   ├── resource/            # Resource jaringan seperti IP pool, VLAN, bandwidth profile
-│   │   └── user/                # User aplikasi, role assignment, status user, akses admin
+│   ├── modules/                  # Modul domain bisnis — lihat docs/module-map.md untuk status lengkap
+│   │   ├── landing/                 # STABIL — landing page builder (modul kanonik)
+│   │   ├── landingpage/             # KOSONG (0 file) — sisa scaffold lama, jangan dipakai
+│   │   ├── organization/            # STABIL — multi-tenant core
+│   │   ├── billing/                 # WIP — plan/subscription/invoice/payment/entitlement
+│   │   ├── user/                    # STABIL — auth + user management
+│   │   └── account, asset, contract, dashboard, mikrotik, newsaggregator, order, payment,
+│   │       product, provisioning, radius, resource   # STUB — scaffold kosong, belum digarap
 │   │
-│   └── shared/                  # Helper umum yang aman dipakai lintas module
-│       ├── pagination/          # Helper pagination, limit, offset, metadata page
-│       ├── response/            # Format response sukses/error yang konsisten
-│       └── utils/               # Utility umum kecil seperti string, time, slug, phone helper
+│   └── shared/                   # Helper lintas modul
+│       ├── pagination/              # Baru berisi doc.go — belum ada helper terpakai
+│       ├── response/                # Envelope response sukses/error (Success/Message/Data/Meta)
+│       └── utils/                   # Utility string/time/slug/phone
 │
-├── docs/                        # Dokumentasi requirement, PRD, SRS, SDD, TBD, dan development note
-├── scripts/                     # Script pendukung development, deployment, migration, seed
-├── tests/                       # Test tambahan/integration/e2e jika diperlukan
-├── .env.example                 # Contoh environment variable
-├── go.mod                       # Go module definition
-├── go.sum                       # Dependency checksum
-├── AGENTS.md                    # Instruksi kerja untuk AI coding agent seperti Codex
-└── README.md                    # Dokumentasi utama project untuk developer
+├── migrations/                  # 57 pasang file .up/.down.sql (000001–000057)
+├── docs/                        # Dokumentasi — lihat docs/repository-context.md untuk index lengkap
+├── scripts/, tests/              # Script pendukung & test tambahan
+├── .env.example
+├── go.mod / go.sum
+├── AGENTS.md                    # Instruksi kerja untuk AI coding agent
+└── README.md                    # Dokumen ini
 ```
+
+**Catatan**: tidak ada Dockerfile/docker-compose/Makefile/CI workflow di repo ini — lihat
+[docs/development-guide.md](docs/development-guide.md) untuk cara setup lokal.
 
 ---
 
 ## 📚 Development Documentation
+
+Sebelum mengikuti workflow per fitur di bawah, baca dulu 8 dokumen konteks lintas-modul di `docs/` sebagai
+orientasi umum: [repository-context.md](docs/repository-context.md),
+[development-guide.md](docs/development-guide.md), [module-map.md](docs/module-map.md),
+[api-contract-review.md](docs/api-contract-review.md), [database-context.md](docs/database-context.md),
+[permission-context.md](docs/permission-context.md),
+[development-traceability.md](docs/development-traceability.md),
+[next-development-tasks.md](docs/next-development-tasks.md).
 
 ### Multi-Tenant Workflow
 
@@ -251,25 +265,13 @@ Worker memakai env `NOTIFICATION_WORKER_INTERVAL_SECONDS` dan `NOTIFICATION_WORK
 
 ---
 
-## 💡 Ide Tambahan & Peningkatan (Value-Added Suggestions)
+## 💡 Ide Tambahan & Peningkatan
 
-Berikut adalah beberapa rekomendasi fitur dan teknologi tambahan untuk meningkatkan nilai jual platform Anda:
-
-1.  **Dynamic Custom Domain & Automatic SSL Provisioning**
-    *   *Ide:* Izinkan tenant menggunakan domain mereka sendiri (misalnya, `toko-budi.com` alih-alih `budi.platform.com`).
-    *   *Solusi:* Integrasikan **Traefik** atau **Caddy Server** dengan API Let's Encrypt untuk secara otomatis menerbitkan dan memperbarui sertifikat SSL ketika tenant menambahkan custom domain mereka.
-2.  **Event-Driven Architecture (EDA) dengan Message Broker**
-    *   *Ide:* Sinkronisasi data real-time antar modul (contoh: ketika transaksi POS selesai -> tambahkan poin ke Membership -> perbarui data transaksi di CRM).
-    *   *Solusi:* Gunakan **RabbitMQ** atau **Apache Kafka** untuk memproses event secara asinkron agar tidak membebani performa request utama HTTP POS.
-3.  **Payment Gateway Integration**
-    *   *Ide:* Pembayaran online terintegrasi untuk POS, tagihan keanggotaan (Membership), atau checkout Landing Page.
-    *   *Solusi:* Sediakan modul payment gateway lokal seperti **Midtrans** atau **Xendit** untuk Indonesia, atau **Stripe** untuk pasar global.
-4.  **Tenant Feature Flagging & Billing Control**
-    *   *Ide:* Mengontrol akses modul produk berdasarkan paket langganan tenant (misal: Paket Basic hanya dapat Landing Page, Paket Pro mendapat POS & CRM).
-    *   *Solusi:* Implementasikan middleware Feature Flagging di level router API Golang, terintegrasi dengan modul langganan/billing tenant.
-5.  **Multi-Language / Localization (i18n)**
-    *   *Ide:* Aplikasi POS atau Company Profile yang dapat diubah bahasanya sesuai target pasar tenant.
-    *   *Solusi:* Integrasikan pustaka i18n Golang (`nicksnyder/go-i18n`) dengan database tenant untuk menyimpan terjemahan dinamis menu atau produk.
+Ide/rekomendasi peningkatan platform (SSL otomatis, message broker, payment gateway, feature flagging per
+paket langganan, i18n) sudah digabung ke section [🗺️ Roadmap / Belum Diimplementasikan](#️-roadmap--belum-diimplementasikan)
+di atas bersama item roadmap lain, supaya semua hal yang "belum ada di kode" ada di satu tempat.
+**Payment Gateway Integration** khususnya sudah **sebagian berjalan** (Xendit, lewat modul `billing` —
+lihat [docs/billing-plan-concept-reference.md](docs/billing-plan-concept-reference.md)), bukan lagi murni ide.
 
 ## 📄 Lisensi
 Hak Cipta © 2026. Seluruh hak cipta dilindungi undang-undang.
