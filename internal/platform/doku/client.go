@@ -54,6 +54,10 @@ type CreatePaymentRequest struct {
 	Currency              string
 	PaymentDueDateMinutes int
 	CallbackURL           string
+	// NotificationURL overrides the Back Office "Notification URL" for this
+	// payment (additional_info.override_notification_url), so webhooks work
+	// without per-channel dashboard configuration.
+	NotificationURL string
 }
 
 // Payment is the hosted checkout session DOKU created for the request.
@@ -135,8 +139,13 @@ func newRequestID() string {
 }
 
 type checkoutRequestBody struct {
-	Order   checkoutOrder   `json:"order"`
-	Payment checkoutPayment `json:"payment"`
+	Order          checkoutOrder           `json:"order"`
+	Payment        checkoutPayment         `json:"payment"`
+	AdditionalInfo *checkoutAdditionalInfo `json:"additional_info,omitempty"`
+}
+
+type checkoutAdditionalInfo struct {
+	OverrideNotificationURL string `json:"override_notification_url,omitempty"`
 }
 
 type checkoutOrder struct {
@@ -183,7 +192,7 @@ func (c *HTTPClient) CreatePayment(ctx context.Context, request CreatePaymentReq
 		dueDate = 60
 	}
 
-	body, err := json.Marshal(checkoutRequestBody{
+	requestBody := checkoutRequestBody{
 		Order: checkoutOrder{
 			Amount:        request.Amount,
 			InvoiceNumber: invoiceNumber,
@@ -191,7 +200,11 @@ func (c *HTTPClient) CreatePayment(ctx context.Context, request CreatePaymentReq
 			CallbackURL:   strings.TrimSpace(request.CallbackURL),
 		},
 		Payment: checkoutPayment{PaymentDueDate: dueDate},
-	})
+	}
+	if notificationURL := strings.TrimSpace(request.NotificationURL); notificationURL != "" {
+		requestBody.AdditionalInfo = &checkoutAdditionalInfo{OverrideNotificationURL: notificationURL}
+	}
+	body, err := json.Marshal(requestBody)
 	if err != nil {
 		return Payment{}, fmt.Errorf("marshal doku checkout request: %w", err)
 	}

@@ -32,7 +32,7 @@ func newCheckoutServiceForTest(
 	client *stubDokuClient,
 ) *PaymentService {
 	service := NewPaymentService(store, &stubPaymentInvoiceStore{invoice: invoice}, nil)
-	service.SetDokuCheckout(client, "https://app.example.com/")
+	service.SetDokuCheckout(client, "https://app.example.com/", "https://api.example.com/api/v1/webhooks/doku")
 	service.now = func() time.Time { return time.Date(2026, 7, 9, 1, 0, 0, 0, time.UTC) }
 	return service
 }

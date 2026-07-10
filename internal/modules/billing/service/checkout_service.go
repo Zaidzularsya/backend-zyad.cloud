@@ -18,11 +18,13 @@ import (
 
 const checkoutPaymentDueDateMinutes = 60
 
-// SetDokuCheckout wires the DOKU checkout client and the frontend base URL
-// used to build post-payment callback redirects.
-func (s *PaymentService) SetDokuCheckout(client doku.Client, frontendURL string) {
+// SetDokuCheckout wires the DOKU checkout client, the frontend base URL used
+// to build post-payment callback redirects, and the public webhook URL sent
+// as additional_info.override_notification_url on every payment.
+func (s *PaymentService) SetDokuCheckout(client doku.Client, frontendURL string, notificationURL string) {
 	s.dokuClient = client
 	s.frontendURL = strings.TrimRight(strings.TrimSpace(frontendURL), "/")
+	s.dokuNotificationURL = strings.TrimSpace(notificationURL)
 }
 
 // CreateCheckout creates (or reuses) a DOKU hosted checkout session for an
@@ -72,6 +74,7 @@ func (s *PaymentService) CreateCheckout(
 		Currency:              currencyOrDefault(invoice.Currency, "IDR"),
 		PaymentDueDateMinutes: checkoutPaymentDueDateMinutes,
 		CallbackURL:           s.checkoutCallbackURL(invoice.ID),
+		NotificationURL:       s.dokuNotificationURL,
 	})
 	if err != nil {
 		return dto.CheckoutResponse{}, coreerrors.Wrap(

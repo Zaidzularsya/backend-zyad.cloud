@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"zyad.cloud/internal/config"
@@ -111,7 +112,11 @@ func New(ctx context.Context) (*App, error) {
 		SecretKey:   cfg.Doku.SecretKey,
 		FrontendURL: cfg.App.FrontendURL,
 	})
-	billingPaymentService.SetDokuCheckout(dokuClient, cfg.App.FrontendURL)
+	dokuNotificationURL := ""
+	if baseURL := strings.TrimRight(strings.TrimSpace(cfg.App.URL), "/"); baseURL != "" {
+		dokuNotificationURL = baseURL + "/api/v1/webhooks/doku"
+	}
+	billingPaymentService.SetDokuCheckout(dokuClient, cfg.App.FrontendURL, dokuNotificationURL)
 	dokuWebhookHandler := billinghandler.NewDokuWebhookHandler(
 		billingPaymentService,
 		cfg.Doku.ClientID,

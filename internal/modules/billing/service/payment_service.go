@@ -54,6 +54,7 @@ type PaymentService struct {
 	subscriptionUpgrades PaymentSubscriptionUpgradeActivator
 	dokuClient           doku.Client
 	frontendURL          string
+	dokuNotificationURL  string
 	now                  func() time.Time
 }
 
