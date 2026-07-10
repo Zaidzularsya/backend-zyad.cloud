@@ -131,6 +131,12 @@ func (s *PaymentService) findReusableCheckout(
 	}
 	now := s.now().UTC()
 	for _, payment := range payments {
+		// Simulated (NoopClient) sessions must never be reused: once real
+		// credentials are configured, a lingering pending noop payment would
+		// keep short-circuiting checkout back to the fake success URL.
+		if sessionID, _ := metadataStringValue(payment.RawPayload, "session_id"); sessionID == "noop" {
+			continue
+		}
 		paymentURL, _ := metadataStringValue(payment.RawPayload, "payment_url")
 		expiredDateRaw, _ := metadataStringValue(payment.RawPayload, "expired_date")
 		if paymentURL == "" || expiredDateRaw == "" {
