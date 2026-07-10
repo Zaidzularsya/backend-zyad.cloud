@@ -10,6 +10,7 @@ import (
 
 	"zyad.cloud/internal/modules/billing/dto"
 	organizationdto "zyad.cloud/internal/modules/organization/dto"
+	subscription "zyad.cloud/internal/modules/subscription"
 	productdto "zyad.cloud/internal/modules/product/dto"
 	subscriptiondto "zyad.cloud/internal/modules/subscription/dto"
 )
@@ -18,6 +19,7 @@ type stubTenantBillingSubscriptionReader struct {
 	subscription       subscriptiondto.SubscriptionResponse
 	latestSubscription subscriptiondto.SubscriptionResponse
 	usableErr          error
+	latestErr          error
 	changeResult       subscriptiondto.SubscriptionResponse
 	organizationID     string
 	changedID          string
@@ -36,6 +38,9 @@ func (s *stubTenantBillingSubscriptionReader) FindLatestByOrganization(
 	context.Context,
 	string,
 ) (subscriptiondto.SubscriptionResponse, error) {
+	if s.latestErr != nil {
+		return subscriptiondto.SubscriptionResponse{}, s.latestErr
+	}
 	if s.latestSubscription.ID != "" {
 		return s.latestSubscription, nil
 	}
@@ -359,6 +364,89 @@ func TestTenantBillingServiceRequestUpgradeCreatesInvoice(t *testing.T) {
 	if invoiceReader.created.Metadata["billing_action"] != "upgrade_request" ||
 		invoiceReader.created.Metadata["target_plan_id"] != "plan-growth" {
 		t.Fatalf("metadata = %#v", invoiceReader.created.Metadata)
+	}
+}
+
+type stubTenantBillingDefaultSubscriptionProvisioner struct {
+	reader          *stubTenantBillingSubscriptionReader
+	provisioned     subscriptiondto.SubscriptionResponse
+	organizationIDs []string
+	err             error
+}
+
+func (s *stubTenantBillingDefaultSubscriptionProvisioner) ProvisionDefaultSubscription(
+	_ context.Context,
+	organizationID string,
+) error {
+	s.organizationIDs = append(s.organizationIDs, organizationID)
+	if s.err != nil {
+		return s.err
+	}
+	s.reader.latestErr = nil
+	s.reader.latestSubscription = s.provisioned
+	return nil
+}
+
+func TestTenantBillingServiceRequestUpgradeProvisionsMissingSubscription(t *testing.T) {
+	subscriptionReader := &stubTenantBillingSubscriptionReader{
+		latestErr: subscription.SubscriptionNotFoundError(),
+	}
+	provisioner := &stubTenantBillingDefaultSubscriptionProvisioner{
+		reader: subscriptionReader,
+		provisioned: subscriptiondto.SubscriptionResponse{
+			ID:              "subscription-free",
+			OrganizationID:  "organization-1",
+			PlanID:          "plan-free",
+			Status:          "active",
+			BillingInterval: "monthly",
+		},
+	}
+	planReader := &stubTenantBillingPlanReader{
+		plan: productdto.PlanResponse{
+			ID:       "plan-growth",
+			Code:     "growth",
+			Name:     "Growth",
+			IsPublic: true,
+			IsActive: true,
+			Prices: []productdto.PlanPriceResponse{
+				{BillingInterval: "monthly", Currency: "IDR", Amount: "199000.00", IsActive: true},
+			},
+		},
+	}
+	invoiceReader := &stubTenantBillingInvoiceReader{}
+	service := NewTenantBillingService(subscriptionReader, planReader, invoiceReader, nil)
+	service.SetDefaultSubscriptionProvisioner(provisioner)
+
+	result, err := service.RequestUpgrade(context.Background(), "organization-1", "user-1", dto.UpgradeSubscriptionRequest{
+		PlanID: "plan-growth",
+	})
+	if err != nil {
+		t.Fatalf("RequestUpgrade error = %v", err)
+	}
+	if len(provisioner.organizationIDs) != 1 || provisioner.organizationIDs[0] != "organization-1" {
+		t.Fatalf("provisioner calls = %#v", provisioner.organizationIDs)
+	}
+	if result.Status != "open" || invoiceReader.created.SubscriptionID != "subscription-free" {
+		t.Fatalf("created invoice = %#v", invoiceReader.created)
+	}
+}
+
+func TestTenantBillingServiceRequestUpgradeWithoutProvisionerKeepsNotFound(t *testing.T) {
+	subscriptionReader := &stubTenantBillingSubscriptionReader{
+		latestErr: subscription.SubscriptionNotFoundError(),
+	}
+	service := NewTenantBillingService(
+		subscriptionReader,
+		&stubTenantBillingPlanReader{},
+		&stubTenantBillingInvoiceReader{},
+		nil,
+	)
+
+	_, err := service.RequestUpgrade(context.Background(), "organization-1", "user-1", dto.UpgradeSubscriptionRequest{
+		PlanID: "plan-growth",
+	})
+	if !isSubscriptionNotFound(err) {
+		t.Fatalf("RequestUpgrade error = %v, want subscription not found", err)
 	}
 }
 

@@ -1,0 +1,176 @@
+package service
+
+import (
+	"context"
+	"fmt"
+	"math/big"
+	"net/http"
+	"strings"
+	"time"
+
+	coreerrors "zyad.cloud/internal/core/errors"
+	billing "zyad.cloud/internal/modules/billing"
+	"zyad.cloud/internal/modules/billing/dto"
+	"zyad.cloud/internal/modules/billing/model"
+	"zyad.cloud/internal/modules/billing/repository"
+	"zyad.cloud/internal/platform/doku"
+)
+
+const checkoutPaymentDueDateMinutes = 60
+
+// SetDokuCheckout wires the DOKU checkout client and the frontend base URL
+// used to build post-payment callback redirects.
+func (s *PaymentService) SetDokuCheckout(client doku.Client, frontendURL string) {
+	s.dokuClient = client
+	s.frontendURL = strings.TrimRight(strings.TrimSpace(frontendURL), "/")
+}
+
+// CreateCheckout creates (or reuses) a DOKU hosted checkout session for an
+// open invoice belonging to the organization. The invoice UUID doubles as
+// DOKU's order.invoice_number so notifications can be mapped back without a
+// separate provider-reference lookup.
+func (s *PaymentService) CreateCheckout(
+	ctx context.Context,
+	organizationID string,
+	invoiceID string,
+) (dto.CheckoutResponse, error) {
+	if s.dokuClient == nil {
+		return dto.CheckoutResponse{}, coreerrors.New(
+			"PAYMENT_GATEWAY_NOT_CONFIGURED",
+			"payment gateway is not configured",
+			http.StatusServiceUnavailable,
+		)
+	}
+	invoice, err := s.invoiceStore.FindByID(ctx, strings.TrimSpace(organizationID), strings.TrimSpace(invoiceID))
+	if err != nil {
+		return dto.CheckoutResponse{}, mapInvoiceError(err)
+	}
+	if invoice.IsPaid() || invoice.Status == model.InvoiceStatusPaid {
+		return dto.CheckoutResponse{}, billing.PaymentAlreadyProcessedError()
+	}
+	if invoice.Status != model.InvoiceStatusOpen && invoice.Status != model.InvoiceStatusDraft {
+		return dto.CheckoutResponse{}, validationError("invoice is not payable in its current status")
+	}
+
+	if response, found, err := s.findReusableCheckout(ctx, invoice); err != nil {
+		return dto.CheckoutResponse{}, err
+	} else if found {
+		return response, nil
+	}
+
+	amount, err := wholeCurrencyAmount(invoice.TotalAmount)
+	if err != nil {
+		return dto.CheckoutResponse{}, validationError("invoice total amount is invalid for checkout")
+	}
+	if amount <= 0 {
+		return dto.CheckoutResponse{}, validationError("invoice total amount must be positive for checkout")
+	}
+
+	payment, err := s.dokuClient.CreatePayment(ctx, doku.CreatePaymentRequest{
+		InvoiceNumber:         invoice.ID,
+		Amount:                amount,
+		Currency:              currencyOrDefault(invoice.Currency, "IDR"),
+		PaymentDueDateMinutes: checkoutPaymentDueDateMinutes,
+		CallbackURL:           s.checkoutCallbackURL(invoice.ID),
+	})
+	if err != nil {
+		return dto.CheckoutResponse{}, coreerrors.Wrap(
+			"PAYMENT_CHECKOUT_FAILED",
+			"failed to create payment checkout session",
+			http.StatusBadGateway,
+			err,
+		)
+	}
+
+	providerReference := strings.TrimSpace(payment.TokenID)
+	if providerReference == "" {
+		providerReference = strings.TrimSpace(payment.SessionID)
+	}
+	expiredDate := payment.ExpiredDate.UTC().Format(time.RFC3339)
+	if _, err := s.store.Create(ctx, repository.CreatePaymentParams{
+		InvoiceID:         invoice.ID,
+		OrganizationID:    invoice.OrganizationID,
+		Provider:          model.PaymentProviderDoku,
+		ProviderReference: providerReference,
+		Status:            model.PaymentStatusPending,
+		Amount:            invoice.TotalAmount,
+		Currency:          currencyOrDefault(invoice.Currency, "IDR"),
+		RawPayload: map[string]any{
+			"payment_url":    payment.PaymentURL,
+			"expired_date":   expiredDate,
+			"invoice_number": invoice.ID,
+			"token_id":       payment.TokenID,
+			"session_id":     payment.SessionID,
+		},
+	}); err != nil {
+		return dto.CheckoutResponse{}, err
+	}
+
+	return dto.CheckoutResponse{
+		PaymentURL: payment.PaymentURL,
+		Provider:   string(model.PaymentProviderDoku),
+		ExpiresAt:  &expiredDate,
+	}, nil
+}
+
+// findReusableCheckout returns an existing pending DOKU checkout URL for the
+// invoice when its payment page has not expired yet, so repeated clicks do
+// not create duplicate DOKU sessions.
+func (s *PaymentService) findReusableCheckout(
+	ctx context.Context,
+	invoice model.Invoice,
+) (dto.CheckoutResponse, bool, error) {
+	payments, _, err := s.store.List(ctx, repository.PaymentListFilter{
+		OrganizationID: invoice.OrganizationID,
+		InvoiceID:      invoice.ID,
+		Provider:       model.PaymentProviderDoku,
+		Status:         model.PaymentStatusPending,
+	})
+	if err != nil {
+		return dto.CheckoutResponse{}, false, err
+	}
+	now := s.now().UTC()
+	for _, payment := range payments {
+		paymentURL, _ := metadataStringValue(payment.RawPayload, "payment_url")
+		expiredDateRaw, _ := metadataStringValue(payment.RawPayload, "expired_date")
+		if paymentURL == "" || expiredDateRaw == "" {
+			continue
+		}
+		expiredDate, parseErr := time.Parse(time.RFC3339, expiredDateRaw)
+		if parseErr != nil || !expiredDate.After(now) {
+			continue
+		}
+		expiresAt := expiredDate.UTC().Format(time.RFC3339)
+		return dto.CheckoutResponse{
+			PaymentURL: paymentURL,
+			Provider:   string(model.PaymentProviderDoku),
+			ExpiresAt:  &expiresAt,
+		}, true, nil
+	}
+	return dto.CheckoutResponse{}, false, nil
+}
+
+func (s *PaymentService) checkoutCallbackURL(invoiceID string) string {
+	if s.frontendURL == "" {
+		return ""
+	}
+	return s.frontendURL + "/app/checkout/success?invoice=" + invoiceID
+}
+
+// wholeCurrencyAmount converts a decimal money string into a whole-unit
+// amount (IDR has no minor units on DOKU), rounding half up.
+func wholeCurrencyAmount(value string) (int64, error) {
+	rat, err := moneyRat(value)
+	if err != nil {
+		return 0, err
+	}
+	if rat.Sign() < 0 {
+		return 0, fmt.Errorf("money value must not be negative")
+	}
+	rounded := new(big.Rat).Add(rat, big.NewRat(1, 2))
+	quotient := new(big.Int).Quo(rounded.Num(), rounded.Denom())
+	if !quotient.IsInt64() {
+		return 0, fmt.Errorf("money value is out of range")
+	}
+	return quotient.Int64(), nil
+}

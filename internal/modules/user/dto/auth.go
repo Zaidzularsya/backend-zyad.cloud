@@ -22,6 +22,10 @@ type GoogleAuthRequest struct {
 	InviteToken string `json:"invite_token,omitempty"`
 }
 
+type GoogleExchangeRequest struct {
+	Code string `json:"code" binding:"required"`
+}
+
 type GoogleAuthResponse struct {
 	AccessToken  string       `json:"access_token"`
 	RefreshToken string       `json:"refresh_token"`

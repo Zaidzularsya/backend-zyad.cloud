@@ -45,12 +45,20 @@ type TenantBillingUsageReader interface {
 	) (organizationdto.UsageResponse, error)
 }
 
+// TenantBillingDefaultSubscriptionProvisioner provisions the default (free)
+// subscription for organizations created before default provisioning existed
+// or whose onboarding-time provisioning failed. Wired from the app layer.
+type TenantBillingDefaultSubscriptionProvisioner interface {
+	ProvisionDefaultSubscription(ctx context.Context, organizationID string) error
+}
+
 type TenantBillingService struct {
-	subscriptions TenantBillingSubscriptionReader
-	plans         TenantBillingPlanReader
-	invoices      TenantBillingInvoiceReader
-	usage         TenantBillingUsageReader
-	now           func() time.Time
+	subscriptions        TenantBillingSubscriptionReader
+	plans                TenantBillingPlanReader
+	invoices             TenantBillingInvoiceReader
+	usage                TenantBillingUsageReader
+	defaultSubscriptions TenantBillingDefaultSubscriptionProvisioner
+	now                  func() time.Time
 }
 
 type billingUsageSummarySpec struct {
@@ -85,6 +93,14 @@ func NewTenantBillingService(
 		usage:         usage,
 		now:           time.Now,
 	}
+}
+
+// SetDefaultSubscriptionProvisioner wires the optional safety-net provisioner
+// used when an organization has no subscription row yet.
+func (s *TenantBillingService) SetDefaultSubscriptionProvisioner(
+	provisioner TenantBillingDefaultSubscriptionProvisioner,
+) {
+	s.defaultSubscriptions = provisioner
 }
 
 func (s *TenantBillingService) CurrentPlan(
@@ -128,6 +144,18 @@ func (s *TenantBillingService) RequestUpgrade(
 	}
 
 	subscription, err := s.subscriptions.FindLatestByOrganization(ctx, strings.TrimSpace(organizationID))
+	if err != nil && isSubscriptionNotFound(err) && s.defaultSubscriptions != nil {
+		// Safety net: organizations created before default subscription
+		// provisioning existed (or whose onboarding-time provisioning
+		// failed) get their free subscription created on first upgrade.
+		if provisionErr := s.defaultSubscriptions.ProvisionDefaultSubscription(
+			ctx,
+			strings.TrimSpace(organizationID),
+		); provisionErr != nil {
+			return dto.InvoiceResponse{}, provisionErr
+		}
+		subscription, err = s.subscriptions.FindLatestByOrganization(ctx, strings.TrimSpace(organizationID))
+	}
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return dto.InvoiceResponse{}, mapSubscriptionError(err)

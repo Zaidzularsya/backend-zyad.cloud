@@ -152,11 +152,14 @@ func LoadMikrotik() MikrotikConfig {
 	}
 }
 
-func LoadXendit() XenditConfig {
-	return XenditConfig{
-		BaseURL:      getEnv("XENDIT_BASE_URL", ""),
-		APIKey:       getEnv("XENDIT_API_KEY", ""),
-		WebhookToken: getEnv("XENDIT_WEBHOOK_TOKEN", ""),
+func LoadDoku() DokuConfig {
+	return DokuConfig{
+		BaseURL:  getEnv("DOKU_BASE_URL", "https://api-sandbox.doku.com"),
+		ClientID: getEnv("DOKU_CLIENT_ID", ""),
+		// DOKU_ACTIVE_SECRET is the Back Office "Secret Key" (SK-...);
+		// DOKU_SECRET_KEY is accepted as an explicit alias.
+		SecretKey: getEnv("DOKU_SECRET_KEY", getEnv("DOKU_ACTIVE_SECRET", "")),
+		APIKey:    getEnv("DOKU_API_KEY", ""),
 	}
 }
 

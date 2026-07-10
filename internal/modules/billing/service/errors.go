@@ -31,3 +31,14 @@ func mapSubscriptionError(err error) error {
 	}
 	return err
 }
+
+// isSubscriptionNotFound matches both the raw row-level pgx.ErrNoRows and the
+// subscription domain's mapped SUBSCRIPTION_NOT_FOUND error, since
+// FindLatestByOrganization surfaces the latter for empty result sets.
+func isSubscriptionNotFound(err error) bool {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return true
+	}
+	var appErr *coreerrors.AppError
+	return errors.As(err, &appErr) && appErr.Code == subscription.ErrCodeSubscriptionNotFound
+}

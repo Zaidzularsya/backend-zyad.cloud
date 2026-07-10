@@ -4423,6 +4423,107 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/app/billing/invoices/{id}/checkout:
+    post:
+      summary: Create a hosted payment checkout session for an open invoice
+      operationId: createBillingInvoiceCheckout
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Billing invoice ID
+      responses:
+        "201":
+          description: Billing invoice checkout created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BillingCheckoutEnvelope"
+        "403":
+          description: Missing organization.billing.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Billing invoice not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Invoice is already paid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invoice is not payable in its current status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Payment gateway is not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/webhooks/doku:
+    post:
+      summary: Receive DOKU payment notifications (HMAC-signed)
+      description: >-
+        Endpoint notification DOKU Checkout. Autentikasi memakai header
+        Client-Id, Request-Id, Request-Timestamp, Digest, dan Signature
+        (HMACSHA256) — bukan bearer token. Notifikasi sukses menandai invoice
+        paid dan mengaktifkan upgrade subscription secara idempotent.
+      operationId: handleDokuWebhook
+      tags:
+        - Billing
+      parameters:
+        - name: Client-Id
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: Request-Id
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: Request-Timestamp
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: Signature
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Raw DOKU notification payload
+      responses:
+        "200":
+          description: Notification recorded/processed
+        "400":
+          description: Payload is invalid or missing order.invoice_number
+        "401":
+          description: Signature verification failed
+        "503":
+          description: DOKU webhook credentials are not configured
 components:
   parameters:
     OrganizationID:
@@ -6005,12 +6106,16 @@ components:
     PublicProductPlan:
       type: object
       required:
+        - id
         - code
         - name
         - sort_order
         - prices
         - benefits
       properties:
+        id:
+          type: string
+          format: uuid
         code:
           type: string
         name:
@@ -6099,6 +6204,32 @@ components:
             $ref: "#/components/schemas/CustomerSubscription"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
+    BillingCheckout:
+      type: object
+      required:
+        - payment_url
+        - provider
+      properties:
+        payment_url:
+          type: string
+          format: uri
+          description: Hosted DOKU checkout page URL to redirect the customer to
+        provider:
+          type: string
+          example: doku
+        expires_at:
+          type: string
+          format: date-time
+    BillingCheckoutEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/BillingCheckout"
     BillingInvoiceEnvelope:
       type: object
       required: [success, message, data]

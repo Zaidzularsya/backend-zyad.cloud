@@ -1,29 +1,41 @@
 package handler
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
+	coreauth "zyad.cloud/internal/core/auth"
 	coreerrors "zyad.cloud/internal/core/errors"
 	corehttp "zyad.cloud/internal/core/http"
 	"zyad.cloud/internal/core/middleware"
 	"zyad.cloud/internal/modules/user/dto"
 	"zyad.cloud/internal/modules/user/service"
+	redisplatform "zyad.cloud/internal/platform/redis"
 
 	"github.com/gin-gonic/gin"
 )
 
+const googleAuthCodeTTL = 60 * time.Second
+
 type AuthHandler struct {
-	service *service.AuthService
+	service     *service.AuthService
+	redis       *redisplatform.Client
+	frontendURL string
 }
 
-func NewAuthHandler(authService *service.AuthService) *AuthHandler {
-	return &AuthHandler{service: authService}
+func NewAuthHandler(authService *service.AuthService, redisClient *redisplatform.Client, frontendURL string) *AuthHandler {
+	return &AuthHandler{service: authService, redis: redisClient, frontendURL: strings.TrimRight(frontendURL, "/")}
 }
 
 func (h *AuthHandler) RegisterRoutes(router gin.IRoutes) {
 	router.POST("/auth/login", h.Login)
 	router.POST("/auth/google", h.GoogleAuth)
+	router.POST("/auth/google/callback", h.GoogleAuthCallback)
+	router.POST("/auth/google/exchange", h.GoogleAuthExchange)
 	router.POST("/auth/logout", h.Logout)
 	router.POST("/auth/refresh-token", h.RefreshToken)
 	router.POST("/auth/forgot-password", h.ForgotPassword)
@@ -79,6 +91,100 @@ func (h *AuthHandler) GoogleAuth(c *gin.Context) {
 	}
 
 	corehttp.OK(c, "google authentication successful", result)
+}
+
+// GoogleAuthCallback is the GIS `login_uri` target for the redirect (ux_mode:
+// 'redirect') sign-in flow: Google POSTs the credential directly here (full
+// page navigation, no JS on the SPA side), so the result can't be handed back
+// via a JSON response. Instead we store it behind a short-lived one-time code
+// in Redis and redirect the browser back to the SPA, which exchanges the code
+// via GoogleAuthExchange.
+func (h *AuthHandler) GoogleAuthCallback(c *gin.Context) {
+	credential := c.PostForm("credential")
+	csrfCookie, _ := c.Cookie("g_csrf_token")
+	csrfBody := c.PostForm("g_csrf_token")
+
+	if credential == "" || csrfCookie == "" || csrfBody == "" || csrfCookie != csrfBody {
+		c.Redirect(http.StatusFound, h.frontendURL+"/login?google_error=csrf")
+		return
+	}
+
+	// Google's redirect (ux_mode: 'redirect') POST only carries `credential`
+	// and `g_csrf_token` — there's no custom state passthrough for the GIS
+	// ID-token flow, unlike the separate OAuth2 code-client API. The frontend
+	// keeps the post-login destination in sessionStorage across the round
+	// trip instead, so the session here always uses the persistent (remember
+	// me) TTL, matching common "sign in with Google" UX.
+	req := dto.GoogleAuthRequest{
+		IDToken:    credential,
+		RememberMe: true,
+		DeviceName: "Web Browser",
+	}
+
+	result, err := h.service.GoogleAuth(c.Request.Context(), req, service.LoginHistoryRecord{
+		IPAddress:  c.ClientIP(),
+		UserAgent:  c.Request.UserAgent(),
+		DeviceName: req.DeviceName,
+	})
+	if err != nil {
+		c.Redirect(http.StatusFound, h.frontendURL+"/login?google_error=1")
+		return
+	}
+
+	code, err := h.storeGoogleAuthResult(c.Request.Context(), result)
+	if err != nil {
+		c.Redirect(http.StatusFound, h.frontendURL+"/login?google_error=1")
+		return
+	}
+
+	landing := url.URL{Path: "/auth/google/callback", RawQuery: url.Values{"code": {code}}.Encode()}
+	c.Redirect(http.StatusFound, h.frontendURL+landing.String())
+}
+
+// GoogleAuthExchange lets the SPA trade the one-time code minted by
+// GoogleAuthCallback for the real access/refresh tokens.
+func (h *AuthHandler) GoogleAuthExchange(c *gin.Context) {
+	var req dto.GoogleExchangeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		return
+	}
+
+	ctx := c.Request.Context()
+	key := googleAuthCodeKey(req.Code)
+	raw, err := h.redis.Get(ctx, key).Result()
+	if err != nil {
+		corehttp.Fail(c, coreerrors.New("AUTH_GOOGLE_CODE_INVALID", "google authentication code is invalid or expired", http.StatusUnauthorized))
+		return
+	}
+	h.redis.Del(ctx, key)
+
+	var result dto.GoogleAuthResponse
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		corehttp.Fail(c, coreerrors.New("AUTH_GOOGLE_CODE_INVALID", "google authentication code is invalid or expired", http.StatusUnauthorized))
+		return
+	}
+
+	corehttp.OK(c, "google authentication successful", result)
+}
+
+func (h *AuthHandler) storeGoogleAuthResult(ctx context.Context, result dto.GoogleAuthResponse) (string, error) {
+	code, err := coreauth.NewRandomToken(24)
+	if err != nil {
+		return "", err
+	}
+	payload, err := json.Marshal(result)
+	if err != nil {
+		return "", err
+	}
+	if err := h.redis.Set(ctx, googleAuthCodeKey(code), payload, googleAuthCodeTTL).Err(); err != nil {
+		return "", err
+	}
+	return code, nil
+}
+
+func googleAuthCodeKey(code string) string {
+	return "google-auth-code:" + code
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {

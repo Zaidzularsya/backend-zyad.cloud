@@ -39,6 +39,7 @@ import (
 	userrepo "zyad.cloud/internal/modules/user/repository"
 	userservice "zyad.cloud/internal/modules/user/service"
 	"zyad.cloud/internal/platform/database"
+	"zyad.cloud/internal/platform/doku"
 	"zyad.cloud/internal/platform/logger"
 	"zyad.cloud/internal/platform/mail"
 	redisplatform "zyad.cloud/internal/platform/redis"
@@ -104,6 +105,19 @@ func New(ctx context.Context) (*App, error) {
 		billingInvoiceRepo,
 		subscriptionUpgradeActivatorAdapter{subscriptions: subscriptionService},
 	)
+	dokuClient := doku.NewClientFromConfig(doku.Config{
+		BaseURL:     cfg.Doku.BaseURL,
+		ClientID:    cfg.Doku.ClientID,
+		SecretKey:   cfg.Doku.SecretKey,
+		FrontendURL: cfg.App.FrontendURL,
+	})
+	billingPaymentService.SetDokuCheckout(dokuClient, cfg.App.FrontendURL)
+	dokuWebhookHandler := billinghandler.NewDokuWebhookHandler(
+		billingPaymentService,
+		cfg.Doku.ClientID,
+		cfg.Doku.SecretKey,
+		log,
+	)
 	platformProductHandler := producthandler.NewPlatformProductHandler(
 		productPlanService,
 		productFeatureService,
@@ -155,7 +169,7 @@ func New(ctx context.Context) (*App, error) {
 		authService.SetGoogleTokenVerifier(coreauth.NewGoogleIDTokenVerifier(cfg.Auth.Google.ClientIDs))
 	}
 	authService.SetNotificationPublisher(notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts))
-	authHandler := userhandler.NewAuthHandler(authService)
+	authHandler := userhandler.NewAuthHandler(authService, redisClient, cfg.App.FrontendURL)
 	userRepo := userrepo.NewUserRepository(db)
 	userService := userservice.NewUserService(userRepo)
 	if err := userService.Configure(cfg); err != nil {
@@ -180,6 +194,11 @@ func New(ctx context.Context) (*App, error) {
 	organizationOnboardingService := organizationservice.NewOnboardingService(
 		organizationrepo.NewOnboardingRepository(db),
 	)
+	defaultSubscriptions := defaultSubscriptionProvisioner{
+		plans:         productPlanService,
+		subscriptions: subscriptionService,
+	}
+	organizationOnboardingService.SetDefaultSubscriptionProvisioner(defaultSubscriptions)
 	authService.SetGoogleWorkspaceProvisioner(
 		googleWorkspaceProvisioner{onboarding: organizationOnboardingService},
 	)
@@ -246,10 +265,12 @@ func New(ctx context.Context) (*App, error) {
 		billingInvoiceService,
 		organizationEntitlementService,
 	)
+	tenantBillingService.SetDefaultSubscriptionProvisioner(defaultSubscriptions)
 	tenantBillingHandler := billinghandler.NewTenantBillingHandler(
 		tenantBillingService,
 		permService,
 	)
+	tenantBillingHandler.SetCheckoutService(billingPaymentService)
 	organizationImpersonationHandler := organizationhandler.NewImpersonationHandler(
 		organizationservice.NewImpersonationService(
 			organizationrepo.NewImpersonationRepository(db),
@@ -341,6 +362,7 @@ func New(ctx context.Context) (*App, error) {
 		PlatformSubscriptionHandler:      platformSubscriptionHandler,
 		PlatformBillingHandler:           platformBillingHandler,
 		TenantBillingHandler:             tenantBillingHandler,
+		DokuWebhookHandler:               dokuWebhookHandler,
 		OrganizationDomainHandler:        organizationDomainHandler,
 		OrganizationEntitlementHandler:   organizationEntitlementHandler,
 		OrganizationImpersonationHandler: organizationImpersonationHandler,

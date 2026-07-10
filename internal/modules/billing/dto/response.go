@@ -93,3 +93,10 @@ type CurrentPlanResponse struct {
 	Subscription subscriptiondto.SubscriptionResponse `json:"subscription"`
 	Usage        []UsageItemResponse                  `json:"usage,omitempty"`
 }
+
+// CheckoutResponse is the hosted payment page created for an open invoice.
+type CheckoutResponse struct {
+	PaymentURL string  `json:"payment_url"`
+	Provider   string  `json:"provider"`
+	ExpiresAt  *string `json:"expires_at,omitempty"`
+}

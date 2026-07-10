@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
@@ -23,9 +24,17 @@ type OnboardingStore interface {
 	CreateWorkspace(context.Context, repository.CreateWorkspaceParams) (repository.MembershipOrganization, error)
 }
 
+// DefaultSubscriptionProvisioner creates the default (free) subscription for
+// a freshly created workspace so billing lookups never 404 for new tenants.
+// The concrete implementation is composed in the app wiring layer.
+type DefaultSubscriptionProvisioner interface {
+	ProvisionDefaultSubscription(ctx context.Context, organizationID string) error
+}
+
 type OnboardingService struct {
-	store OnboardingStore
-	now   func() time.Time
+	store                OnboardingStore
+	defaultSubscriptions DefaultSubscriptionProvisioner
+	now                  func() time.Time
 }
 
 type OnboardingMetadata struct {
@@ -36,6 +45,12 @@ type OnboardingMetadata struct {
 
 func NewOnboardingService(store OnboardingStore) *OnboardingService {
 	return &OnboardingService{store: store, now: time.Now}
+}
+
+// SetDefaultSubscriptionProvisioner wires the optional post-onboarding
+// default subscription provisioning step.
+func (s *OnboardingService) SetDefaultSubscriptionProvisioner(provisioner DefaultSubscriptionProvisioner) {
+	s.defaultSubscriptions = provisioner
 }
 
 func (s *OnboardingService) CreateWorkspace(
@@ -84,6 +99,19 @@ func (s *OnboardingService) CreateWorkspace(
 	})
 	if err != nil {
 		return dto.CreateWorkspaceResponse{}, mapOnboardingError(err)
+	}
+	// Non-fatal: the workspace is already committed; a provisioning failure
+	// must not fail onboarding (retrying would hit a slug conflict). The
+	// RequestUpgrade safety net covers organizations left without a
+	// subscription here.
+	if s.defaultSubscriptions != nil {
+		if provisionErr := s.defaultSubscriptions.ProvisionDefaultSubscription(ctx, result.Organization.ID); provisionErr != nil {
+			slog.Default().Error(
+				"provision default subscription after onboarding failed",
+				"organization_id", result.Organization.ID,
+				"error", provisionErr,
+			)
+		}
 	}
 	return dto.CreateWorkspaceResponse{
 		CurrentOrganization: userOrganizationResponse(result, result.Organization.ID),

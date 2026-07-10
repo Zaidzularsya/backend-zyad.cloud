@@ -8,13 +8,15 @@ const (
 	PaymentProviderManual   PaymentProvider = "manual"
 	PaymentProviderXendit   PaymentProvider = "xendit"
 	PaymentProviderMidtrans PaymentProvider = "midtrans"
+	PaymentProviderDoku     PaymentProvider = "doku"
 )
 
 func (p PaymentProvider) IsValid() bool {
 	switch p {
 	case PaymentProviderManual,
 		PaymentProviderXendit,
-		PaymentProviderMidtrans:
+		PaymentProviderMidtrans,
+		PaymentProviderDoku:
 		return true
 	default:
 		return false

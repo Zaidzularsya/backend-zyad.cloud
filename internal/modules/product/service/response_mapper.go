@@ -44,6 +44,7 @@ func publicPlanSummary(
 		})
 	}
 	return dto.PublicPlanSummary{
+		ID:          plan.ID,
 		Code:        plan.Code,
 		Name:        plan.Name,
 		Description: plan.Description,

@@ -33,6 +33,7 @@ type PaymentRepository struct {
 type PaymentListFilter struct {
 	OrganizationID string
 	InvoiceID      string
+	Provider       model.PaymentProvider
 	Status         model.PaymentStatus
 	Limit          int
 	Offset         int
@@ -272,6 +273,10 @@ func paymentWhere(filter PaymentListFilter) (string, []any) {
 	if filter.InvoiceID != "" {
 		args = append(args, strings.TrimSpace(filter.InvoiceID))
 		conditions = append(conditions, fmt.Sprintf("invoice_id = $%d::uuid", len(args)))
+	}
+	if filter.Provider != "" {
+		args = append(args, string(filter.Provider))
+		conditions = append(conditions, fmt.Sprintf("provider = $%d", len(args)))
 	}
 	if filter.Status != "" {
 		args = append(args, string(filter.Status))

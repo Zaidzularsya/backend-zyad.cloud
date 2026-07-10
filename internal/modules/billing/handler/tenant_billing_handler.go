@@ -40,9 +40,16 @@ type TenantBillingService interface {
 	) (subscriptiondto.SubscriptionResponse, error)
 }
 
+// TenantBillingCheckoutService creates hosted payment sessions for open
+// invoices; implemented by billing's PaymentService.
+type TenantBillingCheckoutService interface {
+	CreateCheckout(ctx context.Context, organizationID string, invoiceID string) (dto.CheckoutResponse, error)
+}
+
 type TenantBillingHandler struct {
-	service TenantBillingService
-	checker permissionmiddleware.OrganizationPermissionChecker
+	service  TenantBillingService
+	checkout TenantBillingCheckoutService
+	checker  permissionmiddleware.OrganizationPermissionChecker
 }
 
 func NewTenantBillingHandler(
@@ -50,6 +57,12 @@ func NewTenantBillingHandler(
 	checker permissionmiddleware.OrganizationPermissionChecker,
 ) *TenantBillingHandler {
 	return &TenantBillingHandler{service: service, checker: checker}
+}
+
+// SetCheckoutService wires invoice checkout; must be called before
+// RegisterRoutes for the checkout route to be exposed.
+func (h *TenantBillingHandler) SetCheckoutService(checkout TenantBillingCheckoutService) {
+	h.checkout = checkout
 }
 
 func (h *TenantBillingHandler) RegisterRoutes(router *gin.RouterGroup) {
@@ -83,6 +96,13 @@ func (h *TenantBillingHandler) RegisterRoutes(router *gin.RouterGroup) {
 		permissionmiddleware.RequireOrganization(h.checker, "organization.billing.manage"),
 		h.CancelSubscription,
 	)
+	if h.checkout != nil {
+		group.POST(
+			"/invoices/:id/checkout",
+			permissionmiddleware.RequireOrganization(h.checker, "organization.billing.manage"),
+			h.CreateInvoiceCheckout,
+		)
+	}
 }
 
 func (h *TenantBillingHandler) CurrentPlan(c *gin.Context) {
@@ -159,6 +179,24 @@ func (h *TenantBillingHandler) RequestUpgrade(c *gin.Context) {
 		return
 	}
 	corehttp.Created(c, "billing upgrade invoice created successfully", result)
+}
+
+func (h *TenantBillingHandler) CreateInvoiceCheckout(c *gin.Context) {
+	tenantContext, err := middleware.RequireTenantContext(c)
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	result, err := h.checkout.CreateCheckout(
+		c.Request.Context(),
+		tenantContext.OrganizationID(),
+		c.Param("id"),
+	)
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	corehttp.Created(c, "billing invoice checkout created successfully", result)
 }
 
 func (h *TenantBillingHandler) CancelSubscription(c *gin.Context) {

@@ -16,7 +16,7 @@ type Config struct {
 	MultiTenant  MultiTenantConfig
 	Mail         MailConfig
 	Mikrotik     MikrotikConfig
-	Xendit       XenditConfig
+	Doku         DokuConfig
 	WhatsApp     WhatsAppConfig
 	Discord      DiscordConfig
 	Security     SecurityConfig
@@ -40,7 +40,7 @@ func Load() Config {
 		MultiTenant:  LoadMultiTenant(),
 		Mail:         LoadMail(),
 		Mikrotik:     LoadMikrotik(),
-		Xendit:       LoadXendit(),
+		Doku:         LoadDoku(),
 		WhatsApp:     LoadWhatsApp(),
 		Discord:      LoadDiscord(),
 		Security:     LoadSecurity(),
@@ -152,10 +152,16 @@ type MikrotikConfig struct {
 	Password string
 }
 
-type XenditConfig struct {
-	BaseURL      string
-	APIKey       string
-	WebhookToken string
+// DokuConfig holds DOKU Checkout API credentials. ClientID + SecretKey drive
+// the per-request HMAC signature scheme (both outgoing checkout calls and
+// incoming notification verification). APIKey is DOKU's newer dashboard-issued
+// key (doku_key_...); it is not used by the Checkout API but kept configured
+// for other DOKU surfaces.
+type DokuConfig struct {
+	BaseURL   string
+	ClientID  string
+	SecretKey string
+	APIKey    string
 }
 
 type WhatsAppConfig struct {

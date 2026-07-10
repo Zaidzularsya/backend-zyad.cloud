@@ -12,6 +12,7 @@ import (
 	"zyad.cloud/internal/modules/billing/dto"
 	"zyad.cloud/internal/modules/billing/model"
 	"zyad.cloud/internal/modules/billing/repository"
+	"zyad.cloud/internal/platform/doku"
 )
 
 type PaymentStore interface {
@@ -51,6 +52,8 @@ type PaymentService struct {
 	store                PaymentStore
 	invoiceStore         PaymentInvoiceStore
 	subscriptionUpgrades PaymentSubscriptionUpgradeActivator
+	dokuClient           doku.Client
+	frontendURL          string
 	now                  func() time.Time
 }
 
