@@ -106,6 +106,20 @@ func (h *DokuWebhookHandler) HandleNotification(c *gin.Context) {
 		signature,
 		h.secretKey,
 	) {
+		// Payload/header dump so a mismatched scheme (e.g. DOKU sending
+		// SNAP-format notifications with X-SIGNATURE instead of the
+		// non-SNAP HMAC headers) is diagnosable from logs alone.
+		h.logger.Warn("doku notification rejected: signature mismatch",
+			"client_id_header", clientID,
+			"request_id", requestID,
+			"request_timestamp", requestTimestamp,
+			"has_signature", signature != "",
+			"x_signature", c.GetHeader("X-SIGNATURE") != "",
+			"x_timestamp", c.GetHeader("X-TIMESTAMP"),
+			"x_partner_id", c.GetHeader("X-PARTNER-ID"),
+			"path", c.Request.URL.Path,
+			"body_preview", string(body[:min(len(body), 800)]),
+		)
 		corehttp.Fail(c, coreerrors.New(
 			"PAYMENT_WEBHOOK_SIGNATURE_INVALID",
 			"doku notification signature is invalid",
