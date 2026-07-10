@@ -18,6 +18,7 @@ mkdir -p "$RELEASE_DIR"
 mv "$TMP"/dist/* "$RELEASE_DIR"/
 chmod +x "$RELEASE_DIR"/api "$RELEASE_DIR"/worker "$RELEASE_DIR"/migrate
 ln -sf "$ROOT/shared/.env" "$RELEASE_DIR/.env"
+cp "$TMP"/deploy/ecosystem.config.js "$ROOT/ecosystem.config.js"
 
 cd "$RELEASE_DIR"
 ./migrate -direction up -dir migrations
