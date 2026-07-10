@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -105,7 +106,9 @@ func (h *AuthHandler) GoogleAuthCallback(c *gin.Context) {
 	csrfBody := c.PostForm("g_csrf_token")
 
 	if credential == "" || csrfCookie == "" || csrfBody == "" || csrfCookie != csrfBody {
-		c.Redirect(http.StatusFound, h.frontendURL+"/login?google_error=csrf")
+		slog.Error("google auth callback: csrf check failed",
+			"has_credential", credential != "", "has_csrf_cookie", csrfCookie != "", "has_csrf_body", csrfBody != "")
+		c.Redirect(http.StatusFound, h.frontendURL+"/auth/login?google_error=csrf")
 		return
 	}
 
@@ -127,13 +130,15 @@ func (h *AuthHandler) GoogleAuthCallback(c *gin.Context) {
 		DeviceName: req.DeviceName,
 	})
 	if err != nil {
-		c.Redirect(http.StatusFound, h.frontendURL+"/login?google_error=1")
+		slog.Error("google auth callback: GoogleAuth failed", "error", err)
+		c.Redirect(http.StatusFound, h.frontendURL+"/auth/login?google_error=1")
 		return
 	}
 
 	code, err := h.storeGoogleAuthResult(c.Request.Context(), result)
 	if err != nil {
-		c.Redirect(http.StatusFound, h.frontendURL+"/login?google_error=1")
+		slog.Error("google auth callback: storeGoogleAuthResult failed", "error", err)
+		c.Redirect(http.StatusFound, h.frontendURL+"/auth/login?google_error=1")
 		return
 	}
 
