@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"net/http"
@@ -157,6 +158,92 @@ func (s *PaymentService) findReusableCheckout(
 		}, true, nil
 	}
 	return dto.CheckoutResponse{}, false, nil
+}
+
+// SyncCheckoutStatus actively reconciles an open invoice against DOKU's
+// Check Status API. It is the fallback for environments where DOKU
+// notifications never arrive: when DOKU reports SUCCESS the invoice settles
+// through the same idempotent MarkInvoicePaidByID path the webhook uses
+// (including subscription upgrade activation).
+func (s *PaymentService) SyncCheckoutStatus(
+	ctx context.Context,
+	organizationID string,
+	invoiceID string,
+) (dto.CheckoutStatusResponse, error) {
+	invoice, err := s.invoiceStore.FindByID(ctx, strings.TrimSpace(organizationID), strings.TrimSpace(invoiceID))
+	if err != nil {
+		return dto.CheckoutStatusResponse{}, mapInvoiceError(err)
+	}
+	response := dto.CheckoutStatusResponse{
+		InvoiceID:     invoice.ID,
+		InvoiceStatus: string(invoice.Status),
+		Paid:          invoice.IsPaid() || invoice.Status == model.InvoiceStatusPaid,
+	}
+	if response.Paid {
+		return response, nil
+	}
+	if s.dokuClient == nil {
+		return response, nil
+	}
+
+	// Only query DOKU when a checkout session was actually created.
+	payments, _, err := s.store.List(ctx, repository.PaymentListFilter{
+		OrganizationID: invoice.OrganizationID,
+		InvoiceID:      invoice.ID,
+		Provider:       model.PaymentProviderDoku,
+	})
+	if err != nil {
+		return dto.CheckoutStatusResponse{}, err
+	}
+	if len(payments) == 0 {
+		return response, nil
+	}
+
+	status, err := s.dokuClient.CheckStatus(ctx, invoice.ID)
+	if err != nil {
+		return dto.CheckoutStatusResponse{}, coreerrors.Wrap(
+			"PAYMENT_STATUS_CHECK_FAILED",
+			"failed to check payment status with provider",
+			http.StatusBadGateway,
+			err,
+		)
+	}
+	response.TransactionStatus = strings.ToUpper(strings.TrimSpace(status.Status))
+	if !status.IsFinalSuccess() {
+		return response, nil
+	}
+
+	var paidAt *string
+	if parsed, parseErr := time.Parse(time.RFC3339, status.Date); parseErr == nil {
+		formatted := parsed.UTC().Format(time.RFC3339)
+		paidAt = &formatted
+	}
+	if _, err := s.MarkInvoicePaidByID(ctx, invoice.ID, dto.MarkInvoicePaidRequest{
+		Provider:          string(model.PaymentProviderDoku),
+		ProviderReference: firstNonEmpty(status.OriginalRequestID, "checkstatus-"+invoice.ID),
+		PaymentMethod:     status.Channel,
+		Amount:            status.Amount,
+		Currency:          currencyOrDefault(invoice.Currency, "IDR"),
+		PaidAt:            paidAt,
+		RawPayload:        status.Raw,
+	}); err != nil {
+		var appErr *coreerrors.AppError
+		if !errors.As(err, &appErr) || appErr.Code != billing.ErrCodePaymentAlreadyProcessed {
+			return dto.CheckoutStatusResponse{}, err
+		}
+	}
+	response.Paid = true
+	response.InvoiceStatus = string(model.InvoiceStatusPaid)
+	return response, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (s *PaymentService) checkoutCallbackURL(invoiceID string) string {

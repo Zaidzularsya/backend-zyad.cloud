@@ -41,9 +41,11 @@ type TenantBillingService interface {
 }
 
 // TenantBillingCheckoutService creates hosted payment sessions for open
-// invoices; implemented by billing's PaymentService.
+// invoices and reconciles their payment status against the provider;
+// implemented by billing's PaymentService.
 type TenantBillingCheckoutService interface {
 	CreateCheckout(ctx context.Context, organizationID string, invoiceID string) (dto.CheckoutResponse, error)
+	SyncCheckoutStatus(ctx context.Context, organizationID string, invoiceID string) (dto.CheckoutStatusResponse, error)
 }
 
 type TenantBillingHandler struct {
@@ -101,6 +103,11 @@ func (h *TenantBillingHandler) RegisterRoutes(router *gin.RouterGroup) {
 			"/invoices/:id/checkout",
 			permissionmiddleware.RequireOrganization(h.checker, "organization.billing.manage"),
 			h.CreateInvoiceCheckout,
+		)
+		group.POST(
+			"/invoices/:id/checkout/sync",
+			permissionmiddleware.RequireOrganization(h.checker, "organization.billing.read"),
+			h.SyncInvoiceCheckoutStatus,
 		)
 	}
 }
@@ -197,6 +204,27 @@ func (h *TenantBillingHandler) CreateInvoiceCheckout(c *gin.Context) {
 		return
 	}
 	corehttp.Created(c, "billing invoice checkout created successfully", result)
+}
+
+// SyncInvoiceCheckoutStatus reconciles an invoice's payment state directly
+// against the provider — polled by the checkout status page as a fallback
+// when webhook notifications don't arrive.
+func (h *TenantBillingHandler) SyncInvoiceCheckoutStatus(c *gin.Context) {
+	tenantContext, err := middleware.RequireTenantContext(c)
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	result, err := h.checkout.SyncCheckoutStatus(
+		c.Request.Context(),
+		tenantContext.OrganizationID(),
+		c.Param("id"),
+	)
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	corehttp.OK(c, "billing invoice checkout status synced", result)
 }
 
 func (h *TenantBillingHandler) CancelSubscription(c *gin.Context) {

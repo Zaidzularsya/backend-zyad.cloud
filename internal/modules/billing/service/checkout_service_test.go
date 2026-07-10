@@ -13,9 +13,11 @@ import (
 )
 
 type stubDokuClient struct {
-	requests []doku.CreatePaymentRequest
-	payment  doku.Payment
-	err      error
+	requests  []doku.CreatePaymentRequest
+	payment   doku.Payment
+	err       error
+	status    doku.TransactionStatus
+	statusErr error
 }
 
 func (s *stubDokuClient) CreatePayment(
@@ -24,6 +26,16 @@ func (s *stubDokuClient) CreatePayment(
 ) (doku.Payment, error) {
 	s.requests = append(s.requests, request)
 	return s.payment, s.err
+}
+
+func (s *stubDokuClient) CheckStatus(
+	_ context.Context,
+	invoiceNumber string,
+) (doku.TransactionStatus, error) {
+	if s.status.InvoiceNumber == "" {
+		s.status.InvoiceNumber = invoiceNumber
+	}
+	return s.status, s.statusErr
 }
 
 func newCheckoutServiceForTest(

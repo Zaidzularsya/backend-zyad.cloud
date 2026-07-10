@@ -100,3 +100,12 @@ type CheckoutResponse struct {
 	Provider   string  `json:"provider"`
 	ExpiresAt  *string `json:"expires_at,omitempty"`
 }
+
+// CheckoutStatusResponse is the reconciled payment state of an invoice after
+// actively querying the provider's check-status API.
+type CheckoutStatusResponse struct {
+	InvoiceID         string `json:"invoice_id"`
+	InvoiceStatus     string `json:"invoice_status"`
+	Paid              bool   `json:"paid"`
+	TransactionStatus string `json:"transaction_status,omitempty"`
+}

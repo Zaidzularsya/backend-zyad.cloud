@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -69,8 +70,29 @@ type Payment struct {
 	PaymentDueDate int
 }
 
+// TransactionStatus is the state DOKU reports for an order via the Check
+// Status API (GET /orders/v1/status/{invoice_number}).
+type TransactionStatus struct {
+	InvoiceNumber     string
+	Status            string // SUCCESS, PENDING, FAILED, EXPIRED, REFUNDED, TIMEOUT, REDIRECT
+	Date              string
+	OriginalRequestID string
+	Channel           string
+	Service           string
+	Amount            string
+	Raw               map[string]any
+}
+
+// IsFinalSuccess reports whether the transaction settled successfully.
+func (s TransactionStatus) IsFinalSuccess() bool {
+	return strings.EqualFold(strings.TrimSpace(s.Status), "SUCCESS")
+}
+
 type Client interface {
 	CreatePayment(ctx context.Context, request CreatePaymentRequest) (Payment, error)
+	// CheckStatus queries DOKU for the current transaction status of an
+	// invoice, used as an active fallback when notifications don't arrive.
+	CheckStatus(ctx context.Context, invoiceNumber string) (TransactionStatus, error)
 }
 
 // Digest returns the base64-encoded SHA256 of a raw request/notification body,
@@ -279,6 +301,101 @@ func (c *HTTPClient) CreatePayment(ctx context.Context, request CreatePaymentReq
 	return payment, nil
 }
 
+const checkStatusPathPrefix = "/orders/v1/status/"
+
+// CheckStatus queries DOKU's Check Status API (non-SNAP) for the current
+// transaction state of an invoice. GET requests carry no Digest component in
+// the signature.
+func (c *HTTPClient) CheckStatus(ctx context.Context, invoiceNumber string) (TransactionStatus, error) {
+	if !c.config.HasCredentials() {
+		return TransactionStatus{}, fmt.Errorf("doku client credentials are not configured")
+	}
+	invoiceNumber = strings.TrimSpace(invoiceNumber)
+	if invoiceNumber == "" {
+		return TransactionStatus{}, fmt.Errorf("doku invoice number is required")
+	}
+
+	requestTarget := checkStatusPathPrefix + url.PathEscape(invoiceNumber)
+	endpoint := strings.TrimRight(c.config.BaseURL, "/") + requestTarget
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return TransactionStatus{}, fmt.Errorf("build doku check status request: %w", err)
+	}
+
+	requestID := c.newUUID()
+	requestTimestamp := c.now().UTC().Format("2006-01-02T15:04:05Z")
+	httpRequest.Header.Set("Client-Id", c.config.ClientID)
+	httpRequest.Header.Set("Request-Id", requestID)
+	httpRequest.Header.Set("Request-Timestamp", requestTimestamp)
+	httpRequest.Header.Set("Signature", Signature(
+		c.config.ClientID,
+		requestID,
+		requestTimestamp,
+		requestTarget,
+		"",
+		c.config.SecretKey,
+	))
+
+	httpResponse, err := c.httpClient.Do(httpRequest)
+	if err != nil {
+		return TransactionStatus{}, fmt.Errorf("call doku check status: %w", err)
+	}
+	defer httpResponse.Body.Close()
+
+	responseBody, err := io.ReadAll(io.LimitReader(httpResponse.Body, 1<<20))
+	if err != nil {
+		return TransactionStatus{}, fmt.Errorf("read doku check status response: %w", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(responseBody, &raw); err != nil {
+		return TransactionStatus{}, fmt.Errorf(
+			"decode doku check status response (status %d): %w",
+			httpResponse.StatusCode,
+			err,
+		)
+	}
+	if httpResponse.StatusCode != http.StatusOK {
+		return TransactionStatus{}, fmt.Errorf(
+			"doku check status failed (status %d): %s",
+			httpResponse.StatusCode,
+			strings.TrimSpace(string(responseBody)),
+		)
+	}
+	return parseTransactionStatus(raw), nil
+}
+
+func parseTransactionStatus(raw map[string]any) TransactionStatus {
+	stringAt := func(section map[string]any, key string) string {
+		if section == nil {
+			return ""
+		}
+		switch value := section[key].(type) {
+		case string:
+			return strings.TrimSpace(value)
+		case float64:
+			return strconv.FormatFloat(value, 'f', -1, 64)
+		default:
+			return ""
+		}
+	}
+	sectionAt := func(key string) map[string]any {
+		section, _ := raw[key].(map[string]any)
+		return section
+	}
+	order := sectionAt("order")
+	transaction := sectionAt("transaction")
+	return TransactionStatus{
+		InvoiceNumber:     stringAt(order, "invoice_number"),
+		Status:            stringAt(transaction, "status"),
+		Date:              stringAt(transaction, "date"),
+		OriginalRequestID: stringAt(transaction, "original_request_id"),
+		Channel:           stringAt(sectionAt("channel"), "id"),
+		Service:           stringAt(sectionAt("service"), "id"),
+		Amount:            stringAt(order, "amount"),
+		Raw:               raw,
+	}
+}
+
 // NoopClient fabricates a payment URL pointing straight at the frontend's
 // checkout success page so the full order flow stays clickable in
 // environments without DOKU credentials (CI, local dev).
@@ -309,6 +426,24 @@ func (c NoopClient) CreatePayment(_ context.Context, request CreatePaymentReques
 		PaymentURL:     paymentURL,
 		ExpiredDate:    now().UTC().Add(time.Duration(dueDate) * time.Minute),
 		PaymentDueDate: dueDate,
+	}, nil
+}
+
+// CheckStatus on the noop client always reports SUCCESS so the simulated
+// checkout flow can settle invoices end-to-end without real credentials.
+func (c NoopClient) CheckStatus(_ context.Context, invoiceNumber string) (TransactionStatus, error) {
+	now := time.Now
+	if c.now != nil {
+		now = c.now
+	}
+	return TransactionStatus{
+		InvoiceNumber:     strings.TrimSpace(invoiceNumber),
+		Status:            "SUCCESS",
+		Date:              now().UTC().Format(time.RFC3339),
+		OriginalRequestID: "noop-" + strings.TrimSpace(invoiceNumber),
+		Channel:           "NOOP_SIMULATED",
+		Service:           "NOOP_SIMULATED",
+		Raw:               map[string]any{"simulated": true},
 	}, nil
 }
 
