@@ -1,0 +1,15 @@
+#!/bin/bash
+# Cegah file scratch/binary sekali pakai ikut ter-commit ke repo.
+# Aktifkan sekali per clone: git config core.hooksPath .githooks
+
+bad=$(git diff --cached --name-only --diff-filter=AM | grep -E '(^bin/|_bin$|^fix.*\.py$|^scratch.*\.go$|^test_resolve\.go$)')
+
+if [ -n "$bad" ]; then
+  echo "Commit diblokir: file scratch/binary berikut masih staged dan seharusnya tidak pernah masuk git:" >&2
+  echo "$bad" >&2
+  echo "" >&2
+  echo "Hapus dari staging dulu: git rm --cached <file>, atau hapus filenya kalau memang tidak diperlukan, lalu commit ulang." >&2
+  exit 1
+fi
+
+exit 0

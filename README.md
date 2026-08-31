@@ -209,6 +209,17 @@ Target canonical module adalah `internal/modules/billing`. Runtime entitlement d
 
 ## 🧪 Development Commands
 
+### Git Hooks (Setup Sekali per Clone)
+
+Repo ini punya pre-commit hook yang mencegah file scratch/binary sekali pakai (`bin/`, `*_bin`, `fix*.py`,
+`scratch*.go`, `test_resolve.go`) ikut ter-commit. Hook disimpan di `.githooks/` (bukan `.git/hooks/`)
+supaya bisa di-commit dan dibagikan lewat repo, tapi git tidak otomatis memakainya — aktifkan sekali
+setelah clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 ### Unit Test
 
 Jalankan test biasa tanpa kebutuhan database:

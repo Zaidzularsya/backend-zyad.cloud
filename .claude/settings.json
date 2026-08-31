@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cmd_input=$(cat); cmd=$(echo \"$cmd_input\" | jq -r '.tool_input.command // empty'); if echo \"$cmd\" | grep -qE '(^|[;&|])[[:space:]]*git[[:space:]]+commit([[:space:]]|$)'; then toplevel=$(git rev-parse --show-toplevel 2>/dev/null); if [ -n \"$toplevel\" ]; then bad=$(git -C \"$toplevel\" diff --cached --name-only | grep -E '(^bin/|_bin$|^fix.*\\.py$|^scratch.*\\.go$|^test_resolve\\.go$)'); if [ -n \"$bad\" ]; then echo 'Commit diblokir: file scratch/binary berikut masih staged dan seharusnya tidak pernah masuk git:' >&2; echo \"$bad\" >&2; echo 'Hapus dari staging dulu: git rm --cached <file>, atau hapus filenya kalau memang tidak diperlukan, lalu commit ulang.' >&2; exit 2; fi; fi; fi; exit 0",
+            "statusMessage": "Memeriksa staged files terhadap pattern scratch/binary..."
+          }
+        ]
+      }
+    ]
+  }
+}

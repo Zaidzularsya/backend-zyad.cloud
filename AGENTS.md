@@ -6,6 +6,9 @@
 - Buat perubahan kecil dan bertahap.
 - Jangan menambah dependency production tanpa konfirmasi.
 - Jangan mengubah arsitektur utama tanpa konfirmasi.
+- Jalankan `git config core.hooksPath .githooks` sekali di awal (kalau belum) — repo ini punya pre-commit
+  hook yang menolak commit berisi file scratch/binary sekali pakai (`bin/`, `*_bin`, `fix*.py`,
+  `scratch*.go`, `test_resolve.go`). Jangan pernah commit file semacam itu meskipun hook belum aktif.
 
 ## Scope repo
 - Bacalah dokumen `README.md` terlebih dahulu untuk memahami konteks dari repo.
