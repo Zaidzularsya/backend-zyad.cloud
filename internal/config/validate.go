@@ -11,6 +11,9 @@ import (
 var hostnameLabelPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
 func (c Config) ValidateForApp() error {
+	if err := c.App.validate(c.App.Env); err != nil {
+		return fmt.Errorf("app config: %w", err)
+	}
 	if err := c.Auth.validate(c.App.Env); err != nil {
 		return fmt.Errorf("auth config: %w", err)
 	}
@@ -40,6 +43,21 @@ func (c SeedAdminConfig) Validate() error {
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required seed admin config: %s", strings.Join(missing, ", "))
 	}
+	return nil
+}
+
+func (c AppConfig) validate(env string) error {
+	if !isProduction(env) {
+		return nil
+	}
+
+	if c.Secret == "" {
+		return errors.New("missing required production app config: APP_SECRET")
+	}
+	if len(c.Secret) < 32 {
+		return errors.New("APP_SECRET must be at least 32 characters in production")
+	}
+
 	return nil
 }
 

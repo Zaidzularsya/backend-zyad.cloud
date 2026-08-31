@@ -56,6 +56,40 @@ func TestValidateForAppRequiresProductionMultiTenantConfig(t *testing.T) {
 	}
 }
 
+func TestValidateForAppAllowsMissingAppSecretOutsideProduction(t *testing.T) {
+	cfg := Config{
+		App: AppConfig{Env: "development", Secret: ""},
+	}
+
+	if err := cfg.App.validate(cfg.App.Env); err != nil {
+		t.Fatalf("expected development app config to be valid, got %v", err)
+	}
+}
+
+func TestAppConfigRequiresProductionSecret(t *testing.T) {
+	cfg := AppConfig{Env: "production", Secret: ""}
+
+	if err := cfg.validate("production"); err == nil {
+		t.Fatal("expected missing production app secret to be invalid")
+	}
+}
+
+func TestAppConfigRejectsShortProductionSecret(t *testing.T) {
+	cfg := AppConfig{Env: "production", Secret: "too-short"}
+
+	if err := cfg.validate("production"); err == nil {
+		t.Fatal("expected short production app secret to be invalid")
+	}
+}
+
+func TestAppConfigAcceptsValidProductionSecret(t *testing.T) {
+	cfg := AppConfig{Env: "production", Secret: "12345678901234567890123456789012"}
+
+	if err := cfg.validate("production"); err != nil {
+		t.Fatalf("expected valid production app secret to pass, got %v", err)
+	}
+}
+
 func TestMultiTenantConfigRejectsForwardedHostWithoutTrustedProxy(t *testing.T) {
 	cfg := MultiTenantConfig{
 		DefaultDataPlacement: "shared",
