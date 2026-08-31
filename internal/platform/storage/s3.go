@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -89,16 +90,22 @@ func (p *S3Provider) Put(
 	if cleaned == "" {
 		return ErrInvalidTenantObject
 	}
+	// aws-sdk-go-v2 butuh body yang seekable untuk menghitung payload hash saat
+	// SigV4 signing. Caller (media service) mengirim io.LimitReader yang tidak
+	// seekable, jadi buffer dulu di memory. Aman karena object media dibatasi
+	// MaxMediaSizeBytes (10MB) di layer service.
+	body, err := io.ReadAll(content)
+	if err != nil {
+		return fmt.Errorf("buffer s3 object body: %w", err)
+	}
 	input := &s3.PutObjectInput{
-		Bucket: aws.String(p.bucket),
-		Key:    aws.String(cleaned),
-		Body:   content,
+		Bucket:        aws.String(p.bucket),
+		Key:           aws.String(cleaned),
+		Body:          bytes.NewReader(body),
+		ContentLength: aws.Int64(int64(len(body))),
 	}
 	if contentType != "" {
 		input.ContentType = aws.String(contentType)
-	}
-	if size > 0 {
-		input.ContentLength = aws.Int64(size)
 	}
 	if _, err := p.client.PutObject(ctx, input); err != nil {
 		return fmt.Errorf("put s3 object: %w", err)

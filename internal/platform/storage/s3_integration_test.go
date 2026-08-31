@@ -51,7 +51,10 @@ func TestS3ProviderRoundTripIntegration(t *testing.T) {
 	key := "organizations/11111111-1111-1111-1111-111111111111/public/landing-media/it-roundtrip.txt"
 	payload := "s3-integration-payload"
 
-	if err := provider.Put(ctx, key, strings.NewReader(payload), "text/plain", int64(len(payload))); err != nil {
+	// nonSeekableReader meniru io.LimitReader dari media service: SDK harus tetap
+	// bisa PutObject tanpa membutuhkan body yang seekable.
+	putBody := struct{ io.Reader }{strings.NewReader(payload)}
+	if err := provider.Put(ctx, key, putBody, "text/plain", int64(len(payload))); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 	t.Cleanup(func() { _ = provider.Delete(ctx, key) })
