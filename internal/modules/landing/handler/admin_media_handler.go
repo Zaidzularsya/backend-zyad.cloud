@@ -62,13 +62,11 @@ func (h *AdminMediaHandler) Upload(c *gin.Context) {
 		return
 	}
 
-	// Read file contents or just pass the metadata
-	// In MVP, we might only use metadata for the database entry
 	params := repository.CreateMediaAssetParams{
-		Filename:         fileHeader.Filename,
-		MimeType:         fileHeader.Header.Get("Content-Type"),
-		SizeBytes:        fileHeader.Size,
-		CreatedBy:        userID,
+		Filename:  fileHeader.Filename,
+		MimeType:  fileHeader.Header.Get("Content-Type"),
+		SizeBytes: fileHeader.Size,
+		CreatedBy: userID,
 	}
 
 	// AltText can be provided via form
@@ -76,7 +74,14 @@ func (h *AdminMediaHandler) Upload(c *gin.Context) {
 		params.AltText = altText
 	}
 
-	asset, err := h.mediaService.UploadAsset(c.Request.Context(), scope, params)
+	file, err := fileHeader.Open()
+	if err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "failed to read uploaded file", http.StatusBadRequest))
+		return
+	}
+	defer file.Close()
+
+	asset, err := h.mediaService.UploadAsset(c.Request.Context(), scope, params, file)
 	if err != nil {
 		if err == service.ErrInvalidMimeType || err == service.ErrFileTooLarge {
 			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusBadRequest))
@@ -85,8 +90,6 @@ func (h *AdminMediaHandler) Upload(c *gin.Context) {
 		corehttp.Fail(c, coreerrors.New("INTERNAL_ERROR", err.Error(), http.StatusInternalServerError))
 		return
 	}
-
-	// In a real scenario, we would upload the actual file to S3/GCS here using asset.StorageKey
 
 	corehttp.OK(c, "success", asset)
 }

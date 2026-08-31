@@ -16,6 +16,7 @@ import (
 	userhandler "zyad.cloud/internal/modules/user/handler"
 	pgdatabase "zyad.cloud/internal/platform/database"
 	"zyad.cloud/internal/platform/redis"
+	"zyad.cloud/internal/platform/storage"
 )
 
 type Dependencies struct {
@@ -58,6 +59,7 @@ type Dependencies struct {
 	LandingAdminRevisionHandler      *landinghandler.AdminRevisionHandler
 	LandingAdminScheduleHandler      *landinghandler.AdminScheduleHandler
 	LandingAdminIntegrationHandler   *landinghandler.AdminIntegrationHandler
+	MediaStorage                     *storage.LocalProvider
 	PermissionChecker                permissionmiddleware.PermissionChecker
 	Authenticator                    middleware.AccessTokenAuthenticator
 	OrganizationResolver             middleware.AuthenticatedOrganizationResolver

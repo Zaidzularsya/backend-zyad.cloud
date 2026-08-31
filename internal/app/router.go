@@ -1,6 +1,8 @@
 package app
 
 import (
+	"net/http"
+	"strings"
 	"time"
 
 	corehttp "zyad.cloud/internal/core/http"
@@ -55,6 +57,21 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	router.GET("/readyz", func(c *gin.Context) {
 		corehttp.OK(c, "ready", gin.H{"ready": true})
 	})
+
+	// Media publik (logo/gambar landing) dilayani tanpa auth; provider hanya
+	// me-resolve object berkelas public dan menolak path traversal.
+	if deps.MediaStorage != nil {
+		router.GET("/public/media/*objectKey", func(c *gin.Context) {
+			objectKey := strings.TrimPrefix(c.Param("objectKey"), "/")
+			filePath, err := deps.MediaStorage.ResolvePublic(objectKey)
+			if err != nil {
+				c.Status(http.StatusNotFound)
+				return
+			}
+			c.Header("Cache-Control", "public, max-age=3600")
+			c.File(filePath)
+		})
+	}
 
 	api := router.Group("/api/v1")
 	api.GET("/meta", func(c *gin.Context) {

@@ -20,6 +20,7 @@ type Config struct {
 	WhatsApp     WhatsAppConfig
 	Discord      DiscordConfig
 	Security     SecurityConfig
+	Storage      StorageConfig
 }
 
 var loadEnvOnce sync.Once
@@ -44,6 +45,7 @@ func Load() Config {
 		WhatsApp:     LoadWhatsApp(),
 		Discord:      LoadDiscord(),
 		Security:     LoadSecurity(),
+		Storage:      LoadStorage(),
 	}
 }
 
@@ -189,6 +191,12 @@ type DiscordConfig struct {
 
 type SecurityConfig struct {
 	EncryptionKey string
+}
+
+// StorageConfig mengatur penyimpanan file (media upload). LocalPath adalah
+// root directory provider lokal; di VPS taruh di shared/ agar tahan deploy.
+type StorageConfig struct {
+	LocalPath string
 }
 
 func (c AppConfig) Address() string {

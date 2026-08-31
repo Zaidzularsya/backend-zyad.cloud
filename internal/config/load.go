@@ -144,6 +144,12 @@ func LoadNotification() NotificationConfig {
 	}
 }
 
+func LoadStorage() StorageConfig {
+	return StorageConfig{
+		LocalPath: getEnv("STORAGE_LOCAL_PATH", "./storage"),
+	}
+}
+
 func LoadMikrotik() MikrotikConfig {
 	return MikrotikConfig{
 		Host:     getEnv("MIKROTIK_HOST", ""),

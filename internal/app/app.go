@@ -44,6 +44,7 @@ import (
 	"zyad.cloud/internal/platform/logger"
 	"zyad.cloud/internal/platform/mail"
 	redisplatform "zyad.cloud/internal/platform/redis"
+	"zyad.cloud/internal/platform/storage"
 	"zyad.cloud/internal/platform/whatsapp"
 )
 
@@ -327,7 +328,15 @@ func New(ctx context.Context) (*App, error) {
 		landingSectionRepo,
 		landingservice.WithTemplateSectionQuotaGuard(subscriptionGuardService),
 	)
-	landingMediaSvc := landingservice.NewMediaService(landingMediaRepo)
+	mediaStorage, err := storage.NewLocalProvider(cfg.Storage.LocalPath)
+	if err != nil {
+		return nil, fmt.Errorf("init media storage: %w", err)
+	}
+	landingMediaSvc := landingservice.NewMediaService(
+		landingMediaRepo,
+		landingservice.WithMediaObjectStorage(mediaStorage),
+		landingservice.WithMediaPublicBaseURL(cfg.App.URL),
+	)
 	landingNavigationSvc := landingservice.NewNavigationService(landingReusableRepo, landingPageRepo)
 	landingDeliverySvc := landingservice.NewDeliveryService(landingIntegrationRepo, landingSubmissionRepo)
 
@@ -387,6 +396,7 @@ func New(ctx context.Context) (*App, error) {
 		LandingAdminCTAHandler:           landingAdminCTAHandler,
 		LandingAdminTemplateHandler:      landingAdminTemplateHandler,
 		LandingAdminMediaHandler:         landingAdminMediaHandler,
+		MediaStorage:                     mediaStorage,
 		LandingAdminNavigationHandler:    landingAdminNavigationHandler,
 		LandingAdminRevisionHandler:      landingAdminRevisionHandler,
 		LandingAdminScheduleHandler:      landingAdminScheduleHandler,

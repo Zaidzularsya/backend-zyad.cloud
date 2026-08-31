@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"io"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/landing/domain"
@@ -9,7 +10,7 @@ import (
 )
 
 type MediaService interface {
-	UploadAsset(ctx context.Context, scope coretenant.Scope, params repository.CreateMediaAssetParams) (domain.LandingMediaAsset, error)
+	UploadAsset(ctx context.Context, scope coretenant.Scope, params repository.CreateMediaAssetParams, content io.Reader) (domain.LandingMediaAsset, error)
 	GetAsset(ctx context.Context, scope coretenant.Scope, id string) (domain.LandingMediaAsset, error)
 	ListAssets(ctx context.Context, scope coretenant.Scope) ([]domain.LandingMediaAsset, error)
 	DeleteAsset(ctx context.Context, scope coretenant.Scope, id string) error
