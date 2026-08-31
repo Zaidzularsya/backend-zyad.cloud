@@ -14,8 +14,8 @@ WITH platform_landing_page AS (
 branding_seed AS (
 	SELECT
 		organization_id,
-		'HEY Digital Solution'::varchar(200) AS company_name,
-		'Partner eksekusi teknologi terpercaya untuk B2B'::varchar(255) AS tagline,
+		'Zyad Cloud'::varchar(200) AS company_name,
+		'IT Solutions · Web · SaaS Multi-Tenant'::varchar(255) AS tagline,
 		'{
 			"primary": "#2563EB",
 			"secondary": "#0F172A",
@@ -42,9 +42,9 @@ branding_seed AS (
 			"footer_style": "default"
 		}'::jsonb AS layout,
 		'{
-			"email": "",
+			"email": "yulianto.personal@outlook.com",
 			"phone": "6281223329453",
-			"address": "Indonesia"
+			"address": "Desa Lumpang, Kec. Karanganyar, Kab. Purbalingga, Jawa Tengah"
 		}'::jsonb AS contact,
 		'[
 			{

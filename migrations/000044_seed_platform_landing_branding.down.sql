@@ -15,12 +15,12 @@ DELETE FROM landing_brandings b
 USING platform_landing_page p
 WHERE b.organization_id = p.organization_id
 	AND b.landing_page_id IS NULL
-	AND b.company_name = 'HEY Digital Solution'
-	AND b.tagline = 'Partner eksekusi teknologi terpercaya untuk B2B'
+	AND b.company_name = 'Zyad Cloud'
+	AND b.tagline = 'IT Solutions · Web · SaaS Multi-Tenant'
 	AND b.contact = '{
-		"email": "",
+		"email": "yulianto.personal@outlook.com",
 		"phone": "6281223329453",
-		"address": "Indonesia"
+		"address": "Desa Lumpang, Kec. Karanganyar, Kab. Purbalingga, Jawa Tengah"
 	}'::jsonb
 	AND b.social_links = '[
 		{

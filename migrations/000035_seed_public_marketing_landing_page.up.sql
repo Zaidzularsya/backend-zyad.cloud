@@ -28,7 +28,7 @@ landing_page_new AS (
 	SELECT
 		id,
 		'Platform Marketing Landing Page',
-		'HEY Digital Solution - Partner Eksekusi Teknologi',
+		'Zyad Cloud - Partner Eksekusi Teknologi',
 		'public-marketing',
 		'homepage',
 		'published',
@@ -51,7 +51,7 @@ sections_data (section_key, section_type, name, sort_order, content) AS (
 			'hero', 
 			'Hero Section', 
 			10, 
-			'{"badge": "", "titleHtml": "Punya Jaringan Klien? Jadikan HEY <span class=\"text-secondary\">Tim Teknis di Belakang Anda.</span>", "description": "Anda fokus mencari peluang dan bernegosiasi. Kami fokus memikirkan arsitektur, coding, dan memastikan aplikasi berjalan lancar. Mari kolaborasi tanpa repot merekrut programmer sendiri.", "primaryCta": "Saya Punya Calon Klien", "secondaryCta": "Saya Butuh Sistem", "primaryCtaUrl": "https://wa.me/6281223329453", "secondaryCtaUrl": "https://wa.me/6281223329453"}'::jsonb
+			'{"badge": "", "titleHtml": "Punya Jaringan Klien? Jadikan Zyad Cloud <span class=\"text-secondary\">Tim Teknis di Belakang Anda.</span>", "description": "Anda fokus mencari peluang dan bernegosiasi. Kami fokus memikirkan arsitektur, coding, dan memastikan aplikasi berjalan lancar. Mari kolaborasi tanpa repot merekrut programmer sendiri.", "primaryCta": "Saya Punya Calon Klien", "secondaryCta": "Saya Butuh Sistem", "primaryCtaUrl": "https://wa.me/6281223329453", "secondaryCtaUrl": "https://wa.me/6281223329453"}'::jsonb
 		),
 		(
 			'problem-section', 
@@ -65,7 +65,7 @@ sections_data (section_key, section_type, name, sort_order, content) AS (
 			'services', 
 			'Solution Section', 
 			30, 
-			'{"title": "HEY Menjadi Partner Eksekusi Digital di Belakang Anda.", "description": "Kami memposisikan diri sebagai ''dapur'' teknologi Anda. Bawa ide atau masalah klien ke kami, dan kami siapkan solusi end-to-end nya.", "ctaText": "Pelajari Model Kerjasama", "ctaUrl": "https://wa.me/6281223329453", "steps": [{"number": 1, "title": "Konsultasi & Booking Meeting", "desc": "Diskusi awal via CS HEY dan finalisasi kebutuhan lewat meeting bersama tim teknis kami.", "highlight": true}, {"number": 2, "title": "Quotation & Kesepakatan Deal", "desc": "Penerbitan penawaran, invoice, serta persetujuan Syarat & Ketentuan yang berlaku.", "highlight": false}, {"number": 3, "title": "Development & Reporting", "desc": "Proses coding dan pengerjaan aplikasi beserta laporan progress rutin secara transparan.", "highlight": false}, {"number": 4, "title": "Pelunasan & Deployment", "desc": "Pembayaran lunas dari klien yang dilanjutkan dengan serah terima (deployment) aplikasi.", "highlight": false}]}'::jsonb
+			'{"title": "Zyad Cloud Menjadi Partner Eksekusi Digital di Belakang Anda.", "description": "Kami memposisikan diri sebagai ''dapur'' teknologi Anda. Bawa ide atau masalah klien ke kami, dan kami siapkan solusi end-to-end nya.", "ctaText": "Pelajari Model Kerjasama", "ctaUrl": "https://wa.me/6281223329453", "steps": [{"number": 1, "title": "Konsultasi & Booking Meeting", "desc": "Diskusi awal via CS Zyad Cloud dan finalisasi kebutuhan lewat meeting bersama tim teknis kami.", "highlight": true}, {"number": 2, "title": "Quotation & Kesepakatan Deal", "desc": "Penerbitan penawaran, invoice, serta persetujuan Syarat & Ketentuan yang berlaku.", "highlight": false}, {"number": 3, "title": "Development & Reporting", "desc": "Proses coding dan pengerjaan aplikasi beserta laporan progress rutin secara transparan.", "highlight": false}, {"number": 4, "title": "Pelunasan & Deployment", "desc": "Pembayaran lunas dari klien yang dilanjutkan dengan serah terima (deployment) aplikasi.", "highlight": false}]}'::jsonb
 		),
 		(
 			'services-section', 
@@ -79,7 +79,7 @@ sections_data (section_key, section_type, name, sort_order, content) AS (
 			'features', 
 			'Benefits Section', 
 			50, 
-			'{"title": "Keuntungan Menjadi Partner HEY", "description": "Kolaborasi saling menguntungkan. Anda bawa project, kami sediakan dukungan penuh dari awal hingga selesai.", "benefits": [{"icon": "dashboard_customize", "title": "Dashboard Partner", "desc": "Akses portal khusus untuk memantau fee project, mendaftarkan lead, melihat kalender progres, dan info aturan kerja."}, {"icon": "payments", "title": "Project Fee", "desc": "Dapatkan fee dari project yang berhasil deal."}, {"icon": "code_off", "title": "Technical Backup", "desc": "Tidak perlu bisa coding. HEY bantu bagian teknis."}, {"icon": "description", "title": "Proposal Support", "desc": "Kami bantu susun solusi, estimasi, dan materi penawaran."}, {"icon": "present_to_all", "title": "Demo Material", "desc": "Partner bisa membawa contoh solusi untuk menjelaskan ke calon klien."}, {"icon": "groups", "title": "Meeting Support", "desc": "HEY bisa ikut membantu sesi diskusi kebutuhan dengan calon klien."}, {"icon": "all_inclusive", "title": "Long-Term Collaboration", "desc": "Partner bisa membawa peluang project berikutnya secara berulang."}]}'::jsonb
+			'{"title": "Keuntungan Menjadi Partner Zyad Cloud", "description": "Kolaborasi saling menguntungkan. Anda bawa project, kami sediakan dukungan penuh dari awal hingga selesai.", "benefits": [{"icon": "dashboard_customize", "title": "Dashboard Partner", "desc": "Akses portal khusus untuk memantau fee project, mendaftarkan lead, melihat kalender progres, dan info aturan kerja."}, {"icon": "payments", "title": "Project Fee", "desc": "Dapatkan fee dari project yang berhasil deal."}, {"icon": "code_off", "title": "Technical Backup", "desc": "Tidak perlu bisa coding. Zyad Cloud bantu bagian teknis."}, {"icon": "description", "title": "Proposal Support", "desc": "Kami bantu susun solusi, estimasi, dan materi penawaran."}, {"icon": "present_to_all", "title": "Demo Material", "desc": "Partner bisa membawa contoh solusi untuk menjelaskan ke calon klien."}, {"icon": "groups", "title": "Meeting Support", "desc": "Zyad Cloud bisa ikut membantu sesi diskusi kebutuhan dengan calon klien."}, {"icon": "all_inclusive", "title": "Long-Term Collaboration", "desc": "Partner bisa membawa peluang project berikutnya secara berulang."}]}'::jsonb
 		),
 		(
 			'demo-section', 
@@ -93,7 +93,7 @@ sections_data (section_key, section_type, name, sort_order, content) AS (
 			'faq', 
 			'FAQ Section', 
 			70, 
-			'{"title": "FAQ", "items": [{"question": "Apakah partner harus bisa coding?", "answer": "Tidak. Partner cukup membawa peluang dan membantu komunikasi bisnis. Tim HEY membantu bagian teknis."}, {"question": "Apakah HEY sudah punya banyak client?", "answer": "HEY masih tahap awal. Karena itu kami fokus pada project yang jelas, realistis, dan bisa dikerjakan dengan rapi."}, {"question": "Berapa fee partner?", "answer": "Fee disepakati berdasarkan nilai project dan kontribusi partner. Skema awal bisa berupa persentase project atau referral fee."}, {"question": "Apakah HEY bisa ikut meeting dengan calon klien?", "answer": "Bisa. HEY dapat membantu sesi discovery, menjelaskan solusi, dan menyusun proposal teknis."}, {"question": "Project seperti apa yang cocok?", "answer": "Project kecil-menengah seperti landing page, dashboard admin, sistem registrasi, otomasi WhatsApp, membership, invoice tracking, dan laporan operasional."}, {"question": "Kapan fee partner dibayarkan?", "answer": "Fee dibayarkan setelah pembayaran dari klien masuk sesuai kesepakatan project."}]}'::jsonb
+			'{"title": "FAQ", "items": [{"question": "Apakah partner harus bisa coding?", "answer": "Tidak. Partner cukup membawa peluang dan membantu komunikasi bisnis. Tim Zyad Cloud membantu bagian teknis."}, {"question": "Apakah Zyad Cloud sudah punya banyak client?", "answer": "Zyad Cloud masih tahap awal. Karena itu kami fokus pada project yang jelas, realistis, dan bisa dikerjakan dengan rapi."}, {"question": "Berapa fee partner?", "answer": "Fee disepakati berdasarkan nilai project dan kontribusi partner. Skema awal bisa berupa persentase project atau referral fee."}, {"question": "Apakah Zyad Cloud bisa ikut meeting dengan calon klien?", "answer": "Bisa. Zyad Cloud dapat membantu sesi discovery, menjelaskan solusi, dan menyusun proposal teknis."}, {"question": "Project seperti apa yang cocok?", "answer": "Project kecil-menengah seperti landing page, dashboard admin, sistem registrasi, otomasi WhatsApp, membership, invoice tracking, dan laporan operasional."}, {"question": "Kapan fee partner dibayarkan?", "answer": "Fee dibayarkan setelah pembayaran dari klien masuk sesuai kesepakatan project."}]}'::jsonb
 		),
 		(
 			'cta-section', 
@@ -107,7 +107,7 @@ sections_data (section_key, section_type, name, sort_order, content) AS (
 			'footer', 
 			'Footer Section', 
 			90, 
-			'{"brandName": "HEY Digital Solution", "description": "Partner eksekusi teknologi terpercaya untuk B2B. Membangun fondasi digital yang kuat, aman, dan scalable untuk inovasi bisnis Anda.", "columns": [{"title": "Perusahaan", "links": [{"label": "Tentang Kami", "href": "#"}, {"label": "Solusi IT", "href": "#"}, {"label": "Program Reseller", "href": "#"}]}, {"title": "Legal & Resource", "links": [{"label": "Dokumentasi API", "href": "#"}, {"label": "Kebijakan Privasi", "href": "#"}, {"label": "SaaS Demo Portal", "href": "#demo-portal"}]}], "copyright": "© 2024 HEY Digital Solution. All rights reserved."}'::jsonb
+			'{"brandName": "Zyad Cloud", "description": "Partner eksekusi teknologi terpercaya untuk B2B. Membangun fondasi digital yang kuat, aman, dan scalable untuk inovasi bisnis Anda.", "columns": [{"title": "Perusahaan", "links": [{"label": "Tentang Kami", "href": "#"}, {"label": "Solusi IT", "href": "#"}, {"label": "Program Reseller", "href": "#"}]}, {"title": "Legal & Resource", "links": [{"label": "Dokumentasi API", "href": "#"}, {"label": "Kebijakan Privasi", "href": "#"}, {"label": "SaaS Demo Portal", "href": "#demo-portal"}]}], "copyright": "© 2024 Zyad Cloud — PT Zyad Technovation Indonesia. All rights reserved."}'::jsonb
 		)
 )
 INSERT INTO landing_page_sections (

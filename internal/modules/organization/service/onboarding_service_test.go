@@ -30,8 +30,8 @@ func TestOnboardingServiceCreateWorkspaceDerivesSlugAndContext(t *testing.T) {
 		result: repository.MembershipOrganization{
 			Organization: model.Organization{
 				ID:        "11111111-1111-1111-1111-111111111111",
-				Slug:      "hey-digital-solution",
-				Name:      "Hey Digital Solution",
+				Slug:      "zyad-technovation",
+				Name:      "Zyad Technovation",
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
 			},
@@ -57,14 +57,14 @@ func TestOnboardingServiceCreateWorkspaceDerivesSlugAndContext(t *testing.T) {
 		context.Background(),
 		"33333333-3333-3333-3333-333333333333",
 		"44444444-4444-4444-4444-444444444444",
-		dto.CreateWorkspaceRequest{Name: " Hey Digital Solution "},
+		dto.CreateWorkspaceRequest{Name: " Zyad Technovation "},
 		OnboardingMetadata{RequestID: "req-1", IPAddress: "127.0.0.1", UserAgent: "test"},
 	)
 	if err != nil {
 		t.Fatalf("CreateWorkspace() error = %v", err)
 	}
-	if store.params.Slug != "hey-digital-solution" ||
-		store.params.Name != "Hey Digital Solution" ||
+	if store.params.Slug != "zyad-technovation" ||
+		store.params.Name != "Zyad Technovation" ||
 		store.params.RequestID != "req-1" ||
 		!store.params.CorrelationAt.Equal(time.Date(2026, 6, 28, 1, 2, 3, 0, time.UTC)) {
 		t.Fatalf("CreateWorkspace() params = %#v", store.params)

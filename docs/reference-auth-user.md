@@ -345,7 +345,7 @@ User A:
 - Organization: ASPARMINAS
   Role: Admin
 
-- Organization: HEY Digital Solution
+- Organization: PT Zyad Technovation Indonesia
   Role: Super Admin
 ```
 
