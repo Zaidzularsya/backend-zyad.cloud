@@ -43,9 +43,10 @@ func TestResolverServiceIntegration(t *testing.T) {
 	brandingRepo := repository.NewBrandingRepository(db)
 	versionRepo := repository.NewVersionRepository(db)
 	resolverRepo := repository.NewResolverRepository(db)
+	reusableRepo := repository.NewReusableRepository(db)
 
 	publishService := service.NewPublishService(db, pageRepo, sectionRepo, formRepo, brandingRepo, versionRepo, "test-secret")
-	resolverService := service.NewResolverService(db, resolverRepo, versionRepo, pageRepo, sectionRepo, formRepo, brandingRepo, publishService)
+	resolverService := service.NewResolverService(db, resolverRepo, versionRepo, pageRepo, sectionRepo, formRepo, brandingRepo, reusableRepo, publishService)
 
 	slug := strings.ReplaceAll(testutil.UniqueCode("resolve-page-"), ".", "-")
 	
@@ -111,6 +112,123 @@ func TestResolverServiceIntegration(t *testing.T) {
 		_, err := resolverService.ResolveBySlug(ctx, tenants.A.Scope, "non-existent-slug", "")
 		if err != service.ErrPageNotFound {
 			t.Errorf("Expected ErrPageNotFound, got %v", err)
+		}
+	})
+
+	// FTR-BE-002: resolve payload must always carry Branding/Menus/Page.Settings
+	// so the renderer can derive footer content, regardless of which sections
+	// the page has or whether the resolve hits the published snapshot path.
+	t.Run("ResolveBySlug - Published page always carries Branding/Menus/Settings for footer", func(t *testing.T) {
+		footerSlug := strings.ReplaceAll(testutil.UniqueCode("resolve-footer-page-"), ".", "-")
+
+		footerPage, err := pageRepo.Create(ctx, tenants.A.Scope, repository.CreatePageParams{
+			Name:       "Resolve Footer Test Page",
+			Title:      "Resolve Footer Title",
+			Slug:       footerSlug,
+			Type:       domain.PageTypeCampaign,
+			Status:     domain.PageStatusDraft,
+			Visibility: domain.PageVisibilityPublic,
+			CreatedBy:  userID,
+		})
+		if err != nil {
+			t.Fatalf("CreatePage: %v", err)
+		}
+
+		copyrightText := "© 2026 Footer Resolve Test"
+		settings := domain.PageSettings{FooterCopyrightText: copyrightText}
+		_, err = pageRepo.Update(ctx, tenants.A.Scope, footerPage.ID, repository.UpdatePageParams{
+			Settings: &settings,
+		})
+		if err != nil {
+			t.Fatalf("UpdatePage settings: %v", err)
+		}
+
+		_, err = sectionRepo.Create(ctx, tenants.A.Scope, repository.CreateSectionParams{
+			LandingPageID: footerPage.ID,
+			Key:           "footer-main",
+			Type:          domain.SectionTypeFooter,
+			Name:          "Footer",
+			IsEnabled:     true,
+			Content:       map[string]any{},
+			Style:         map[string]any{},
+		})
+		if err != nil {
+			t.Fatalf("CreateSection footer: %v", err)
+		}
+
+		reusableRepo := repository.NewReusableRepository(db)
+		footerMenu, err := reusableRepo.CreateMenu(ctx, tenants.A.Scope, repository.CreateMenuParams{
+			Name:      "Footer Menu",
+			Location:  domain.MenuLocationFooter,
+			IsActive:  true,
+			CreatedBy: userID,
+		})
+		if err != nil {
+			t.Fatalf("CreateMenu footer: %v", err)
+		}
+		t.Cleanup(func() {
+			_ = reusableRepo.DeleteMenu(context.Background(), tenants.A.Scope, footerMenu.ID, userID)
+		})
+		_, err = reusableRepo.CreateMenuItem(ctx, tenants.A.Scope, repository.CreateMenuItemParams{
+			MenuID:      footerMenu.ID,
+			Label:       "Privacy",
+			LinkType:    domain.LinkTypeInternalPage,
+			Destination: "/privacy",
+			Target:      domain.CTATargetSelf,
+			SortOrder:   0,
+			IsEnabled:   true,
+		})
+		if err != nil {
+			t.Fatalf("CreateMenuItem footer: %v", err)
+		}
+
+		cta, err := reusableRepo.CreateCTA(ctx, tenants.A.Scope, repository.CreateCTAParams{
+			Name:        "Footer Secondary CTA",
+			Label:       "Talk to Sales",
+			Type:        domain.CTATypeInternalPage,
+			Target:      domain.CTATargetSelf,
+			Destination: "/contact",
+			TrackingKey: "footer-secondary-cta",
+			CreatedBy:   userID,
+		})
+		if err != nil {
+			t.Fatalf("CreateCTA footer: %v", err)
+		}
+		t.Cleanup(func() {
+			_ = reusableRepo.DeleteCTA(context.Background(), tenants.A.Scope, cta.ID, userID)
+		})
+
+		if _, err := publishService.Publish(ctx, tenants.A.Scope, footerPage.ID, "Footer Release", userID); err != nil {
+			t.Fatalf("Publish: %v", err)
+		}
+
+		resolved, err := resolverService.ResolveBySlug(ctx, tenants.A.Scope, footerSlug, "")
+		if err != nil {
+			t.Fatalf("ResolveBySlug: %v", err)
+		}
+		if resolved.Page.Settings.FooterCopyrightText != copyrightText {
+			t.Errorf("Expected Page.Settings.FooterCopyrightText = %q, got %q", copyrightText, resolved.Page.Settings.FooterCopyrightText)
+		}
+		if resolved.Branding.ID == "" {
+			t.Errorf("Expected Branding to be populated (default fallback if none set)")
+		}
+		foundFooterMenu := false
+		for _, menu := range resolved.Menus {
+			if menu.Location == string(domain.MenuLocationFooter) {
+				foundFooterMenu = true
+			}
+		}
+		if !foundFooterMenu {
+			t.Errorf("Expected Menus to include a menu with location=footer, got %+v", resolved.Menus)
+		}
+		foundCTA := false
+		for _, resolvedCTA := range resolved.CTAs {
+			if resolvedCTA.TrackingKey == "footer-secondary-cta" && resolvedCTA.Label == "Talk to Sales" {
+				foundCTA = true
+			}
+		}
+		if !foundCTA {
+			t.Errorf("Expected CTAs to include the secondary CTA by tracking key, got %+v", resolved.CTAs)
 		}
 	})
 }

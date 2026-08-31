@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 	"net/http"
-	"regexp"
-	"strings"
+
+	"github.com/microcosm-cc/bluemonday"
 
 	coreerrors "zyad.cloud/internal/core/errors"
 	coretenant "zyad.cloud/internal/core/tenant"
@@ -32,6 +32,38 @@ func validatePricingSource(sectionType domain.SectionType, content map[string]an
 	}
 	if organizationType != coretenant.OrganizationTypePlatform {
 		return errPricingSourceNotAllowed()
+	}
+	return nil
+}
+
+// footerVariants is the FTR-0002 v1 catalog. Variant is persisted as
+// style.variant (no dedicated column, see footer-management-traceability-index.md).
+var footerVariants = map[string]bool{
+	"":           true, // backward compatible: resolves to "default" at render time
+	"default":    true,
+	"simple":     true,
+	"newsletter": true,
+	"mega":       true,
+}
+
+func errFooterVariantNotAllowed(variant string) error {
+	return coreerrors.New(
+		"VALIDATION_ERROR",
+		"unknown footer variant \""+variant+"\", expected one of: default, simple, newsletter, mega",
+		http.StatusUnprocessableEntity,
+	)
+}
+
+func validateFooterVariant(sectionType domain.SectionType, style map[string]any) error {
+	if sectionType != domain.SectionTypeFooter || style == nil {
+		return nil
+	}
+	variant, ok := style["variant"].(string)
+	if !ok {
+		return nil
+	}
+	if !footerVariants[variant] {
+		return errFooterVariantNotAllowed(variant)
 	}
 	return nil
 }
@@ -77,6 +109,9 @@ func (s *sectionService) Create(ctx context.Context, scope coretenant.Scope, org
 	if err := validatePricingSource(params.Type, params.Content, organizationType); err != nil {
 		return domain.LandingSection{}, err
 	}
+	if err := validateFooterVariant(params.Type, params.Style); err != nil {
+		return domain.LandingSection{}, err
+	}
 	if err := s.requireCreateQuota(ctx, scope, params.LandingPageID); err != nil {
 		return domain.LandingSection{}, err
 	}
@@ -116,7 +151,7 @@ func (s *sectionService) ListByPage(ctx context.Context, scope coretenant.Scope,
 }
 
 func (s *sectionService) Update(ctx context.Context, scope coretenant.Scope, organizationType coretenant.OrganizationType, id string, params repository.UpdateSectionParams) (domain.LandingSection, error) {
-	if params.Content != nil {
+	if params.Content != nil || params.Style != nil {
 		existing, err := s.sectionRepo.FindByID(ctx, scope, id)
 		if err != nil {
 			return domain.LandingSection{}, err
@@ -124,7 +159,12 @@ func (s *sectionService) Update(ctx context.Context, scope coretenant.Scope, org
 		if err := validatePricingSource(existing.Type, params.Content, organizationType); err != nil {
 			return domain.LandingSection{}, err
 		}
-		params.Content = s.sanitizeMap(params.Content)
+		if err := validateFooterVariant(existing.Type, params.Style); err != nil {
+			return domain.LandingSection{}, err
+		}
+		if params.Content != nil {
+			params.Content = s.sanitizeMap(params.Content)
+		}
 	}
 	return s.sectionRepo.Update(ctx, scope, id, params)
 }
@@ -145,7 +185,21 @@ func (s *sectionService) Reorder(ctx context.Context, scope coretenant.Scope, pa
 	return s.sectionRepo.Reorder(ctx, scope, pageID, params)
 }
 
-var xssRegex = regexp.MustCompile(`(?i)<\/?(script|iframe|object|embed|applet|meta|link|style|base|form|input|button|textarea|select)[^>]*>`)
+// contentSanitizerPolicy is the single allowlist used for every string value stored in
+// section content: a small set of inline formatting tags plus links restricted to
+// standard http/https/mailto URLs. Anything else (script/event handlers/style/svg/etc.)
+// is stripped, not just a denylist of known-dangerous tags.
+var contentSanitizerPolicy = newContentSanitizerPolicy()
+
+func newContentSanitizerPolicy() *bluemonday.Policy {
+	policy := bluemonday.NewPolicy()
+	policy.AllowElements("b", "i", "em", "strong", "u", "br", "span")
+	policy.AllowAttrs("href").OnElements("a")
+	policy.AllowElements("a")
+	policy.AllowStandardURLs()
+	policy.RequireNoFollowOnLinks(true)
+	return policy
+}
 
 func (s *sectionService) sanitizeMap(m map[string]any) map[string]any {
 	if m == nil {
@@ -186,14 +240,5 @@ func (s *sectionService) sanitizeSlice(arr []any) []any {
 }
 
 func (s *sectionService) sanitizeString(str string) string {
-	// Strip potentially dangerous tags
-	clean := xssRegex.ReplaceAllString(str, "")
-	
-	// Handle basic "javascript:" links in hrefs or src attributes if any (simplified)
-	if strings.Contains(strings.ToLower(clean), "javascript:") {
-		clean = strings.ReplaceAll(clean, "javascript:", "blocked-js:")
-		clean = strings.ReplaceAll(clean, "JavaScript:", "blocked-js:")
-	}
-
-	return clean
+	return contentSanitizerPolicy.Sanitize(str)
 }

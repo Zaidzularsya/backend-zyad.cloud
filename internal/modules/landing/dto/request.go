@@ -25,11 +25,13 @@ type TrustBadgeItem struct {
 // When present on an update, it replaces the settings object wholesale (matching
 // how SEO/branding sub-objects are replaced elsewhere in this module).
 type PageSettingsRequest struct {
-	PublishRequireApproval bool             `json:"publish_require_approval"`
-	LeadNotificationEmails []string         `json:"lead_notification_emails"`
-	FooterCopyrightText    string           `json:"footer_copyright_text"`
-	TrustBadges            []TrustBadgeItem `json:"trust_badges"`
-	AnalyticsHooks         map[string]any   `json:"analytics_hooks"`
+	PublishRequireApproval  bool             `json:"publish_require_approval"`
+	LeadNotificationEmails  []string         `json:"lead_notification_emails"`
+	FooterCopyrightText     string           `json:"footer_copyright_text"`
+	TrustBadges             []TrustBadgeItem `json:"trust_badges"`
+	SecondaryCTATrackingKey string           `json:"secondary_cta_tracking_key"`
+	NewsletterFormID        string           `json:"newsletter_form_id"`
+	AnalyticsHooks          map[string]any   `json:"analytics_hooks"`
 }
 
 // CreatePageRequest binds the payload for creating a landing page.

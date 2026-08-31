@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
@@ -23,13 +24,13 @@ var (
 )
 
 type publishService struct {
-	db              *database.Pool
-	pageRepo        repository.PageRepository
-	sectionRepo     repository.SectionRepository
-	formRepo        repository.FormRepository
-	brandingRepo    repository.BrandingRepository
-	versionRepo     repository.VersionRepository
-	previewSecret   string
+	db            *database.Pool
+	pageRepo      repository.PageRepository
+	sectionRepo   repository.SectionRepository
+	formRepo      repository.FormRepository
+	brandingRepo  repository.BrandingRepository
+	versionRepo   repository.VersionRepository
+	previewSecret string
 }
 
 func NewPublishService(
@@ -42,7 +43,15 @@ func NewPublishService(
 	previewSecret string,
 ) PublishService {
 	if previewSecret == "" {
-		previewSecret = "default-insecure-preview-secret" // In production this should come from config
+		// APP_SECRET is required in production (see config.AppConfig.validate), so an empty
+		// value here only happens in non-production environments. Generate a random,
+		// process-local secret instead of a fixed literal so preview tokens can't be forged
+		// by anyone who has read the source code.
+		buf := make([]byte, 32)
+		if _, err := rand.Read(buf); err != nil {
+			panic(fmt.Sprintf("landing: failed to generate fallback preview secret: %v", err))
+		}
+		previewSecret = hexEncode(buf)
 	}
 	return &publishService{
 		db:            db,
@@ -126,14 +135,14 @@ func (s *publishService) Publish(ctx context.Context, scope tenant.Scope, pageID
 	forms, _ := s.formRepo.ListByPage(ctx, scope, pageID)
 
 	snapshot := map[string]any{
-		"page":     page,
-		"sections": sections,
-		"forms":    forms,
+		"page":          page,
+		"sections":      sections,
+		"forms":         forms,
 		"snapshot_time": time.Now().UTC(),
 	}
 
-	// 2. We use a manual transaction approach, but our repos use db pool directly. 
-	// To ensure consistency, we should ideally run these in a single Tx, but since 
+	// 2. We use a manual transaction approach, but our repos use db pool directly.
+	// To ensure consistency, we should ideally run these in a single Tx, but since
 	// VersionRepo creates the snapshot as JSON, it's atomic from the read side.
 	// 3. Get next version number
 	versions, err := s.versionRepo.ListByPage(ctx, scope, pageID)
@@ -224,9 +233,9 @@ func (s *publishService) GeneratePreviewToken(ctx context.Context, scope tenant.
 	}
 
 	expiresAt := time.Now().Add(time.Duration(durationMinutes) * time.Minute).Unix()
-	
+
 	payload := fmt.Sprintf("%s:%d", pageID, expiresAt)
-	
+
 	mac := hmac.New(sha256.New, []byte(s.previewSecret))
 	mac.Write([]byte(payload))
 	signature := hexEncode(mac.Sum(nil))

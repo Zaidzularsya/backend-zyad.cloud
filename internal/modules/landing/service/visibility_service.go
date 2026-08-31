@@ -35,20 +35,23 @@ func NewVisibilityService(
 	platformRepo repository.PlatformPageRepository,
 	redisClient *redis.Client,
 	cfg config.Config,
-) VisibilityService {
+) (VisibilityService, error) {
 	// Initialize token manager with app secret or auth secret
 	secret := cfg.Auth.Secret
 	if secret == "" {
 		secret = cfg.App.Secret
 	}
-	tokenMgr, _ := coreauth.NewTokenManager(secret, "landing_visibility")
-	
+	tokenMgr, err := coreauth.NewTokenManager(secret, "landing_visibility")
+	if err != nil {
+		return nil, fmt.Errorf("create landing visibility token manager: %w", err)
+	}
+
 	return &visibilityService{
 		pageRepo:     pageRepo,
 		platformRepo: platformRepo,
 		redis:        redisClient,
 		tokenMgr:     tokenMgr,
-	}
+	}, nil
 }
 
 func (s *visibilityService) UpdateVisibility(ctx context.Context, scope coretenant.Scope, pageID string, visibility domain.PageVisibility, updatedBy string) error {
@@ -163,7 +166,7 @@ func (s *visibilityService) VerifyAccess(ctx context.Context, organizationID str
 	if s.tokenMgr == nil {
 		return "", ErrTokenManagerFailed
 	}
-	
+
 	claims := coreauth.Claims{
 		Subject: pageID,
 	}

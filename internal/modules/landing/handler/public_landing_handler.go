@@ -141,7 +141,13 @@ func (h *PublicLandingHandler) RequestAccess(c *gin.Context) {
 
 	ipAddress := c.ClientIP()
 
-	token, err := h.visibilitySvc.VerifyAccess(c.Request.Context(), "", pageID, req.Password, ipAddress)
+	scope, err := coretenant.RequireScope(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+
+	token, err := h.visibilitySvc.VerifyAccess(c.Request.Context(), scope.OrganizationID(), pageID, req.Password, ipAddress)
 	if err != nil {
 		corehttp.Fail(c, coreerrors.New("INTERNAL_ERROR", err.Error(), http.StatusInternalServerError))
 		return
@@ -174,17 +180,11 @@ func (h *PublicLandingHandler) SubmitForm(c *gin.Context) {
 		return
 	}
 
-	// Verify idempotency
 	idempotencyKey := c.GetHeader("Idempotency-Key")
 
-	// The PageID is not directly in the payload, wait, how do we know the page?
-	// It's usually part of the context or we resolve from FormKey.
-	// For MVP, we will leave PageID blank if it's not present, or rely on form lookup.
-	// Actually we should look up the form to get the page ID, but form key is unique per page or globally?
-	// The repository params:
+	// LandingPageID is resolved from the form record itself in SubmitForm.
 	params := repository.CreateSubmissionParams{
 		FormID:         formKey,
-		LandingPageID:  "", // Form lookup should resolve this in a real scenario
 		Status:         domain.SubmissionStatusNew,
 		SubmittedData:  req.Fields,
 		SourceURL:      "", // from context if any

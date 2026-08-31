@@ -65,8 +65,11 @@ func TestSectionServiceIntegration(t *testing.T) {
 		SortOrder:     0,
 		IsEnabled:     true,
 		Content: map[string]any{
-			"title":   "Welcome <script>alert(1)</script>",
-			"desc":    "Click <a href='javascript:alert(1)'>here</a>",
+			"title":    "Welcome <script>alert(1)</script>",
+			"desc":     "Click <a href='javascript:alert(1)'>here</a>",
+			"imgAttr":  "<img src=x onerror=alert(1)>",
+			"svgAttr":  "<svg onload=alert(1)>",
+			"safeLink": "Click <a href=\"https://example.com\">here</a>",
 			"nested": []any{
 				map[string]any{"text": "<iframe src='bad.com'></iframe> nested"},
 			},
@@ -79,11 +82,20 @@ func TestSectionServiceIntegration(t *testing.T) {
 	}
 
 	// Verify sanitization
-	if sec.Content["title"] != "Welcome alert(1)" {
+	if sec.Content["title"] != "Welcome " {
 		t.Errorf("Expected sanitized title, got: %v", sec.Content["title"])
 	}
-	if sec.Content["desc"] != "Click <a href='blocked-js:alert(1)'>here</a>" {
+	if sec.Content["desc"] != "Click here" {
 		t.Errorf("Expected sanitized desc, got: %v", sec.Content["desc"])
+	}
+	if sec.Content["imgAttr"] != "" {
+		t.Errorf("Expected img onerror payload stripped entirely, got: %v", sec.Content["imgAttr"])
+	}
+	if sec.Content["svgAttr"] != "" {
+		t.Errorf("Expected svg onload payload stripped entirely, got: %v", sec.Content["svgAttr"])
+	}
+	if sec.Content["safeLink"] != `Click <a href="https://example.com" rel="nofollow">here</a>` {
+		t.Errorf("Expected safe link to be preserved with nofollow, got: %v", sec.Content["safeLink"])
 	}
 	nestedArr := sec.Content["nested"].([]any)
 	nestedMap := nestedArr[0].(map[string]any)

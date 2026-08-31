@@ -292,7 +292,10 @@ func New(ctx context.Context) (*App, error) {
 	landingVersionRepo := landingrepo.NewVersionRepository(db)
 	landingPlatformRepo := landingrepo.NewPlatformPageRepository(db)
 
-	landingVisibilitySvc := landingservice.NewVisibilityService(landingPageRepo, landingPlatformRepo, redisClient, cfg)
+	landingVisibilitySvc, err := landingservice.NewVisibilityService(landingPageRepo, landingPlatformRepo, redisClient, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("create landing visibility service: %w", err)
+	}
 	landingRevisionSvc := landingservice.NewRevisionService(landingRevisionRepo, landingPageRepo)
 	landingPublishSvc := landingservice.NewPublishService(db, landingPageRepo, landingSectionRepo, landingFormRepo, landingBrandingRepo, landingVersionRepo, cfg.App.Secret)
 	landingPageSvc := landingservice.NewPageService(
@@ -355,7 +358,7 @@ func New(ctx context.Context) (*App, error) {
 	landingAdminIntegrationHandler := landinghandler.NewAdminIntegrationHandler(landingDeliverySvc)
 
 	landingResolverRepo := landingrepo.NewResolverRepository(db)
-	landingResolverSvc := landingservice.NewResolverService(db, landingResolverRepo, landingVersionRepo, landingPageRepo, landingSectionRepo, landingFormRepo, landingBrandingRepo, landingPublishSvc)
+	landingResolverSvc := landingservice.NewResolverService(db, landingResolverRepo, landingVersionRepo, landingPageRepo, landingSectionRepo, landingFormRepo, landingBrandingRepo, landingReusableRepo, landingPublishSvc)
 	landingAnalyticsRepo := landingrepo.NewAnalyticsRepository(db)
 	landingAnalyticsSvc := landingservice.NewAnalyticsService(landingAnalyticsRepo, landingPageRepo, db)
 	publicLandingHandler := landinghandler.NewPublicLandingHandler(landingResolverSvc, landingVisibilitySvc, landingSubmissionSvc, landingAnalyticsSvc)

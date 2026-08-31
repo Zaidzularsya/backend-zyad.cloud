@@ -39,6 +39,7 @@ func (s *submissionService) SubmitForm(ctx context.Context, scope coretenant.Sco
 	if !form.IsActive {
 		return domain.LandingSubmission{}, ErrFormNotActive
 	}
+	params.LandingPageID = form.LandingPageID
 
 	// 2. Generate Idempotency Key (Hash of payload + form_id + time bucket to prevent duplicate within a window)
 	// Alternatively, just trust the client's IdempotencyKey if provided.

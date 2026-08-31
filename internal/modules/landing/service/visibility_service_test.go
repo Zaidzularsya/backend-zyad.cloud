@@ -39,7 +39,7 @@ func TestVisibilityServiceIntegration(t *testing.T) {
 	`, tenants.A.OrganizationID)
 	if err != nil {
 		t.Fatalf("failed to insert mock organizations: %v", err)
-	} 
+	}
 	// we will pass nil to redis to test the main logic without rate limiting for now.
 	var redisClient *redis.Client = nil
 
@@ -51,7 +51,10 @@ func TestVisibilityServiceIntegration(t *testing.T) {
 
 	pageRepo := repository.NewPageRepository(db)
 	platformRepo := repository.NewPlatformPageRepository(db)
-	visibilityService := service.NewVisibilityService(pageRepo, platformRepo, redisClient, cfg)
+	visibilityService, err := service.NewVisibilityService(pageRepo, platformRepo, redisClient, cfg)
+	if err != nil {
+		t.Fatalf("failed to create visibility service: %v", err)
+	}
 
 	// Create a Page
 	page, err := pageRepo.Create(ctx, tenants.A.Scope, repository.CreatePageParams{

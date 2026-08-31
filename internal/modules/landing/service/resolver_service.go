@@ -23,6 +23,7 @@ type resolverService struct {
 	sectionRepo    repository.SectionRepository
 	formRepo       repository.FormRepository
 	brandingRepo   repository.BrandingRepository
+	reusableRepo   repository.ReusableRepository
 	publishService PublishService
 }
 
@@ -34,6 +35,7 @@ func NewResolverService(
 	sectionRepo repository.SectionRepository,
 	formRepo repository.FormRepository,
 	brandingRepo repository.BrandingRepository,
+	reusableRepo repository.ReusableRepository,
 	publishService PublishService,
 ) ResolverService {
 	return &resolverService{
@@ -44,6 +46,7 @@ func NewResolverService(
 		sectionRepo:    sectionRepo,
 		formRepo:       formRepo,
 		brandingRepo:   brandingRepo,
+		reusableRepo:   reusableRepo,
 		publishService: publishService,
 	}
 }
@@ -103,6 +106,7 @@ func (s *resolverService) resolvePageData(ctx context.Context, scope tenant.Scop
 			Forms:    forms,
 			Branding: branding,
 			Menus:    s.resolveMenus(ctx, scope),
+			CTAs:     s.resolveCTAs(ctx, scope),
 			IsDraft:  true,
 		}, nil
 	}
@@ -123,6 +127,7 @@ func (s *resolverService) resolvePageData(ctx context.Context, scope tenant.Scop
 			Forms:    forms,
 			Branding: branding,
 			Menus:    s.resolveMenus(ctx, scope),
+			CTAs:     s.resolveCTAs(ctx, scope),
 		}, nil
 	}
 
@@ -150,6 +155,7 @@ func (s *resolverService) resolvePageData(ctx context.Context, scope tenant.Scop
 		Snapshot: latestVersion.Snapshot,
 		Branding: branding,
 		Menus:    s.resolveMenus(ctx, scope),
+		CTAs:     s.resolveCTAs(ctx, scope),
 		IsDraft:  false,
 	}, nil
 }
@@ -190,6 +196,27 @@ func snapshotHasItems(snapshot map[string]any, key string) bool {
 	default:
 		return true
 	}
+}
+
+func (s *resolverService) resolveCTAs(ctx context.Context, scope tenant.Scope) []ResolvedCTA {
+	if s.reusableRepo == nil {
+		return nil
+	}
+	ctas, err := s.reusableRepo.ListCTAs(ctx, scope)
+	if err != nil {
+		return nil
+	}
+	resolved := make([]ResolvedCTA, 0, len(ctas))
+	for _, cta := range ctas {
+		resolved = append(resolved, ResolvedCTA{
+			ID:          cta.ID,
+			Label:       cta.Label,
+			Target:      string(cta.Target),
+			Destination: cta.Destination,
+			TrackingKey: cta.TrackingKey,
+		})
+	}
+	return resolved
 }
 
 func (s *resolverService) resolveMenus(ctx context.Context, scope tenant.Scope) []ResolvedMenu {

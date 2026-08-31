@@ -249,3 +249,154 @@ func TestSectionServiceUpdateAllowsPlatformCatalogForPlatformOrg(t *testing.T) {
 		t.Fatal("Update() should persist section when platform organization uses platform_catalog source")
 	}
 }
+
+func TestSectionServiceCreateRejectsUnknownFooterVariant(t *testing.T) {
+	repo := &sectionServiceRepoStub{}
+	service := NewSectionService(repo)
+
+	_, err := service.Create(context.Background(), mustLandingScope(t), coretenant.OrganizationTypeCustomer, repository.CreateSectionParams{
+		LandingPageID: "page-1",
+		Key:           "footer-1",
+		Type:          landingdomain.SectionTypeFooter,
+		Name:          "Footer",
+		IsEnabled:     true,
+		Style:         map[string]any{"variant": "carousel"},
+	})
+	if err == nil {
+		t.Fatal("Create() expected error for unknown footer variant")
+	}
+	if repo.createCalled {
+		t.Fatal("Create() should not persist section when footer variant is not allowed")
+	}
+}
+
+func TestSectionServiceCreateAllowsKnownFooterVariants(t *testing.T) {
+	for _, variant := range []string{"", "default", "simple", "newsletter", "mega"} {
+		repo := &sectionServiceRepoStub{}
+		service := NewSectionService(repo)
+
+		_, err := service.Create(context.Background(), mustLandingScope(t), coretenant.OrganizationTypeCustomer, repository.CreateSectionParams{
+			LandingPageID: "page-1",
+			Key:           "footer-1",
+			Type:          landingdomain.SectionTypeFooter,
+			Name:          "Footer",
+			IsEnabled:     true,
+			Style:         map[string]any{"variant": variant},
+		})
+		if err != nil {
+			t.Fatalf("Create() unexpected error for variant %q = %v", variant, err)
+		}
+		if !repo.createCalled {
+			t.Fatalf("Create() should persist section for variant %q", variant)
+		}
+	}
+}
+
+func TestSectionServiceCreateIgnoresVariantForNonFooterSection(t *testing.T) {
+	repo := &sectionServiceRepoStub{}
+	service := NewSectionService(repo)
+
+	_, err := service.Create(context.Background(), mustLandingScope(t), coretenant.OrganizationTypeCustomer, repository.CreateSectionParams{
+		LandingPageID: "page-1",
+		Key:           "hero-1",
+		Type:          landingdomain.SectionTypeHero,
+		Name:          "Hero",
+		IsEnabled:     true,
+		Style:         map[string]any{"variant": "anything-goes"},
+	})
+	if err != nil {
+		t.Fatalf("Create() unexpected error = %v", err)
+	}
+	if !repo.createCalled {
+		t.Fatal("Create() should persist non-footer section regardless of style.variant")
+	}
+}
+
+func TestSectionServiceUpdateRejectsUnknownFooterVariant(t *testing.T) {
+	repo := &sectionServiceRepoStub{
+		findByIDResult: landingdomain.LandingSection{
+			ID:   "section-1",
+			Type: landingdomain.SectionTypeFooter,
+		},
+	}
+	service := NewSectionService(repo)
+
+	_, err := service.Update(context.Background(), mustLandingScope(t), coretenant.OrganizationTypeCustomer, "section-1", repository.UpdateSectionParams{
+		Style: map[string]any{"variant": "carousel"},
+	})
+	if err == nil {
+		t.Fatal("Update() expected error for unknown footer variant")
+	}
+	if repo.updateCalled {
+		t.Fatal("Update() should not persist section when footer variant is not allowed")
+	}
+}
+
+func TestSectionServiceSanitizeStringStripsXSSVectors(t *testing.T) {
+	svc := &sectionService{}
+
+	cases := map[string]string{
+		"Welcome <script>alert(1)</script>":            "Welcome ",
+		"Click <a href='javascript:alert(1)'>here</a>": "Click here",
+		"<img src=x onerror=alert(1)>":                 "",
+		"<svg onload=alert(1)>":                        "",
+		"<iframe src='bad.com'></iframe> nested":       " nested",
+		`Click <a href="https://example.com">here</a>`: `Click <a href="https://example.com" rel="nofollow">here</a>`,
+		"plain text with no tags":                      "plain text with no tags",
+	}
+
+	for in, want := range cases {
+		if got := svc.sanitizeString(in); got != want {
+			t.Errorf("sanitizeString(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestSectionServiceSanitizeMapRecursesThroughNestedStructures(t *testing.T) {
+	svc := &sectionService{}
+
+	content := map[string]any{
+		"title": "Welcome <script>alert(1)</script>",
+		"nested": []any{
+			map[string]any{"text": "<iframe src='bad.com'></iframe> nested"},
+		},
+		"count": 5,
+	}
+
+	sanitized := svc.sanitizeMap(content)
+
+	if sanitized["title"] != "Welcome " {
+		t.Errorf("sanitizeMap() title = %v", sanitized["title"])
+	}
+	nestedArr, ok := sanitized["nested"].([]any)
+	if !ok || len(nestedArr) != 1 {
+		t.Fatalf("sanitizeMap() nested = %#v", sanitized["nested"])
+	}
+	nestedMap, ok := nestedArr[0].(map[string]any)
+	if !ok || nestedMap["text"] != " nested" {
+		t.Fatalf("sanitizeMap() nested text = %#v", nestedArr[0])
+	}
+	if sanitized["count"] != 5 {
+		t.Errorf("sanitizeMap() should leave non-string values untouched, got %v", sanitized["count"])
+	}
+}
+
+func TestSectionServiceUpdateAllowsKnownFooterVariant(t *testing.T) {
+	repo := &sectionServiceRepoStub{
+		findByIDResult: landingdomain.LandingSection{
+			ID:   "section-1",
+			Type: landingdomain.SectionTypeFooter,
+		},
+	}
+	service := NewSectionService(repo)
+
+	_, err := service.Update(context.Background(), mustLandingScope(t), coretenant.OrganizationTypeCustomer, "section-1", repository.UpdateSectionParams{
+		Style: map[string]any{"variant": "mega"},
+	})
+	if err != nil {
+		t.Fatalf("Update() unexpected error = %v", err)
+	}
+	if !repo.updateCalled {
+		t.Fatal("Update() should persist section when footer variant is known")
+	}
+}

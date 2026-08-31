@@ -82,6 +82,8 @@ type PageSettings struct {
 	LeadNotificationEmails []string       `json:"lead_notification_emails"`
 	FooterCopyrightText    string         `json:"footer_copyright_text"`
 	TrustBadges            []TrustBadge   `json:"trust_badges"`
+	SecondaryCTATrackingKey string        `json:"secondary_cta_tracking_key"`
+	NewsletterFormID       string         `json:"newsletter_form_id"`
 	AnalyticsHooks         map[string]any `json:"analytics_hooks,omitempty"`
 }
 

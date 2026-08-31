@@ -13,8 +13,20 @@ type ResolvedPage struct {
 	Sections []domain.LandingSection
 	Forms    []domain.LandingForm
 	Menus    []ResolvedMenu
+	CTAs     []ResolvedCTA
 	Snapshot map[string]any
 	IsDraft  bool
+}
+
+// ResolvedCTA is the public-safe projection of domain.LandingCTA, exposed so the
+// renderer can resolve PageSettings.SecondaryCTATrackingKey to a label/url
+// without a separate authenticated request (FTR-FE-014).
+type ResolvedCTA struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Target      string `json:"target"`
+	Destination string `json:"destination"`
+	TrackingKey string `json:"tracking_key"`
 }
 
 type ResolvedMenu struct {

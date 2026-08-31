@@ -12,11 +12,13 @@ type PaginationMeta struct {
 
 // PageSettingsResponse represents the typed, validated landing page settings.
 type PageSettingsResponse struct {
-	PublishRequireApproval bool             `json:"publish_require_approval"`
-	LeadNotificationEmails []string         `json:"lead_notification_emails"`
-	FooterCopyrightText    string           `json:"footer_copyright_text"`
-	TrustBadges            []TrustBadgeItem `json:"trust_badges"`
-	AnalyticsHooks         map[string]any   `json:"analytics_hooks,omitempty"`
+	PublishRequireApproval  bool             `json:"publish_require_approval"`
+	LeadNotificationEmails  []string         `json:"lead_notification_emails"`
+	FooterCopyrightText     string           `json:"footer_copyright_text"`
+	TrustBadges             []TrustBadgeItem `json:"trust_badges"`
+	SecondaryCTATrackingKey string           `json:"secondary_cta_tracking_key"`
+	NewsletterFormID        string           `json:"newsletter_form_id"`
+	AnalyticsHooks          map[string]any   `json:"analytics_hooks,omitempty"`
 }
 
 // PageResponse represents the details of a landing page.
