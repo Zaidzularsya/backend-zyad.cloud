@@ -59,6 +59,20 @@ func (s *domainHandlerServiceStub) Verify(
 	return dto.DomainResponse{ID: domainID}, nil
 }
 
+func (s *domainHandlerServiceStub) RegenerateChallenge(
+	_ context.Context,
+	organizationID string,
+	domainID string,
+	actorUserID string,
+) (dto.DomainChallengeResponse, error) {
+	s.organizationID = organizationID
+	s.domainID = domainID
+	s.actorUserID = actorUserID
+	return dto.DomainChallengeResponse{
+		Domain: dto.DomainResponse{ID: domainID},
+	}, nil
+}
+
 func (s *domainHandlerServiceStub) Update(
 	context.Context,
 	string,

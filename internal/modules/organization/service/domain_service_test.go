@@ -101,6 +101,20 @@ func (s *domainStoreStub) SetPrimary(
 	return s.domain, nil
 }
 
+func (s *domainStoreStub) UpdateChallenge(
+	_ context.Context,
+	_ string,
+	_ string,
+	challengeHash string,
+	_ time.Time,
+) (model.OrganizationDomain, error) {
+	s.domain.Status = model.DomainStatusPending
+	s.domain.VerificationChallengeHash = challengeHash
+	s.domain.VerifiedAt = nil
+	s.domain.VerificationError = ""
+	return s.domain, nil
+}
+
 func (s *domainStoreStub) Delete(context.Context, string, string, time.Time, string) error {
 	return nil
 }
@@ -323,6 +337,148 @@ func TestDomainServiceRejectsInvalidHostAndPrematurePrimary(t *testing.T) {
 	}
 }
 
+func TestDomainServiceCreateSubdomainAutoVerifies(t *testing.T) {
+	store := &domainStoreStub{}
+	service := NewDomainService(store, nil, "example.test")
+
+	challenge, err := service.Create(
+		context.Background(),
+		"11111111-1111-1111-1111-111111111111",
+		dto.CreateDomainRequest{
+			Type:          "subdomain",
+			CanonicalHost: "acme.example.test",
+		},
+		"33333333-3333-3333-3333-333333333333",
+	)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if challenge.ChallengeType != "auto_verified" ||
+		challenge.RecordName != "" ||
+		challenge.RecordValue != "" {
+		t.Fatalf("challenge = %#v, want auto_verified without DNS record", challenge)
+	}
+	if !store.activated || challenge.Domain.Status != string(model.DomainStatusActive) {
+		t.Fatalf(
+			"subdomain should be active after create, activated=%v status=%s",
+			store.activated,
+			challenge.Domain.Status,
+		)
+	}
+	if store.createParams.VerificationChallengeHash != "" {
+		t.Fatalf("subdomain should not store challenge hash: %#v", store.createParams)
+	}
+}
+
+func TestDomainServiceVerifyActiveDomainIsIdempotent(t *testing.T) {
+	store := &domainStoreStub{
+		domain: model.OrganizationDomain{
+			ID:             "22222222-2222-2222-2222-222222222222",
+			OrganizationID: "11111111-1111-1111-1111-111111111111",
+			Type:           model.DomainTypeCustom,
+			Status:         model.DomainStatusActive,
+		},
+	}
+	verifier := &domainVerifierStub{err: ErrDomainChallengeNotFound}
+	service := NewDomainService(store, verifier, "example.test")
+
+	domain, err := service.Verify(
+		context.Background(),
+		"11111111-1111-1111-1111-111111111111",
+		"22222222-2222-2222-2222-222222222222",
+		"33333333-3333-3333-3333-333333333333",
+	)
+	if err != nil {
+		t.Fatalf("Verify() error = %v", err)
+	}
+	if domain.Status != string(model.DomainStatusActive) {
+		t.Fatalf("status = %s, want active", domain.Status)
+	}
+	if verifier.recordName != "" {
+		t.Fatal("Verify() should not run DNS lookup for an active domain")
+	}
+}
+
+func TestDomainServiceVerifyRateLimited(t *testing.T) {
+	lastAttempt := time.Now().UTC().Add(-5 * time.Second)
+	store := &domainStoreStub{
+		domain: model.OrganizationDomain{
+			ID:                 "22222222-2222-2222-2222-222222222222",
+			OrganizationID:     "11111111-1111-1111-1111-111111111111",
+			Type:               model.DomainTypeCustom,
+			Status:             model.DomainStatusPending,
+			LastVerificationAt: &lastAttempt,
+		},
+	}
+	service := NewDomainService(store, &domainVerifierStub{}, "example.test")
+
+	_, err := service.Verify(
+		context.Background(),
+		"11111111-1111-1111-1111-111111111111",
+		"22222222-2222-2222-2222-222222222222",
+		"33333333-3333-3333-3333-333333333333",
+	)
+	if err == nil {
+		t.Fatal("Verify() error = nil, want rate limit error")
+	}
+}
+
+func TestDomainServiceRegenerateChallengeReturnsNewToken(t *testing.T) {
+	store := &domainStoreStub{
+		domain: model.OrganizationDomain{
+			ID:             "22222222-2222-2222-2222-222222222222",
+			OrganizationID: "11111111-1111-1111-1111-111111111111",
+			Type:           model.DomainTypeCustom,
+			CanonicalHost:  "www.example.com",
+			Status:         model.DomainStatusFailed,
+		},
+	}
+	service := NewDomainService(store, nil, "example.test")
+	service.generateToken = func(int) (string, error) {
+		return "regenerated-token", nil
+	}
+
+	challenge, err := service.RegenerateChallenge(
+		context.Background(),
+		"11111111-1111-1111-1111-111111111111",
+		"22222222-2222-2222-2222-222222222222",
+		"33333333-3333-3333-3333-333333333333",
+	)
+	if err != nil {
+		t.Fatalf("RegenerateChallenge() error = %v", err)
+	}
+	if challenge.RecordValue != "regenerated-token" ||
+		challenge.RecordName != "_zyad-verification.www.example.com" {
+		t.Fatalf("challenge = %#v", challenge)
+	}
+	if store.domain.VerificationChallengeHash != coreauth.HashToken("regenerated-token") {
+		t.Fatal("store should keep only the hash of the regenerated token")
+	}
+}
+
+func TestDomainServiceRegenerateChallengeRejectsActiveDomain(t *testing.T) {
+	store := &domainStoreStub{
+		domain: model.OrganizationDomain{
+			ID:             "22222222-2222-2222-2222-222222222222",
+			OrganizationID: "11111111-1111-1111-1111-111111111111",
+			Type:           model.DomainTypeCustom,
+			CanonicalHost:  "www.example.com",
+			Status:         model.DomainStatusActive,
+		},
+	}
+	service := NewDomainService(store, nil, "example.test")
+
+	_, err := service.RegenerateChallenge(
+		context.Background(),
+		"11111111-1111-1111-1111-111111111111",
+		"22222222-2222-2222-2222-222222222222",
+		"33333333-3333-3333-3333-333333333333",
+	)
+	if err == nil {
+		t.Fatal("RegenerateChallenge() error = nil, want conflict for active domain")
+	}
+}
+
 func TestDomainServiceCreateCustomChecksBillingGuard(t *testing.T) {
 	store := &domainStoreStub{
 		domains: []model.OrganizationDomain{
@@ -359,7 +515,7 @@ func TestDomainServiceCreateCustomChecksBillingGuard(t *testing.T) {
 		guard.quotaOrganizationID != "11111111-1111-1111-1111-111111111111" ||
 		guard.quotaFeatureKey != featureDomainMaxCustomDomains ||
 		guard.quotaLimitKey != "limit" ||
-		guard.quotaUsed != 2 ||
+		guard.quotaUsed != 3 ||
 		guard.quotaDelta != 1 {
 		t.Fatalf("guard = %#v", guard)
 	}

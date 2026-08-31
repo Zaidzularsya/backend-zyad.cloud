@@ -44,6 +44,22 @@ func TestDomainServiceIntegration(t *testing.T) {
 	`, organizationDomainID, tenants.A.OrganizationID)
 	require.NoError(t, err)
 
+	// Binding dari run sebelumnya membuat test tidak re-runnable (unique index
+	// per organization_domain_id); bersihkan dalam konteks RLS tenant.
+	tx, err := db.Begin(ctx)
+	require.NoError(t, err)
+	_, err = tx.Exec(ctx,
+		`SELECT set_config('app.organization_id', $1, true)`,
+		tenants.A.OrganizationID,
+	)
+	require.NoError(t, err)
+	_, err = tx.Exec(ctx, `
+		DELETE FROM landing_domain_bindings
+		WHERE organization_domain_id IN ($1, $2)
+	`, organizationDomainID, "66666666-6666-6666-6666-666666666666")
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit(ctx))
+
 	// Insert dummy user
 	_, err = db.Exec(ctx, `
 		INSERT INTO users (id, name, email, status)

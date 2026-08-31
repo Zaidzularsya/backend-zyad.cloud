@@ -26,6 +26,12 @@ type OrganizationDomainService interface {
 		string,
 	) (dto.DomainChallengeResponse, error)
 	Verify(context.Context, string, string, string) (dto.DomainResponse, error)
+	RegenerateChallenge(
+		context.Context,
+		string,
+		string,
+		string,
+	) (dto.DomainChallengeResponse, error)
 	Update(
 		context.Context,
 		string,
@@ -60,6 +66,7 @@ func (h *DomainHandler) RegisterRoutes(router *gin.RouterGroup) {
 	group.GET("", h.List)
 	group.POST("", h.Create)
 	group.POST("/:id/verify", h.Verify)
+	group.POST("/:id/challenge", h.RegenerateChallenge)
 	group.PATCH("/:id", h.Update)
 	group.DELETE("/:id", h.Delete)
 }
@@ -128,6 +135,25 @@ func (h *DomainHandler) Verify(c *gin.Context) {
 		return
 	}
 	corehttp.OK(c, "organization domain verified successfully", domain)
+}
+
+func (h *DomainHandler) RegenerateChallenge(c *gin.Context) {
+	tenantContext, err := middleware.RequireTenantContext(c)
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	challenge, err := h.service.RegenerateChallenge(
+		c.Request.Context(),
+		tenantContext.OrganizationID(),
+		c.Param("id"),
+		permissionmiddleware.UserID(c),
+	)
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	corehttp.OK(c, "organization domain challenge regenerated successfully", challenge)
 }
 
 func (h *DomainHandler) Update(c *gin.Context) {

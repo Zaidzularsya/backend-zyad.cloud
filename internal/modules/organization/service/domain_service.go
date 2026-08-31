@@ -22,6 +22,9 @@ import (
 
 const domainVerificationPrefix = "_zyad-verification."
 
+// domainVerifyCooldown membatasi frekuensi lookup DNS per domain.
+const domainVerifyCooldown = 30 * time.Second
+
 var domainLabelPattern = regexp.MustCompile(
 	`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`,
 )
@@ -39,6 +42,13 @@ type DomainStore interface {
 		string,
 		string,
 		repository.UpdateDomainVerificationParams,
+	) (model.OrganizationDomain, error)
+	UpdateChallenge(
+		context.Context,
+		string,
+		string,
+		string,
+		time.Time,
 	) (model.OrganizationDomain, error)
 	Activate(
 		context.Context,
@@ -197,6 +207,38 @@ func (s *DomainService) Create(
 			return dto.DomainChallengeResponse{}, err
 		}
 	}
+	if domainType == model.DomainTypeSubdomain {
+		// Subdomain platform berada di zona DNS milik platform sehingga
+		// tenant tidak mungkin memasang TXT challenge — langsung aktif.
+		domain, err := s.store.Create(ctx, repository.CreateDomainParams{
+			OrganizationID: strings.TrimSpace(organizationID),
+			Type:           domainType,
+			CanonicalHost:  host,
+			SSLStatus:      model.DomainSSLStatusPending,
+			ActorUserID:    strings.TrimSpace(actorUserID),
+		})
+		if err != nil {
+			return dto.DomainChallengeResponse{}, mapDomainError(
+				"DOMAIN_CREATE_FAILED",
+				"failed to create organization domain",
+				err,
+			)
+		}
+		activated, err := s.markVerifiedAndActivate(
+			ctx,
+			strings.TrimSpace(organizationID),
+			domain.ID,
+			strings.TrimSpace(actorUserID),
+			s.now().UTC(),
+		)
+		if err != nil {
+			return dto.DomainChallengeResponse{}, err
+		}
+		return dto.DomainChallengeResponse{
+			Domain:        domainResponse(activated),
+			ChallengeType: "auto_verified",
+		}, nil
+	}
 	token, err := s.generateToken(32)
 	if err != nil {
 		return dto.DomainChallengeResponse{}, coreerrors.Wrap(
@@ -244,10 +286,13 @@ func (s *DomainService) requireCustomDomainCreate(
 	if _, err := s.guard.RequireFeature(ctx, organizationID, featureDomainEnabled); err != nil {
 		return err
 	}
-	domains, _, err := s.store.ListByOrganization(ctx, organizationID, repository.DomainListFilter{
+	// Semua custom domain yang belum dihapus mengonsumsi quota (termasuk
+	// pending/failed) supaya namespace host global tidak bisa dipenuhi
+	// lewat domain yang tidak pernah diverifikasi.
+	_, used, err := s.store.ListByOrganization(ctx, organizationID, repository.DomainListFilter{
 		Type:           model.DomainTypeCustom,
 		IncludeDeleted: false,
-		Limit:          100,
+		Limit:          1,
 		Offset:         0,
 	})
 	if err != nil {
@@ -256,12 +301,6 @@ func (s *DomainService) requireCustomDomainCreate(
 			"failed to list organization domains",
 			err,
 		)
-	}
-	var used int64
-	for _, domain := range domains {
-		if domain.Status == model.DomainStatusVerified || domain.Status == model.DomainStatusActive {
-			used++
-		}
 	}
 	return s.guard.RequireQuotaValue(
 		ctx,
@@ -292,12 +331,53 @@ func (s *DomainService) Verify(
 			err,
 		)
 	}
+	if domain.Status == model.DomainStatusActive {
+		// Sudah aktif — jangan re-run DNS check yang bisa menjatuhkan
+		// domain produksi ke failed; verify bersifat idempoten.
+		return domainResponse(domain), nil
+	}
+	if domain.Status == model.DomainStatusDisabled {
+		return dto.DomainResponse{}, coreerrors.New(
+			"DOMAIN_DISABLED",
+			"organization domain is disabled",
+			http.StatusConflict,
+		)
+	}
 	now := s.now().UTC()
+	if domain.LastVerificationAt != nil &&
+		now.Sub(*domain.LastVerificationAt) < domainVerifyCooldown {
+		return dto.DomainResponse{}, coreerrors.New(
+			"DOMAIN_VERIFICATION_RATE_LIMITED",
+			"domain verification was attempted too recently, retry shortly",
+			http.StatusTooManyRequests,
+		)
+	}
+	if domain.Type == model.DomainTypeSubdomain {
+		// Subdomain platform tidak memakai DNS challenge (lihat Create).
+		activated, err := s.markVerifiedAndActivate(
+			ctx,
+			organizationID,
+			domain.ID,
+			strings.TrimSpace(actorUserID),
+			now,
+		)
+		if err != nil {
+			return dto.DomainResponse{}, err
+		}
+		return domainResponse(activated), nil
+	}
 	if s.verifier == nil {
 		return dto.DomainResponse{}, coreerrors.New(
 			"DOMAIN_VERIFIER_REQUIRED",
 			"domain verifier is not configured",
 			http.StatusServiceUnavailable,
+		)
+	}
+	if domain.VerificationChallengeHash == "" {
+		return dto.DomainResponse{}, coreerrors.New(
+			"DOMAIN_CHALLENGE_MISSING",
+			"domain has no verification challenge, regenerate it first",
+			http.StatusConflict,
 		)
 	}
 	err = s.verifier.VerifyTXT(
@@ -338,6 +418,26 @@ func (s *DomainService) Verify(
 			err,
 		)
 	}
+	activated, err := s.markVerifiedAndActivate(
+		ctx,
+		organizationID,
+		domainID,
+		strings.TrimSpace(actorUserID),
+		now,
+	)
+	if err != nil {
+		return dto.DomainResponse{}, err
+	}
+	return domainResponse(activated), nil
+}
+
+func (s *DomainService) markVerifiedAndActivate(
+	ctx context.Context,
+	organizationID string,
+	domainID string,
+	actorUserID string,
+	now time.Time,
+) (model.OrganizationDomain, error) {
 	verified, err := s.store.UpdateVerification(
 		ctx,
 		organizationID,
@@ -346,11 +446,11 @@ func (s *DomainService) Verify(
 			Status:      model.DomainStatusVerified,
 			VerifiedAt:  &now,
 			AttemptedAt: now,
-			ActorUserID: strings.TrimSpace(actorUserID),
+			ActorUserID: actorUserID,
 		},
 	)
 	if err != nil {
-		return dto.DomainResponse{}, mapDomainError(
+		return model.OrganizationDomain{}, mapDomainError(
 			"DOMAIN_VERIFICATION_UPDATE_FAILED",
 			"failed to record domain verification result",
 			err,
@@ -362,16 +462,78 @@ func (s *DomainService) Verify(
 		verified.ID,
 		false,
 		now,
-		strings.TrimSpace(actorUserID),
+		actorUserID,
 	)
 	if err != nil {
-		return dto.DomainResponse{}, mapDomainError(
+		return model.OrganizationDomain{}, mapDomainError(
 			"DOMAIN_ACTIVATION_FAILED",
 			"failed to activate verified domain",
 			err,
 		)
 	}
-	return domainResponse(activated), nil
+	return activated, nil
+}
+
+func (s *DomainService) RegenerateChallenge(
+	ctx context.Context,
+	organizationID string,
+	domainID string,
+	actorUserID string,
+) (dto.DomainChallengeResponse, error) {
+	if !validUUID(organizationID) || !validUUID(domainID) {
+		return dto.DomainChallengeResponse{}, validationError(
+			"organization_id and domain_id must be valid UUIDs",
+		)
+	}
+	domain, err := s.store.FindByID(ctx, organizationID, domainID)
+	if err != nil {
+		return dto.DomainChallengeResponse{}, mapDomainError(
+			"DOMAIN_QUERY_FAILED",
+			"failed to get organization domain",
+			err,
+		)
+	}
+	if domain.Type != model.DomainTypeCustom {
+		return dto.DomainChallengeResponse{}, validationError(
+			"verification challenge only applies to custom domains",
+		)
+	}
+	if domain.Status == model.DomainStatusActive {
+		return dto.DomainChallengeResponse{}, coreerrors.New(
+			"DOMAIN_ALREADY_ACTIVE",
+			"active domain does not need a new verification challenge",
+			http.StatusConflict,
+		)
+	}
+	token, err := s.generateToken(32)
+	if err != nil {
+		return dto.DomainChallengeResponse{}, coreerrors.Wrap(
+			"DOMAIN_CHALLENGE_GENERATION_FAILED",
+			"failed to generate domain verification challenge",
+			http.StatusInternalServerError,
+			err,
+		)
+	}
+	updated, err := s.store.UpdateChallenge(
+		ctx,
+		organizationID,
+		domainID,
+		coreauth.HashToken(token),
+		s.now().UTC(),
+	)
+	if err != nil {
+		return dto.DomainChallengeResponse{}, mapDomainError(
+			"DOMAIN_CHALLENGE_UPDATE_FAILED",
+			"failed to update domain verification challenge",
+			err,
+		)
+	}
+	return dto.DomainChallengeResponse{
+		Domain:        domainResponse(updated),
+		ChallengeType: "dns_txt",
+		RecordName:    verificationRecordName(updated.CanonicalHost),
+		RecordValue:   token,
+	}, nil
 }
 
 func (s *DomainService) Update(
@@ -532,8 +694,10 @@ func mapDomainError(code, message string, err error) error {
 			)
 		case pgErr.Code == "23514":
 			return validationError("domain data violates a database constraint")
-		case pgErr.Code == "P0001" &&
-			strings.Contains(strings.ToLower(pgErr.Message), "reserved"):
+		case pgErr.Code == "ZD001",
+			// Fallback untuk DB yang belum menjalankan migration ERRCODE.
+			pgErr.Code == "P0001" &&
+				strings.Contains(strings.ToLower(pgErr.Message), "reserved"):
 			return coreerrors.New(
 				"DOMAIN_SUBDOMAIN_RESERVED",
 				"subdomain label is reserved",
