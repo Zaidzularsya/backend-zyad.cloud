@@ -24,13 +24,13 @@ func NewAdminCTAHandler(ctaService service.CTAService) *AdminCTAHandler {
 	}
 }
 
-func (h *AdminCTAHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.PermissionChecker) {
+func (h *AdminCTAHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker) {
 	group := router.Group("/admin/landing/ctas")
 
-	group.GET("", permissionmiddleware.Require(p, "landing.cta.manage"), h.List)
-	group.POST("", permissionmiddleware.Require(p, "landing.cta.manage"), h.Create)
-	group.PATCH("/:id", permissionmiddleware.Require(p, "landing.cta.manage"), h.Update)
-	group.DELETE("/:id", permissionmiddleware.Require(p, "landing.cta.manage"), h.Delete)
+	group.GET("", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.cta.manage"), h.List)
+	group.POST("", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.cta.manage"), h.Create)
+	group.PATCH("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.cta.manage"), h.Update)
+	group.DELETE("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.cta.manage"), h.Delete)
 }
 
 func (h *AdminCTAHandler) List(c *gin.Context) {

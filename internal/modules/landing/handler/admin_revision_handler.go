@@ -21,10 +21,10 @@ func NewAdminRevisionHandler(revisionService service.RevisionService) *AdminRevi
 	}
 }
 
-func (h *AdminRevisionHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.PermissionChecker) {
+func (h *AdminRevisionHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker) {
 	group := router.Group("/admin/landing-pages/:id/revisions")
 
-	group.GET("/compare", permissionmiddleware.Require(p, "landing.page.read"), h.Compare)
+	group.GET("/compare", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.page.read"), h.Compare)
 }
 
 func (h *AdminRevisionHandler) List(c *gin.Context) {

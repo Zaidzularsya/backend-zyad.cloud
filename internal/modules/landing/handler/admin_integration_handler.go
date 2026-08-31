@@ -24,19 +24,19 @@ func NewAdminIntegrationHandler(deliveryService service.DeliveryService) *AdminI
 	}
 }
 
-func (h *AdminIntegrationHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.PermissionChecker) {
+func (h *AdminIntegrationHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker) {
 	group := router.Group("/admin/landing")
 
 	// Integrations
-	group.GET("/lead-integrations", permissionmiddleware.Require(p, "landing.integration.read"), h.ListIntegrations)
-	group.POST("/lead-integrations", permissionmiddleware.Require(p, "landing.integration.manage"), h.CreateIntegration)
-	group.PATCH("/lead-integrations/:id", permissionmiddleware.Require(p, "landing.integration.manage"), h.UpdateIntegration)
-	group.DELETE("/lead-integrations/:id", permissionmiddleware.Require(p, "landing.integration.manage"), h.DeleteIntegration)
-	group.POST("/lead-integrations/:id/test", permissionmiddleware.Require(p, "landing.integration.manage"), h.TestIntegration)
+	group.GET("/lead-integrations", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.integration.read"), h.ListIntegrations)
+	group.POST("/lead-integrations", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.integration.manage"), h.CreateIntegration)
+	group.PATCH("/lead-integrations/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.integration.manage"), h.UpdateIntegration)
+	group.DELETE("/lead-integrations/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.integration.manage"), h.DeleteIntegration)
+	group.POST("/lead-integrations/:id/test", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.integration.manage"), h.TestIntegration)
 
 	// Deliveries
-	group.GET("/lead-deliveries", permissionmiddleware.Require(p, "landing.integration.read"), h.ListDeliveries)
-	group.POST("/lead-deliveries/:id/retry", permissionmiddleware.Require(p, "landing.integration.manage"), h.RetryDelivery)
+	group.GET("/lead-deliveries", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.integration.read"), h.ListDeliveries)
+	group.POST("/lead-deliveries/:id/retry", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.integration.manage"), h.RetryDelivery)
 }
 
 func (h *AdminIntegrationHandler) ListIntegrations(c *gin.Context) {

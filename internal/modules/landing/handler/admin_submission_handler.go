@@ -25,15 +25,15 @@ func NewAdminSubmissionHandler(submissionSvc service.SubmissionService) *AdminSu
 	}
 }
 
-func (h *AdminSubmissionHandler) RegisterRoutes(router *gin.RouterGroup, checker permissionmiddleware.PermissionChecker) {
+func (h *AdminSubmissionHandler) RegisterRoutes(router *gin.RouterGroup, checker permissionmiddleware.CombinedPermissionChecker) {
 	group := router.Group("/admin/landing-submissions")
 	
-	group.GET("", permissionmiddleware.Require(checker, "landing.submission.read"), h.ListSubmissions)
-	group.GET("/export", permissionmiddleware.Require(checker, "landing.submission.export"), h.ExportSubmissions)
-	group.GET("/:id", permissionmiddleware.Require(checker, "landing.submission.read"), h.GetSubmission)
-	group.PATCH("/:id/status", permissionmiddleware.Require(checker, "landing.submission.update"), h.UpdateStatus)
-	group.POST("/:id/notes", permissionmiddleware.Require(checker, "landing.submission.update"), h.AddNote)
-	group.DELETE("/:id", permissionmiddleware.Require(checker, "landing.submission.delete"), h.DeleteSubmission)
+	group.GET("", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.submission.read"), h.ListSubmissions)
+	group.GET("/export", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.submission.export"), h.ExportSubmissions)
+	group.GET("/:id", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.submission.read"), h.GetSubmission)
+	group.PATCH("/:id/status", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.submission.update"), h.UpdateStatus)
+	group.POST("/:id/notes", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.submission.update"), h.AddNote)
+	group.DELETE("/:id", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.submission.delete"), h.DeleteSubmission)
 }
 
 func (h *AdminSubmissionHandler) ListSubmissions(c *gin.Context) {

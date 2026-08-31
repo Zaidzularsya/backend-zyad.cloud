@@ -24,13 +24,13 @@ func NewAdminDomainHandler(domainSvc service.DomainService) *AdminDomainHandler 
 	}
 }
 
-func (h *AdminDomainHandler) RegisterRoutes(router *gin.RouterGroup, checker permissionmiddleware.PermissionChecker) {
-	router.GET("/admin/landing/domains/available", permissionmiddleware.Require(checker, "landing.domain.read"), h.ListAvailableDomains)
+func (h *AdminDomainHandler) RegisterRoutes(router *gin.RouterGroup, checker permissionmiddleware.CombinedPermissionChecker) {
+	router.GET("/admin/landing/domains/available", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.domain.read"), h.ListAvailableDomains)
 
-	router.GET("/admin/landing/domain-bindings", permissionmiddleware.Require(checker, "landing.domain.read"), h.ListDomainBindings)
-	router.POST("/admin/landing/domain-bindings", permissionmiddleware.Require(checker, "landing.domain.manage"), h.CreateDomainBinding)
-	router.PATCH("/admin/landing/domain-bindings/:id", permissionmiddleware.Require(checker, "landing.domain.manage"), h.UpdateDomainBinding)
-	router.DELETE("/admin/landing/domain-bindings/:id", permissionmiddleware.Require(checker, "landing.domain.manage"), h.DeleteDomainBinding)
+	router.GET("/admin/landing/domain-bindings", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.domain.read"), h.ListDomainBindings)
+	router.POST("/admin/landing/domain-bindings", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.domain.manage"), h.CreateDomainBinding)
+	router.PATCH("/admin/landing/domain-bindings/:id", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.domain.manage"), h.UpdateDomainBinding)
+	router.DELETE("/admin/landing/domain-bindings/:id", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.domain.manage"), h.DeleteDomainBinding)
 }
 
 func (h *AdminDomainHandler) ListAvailableDomains(c *gin.Context) {

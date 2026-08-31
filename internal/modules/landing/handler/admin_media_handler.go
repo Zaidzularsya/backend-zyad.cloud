@@ -22,13 +22,13 @@ func NewAdminMediaHandler(mediaService service.MediaService) *AdminMediaHandler 
 	}
 }
 
-func (h *AdminMediaHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.PermissionChecker) {
+func (h *AdminMediaHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker) {
 	group := router.Group("/admin/landing/media")
 
-	group.GET("", permissionmiddleware.Require(p, "landing.media.manage"), h.List)
-	group.POST("", permissionmiddleware.Require(p, "landing.media.manage"), h.Upload)
+	group.GET("", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.media.manage"), h.List)
+	group.POST("", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.media.manage"), h.Upload)
 	// DELETE mapping based on the OpenAPI docs
-	group.DELETE("/:id", permissionmiddleware.Require(p, "landing.media.manage"), h.Delete)
+	group.DELETE("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.media.manage"), h.Delete)
 }
 
 func (h *AdminMediaHandler) List(c *gin.Context) {

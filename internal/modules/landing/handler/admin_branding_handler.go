@@ -26,20 +26,20 @@ func NewAdminBrandingHandler(brandingSvc service.BrandingService) *AdminBranding
 	}
 }
 
-func (h *AdminBrandingHandler) RegisterRoutes(router *gin.RouterGroup, checker permissionmiddleware.PermissionChecker) {
+func (h *AdminBrandingHandler) RegisterRoutes(router *gin.RouterGroup, checker permissionmiddleware.CombinedPermissionChecker) {
 	// Organization branding
-	router.GET("/admin/landing/branding", permissionmiddleware.Require(checker, "landing.branding.read"), h.GetDefaultBranding)
-	router.PATCH("/admin/landing/branding", permissionmiddleware.Require(checker, "landing.branding.update"), h.UpdateDefaultBranding)
+	router.GET("/admin/landing/branding", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.branding.read"), h.GetDefaultBranding)
+	router.PATCH("/admin/landing/branding", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.branding.update"), h.UpdateDefaultBranding)
 
 	// Theme (subset of branding)
-	router.GET("/admin/landing/theme", permissionmiddleware.Require(checker, "landing.branding.read"), h.GetTheme)
-	router.PATCH("/admin/landing/theme", permissionmiddleware.Require(checker, "landing.theme.manage"), h.UpdateTheme)
+	router.GET("/admin/landing/theme", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.branding.read"), h.GetTheme)
+	router.PATCH("/admin/landing/theme", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.theme.manage"), h.UpdateTheme)
 
 	// Page override branding
 	pageGroup := router.Group("/admin/landing-pages/:id/branding")
-	pageGroup.GET("", permissionmiddleware.Require(checker, "landing.branding.read"), h.GetPageBranding)
-	pageGroup.PATCH("", permissionmiddleware.Require(checker, "landing.branding.update"), h.UpdatePageBranding)
-	pageGroup.DELETE("", permissionmiddleware.Require(checker, "landing.branding.update"), h.DeletePageBranding)
+	pageGroup.GET("", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.branding.read"), h.GetPageBranding)
+	pageGroup.PATCH("", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.branding.update"), h.UpdatePageBranding)
+	pageGroup.DELETE("", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.branding.update"), h.DeletePageBranding)
 }
 
 func (h *AdminBrandingHandler) GetDefaultBranding(c *gin.Context) {

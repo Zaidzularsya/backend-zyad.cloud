@@ -24,20 +24,20 @@ func NewAdminNavigationHandler(navigationService service.NavigationService) *Adm
 	}
 }
 
-func (h *AdminNavigationHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.PermissionChecker) {
+func (h *AdminNavigationHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker) {
 	group := router.Group("/admin/landing/menus")
 
-	group.GET("", permissionmiddleware.Require(p, "landing.menu.manage"), h.ListMenus)
-	group.POST("", permissionmiddleware.Require(p, "landing.menu.manage"), h.CreateMenu)
-	group.PATCH("/:id", permissionmiddleware.Require(p, "landing.menu.manage"), h.UpdateMenu)
-	group.DELETE("/:id", permissionmiddleware.Require(p, "landing.menu.manage"), h.DeleteMenu)
+	group.GET("", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.menu.manage"), h.ListMenus)
+	group.POST("", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.menu.manage"), h.CreateMenu)
+	group.PATCH("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.menu.manage"), h.UpdateMenu)
+	group.DELETE("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.menu.manage"), h.DeleteMenu)
 
 	// Items
-	group.GET("/:id/items", permissionmiddleware.Require(p, "landing.menu.manage"), h.ListMenuItems)
-	group.POST("/:id/items", permissionmiddleware.Require(p, "landing.menu.manage"), h.CreateMenuItem)
-	group.PATCH("/:id/items/:itemId", permissionmiddleware.Require(p, "landing.menu.manage"), h.UpdateMenuItem)
-	group.DELETE("/:id/items/:itemId", permissionmiddleware.Require(p, "landing.menu.manage"), h.DeleteMenuItem)
-	group.PUT("/:id/items/reorder", permissionmiddleware.Require(p, "landing.menu.manage"), h.ReorderMenuItems)
+	group.GET("/:id/items", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.menu.manage"), h.ListMenuItems)
+	group.POST("/:id/items", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.menu.manage"), h.CreateMenuItem)
+	group.PATCH("/:id/items/:itemId", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.menu.manage"), h.UpdateMenuItem)
+	group.DELETE("/:id/items/:itemId", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.menu.manage"), h.DeleteMenuItem)
+	group.PUT("/:id/items/reorder", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.menu.manage"), h.ReorderMenuItems)
 }
 
 func (h *AdminNavigationHandler) ListMenus(c *gin.Context) {

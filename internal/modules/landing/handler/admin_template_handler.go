@@ -24,16 +24,16 @@ func NewAdminTemplateHandler(templateService service.TemplateService) *AdminTemp
 	}
 }
 
-func (h *AdminTemplateHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.PermissionChecker) {
+func (h *AdminTemplateHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker) {
 	group := router.Group("/admin/landing/section-templates")
 
-	group.GET("", permissionmiddleware.Require(p, "landing.section_template.manage"), h.List)
-	group.POST("", permissionmiddleware.Require(p, "landing.section_template.manage"), h.Create)
-	group.PATCH("/:id", permissionmiddleware.Require(p, "landing.section_template.manage"), h.Update)
-	group.DELETE("/:id", permissionmiddleware.Require(p, "landing.section_template.manage"), h.Delete)
+	group.GET("", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.section_template.manage"), h.List)
+	group.POST("", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.section_template.manage"), h.Create)
+	group.PATCH("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.section_template.manage"), h.Update)
+	group.DELETE("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.section_template.manage"), h.Delete)
 
 	// Instantiate template to a page
-	router.POST("/admin/landing-pages/:id/sections/from-template", permissionmiddleware.Require(p, "landing.page.update"), h.InstantiateToPage)
+	router.POST("/admin/landing-pages/:id/sections/from-template", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.page.update"), h.InstantiateToPage)
 }
 
 func (h *AdminTemplateHandler) List(c *gin.Context) {

@@ -38,27 +38,27 @@ func NewAdminPageHandler(
 	}
 }
 
-func (h *AdminPageHandler) RegisterRoutes(router *gin.RouterGroup, checker permissionmiddleware.PermissionChecker) {
+func (h *AdminPageHandler) RegisterRoutes(router *gin.RouterGroup, checker permissionmiddleware.CombinedPermissionChecker) {
 	group := router.Group("/admin/landing-pages")
 	group.Use(middleware.RequireActiveTenant())
 
-	group.GET("", permissionmiddleware.Require(checker, "landing.page.read"), h.ListPages)
-	group.POST("", permissionmiddleware.Require(checker, "landing.page.create"), h.CreatePage)
-	group.POST("/from-template", permissionmiddleware.Require(checker, "landing.page.create"), h.CreatePageFromTemplate)
-	group.GET("/:id", permissionmiddleware.Require(checker, "landing.page.read"), h.GetPage)
-	group.PATCH("/:id", permissionmiddleware.Require(checker, "landing.page.update"), h.UpdatePage)
-	group.DELETE("/:id", permissionmiddleware.Require(checker, "landing.page.delete"), h.DeletePage)
-	group.PUT("/:id/access", permissionmiddleware.Require(checker, "landing.page.update"), h.UpdatePageAccess)
-	group.POST("/:id/duplicate", permissionmiddleware.Require(checker, "landing.page.create"), h.DuplicatePage)
-	group.POST("/:id/archive", permissionmiddleware.Require(checker, "landing.page.archive"), h.ArchivePage)
-	group.POST("/:id/restore", permissionmiddleware.Require(checker, "landing.page.restore"), h.RestorePage)
-	group.PATCH("/:id/seo", permissionmiddleware.Require(checker, "landing.seo.manage"), h.UpdatePageSEO)
-	group.GET("/:id/revisions", permissionmiddleware.Require(checker, "landing.page.read"), h.ListRevisions)
-	group.POST("/:id/revisions/:version/restore", permissionmiddleware.Require(checker, "landing.page.publish"), h.RestoreRevision)
-	group.POST("/:id/publish", permissionmiddleware.Require(checker, "landing.page.publish"), h.PublishPage)
-	group.POST("/:id/unpublish", permissionmiddleware.Require(checker, "landing.page.publish"), h.UnpublishPage)
-	group.PUT("/:id/schedule", permissionmiddleware.Require(checker, "landing.page.publish"), h.SchedulePage)
-	group.DELETE("/:id/schedule", permissionmiddleware.Require(checker, "landing.page.publish"), h.CancelSchedule)
+	group.GET("", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.page.read"), h.ListPages)
+	group.POST("", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.page.create"), h.CreatePage)
+	group.POST("/from-template", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.page.create"), h.CreatePageFromTemplate)
+	group.GET("/:id", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.page.read"), h.GetPage)
+	group.PATCH("/:id", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.page.update"), h.UpdatePage)
+	group.DELETE("/:id", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.page.delete"), h.DeletePage)
+	group.PUT("/:id/access", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.page.update"), h.UpdatePageAccess)
+	group.POST("/:id/duplicate", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.page.create"), h.DuplicatePage)
+	group.POST("/:id/archive", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.page.archive"), h.ArchivePage)
+	group.POST("/:id/restore", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.page.restore"), h.RestorePage)
+	group.PATCH("/:id/seo", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.seo.manage"), h.UpdatePageSEO)
+	group.GET("/:id/revisions", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.page.read"), h.ListRevisions)
+	group.POST("/:id/revisions/:version/restore", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.page.publish"), h.RestoreRevision)
+	group.POST("/:id/publish", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.page.publish"), h.PublishPage)
+	group.POST("/:id/unpublish", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.page.publish"), h.UnpublishPage)
+	group.PUT("/:id/schedule", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.page.publish"), h.SchedulePage)
+	group.DELETE("/:id/schedule", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.page.publish"), h.CancelSchedule)
 }
 
 // ListPages godoc

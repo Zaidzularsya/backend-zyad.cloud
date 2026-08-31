@@ -25,14 +25,14 @@ func NewAdminFormHandler(formSvc service.FormService) *AdminFormHandler {
 	}
 }
 
-func (h *AdminFormHandler) RegisterRoutes(router *gin.RouterGroup, checker permissionmiddleware.PermissionChecker) {
+func (h *AdminFormHandler) RegisterRoutes(router *gin.RouterGroup, checker permissionmiddleware.CombinedPermissionChecker) {
 	pageGroup := router.Group("/admin/landing-pages/:id/forms")
 	
-	pageGroup.GET("", permissionmiddleware.Require(checker, "landing.page.read"), h.ListForms)
-	pageGroup.POST("", permissionmiddleware.Require(checker, "landing.form.manage"), h.CreateForm)
-	pageGroup.PATCH("/:formId", permissionmiddleware.Require(checker, "landing.form.manage"), h.UpdateForm)
-	pageGroup.DELETE("/:formId", permissionmiddleware.Require(checker, "landing.form.manage"), h.DeleteForm)
-	pageGroup.PUT("/:formId/fields", permissionmiddleware.Require(checker, "landing.form.manage"), h.ReplaceFields)
+	pageGroup.GET("", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.page.read"), h.ListForms)
+	pageGroup.POST("", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.form.manage"), h.CreateForm)
+	pageGroup.PATCH("/:formId", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.form.manage"), h.UpdateForm)
+	pageGroup.DELETE("/:formId", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.form.manage"), h.DeleteForm)
+	pageGroup.PUT("/:formId/fields", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.form.manage"), h.ReplaceFields)
 }
 
 func (h *AdminFormHandler) ListForms(c *gin.Context) {

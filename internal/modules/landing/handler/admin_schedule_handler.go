@@ -23,10 +23,10 @@ func NewAdminScheduleHandler(revisionService service.RevisionService) *AdminSche
 	}
 }
 
-func (h *AdminScheduleHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.PermissionChecker) {
+func (h *AdminScheduleHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker) {
 	group := router.Group("/admin/landing-pages/:id/schedules")
 
-	group.DELETE("/:scheduleId", permissionmiddleware.Require(p, "landing.page.publish"), h.CancelSchedule)
+	group.DELETE("/:scheduleId", permissionmiddleware.RequireOrganizationOrGlobal(p, "landing.page.publish"), h.CancelSchedule)
 }
 
 func (h *AdminScheduleHandler) Schedule(c *gin.Context) {

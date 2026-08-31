@@ -26,14 +26,14 @@ func NewAdminSectionHandler(sectionSvc service.SectionService) *AdminSectionHand
 	}
 }
 
-func (h *AdminSectionHandler) RegisterRoutes(router *gin.RouterGroup, checker permissionmiddleware.PermissionChecker) {
+func (h *AdminSectionHandler) RegisterRoutes(router *gin.RouterGroup, checker permissionmiddleware.CombinedPermissionChecker) {
 	group := router.Group("/admin/landing-pages/:id/sections")
 	
-	group.GET("", permissionmiddleware.Require(checker, "landing.page.read"), h.ListSections)
-	group.POST("", permissionmiddleware.Require(checker, "landing.section.manage"), h.CreateSection)
-	group.PATCH("/:sectionId", permissionmiddleware.Require(checker, "landing.section.manage"), h.UpdateSection)
-	group.DELETE("/:sectionId", permissionmiddleware.Require(checker, "landing.section.manage"), h.DeleteSection)
-	group.PUT("/reorder", permissionmiddleware.Require(checker, "landing.section.manage"), h.ReorderSections)
+	group.GET("", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.page.read"), h.ListSections)
+	group.POST("", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.section.manage"), h.CreateSection)
+	group.PATCH("/:sectionId", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.section.manage"), h.UpdateSection)
+	group.DELETE("/:sectionId", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.section.manage"), h.DeleteSection)
+	group.PUT("/reorder", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.section.manage"), h.ReorderSections)
 }
 
 // ListSections godoc
