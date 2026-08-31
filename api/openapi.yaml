@@ -2857,6 +2857,105 @@ paths:
       responses:
         "200":
           description: Media uploaded successfully
+  /api/v1/admin/landing/media/presign-upload:
+    post:
+      summary: Create a presigned URL to upload landing media directly to object storage
+      description: >
+        Returns a signed upload URL, the generated object_key, and headers the
+        client must replay on the PUT request. Only available when the storage
+        driver supports presigning (returns 409 otherwise).
+      operationId: presignLandingMediaUpload
+      tags:
+        - Landing Media
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - filename
+                - mime_type
+                - size_bytes
+              properties:
+                filename:
+                  type: string
+                mime_type:
+                  type: string
+                size_bytes:
+                  type: integer
+                  format: int64
+      responses:
+        "200":
+          description: Presigned upload URL created
+        "400":
+          description: Invalid mime type or file too large
+        "409":
+          description: Storage driver does not support presigned URLs
+  /api/v1/admin/landing/media/confirm-upload:
+    post:
+      summary: Confirm a presigned upload and persist the media metadata row
+      operationId: confirmLandingMediaUpload
+      tags:
+        - Landing Media
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - object_key
+                - filename
+                - mime_type
+                - size_bytes
+              properties:
+                object_key:
+                  type: string
+                filename:
+                  type: string
+                mime_type:
+                  type: string
+                size_bytes:
+                  type: integer
+                  format: int64
+                alt_text:
+                  type: string
+      responses:
+        "201":
+          description: Media metadata created
+        "404":
+          description: Uploaded object not found in storage
+  /api/v1/admin/landing/media/presign-download:
+    post:
+      summary: Create a presigned URL to download an organization-owned object
+      operationId: presignLandingMediaDownload
+      tags:
+        - Landing Media
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - object_key
+              properties:
+                object_key:
+                  type: string
+      responses:
+        "200":
+          description: Presigned download URL created
+        "403":
+          description: Object does not belong to the organization
+        "409":
+          description: Storage driver does not support presigned URLs
   /api/v1/admin/landing/media/{id}:
     delete:
       summary: Delete landing media

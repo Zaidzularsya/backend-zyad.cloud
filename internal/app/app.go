@@ -331,7 +331,7 @@ func New(ctx context.Context) (*App, error) {
 		landingSectionRepo,
 		landingservice.WithTemplateSectionQuotaGuard(subscriptionGuardService),
 	)
-	mediaStorage, err := storage.NewLocalProvider(cfg.Storage.LocalPath)
+	mediaStorage, err := buildMediaStorage(cfg.Storage)
 	if err != nil {
 		return nil, fmt.Errorf("init media storage: %w", err)
 	}
@@ -429,6 +429,26 @@ func New(ctx context.Context) (*App, error) {
 		router: router,
 		server: server,
 	}, nil
+}
+
+// buildMediaStorage memilih provider storage sesuai cfg.Driver. Default "local".
+func buildMediaStorage(cfg config.StorageConfig) (storage.MediaStorage, error) {
+	switch cfg.Driver {
+	case "", "local":
+		return storage.NewLocalProvider(cfg.LocalPath)
+	case "s3":
+		return storage.NewS3Provider(storage.S3Config{
+			Endpoint:      cfg.S3Endpoint,
+			Region:        cfg.S3Region,
+			Bucket:        cfg.S3Bucket,
+			AccessKey:     cfg.S3AccessKey,
+			SecretKey:     cfg.S3SecretKey,
+			UsePathStyle:  cfg.S3UsePathStyle,
+			PresignExpiry: cfg.S3PresignExpiry,
+		})
+	default:
+		return nil, fmt.Errorf("unknown storage driver %q", cfg.Driver)
+	}
 }
 
 func Run(ctx context.Context) error {

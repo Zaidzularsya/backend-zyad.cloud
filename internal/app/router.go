@@ -1,12 +1,15 @@
 package app
 
 import (
+	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	corehttp "zyad.cloud/internal/core/http"
 	"zyad.cloud/internal/core/middleware"
+	"zyad.cloud/internal/platform/storage"
 
 	"github.com/gin-gonic/gin"
 )
@@ -63,13 +66,24 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.MediaStorage != nil {
 		router.GET("/public/media/*objectKey", func(c *gin.Context) {
 			objectKey := strings.TrimPrefix(c.Param("objectKey"), "/")
-			filePath, err := deps.MediaStorage.ResolvePublic(objectKey)
+			body, contentType, err := deps.MediaStorage.OpenPublic(c.Request.Context(), objectKey)
 			if err != nil {
+				if !errors.Is(err, storage.ErrObjectNotFound) &&
+					!errors.Is(err, storage.ErrInvalidTenantObject) {
+					deps.Logger.Error("serve public media failed", "object_key", objectKey, "error", err)
+				}
 				c.Status(http.StatusNotFound)
 				return
 			}
+			defer body.Close()
 			c.Header("Cache-Control", "public, max-age=3600")
-			c.File(filePath)
+			if contentType != "" {
+				c.Header("Content-Type", contentType)
+			}
+			c.Status(http.StatusOK)
+			if _, err := io.Copy(c.Writer, body); err != nil {
+				deps.Logger.Error("stream public media failed", "object_key", objectKey, "error", err)
+			}
 		})
 	}
 

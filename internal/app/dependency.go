@@ -59,7 +59,7 @@ type Dependencies struct {
 	LandingAdminRevisionHandler      *landinghandler.AdminRevisionHandler
 	LandingAdminScheduleHandler      *landinghandler.AdminScheduleHandler
 	LandingAdminIntegrationHandler   *landinghandler.AdminIntegrationHandler
-	MediaStorage                     *storage.LocalProvider
+	MediaStorage                     storage.MediaStorage
 	PermissionChecker                permissionmiddleware.CombinedPermissionChecker
 	Authenticator                    middleware.AccessTokenAuthenticator
 	OrganizationResolver             middleware.AuthenticatedOrganizationResolver

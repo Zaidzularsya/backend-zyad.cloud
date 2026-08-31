@@ -23,6 +23,20 @@ const MaxMediaSizeBytes = 10 * 1024 * 1024 // 10MB
 
 const mediaPublicPathPrefix = "/public/media/"
 
+// mediaStorageNamespace adalah segmen namespace object key untuk media landing.
+const mediaStorageNamespace = "landing-media"
+
+// allowedMediaMimeTypes membatasi tipe file yang boleh disimpan sebagai media
+// landing. Dipakai baik oleh upload langsung maupun presigned upload.
+var allowedMediaMimeTypes = map[string]bool{
+	"image/jpeg":      true,
+	"image/png":       true,
+	"image/svg+xml":   true,
+	"image/webp":      true,
+	"application/pdf": true,
+	"video/mp4":       true,
+}
+
 type mediaService struct {
 	mediaRepo     repository.MediaRepository
 	objectStorage storage.ObjectStorage
@@ -70,17 +84,8 @@ func (s *mediaService) UploadAsset(
 	}
 
 	// Validate MIME
-	validMimes := map[string]bool{
-		"image/jpeg":      true,
-		"image/png":       true,
-		"image/svg+xml":   true,
-		"image/webp":      true,
-		"application/pdf": true,
-		"video/mp4":       true,
-	}
-
 	mimeLower := strings.ToLower(params.MimeType)
-	if !validMimes[mimeLower] {
+	if !allowedMediaMimeTypes[mimeLower] {
 		return domain.LandingMediaAsset{}, ErrInvalidMimeType
 	}
 
@@ -95,7 +100,7 @@ func (s *mediaService) UploadAsset(
 	storageInput := storage.ObjectKeyInput{
 		Scope:     scope,
 		Class:     storage.ObjectClassPublic,
-		Namespace: "landing-media",
+		Namespace: mediaStorageNamespace,
 		Filename:  params.Filename,
 		Extension: path.Ext(params.Filename),
 	}

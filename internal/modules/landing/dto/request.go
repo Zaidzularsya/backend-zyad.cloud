@@ -332,6 +332,30 @@ type PublicSubmissionRequest struct {
 	UploadedFiles map[string][]string     `json:"uploaded_files"`
 }
 
+// PresignMediaUploadRequest meminta URL bertanda tangan untuk mengunggah media
+// langsung ke object storage.
+type PresignMediaUploadRequest struct {
+	Filename  string `json:"filename" binding:"required,min=1,max=255"`
+	MimeType  string `json:"mime_type" binding:"required"`
+	SizeBytes int64  `json:"size_bytes" binding:"required,min=1"`
+}
+
+// ConfirmMediaUploadRequest mencatat metadata media setelah unggah presigned
+// selesai.
+type ConfirmMediaUploadRequest struct {
+	ObjectKey string `json:"object_key" binding:"required"`
+	Filename  string `json:"filename" binding:"required,min=1,max=255"`
+	MimeType  string `json:"mime_type" binding:"required"`
+	SizeBytes int64  `json:"size_bytes" binding:"required,min=1"`
+	AltText   string `json:"alt_text"`
+}
+
+// PresignMediaDownloadRequest meminta URL bertanda tangan untuk mengunduh object
+// milik organization langsung dari object storage.
+type PresignMediaDownloadRequest struct {
+	ObjectKey string `json:"object_key" binding:"required"`
+}
+
 // PublicAnalyticsEventRequest tracks visitor interaction.
 type PublicAnalyticsEventRequest struct {
 	Event       string         `json:"event" binding:"required"`

@@ -153,6 +153,15 @@ func PublicAssetPath(scope coretenant.Scope, asset PublicAsset) (string, error) 
 	return "/public/assets/" + publicID, nil
 }
 
+// isPublicObjectKey memastikan key menunjuk object berkelas public milik sebuah
+// organization: organizations/<id>/public/<namespace>/<name>.
+func isPublicObjectKey(cleanedKey string) bool {
+	segments := strings.Split(cleanedKey, "/")
+	return len(segments) >= 4 &&
+		segments[0] == "organizations" &&
+		segments[2] == string(ObjectClassPublic)
+}
+
 func (c ObjectClass) IsValid() bool {
 	switch c {
 	case ObjectClassPrivate, ObjectClassPublic, ObjectClassTemp:

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func LoadApp() AppConfig {
@@ -146,7 +147,16 @@ func LoadNotification() NotificationConfig {
 
 func LoadStorage() StorageConfig {
 	return StorageConfig{
+		Driver:    strings.ToLower(getEnv("STORAGE_DRIVER", "local")),
 		LocalPath: getEnv("STORAGE_LOCAL_PATH", "./storage"),
+
+		S3Endpoint:      getEnv("STORAGE_S3_ENDPOINT", ""),
+		S3Region:        getEnv("STORAGE_S3_REGION", "us-east-1"),
+		S3Bucket:        getEnv("STORAGE_S3_BUCKET", ""),
+		S3AccessKey:     getEnv("STORAGE_S3_ACCESS_KEY", ""),
+		S3SecretKey:     getEnv("STORAGE_S3_SECRET_KEY", ""),
+		S3UsePathStyle:  getEnvBool("STORAGE_S3_USE_PATH_STYLE", true),
+		S3PresignExpiry: getEnvDuration("STORAGE_S3_PRESIGN_EXPIRY", 15*time.Minute),
 	}
 }
 
@@ -235,6 +245,18 @@ func getEnvBool(key string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+func getEnvDuration(key string, fallback time.Duration) time.Duration {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil || d <= 0 {
+		return fallback
+	}
+	return d
 }
 
 func getEnvList(key string, fallback []string) []string {

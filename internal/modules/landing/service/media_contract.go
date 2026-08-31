@@ -15,4 +15,8 @@ type MediaService interface {
 	ListAssets(ctx context.Context, scope coretenant.Scope) ([]domain.LandingMediaAsset, error)
 	DeleteAsset(ctx context.Context, scope coretenant.Scope, id string) error
 	MarkAssetProcessing(ctx context.Context, scope coretenant.Scope, id string, status domain.MediaProcessingStatus) error
+
+	PresignUpload(ctx context.Context, scope coretenant.Scope, params PresignUploadParams) (PresignUploadResult, error)
+	ConfirmUpload(ctx context.Context, scope coretenant.Scope, params ConfirmUploadParams) (domain.LandingMediaAsset, error)
+	PresignDownload(ctx context.Context, scope coretenant.Scope, objectKey string) (PresignDownloadResult, error)
 }

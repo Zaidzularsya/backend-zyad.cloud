@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"sync"
+	"time"
 )
 
 type Config struct {
@@ -193,10 +194,24 @@ type SecurityConfig struct {
 	EncryptionKey string
 }
 
-// StorageConfig mengatur penyimpanan file (media upload). LocalPath adalah
-// root directory provider lokal; di VPS taruh di shared/ agar tahan deploy.
+// StorageConfig mengatur penyimpanan file (media upload).
+//
+// Driver memilih provider aktif:
+//   - "local": simpan di disk di bawah LocalPath (default). Di VPS taruh di
+//     shared/ agar tahan deploy.
+//   - "s3": simpan di object storage S3-compatible (MinIO self-hosted).
+//     Field S3* wajib diisi saat Driver == "s3".
 type StorageConfig struct {
+	Driver    string
 	LocalPath string
+
+	S3Endpoint      string
+	S3Region        string
+	S3Bucket        string
+	S3AccessKey     string
+	S3SecretKey     string
+	S3UsePathStyle  bool
+	S3PresignExpiry time.Duration
 }
 
 func (c AppConfig) Address() string {

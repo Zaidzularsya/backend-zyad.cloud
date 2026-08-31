@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,13 +89,7 @@ func (p *LocalProvider) Delete(_ context.Context, key string) error {
 // Dipakai route serving publik; object private/temp tidak pernah dilayani.
 func (p *LocalProvider) ResolvePublic(key string) (string, error) {
 	cleaned := cleanObjectKey(key)
-	if cleaned == "" {
-		return "", ErrInvalidTenantObject
-	}
-	segments := strings.Split(cleaned, "/")
-	if len(segments) < 4 ||
-		segments[0] != "organizations" ||
-		segments[2] != string(ObjectClassPublic) {
+	if cleaned == "" || !isPublicObjectKey(cleaned) {
 		return "", ErrInvalidTenantObject
 	}
 	target, err := p.resolve(cleaned)
@@ -106,6 +101,26 @@ func (p *LocalProvider) ResolvePublic(key string) (string, error) {
 		return "", ErrObjectNotFound
 	}
 	return target, nil
+}
+
+// OpenPublic membuka object berkelas public untuk dilayani route publik.
+func (p *LocalProvider) OpenPublic(_ context.Context, key string) (io.ReadCloser, string, error) {
+	target, err := p.ResolvePublic(key)
+	if err != nil {
+		return nil, "", err
+	}
+	file, err := os.Open(target)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, "", ErrObjectNotFound
+		}
+		return nil, "", fmt.Errorf("open storage file: %w", err)
+	}
+	contentType := mime.TypeByExtension(filepath.Ext(target))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	return file, contentType, nil
 }
 
 func (p *LocalProvider) resolve(key string) (string, error) {
