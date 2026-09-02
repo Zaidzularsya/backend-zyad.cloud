@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -17,20 +18,24 @@ import (
 )
 
 type AdminSectionHandler struct {
-	sectionSvc service.SectionService
+	sectionSvc  service.SectionService
+	revisionSvc service.RevisionService
 }
 
-func NewAdminSectionHandler(sectionSvc service.SectionService) *AdminSectionHandler {
+func NewAdminSectionHandler(sectionSvc service.SectionService, revisionSvc service.RevisionService) *AdminSectionHandler {
 	return &AdminSectionHandler{
-		sectionSvc: sectionSvc,
+		sectionSvc:  sectionSvc,
+		revisionSvc: revisionSvc,
 	}
 }
 
 func (h *AdminSectionHandler) RegisterRoutes(router *gin.RouterGroup, checker permissionmiddleware.CombinedPermissionChecker) {
 	group := router.Group("/admin/landing-pages/:id/sections")
-	
+
 	group.GET("", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.page.read"), h.ListSections)
 	group.POST("", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.section.manage"), h.CreateSection)
+	group.PUT("", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.section.manage"), h.ReplaceSections)
+	group.POST("/autosave", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.section.manage"), h.AutosaveSections)
 	group.PATCH("/:sectionId", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.section.manage"), h.UpdateSection)
 	group.DELETE("/:sectionId", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.section.manage"), h.DeleteSection)
 	group.PUT("/reorder", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.section.manage"), h.ReorderSections)
@@ -186,4 +191,112 @@ func (h *AdminSectionHandler) ReorderSections(c *gin.Context) {
 	}
 
 	corehttp.OK(c, "Sections reordered successfully", nil)
+}
+
+func toReplaceSectionItems(in []dto.BulkSectionItem) []repository.ReplaceSectionItem {
+	out := make([]repository.ReplaceSectionItem, 0, len(in))
+	for _, item := range in {
+		out = append(out, repository.ReplaceSectionItem{
+			ID:        item.ID,
+			Key:       item.Key,
+			Type:      domain.SectionType(item.Type),
+			Name:      item.Name,
+			IsEnabled: item.IsEnabled,
+			Content:   item.Content,
+			Style:     item.Style,
+		})
+	}
+	return out
+}
+
+// ReplaceSections replaces the whole section set of a page in one transaction:
+// upsert every item, soft-delete anything omitted. Used by the visual builder's
+// explicit "Save".
+func (h *AdminSectionHandler) ReplaceSections(c *gin.Context) {
+	tenantContext, err := coretenant.RequireContext(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	scope, err := coretenant.NewScope(tenantContext)
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+
+	pageID := c.Param("id")
+	var req dto.ReplaceSectionsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		return
+	}
+
+	sections, err := h.sectionSvc.ReplaceAll(
+		c.Request.Context(),
+		scope,
+		tenantContext.OrganizationType(),
+		pageID,
+		toReplaceSectionItems(req.Sections),
+		permissionmiddleware.UserID(c),
+	)
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+
+	corehttp.OK(c, "Sections replaced successfully", sections)
+}
+
+// AutosaveSections is ReplaceSections plus a draft revision snapshot. Used by
+// the visual builder's debounced autosave.
+func (h *AdminSectionHandler) AutosaveSections(c *gin.Context) {
+	tenantContext, err := coretenant.RequireContext(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	scope, err := coretenant.NewScope(tenantContext)
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+
+	pageID := c.Param("id")
+	var req dto.AutosaveSectionsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		return
+	}
+
+	actorID := permissionmiddleware.UserID(c)
+	sections, err := h.sectionSvc.ReplaceAll(
+		c.Request.Context(),
+		scope,
+		tenantContext.OrganizationType(),
+		pageID,
+		toReplaceSectionItems(req.Sections),
+		actorID,
+	)
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+
+	if h.revisionSvc != nil {
+		changeNote := req.ChangeNote
+		if changeNote == "" {
+			changeNote = "autosave"
+		}
+		if _, err := h.revisionSvc.AutosaveDraft(c.Request.Context(), scope, service.AutosaveParams{
+			PageID:     pageID,
+			Snapshot:   map[string]any{"sections": sections, "snapshot_time": time.Now().UTC()},
+			ChangeNote: changeNote,
+			ActorID:    actorID,
+		}); err != nil {
+			corehttp.Fail(c, err)
+			return
+		}
+	}
+
+	corehttp.OK(c, "Sections autosaved successfully", sections)
 }

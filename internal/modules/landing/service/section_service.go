@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/microcosm-cc/bluemonday"
 
@@ -115,8 +117,9 @@ func (s *sectionService) Create(ctx context.Context, scope coretenant.Scope, org
 	if err := s.requireCreateQuota(ctx, scope, params.LandingPageID); err != nil {
 		return domain.LandingSection{}, err
 	}
-	// Sanitize content
+	// Sanitize content + style
 	params.Content = s.sanitizeMap(params.Content)
+	params.Style = s.sanitizeStyleMap(params.Style)
 	return s.sectionRepo.Create(ctx, scope, params)
 }
 
@@ -165,6 +168,9 @@ func (s *sectionService) Update(ctx context.Context, scope coretenant.Scope, org
 		if params.Content != nil {
 			params.Content = s.sanitizeMap(params.Content)
 		}
+		if params.Style != nil {
+			params.Style = s.sanitizeStyleMap(params.Style)
+		}
 	}
 	return s.sectionRepo.Update(ctx, scope, id, params)
 }
@@ -183,6 +189,57 @@ func (s *sectionService) Toggle(ctx context.Context, scope coretenant.Scope, id 
 
 func (s *sectionService) Reorder(ctx context.Context, scope coretenant.Scope, pageID string, params []repository.SectionReorderParam) error {
 	return s.sectionRepo.Reorder(ctx, scope, pageID, params)
+}
+
+func (s *sectionService) ReplaceAll(
+	ctx context.Context,
+	scope coretenant.Scope,
+	organizationType coretenant.OrganizationType,
+	pageID string,
+	items []repository.ReplaceSectionItem,
+	actorID string,
+) ([]domain.LandingSection, error) {
+	sanitized := make([]repository.ReplaceSectionItem, len(items))
+	for i, item := range items {
+		if err := validatePricingSource(item.Type, item.Content, organizationType); err != nil {
+			return nil, err
+		}
+		if err := validateFooterVariant(item.Type, item.Style); err != nil {
+			return nil, err
+		}
+
+		content := s.sanitizeMap(item.Content)
+		if content == nil {
+			content = map[string]any{}
+		}
+		style := s.sanitizeStyleMap(item.Style)
+		if style == nil {
+			style = map[string]any{}
+		}
+
+		item.Content = content
+		item.Style = style
+		sanitized[i] = item
+	}
+
+	if s.quotaGuard != nil {
+		if err := s.quotaGuard.RequireQuotaValue(
+			ctx,
+			scope.OrganizationID(),
+			domain.FeatureLandingMaxSections,
+			"limit",
+			int64(len(sanitized)),
+			0,
+		); err != nil {
+			return nil, err
+		}
+	}
+
+	return s.sectionRepo.ReplaceAll(ctx, scope, repository.ReplaceAllParams{
+		LandingPageID: pageID,
+		ActorID:       actorID,
+		Items:         sanitized,
+	})
 }
 
 // contentSanitizerPolicy is the single allowlist used for every string value stored in
@@ -241,4 +298,73 @@ func (s *sectionService) sanitizeSlice(arr []any) []any {
 
 func (s *sectionService) sanitizeString(str string) string {
 	return contentSanitizerPolicy.Sanitize(str)
+}
+
+// styleTextPolicy strips every tag/entity from a style string leaf. style values
+// are class names, colour hexes, enum tokens and the like — never markup.
+var styleTextPolicy = bluemonday.StrictPolicy()
+
+// sanitizeStyleMap drops any top-level key outside domain.AllowedStyleKeys and
+// recursively cleans the rest: URL-ish leaves go through sanitizeStyleURL, other
+// string leaves are stripped of markup, numbers/bools are left as-is.
+func (s *sectionService) sanitizeStyleMap(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	sanitized := make(map[string]any)
+	for k, v := range m {
+		if !domain.AllowedStyleKeys[k] {
+			continue
+		}
+		sanitized[k] = s.sanitizeStyleValue(k, v)
+	}
+	return sanitized
+}
+
+func (s *sectionService) sanitizeStyleValue(key string, v any) any {
+	switch val := v.(type) {
+	case string:
+		if domain.StyleURLKeys[key] {
+			return sanitizeStyleURL(val)
+		}
+		return styleTextPolicy.Sanitize(val)
+	case map[string]any:
+		out := make(map[string]any, len(val))
+		for k, nv := range val {
+			out[k] = s.sanitizeStyleValue(k, nv)
+		}
+		return out
+	case []any:
+		out := make([]any, len(val))
+		for i, nv := range val {
+			out[i] = s.sanitizeStyleValue(key, nv)
+		}
+		return out
+	default:
+		return val
+	}
+}
+
+// sanitizeStyleURL returns raw only if it is a plain http(s) URL or a
+// site-relative path with no characters that could break out of a CSS
+// url("…") context; otherwise it returns "".
+func sanitizeStyleURL(raw string) string {
+	v := strings.TrimSpace(raw)
+	if v == "" {
+		return ""
+	}
+	if strings.ContainsAny(v, "\"'()<>;\\ \t\r\n") {
+		return ""
+	}
+	if strings.HasPrefix(v, "/") && !strings.HasPrefix(v, "//") {
+		return v
+	}
+	parsed, err := url.Parse(v)
+	if err != nil {
+		return ""
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return ""
+	}
+	return v
 }

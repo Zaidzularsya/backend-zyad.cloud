@@ -119,3 +119,85 @@ func TestSectionServiceIntegration(t *testing.T) {
 		t.Fatalf("Delete section: %v", err)
 	}
 }
+
+func TestSectionServiceReplaceAllIntegration(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+
+	_, err := db.Exec(ctx, `
+		INSERT INTO organizations (id, type, slug, name, status)
+		VALUES ($1, 'customer', 'org-svc-replaceall', 'Org Svc ReplaceAll', 'active')
+		ON CONFLICT DO NOTHING
+	`, tenants.A.OrganizationID)
+	if err != nil {
+		t.Fatalf("insert organization: %v", err)
+	}
+
+	pageRepo := repository.NewPageRepository(db)
+	sectionRepo := repository.NewSectionRepository(db)
+	sectionSvc := service.NewSectionService(sectionRepo)
+
+	page, err := pageRepo.Create(ctx, tenants.A.Scope, repository.CreatePageParams{
+		Name:       "Svc ReplaceAll Page",
+		Title:      "Promo",
+		Slug:       strings.ReplaceAll(testutil.UniqueCode("svc-replaceall"), ".", "-"),
+		Type:       domain.PageTypeCampaign,
+		Status:     domain.PageStatusDraft,
+		Visibility: domain.PageVisibilityPublic,
+	})
+	if err != nil {
+		t.Fatalf("create page: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Exec(context.Background(), "DELETE FROM landing_pages WHERE id = $1", page.ID)
+	})
+
+	first, err := sectionSvc.ReplaceAll(ctx, tenants.A.Scope, tenants.A.Context.OrganizationType(), page.ID, []repository.ReplaceSectionItem{
+		{
+			Key:  "hero-1",
+			Type: domain.SectionTypeHero,
+			Name: "Hero",
+			Content: map[string]any{
+				"title": "Welcome <script>alert(1)</script>",
+			},
+			Style: map[string]any{
+				"variant":    "default",
+				"onload":     "alert(1)",
+				"background": map[string]any{"image": "javascript:alert(1)"},
+			},
+		},
+		{Key: "cta-1", Type: domain.SectionTypeCTA, Name: "CTA"},
+	}, "")
+	if err != nil {
+		t.Fatalf("ReplaceAll seed: %v", err)
+	}
+	if len(first) != 2 {
+		t.Fatalf("expected 2 sections, got %d", len(first))
+	}
+	hero := first[0]
+	if hero.Content["title"] != "Welcome " {
+		t.Errorf("content not sanitized through ReplaceAll: %#v", hero.Content["title"])
+	}
+	if _, exists := hero.Style["onload"]; exists {
+		t.Errorf("unknown style key persisted: %#v", hero.Style)
+	}
+	if bg, ok := hero.Style["background"].(map[string]any); !ok || bg["image"] != "" {
+		t.Errorf("unsafe style url persisted: %#v", hero.Style["background"])
+	}
+
+	// Second call: drop cta-1, keep hero-1 by id, add faq-1.
+	second, err := sectionSvc.ReplaceAll(ctx, tenants.A.Scope, tenants.A.Context.OrganizationType(), page.ID, []repository.ReplaceSectionItem{
+		{ID: hero.ID, Key: "hero-1", Type: domain.SectionTypeHero, Name: "Hero v2"},
+		{Key: "faq-1", Type: domain.SectionTypeFAQ, Name: "FAQ"},
+	}, "")
+	if err != nil {
+		t.Fatalf("ReplaceAll update: %v", err)
+	}
+	if len(second) != 2 || second[0].Key != "hero-1" || second[0].Name != "Hero v2" || second[1].Key != "faq-1" {
+		t.Fatalf("unexpected final sections: %#v", second)
+	}
+	if second[0].ID != hero.ID {
+		t.Fatalf("hero-1 identity changed: was %q now %q", hero.ID, second[0].ID)
+	}
+}

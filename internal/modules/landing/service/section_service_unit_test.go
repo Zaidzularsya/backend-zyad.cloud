@@ -11,12 +11,16 @@ import (
 )
 
 type sectionServiceRepoStub struct {
-	listByPageItems []landingdomain.LandingSection
-	listByPageErr   error
-	createCalled    bool
-	updateCalled    bool
-	findByIDResult  landingdomain.LandingSection
-	findByIDErr     error
+	listByPageItems  []landingdomain.LandingSection
+	listByPageErr    error
+	createCalled     bool
+	updateCalled     bool
+	findByIDResult   landingdomain.LandingSection
+	findByIDErr      error
+	replaceAllCalled bool
+	replaceAllParams repository.ReplaceAllParams
+	replaceAllResult []landingdomain.LandingSection
+	replaceAllErr    error
 }
 
 func (s *sectionServiceRepoStub) Create(
@@ -64,6 +68,16 @@ func (s *sectionServiceRepoStub) Reorder(
 	[]repository.SectionReorderParam,
 ) error {
 	return nil
+}
+
+func (s *sectionServiceRepoStub) ReplaceAll(
+	_ context.Context,
+	_ coretenant.Scope,
+	params repository.ReplaceAllParams,
+) ([]landingdomain.LandingSection, error) {
+	s.replaceAllCalled = true
+	s.replaceAllParams = params
+	return s.replaceAllResult, s.replaceAllErr
 }
 
 func (s *sectionServiceRepoStub) Delete(context.Context, coretenant.Scope, string) error {
@@ -378,6 +392,186 @@ func TestSectionServiceSanitizeMapRecursesThroughNestedStructures(t *testing.T) 
 	}
 	if sanitized["count"] != 5 {
 		t.Errorf("sanitizeMap() should leave non-string values untouched, got %v", sanitized["count"])
+	}
+}
+
+func TestSectionServiceReplaceAllSanitizesAndChecksQuota(t *testing.T) {
+	repo := &sectionServiceRepoStub{}
+	guard := &sectionServiceQuotaGuardStub{}
+	service := NewSectionService(repo, WithLandingSectionQuotaGuard(guard))
+
+	items := []repository.ReplaceSectionItem{
+		{
+			Key:  "hero-1",
+			Type: landingdomain.SectionTypeHero,
+			Name: "Hero",
+			Content: map[string]any{
+				"title": "Welcome <script>alert(1)</script>",
+			},
+			Style: map[string]any{
+				"variant":    "default",
+				"onload":     "alert(1)",
+				"background": map[string]any{"image": "javascript:alert(1)", "color": "#fff"},
+			},
+		},
+		{
+			ID:   "11111111-1111-1111-1111-111111111111",
+			Key:  "cta-1",
+			Type: landingdomain.SectionTypeCTA,
+			Name: "CTA",
+		},
+	}
+
+	_, err := service.ReplaceAll(context.Background(), mustLandingScope(t), coretenant.OrganizationTypeCustomer, "page-1", items, "actor-1")
+	if err != nil {
+		t.Fatalf("ReplaceAll() error = %v", err)
+	}
+	if !repo.replaceAllCalled {
+		t.Fatal("ReplaceAll() should reach the repository when validation passes")
+	}
+	if repo.replaceAllParams.LandingPageID != "page-1" || repo.replaceAllParams.ActorID != "actor-1" {
+		t.Fatalf("ReplaceAll() params = %#v", repo.replaceAllParams)
+	}
+
+	if guard.featureKey != landingdomain.FeatureLandingMaxSections ||
+		guard.limitKey != "limit" ||
+		guard.usedValue != 2 ||
+		guard.delta != 0 {
+		t.Fatalf("quota guard = %#v", guard)
+	}
+
+	got := repo.replaceAllParams.Items[0]
+	if got.Content["title"] != "Welcome " {
+		t.Errorf("content not sanitized: %#v", got.Content["title"])
+	}
+	if _, exists := got.Style["onload"]; exists {
+		t.Errorf("unknown style key should be dropped: %#v", got.Style)
+	}
+	if got.Style["variant"] != "default" {
+		t.Errorf("known style key should survive: %#v", got.Style["variant"])
+	}
+	bg, ok := got.Style["background"].(map[string]any)
+	if !ok {
+		t.Fatalf("background style = %#v", got.Style["background"])
+	}
+	if bg["image"] != "" {
+		t.Errorf("unsafe style url should be blanked: %#v", bg["image"])
+	}
+	if bg["color"] != "#fff" {
+		t.Errorf("safe nested style value should survive: %#v", bg["color"])
+	}
+}
+
+func TestSectionServiceReplaceAllRejectsUnknownFooterVariant(t *testing.T) {
+	repo := &sectionServiceRepoStub{}
+	service := NewSectionService(repo)
+
+	_, err := service.ReplaceAll(context.Background(), mustLandingScope(t), coretenant.OrganizationTypeCustomer, "page-1", []repository.ReplaceSectionItem{
+		{
+			Key:   "footer-1",
+			Type:  landingdomain.SectionTypeFooter,
+			Name:  "Footer",
+			Style: map[string]any{"variant": "carousel"},
+		},
+	}, "actor-1")
+	if err == nil {
+		t.Fatal("ReplaceAll() expected error for unknown footer variant")
+	}
+	if repo.replaceAllCalled {
+		t.Fatal("ReplaceAll() should not reach the repository when an item is invalid")
+	}
+}
+
+func TestSectionServiceReplaceAllRejectsPlatformCatalogForNonPlatformOrg(t *testing.T) {
+	repo := &sectionServiceRepoStub{}
+	service := NewSectionService(repo)
+
+	_, err := service.ReplaceAll(context.Background(), mustLandingScope(t), coretenant.OrganizationTypeCustomer, "page-1", []repository.ReplaceSectionItem{
+		{
+			Key:     "pricing-1",
+			Type:    landingdomain.SectionTypePricing,
+			Name:    "Pricing",
+			Content: map[string]any{"source": "platform_catalog"},
+		},
+	}, "actor-1")
+	if err == nil {
+		t.Fatal("ReplaceAll() expected error for non-platform org using platform_catalog source")
+	}
+	if repo.replaceAllCalled {
+		t.Fatal("ReplaceAll() should not reach the repository when an item is invalid")
+	}
+}
+
+func TestSectionServiceReplaceAllStopsWhenQuotaExceeded(t *testing.T) {
+	repo := &sectionServiceRepoStub{}
+	guardErr := errors.New("quota exceeded")
+	service := NewSectionService(repo, WithLandingSectionQuotaGuard(&sectionServiceQuotaGuardStub{err: guardErr}))
+
+	_, err := service.ReplaceAll(context.Background(), mustLandingScope(t), coretenant.OrganizationTypeCustomer, "page-1", []repository.ReplaceSectionItem{
+		{Key: "hero-1", Type: landingdomain.SectionTypeHero, Name: "Hero"},
+	}, "actor-1")
+	if !errors.Is(err, guardErr) {
+		t.Fatalf("ReplaceAll() error = %v, want %v", err, guardErr)
+	}
+	if repo.replaceAllCalled {
+		t.Fatal("ReplaceAll() should not reach the repository when the quota guard fails")
+	}
+}
+
+func TestSectionServiceSanitizeStyleMapDropsUnknownKeysAndUnsafeURLs(t *testing.T) {
+	svc := &sectionService{}
+
+	in := map[string]any{
+		"variant":            "software_command",
+		"renderer_component": "HeroSection",
+		"align":              "center",
+		"spacing":            map[string]any{"top": 40, "bottom": 24},
+		"hero":               map[string]any{"backgroundImage": "https://cdn.example.com/a.png", "overlay": "dark"},
+		"background":         map[string]any{"image": "javascript:alert(1)"},
+		"evil":               "<script>alert(1)</script>",
+		"onmouseover":        "x",
+	}
+
+	out := svc.sanitizeStyleMap(in)
+
+	for _, dropped := range []string{"evil", "onmouseover"} {
+		if _, exists := out[dropped]; exists {
+			t.Errorf("key %q should be dropped, got %#v", dropped, out)
+		}
+	}
+	if out["variant"] != "software_command" || out["align"] != "center" {
+		t.Errorf("known scalar style keys mangled: %#v", out)
+	}
+	spacing := out["spacing"].(map[string]any)
+	if spacing["top"] != 40 || spacing["bottom"] != 24 {
+		t.Errorf("numeric nested style values should pass through: %#v", spacing)
+	}
+	hero := out["hero"].(map[string]any)
+	if hero["backgroundImage"] != "https://cdn.example.com/a.png" {
+		t.Errorf("safe https url should survive: %#v", hero["backgroundImage"])
+	}
+	bg := out["background"].(map[string]any)
+	if bg["image"] != "" {
+		t.Errorf("javascript: url should be blanked: %#v", bg["image"])
+	}
+}
+
+func TestSanitizeStyleURL(t *testing.T) {
+	cases := map[string]string{
+		"https://cdn.example.com/a.png?v=2": "https://cdn.example.com/a.png?v=2",
+		"http://example.com/b.jpg":          "http://example.com/b.jpg",
+		"/media/local/c.webp":               "/media/local/c.webp",
+		"javascript:alert(1)":               "",
+		"data:image/png;base64,AAAA":        "",
+		"//evil.com/x.png":                  "",
+		`https://x/a.png") ; x:(`:           "",
+		"  https://x/a.png  ":               "https://x/a.png",
+		"":                                  "",
+	}
+	for in, want := range cases {
+		if got := sanitizeStyleURL(in); got != want {
+			t.Errorf("sanitizeStyleURL(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

@@ -1,0 +1,248 @@
+# Landing Page Visual Builder
+
+Editor konten landing page berbentuk **visual WYSIWYG canvas** yang menggantikan
+schema-driven form builder lama (`LandingContentManagementPage.vue`, dihapus).
+Route menu tetap sama: `/app/landing-pages/content` (nama route `*-content`).
+
+Source of truth kontrak HTTP tetap `api/openapi.yaml`. Dokumen ini menjelaskan
+arsitektur dan hal-hal yang tidak terlihat dari OpenAPI saja.
+
+---
+
+## 1. Arsitektur
+
+```
+┌─ LandingBuilderPage.vue (3 pane) ──────────────────────────────────────────┐
+│  ┌ BlockPalette ┐  ┌ CanvasFrame ── <iframe> ─┐  ┌ SectionPropertyPanel ┐  │
+│  │ katalog blok │  │  src=/landing-canvas/:id  │  │  Konten / Gaya /      │  │
+│  │ PageOutline  │  │  ↕ postMessage (bridge)   │  │  Advanced            │  │
+│  └──────────────┘  └──────────────────────────┘  └──────────────────────┘  │
+│         Pinia store: stores/landingBuilder.ts                              │
+│         sections[] · selectedId · dirty · history(undo/redo) · autosave    │
+└───────────────────────────────────────────────────────────────────────────┘
+        │ POST /admin/landing-pages/:id/sections/autosave   (debounce 2s)
+        │ PUT  /admin/landing-pages/:id/sections            (Save / Publish)
+        ▼
+   modul landing (Go) — sanitize content+style, quota, 1 transaksi
+```
+
+- **Iframe canvas** (`LandingCanvasFramePage.vue`, route `landing-canvas`): halaman
+  SPA tanpa app shell yang me-render `LandingPageRenderer` dengan `editMode`. Section
+  komponen renderer yang sama seperti produksi, tapi side-effect dinetralkan
+  (`useEditMode` → `provideEditMode`): PricingSection tidak fetch katalog publik,
+  FooterNewsletter tidak submit, ThreeJSHero jadi poster statis, HeroSection tidak
+  memasang listener parallax, semua `.fade-up` dipaksa terlihat.
+- **Bridge** (`shared/canvas/bridge.ts`): protokol `postMessage` bertipe, semua
+  pesan divalidasi terhadap `window.location.origin` dan berprefiks `canvas:`.
+  - parent → iframe: `set-sections`, `set-selected`, `set-device`
+  - iframe → parent: `ready`, `select`, `reorder`, `request-insert`,
+    `request-delete`, `inline-edit`, `size`
+- **Store** = buffer editor (bukan cache server): undo/redo (maks 50 langkah),
+  `dirty` dari perbandingan serialisasi vs baseline, autosave debounce 2 detik,
+  `pendingResave` untuk edit yang datang saat request lain in-flight. Blok baru
+  memakai temp id `tmp_*` yang dikirim sebagai `id:""`; id asli diadopsi dari
+  respons server dengan mencocokkan `key`.
+
+### Sequence: edit → autosave → publish
+
+```plantuml
+@startuml
+actor Admin
+boundary "BlockPalette /\nSectionPropertyPanel" as UI
+control "landingBuilder\n(Pinia store)" as Store
+boundary "CanvasFrame\n<iframe>" as Frame
+control "LandingCanvasFramePage\n(renderer editMode)" as Canvas
+control "AdminSectionHandler" as Handler
+entity "sectionService.ReplaceAll" as Service
+database "landing_page_sections\n+ landing_page_revisions" as DB
+
+== Insert blok ==
+Admin -> UI : klik blok "Hero"
+UI -> Store : insertBlock("hero.default", idx)
+Store -> Store : commit() ke undo stack\nsections += {id: tmp_x, ...defaultContent}
+Store -> Frame : watch(sections) → postToFrame(set-sections)
+Frame -> Canvas : postMessage canvas:set-sections
+Canvas -> Canvas : render section via SectionRenderer
+Store -> Store : scheduleAutosave() (timer 2s)
+
+== Inline edit ==
+Admin -> Canvas : double-click [data-field="titleHtml"]
+Canvas -> Canvas : contentEditable = true
+Admin -> Canvas : ketik + blur
+Canvas -> Canvas : sanitize (DOMPurify utk *Html)
+Canvas -> Frame : postMessage canvas:inline-edit {id,key,value}
+Frame -> Store : patchSection(id, {content:{...,[key]:value}})
+Store -> Store : scheduleAutosave()
+
+== Autosave (timer habis) ==
+Store -> Handler : POST /sections/autosave {sections:[...]}
+Handler -> Service : ReplaceAll(scope, orgType, pageId, items, actorId)
+Service -> Service : validate footer/pricing per item\nsanitize content + style\ncek quota FeatureLandingMaxSections
+Service -> DB : upsert (by id→key), soft-delete yang absen\n1 transaksi, sort_order = (i+1)*10
+Handler -> DB : RevisionService.AutosaveDraft → snapshot revisi
+Handler --> Store : 200 {data: sections final}
+Store -> Store : applySaved() — adopsi id server via match key\nbaseline = server, dirty = false
+
+== Publish ==
+Admin -> UI : klik Publish
+UI -> Store : publish()
+Store -> Handler : PUT /sections (flush perubahan tertunda)
+Store -> Handler : POST /admin/landing-pages/:id/publish
+Handler -> DB : snapshot ke landing_page_versions, status = published
+@enduml
+```
+
+---
+
+## 2. Endpoint backend
+
+Detail schema di `api/openapi.yaml`. Ringkas:
+
+| Method + path | Handler | Permission | Fungsi |
+|---|---|---|---|
+| `PUT /api/v1/admin/landing-pages/{id}/sections` | `AdminSectionHandler.ReplaceSections` | `landing.section.manage` | Bulk replace seluruh section page |
+| `POST /api/v1/admin/landing-pages/{id}/sections/autosave` | `AdminSectionHandler.AutosaveSections` | `landing.section.manage` | Bulk replace + tulis snapshot revisi (`change_note` default `"autosave"`) |
+
+Endpoint lama tetap ada dan tidak berubah: `POST /sections` (create satu),
+`PATCH /sections/{sectionId}`, `DELETE /sections/{sectionId}`,
+`PUT /sections/reorder` (reorder-only, lebih murah).
+
+### Semantik bulk replace (`sectionService.ReplaceAll` → `sectionRepository.ReplaceAll`)
+
+- Cocokkan tiap item ke row existing berdasarkan `id`; kalau `id` kosong / tidak
+  ketemu, fallback ke `key`. Sisanya = **create**.
+- Row existing yang tidak ada di payload → **soft-delete** (`deleted_at`).
+- `section_type` dan `section_key` immutable untuk row existing (perubahan tipe
+  diabaikan di update).
+- Urutan final = urutan array; `sort_order = (index+1) * 10`.
+- Semua dalam **satu transaksi**. Tabrakan partial-unique index
+  `(organization_id, landing_page_id, sort_order) WHERE deleted_at IS NULL`
+  dihindari dengan pola scratch `sort_order + 1000000` (sama seperti `Reorder`).
+- Quota `FeatureLandingMaxSections` dicek terhadap **jumlah section akhir**.
+- Body `sections` kosong / tidak dikirim = valid, menghapus semua section
+  (semantik REST `PUT`). Frontend selalu mengirim array penuh.
+
+---
+
+## 3. Sanitasi `landing_page_sections.style`
+
+Sebelumnya `style` lolos mentah ke DB, padahal `EnterpriseTemplateSection.vue`
+menginterpolasi `style.hero.backgroundImage` langsung ke CSS `url(...)`.
+`sectionService.sanitizeStyleMap` (dipanggil di `Create`, `Update`, dan
+`ReplaceAll`) sekarang:
+
+- **Allowlist key top-level** (`domain.AllowedStyleKeys`):
+  `variant`, `family`, `renderer_component`, `spacing`, `background`, `hero`,
+  `colors`, `align`, `visible`. Key lain dibuang.
+- Leaf string di key gambar/URL (`domain.StyleURLKeys`: `image`,
+  `backgroundImage`, `url`, `src`) lewat `sanitizeStyleURL`: hanya menerima
+  `http(s)://...` atau path relatif `/...`, menolak nilai yang mengandung
+  karakter pemecah `url("...")` (`" ' ( ) < > ; \` dan whitespace). Nilai
+  tidak aman → `""`.
+- Leaf string lain distrip semua tag (`bluemonday.StrictPolicy()`).
+- Angka / boolean / nested object diproses rekursif tanpa allowlist di level
+  nested (hanya level top yang di-allowlist).
+
+`content` tetap disanitasi seperti sebelumnya (`bluemonday` allowlist tag inline
+`b i em strong u br span a`, link http/https/mailto, `rel=nofollow` dipaksa).
+
+Bentuk `style` yang dikenal builder (semua opsional):
+
+```jsonc
+{
+  "variant": "software_command",   // pemilih varian renderer (footer / template family)
+  "family": "...",
+  "renderer_component": "HeroSection",
+  "spacing":   { "top": 40, "bottom": 24 },   // px, dipakai SectionRenderer generik
+  "background": { "type": "...", "color": "#0f172a", "image": "https://..." },
+  "hero":      { "backgroundImage": "https://...", "overlay": "dark" }, // dipakai EnterpriseTemplateSection
+  "colors":    { "primary": "#2563EB", "secondary": "...", "surface": "...", "text": "...", "muted": "..." },
+  "align":     "center",           // left | center | right — SectionRenderer generik
+  "visible":   true
+}
+```
+
+`SectionRenderer.vue` kini menerapkan `spacing`, `background.color`, `align` ke
+pembungkus **semua** section (bukan cuma template enterprise) — tapi hanya bila
+key-nya diisi, jadi section tanpa style dirender identik.
+
+---
+
+## 4. Katalog blok (frontend)
+
+Satu sumber kebenaran, menggantikan tiga daftar lama yang divergen
+(`sectionPresets` hardcoded, `SECTION_CONTENT_SCHEMAS`, `section-registry`):
+
+- `frontend/src/features/landing/shared/blocks/types.ts` — `BlockDefinition`
+- `frontend/src/features/landing/shared/blocks/catalog.ts` — `BLOCK_CATALOG`
+  (15 blok), `blockById`, `blocksByGroup`, `defaultBlockForType`,
+  `resolveBlockForSection`
+
+`BlockDefinition`:
+
+| field | keterangan |
+|---|---|
+| `id` | id katalog stabil, unik. Contoh `hero.default`, `content.benefits` |
+| `sectionType` | `landing_page_sections.section_type`. **Wajib** tipe yang diterima CHECK backend — bukan `benefits`/`problem`/`solution`/`demo` (frontend-only, dirender lewat `sectionType: 'content'` + `variant`) |
+| `variant` | key section-registry; `undefined` → `default` |
+| `defaultContent` | seed `content` saat insert — key HARUS sama dengan yang dibaca komponen renderer |
+| `defaultStyle` | seed `style` (mis. `{ variant }` untuk footer / sub-varian content) |
+| `schema` | `SectionFieldSchema[]` untuk property panel, keyed ke `defaultContent` |
+| `keyPrefix` | prefix `section_key` yang di-generate, mis. `hero` → `hero-1` |
+
+Invarian dijaga `catalog.spec.ts`: setiap blok resolve komponen renderer nyata,
+setiap key schema ada di `defaultContent`, `resolveBlockForSection` round-trip
+dari seed-nya sendiri, tidak ada `sectionType` frontend-only.
+
+**Menambah blok baru:**
+1. Pastikan komponen renderer + entry `section-registry.ts` ada.
+2. Tambah entry di `BLOCK_CATALOG` dengan `defaultContent` yang cocok dengan
+   props komponen dan `schema` yang keyed ke `defaultContent`.
+3. `npm run test -- catalog` — pastikan invarian lulus.
+
+---
+
+## 5. Peta file
+
+**Backend** (`backend/internal/modules/landing/`):
+- `handler/admin_section_handler.go` — `ReplaceSections`, `AutosaveSections`
+- `service/section_service.go` — `ReplaceAll`, `sanitizeStyleMap`, `sanitizeStyleURL`
+- `repository/section_repository.go` — `ReplaceAll` (transaksional)
+- `domain/section_style.go` — `AllowedStyleKeys`, `StyleURLKeys`
+- `service/revision_service.go` — `AutosaveDraft` (sudah ada, kini dipanggil)
+
+**Frontend** (`frontend/src/`):
+- `stores/landingBuilder.ts` — store editor
+- `features/landing/builder/pages/LandingBuilderPage.vue` — shell 3-pane
+- `features/landing/builder/components/` — `BlockPalette`, `PageOutlineList`,
+  `CanvasFrame`, `SectionPropertyPanel`, `SectionContentForm`,
+  `fields/{ColorField,SpacingField}`
+- `features/landing/renderer/pages/LandingCanvasFramePage.vue` — isi iframe
+- `features/landing/renderer/components/` — `LandingPageRenderer` (`editMode`),
+  `SectionRenderer` (gaya generik), `CanvasSectionShell`
+- `features/landing/renderer/composables/useEditMode.ts`
+- `features/landing/shared/canvas/bridge.ts`
+- `features/landing/shared/blocks/{types,catalog}.ts`
+
+---
+
+## 6. Rollout
+
+- Endpoint bulk/autosave bersifat **aditif** — bisa deploy backend lebih dulu
+  tanpa memutus builder lama.
+- Frontend deploy mengganti editor konten sepenuhnya (tidak ada feature flag).
+- Data section 100% kompatibel; tidak ada migration.
+- Smoke test staging: buat 1 page baru end-to-end (tambah blok, edit inline,
+  reorder, tunggu autosave, Preview, Publish), cek domain binding.
+
+## 7. Backlog terkait (tidak dikerjakan di sini)
+
+- Konsolidasi `landing_page_versions` vs `landing_page_revisions` vs
+  `landing_page_schedules`.
+- `RestoreVersion` / `RestoreRevision` yang benar-benar rehydrate section.
+- Media-library picker (`MediaField`) + CTA picker — belum ada blok / komponen
+  renderer yang mengonsumsi field `media` / `cta`.
+- Floating toolbar inline (bold/italic/link) — formatting kaya lewat
+  RichTextField di property panel.
+- Drag presisi dari palette langsung ke posisi di dalam canvas (saat ini drop
+  diarahkan ke list "Struktur halaman").

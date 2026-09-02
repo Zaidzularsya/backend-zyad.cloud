@@ -134,6 +134,14 @@ func (s *pageServiceSectionRepoStub) Reorder(
 	return nil
 }
 
+func (s *pageServiceSectionRepoStub) ReplaceAll(
+	context.Context,
+	coretenant.Scope,
+	repository.ReplaceAllParams,
+) ([]landingdomain.LandingSection, error) {
+	return nil, nil
+}
+
 func (s *pageServiceSectionRepoStub) Delete(context.Context, coretenant.Scope, string) error {
 	return nil
 }

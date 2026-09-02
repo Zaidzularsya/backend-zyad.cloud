@@ -265,6 +265,169 @@ func (r *sectionRepository) Reorder(ctx context.Context, scope coretenant.Scope,
 	})
 }
 
+func (r *sectionRepository) ReplaceAll(ctx context.Context, scope coretenant.Scope, params ReplaceAllParams) ([]domain.LandingSection, error) {
+	if !scope.IsValid() {
+		return nil, coretenant.ErrInvalidScope
+	}
+
+	orgID := scope.OrganizationID()
+	pageID := params.LandingPageID
+
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		// 1. Lock and load the current live section set for this page.
+		rows, err := tx.Query(ctx, `
+			SELECT id, section_key
+			FROM landing_page_sections
+			WHERE landing_page_id = $1 AND organization_id = $2 AND deleted_at IS NULL
+			FOR UPDATE
+		`, pageID, orgID)
+		if err != nil {
+			return err
+		}
+
+		existingByID := make(map[string]string)  // id -> key
+		existingByKey := make(map[string]string) // key -> id
+		for rows.Next() {
+			var id, key string
+			if err := rows.Scan(&id, &key); err != nil {
+				rows.Close()
+				return err
+			}
+			existingByID[id] = key
+			existingByKey[key] = id
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		// 2. Classify each desired item as update (matched an existing row) or insert.
+		type updateOp struct {
+			id        string
+			item      ReplaceSectionItem
+			sortOrder int
+		}
+		type insertOp struct {
+			item      ReplaceSectionItem
+			sortOrder int
+		}
+
+		matched := make(map[string]bool)
+		updates := make([]updateOp, 0, len(params.Items))
+		inserts := make([]insertOp, 0, len(params.Items))
+
+		for i, item := range params.Items {
+			finalSort := (i + 1) * 10
+
+			matchID := ""
+			if item.ID != "" {
+				if _, ok := existingByID[item.ID]; ok && !matched[item.ID] {
+					matchID = item.ID
+				}
+			}
+			if matchID == "" && item.Key != "" {
+				if id, ok := existingByKey[item.Key]; ok && !matched[id] {
+					matchID = id
+				}
+			}
+
+			if matchID != "" {
+				matched[matchID] = true
+				updates = append(updates, updateOp{id: matchID, item: item, sortOrder: finalSort})
+			} else {
+				inserts = append(inserts, insertOp{item: item, sortOrder: finalSort})
+			}
+		}
+
+		// 3. Soft-delete existing rows that are no longer present.
+		var deleteIDs []string
+		for id := range existingByID {
+			if !matched[id] {
+				deleteIDs = append(deleteIDs, id)
+			}
+		}
+		if len(deleteIDs) > 0 {
+			if _, err := tx.Exec(ctx, `
+				UPDATE landing_page_sections
+				SET deleted_at = NOW()
+				WHERE id = ANY($1::uuid[]) AND organization_id = $2 AND deleted_at IS NULL
+			`, deleteIDs, orgID); err != nil {
+				return err
+			}
+		}
+
+		// 4. Park every surviving (updated) row in scratch sort_order space so
+		//    the partial unique index on (org, page, sort_order) can't trip
+		//    while we shuffle. Same technique as Reorder.
+		for _, u := range updates {
+			if _, err := tx.Exec(ctx, `
+				UPDATE landing_page_sections
+				SET sort_order = $1 + 1000000
+				WHERE id = $2 AND organization_id = $3 AND deleted_at IS NULL
+			`, u.sortOrder, u.id, orgID); err != nil {
+				return err
+			}
+		}
+
+		// 5. Insert new rows directly at their final sort_order (all final slots
+		//    are free now: survivors are in scratch space, removed rows are gone).
+		for _, in := range inserts {
+			var createdBy interface{} = nil
+			if params.ActorID != "" {
+				createdBy = params.ActorID
+			}
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO landing_page_sections (
+					organization_id, landing_page_id, section_key, section_type, name,
+					sort_order, is_enabled, content, style, created_by
+				) VALUES (
+					$1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+				)
+			`,
+				orgID, pageID, in.item.Key, in.item.Type, in.item.Name,
+				in.sortOrder, in.item.IsEnabled, nonNilObject(in.item.Content), nonNilObject(in.item.Style), createdBy,
+			); err != nil {
+				return err
+			}
+		}
+
+		// 6. Move surviving rows from scratch space to their final sort_order and
+		//    write their mutable fields.
+		for _, u := range updates {
+			var updatedBy interface{} = nil
+			if params.ActorID != "" {
+				updatedBy = params.ActorID
+			}
+			if _, err := tx.Exec(ctx, `
+				UPDATE landing_page_sections
+				SET sort_order = $1, name = $2, is_enabled = $3, content = $4, style = $5,
+					updated_at = NOW(), updated_by = $6
+				WHERE id = $7 AND organization_id = $8 AND deleted_at IS NULL
+			`,
+				u.sortOrder, u.item.Name, u.item.IsEnabled, nonNilObject(u.item.Content), nonNilObject(u.item.Style), updatedBy, u.id, orgID,
+			); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return r.ListByPage(ctx, scope, pageID)
+}
+
+// nonNilObject guarantees a non-nil map so the NOT NULL / jsonb_typeof='object'
+// column constraints are satisfied.
+func nonNilObject(m map[string]any) map[string]any {
+	if m == nil {
+		return map[string]any{}
+	}
+	return m
+}
+
 func (r *sectionRepository) Delete(ctx context.Context, scope coretenant.Scope, id string) error {
 	if !scope.IsValid() {
 		return coretenant.ErrInvalidScope

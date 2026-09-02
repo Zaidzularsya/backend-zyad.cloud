@@ -2266,6 +2266,112 @@ paths:
       responses:
         "201":
           description: Section created successfully
+    put:
+      summary: Replace all landing page sections
+      description: >-
+        Full-page section replace used by the visual builder's explicit Save.
+        Every item is upserted (by id, falling back to key); any existing section
+        of the page not present in the payload is soft-deleted. The visual order
+        is the array order. content and style are sanitized server-side; the
+        section quota is enforced against the resulting count. An empty/absent
+        sections array clears every section.
+      operationId: replaceLandingPageSections
+      tags:
+        - Landing Sections
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sections:
+                  type: array
+                  items:
+                    type: object
+                    required: [key, type, name]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                        description: Omit for a new section.
+                      key:
+                        type: string
+                      type:
+                        type: string
+                      name:
+                        type: string
+                      is_enabled:
+                        type: boolean
+                      content:
+                        type: object
+                      style:
+                        type: object
+      responses:
+        "200":
+          description: Sections replaced successfully
+  /api/v1/admin/landing-pages/{id}/sections/autosave:
+    post:
+      summary: Autosave landing page sections
+      description: >-
+        Same full-page replace as PUT /sections, plus a draft revision snapshot
+        recorded via the revision history. Used by the visual builder's debounced
+        autosave.
+      operationId: autosaveLandingPageSections
+      tags:
+        - Landing Sections
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                change_note:
+                  type: string
+                  maxLength: 200
+                sections:
+                  type: array
+                  items:
+                    type: object
+                    required: [key, type, name]
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      key:
+                        type: string
+                      type:
+                        type: string
+                      name:
+                        type: string
+                      is_enabled:
+                        type: boolean
+                      content:
+                        type: object
+                      style:
+                        type: object
+      responses:
+        "200":
+          description: Sections autosaved successfully
   /api/v1/admin/landing-pages/{id}/sections/reorder:
     put:
       summary: Reorder landing page sections

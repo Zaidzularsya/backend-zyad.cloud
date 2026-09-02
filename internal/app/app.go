@@ -344,7 +344,7 @@ func New(ctx context.Context) (*App, error) {
 	landingDeliverySvc := landingservice.NewDeliveryService(landingIntegrationRepo, landingSubmissionRepo)
 
 	landingAdminPageHandler := landinghandler.NewAdminPageHandler(landingPageSvc, landingVisibilitySvc, landingRevisionSvc, landingPublishSvc)
-	landingAdminSectionHandler := landinghandler.NewAdminSectionHandler(landingSectionSvc)
+	landingAdminSectionHandler := landinghandler.NewAdminSectionHandler(landingSectionSvc, landingRevisionSvc)
 	landingAdminBrandingHandler := landinghandler.NewAdminBrandingHandler(landingBrandingSvc)
 	landingAdminDomainHandler := landinghandler.NewAdminDomainHandler(landingDomainSvc)
 	landingAdminFormHandler := landinghandler.NewAdminFormHandler(landingFormSvc)

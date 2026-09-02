@@ -151,6 +151,33 @@ type ReorderSectionsRequest struct {
 	Items []SectionReorderItem `json:"items" binding:"required,dive,required"`
 }
 
+// BulkSectionItem is one section entry in a full-page replace / autosave
+// payload. An empty ID means the section is new; otherwise it identifies the
+// existing row to update (falling back to Key when ID does not resolve). The
+// visual order is the slice order.
+type BulkSectionItem struct {
+	ID        string         `json:"id" binding:"omitempty,uuid"`
+	Key       string         `json:"key" binding:"required,lowercase,alphanumhyphen"`
+	Type      string         `json:"type" binding:"required"`
+	Name      string         `json:"name" binding:"required,min=1,max=200"`
+	IsEnabled bool           `json:"is_enabled"`
+	Content   map[string]any `json:"content"`
+	Style     map[string]any `json:"style"`
+}
+
+// ReplaceSectionsRequest binds a full-page section replace (PUT .../sections).
+// An empty/absent list is a valid request that clears every section.
+type ReplaceSectionsRequest struct {
+	Sections []BulkSectionItem `json:"sections" binding:"dive"`
+}
+
+// AutosaveSectionsRequest binds a canvas autosave (POST .../sections/autosave):
+// a full-page replace that also records a draft revision snapshot.
+type AutosaveSectionsRequest struct {
+	Sections   []BulkSectionItem `json:"sections" binding:"dive"`
+	ChangeNote string            `json:"change_note" binding:"omitempty,max=200"`
+}
+
 // CreateFormRequest binds form creation.
 type CreateFormRequest struct {
 	Name           string         `json:"name" binding:"required,min=1,max=200"`

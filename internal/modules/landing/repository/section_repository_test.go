@@ -377,6 +377,119 @@ func (a *sectionIsolationAdapter) Export(ctx context.Context, tctx coretenant.Co
 	return a.List(ctx, tctx)
 }
 
+func TestSectionRepositoryReplaceAllIntegration(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+
+	_, err := db.Exec(ctx, `
+		INSERT INTO organizations (id, type, slug, name, status)
+		VALUES ($1, 'customer', 'org-replaceall-a', 'Org ReplaceAll A', 'active'),
+		       ($2, 'customer', 'org-replaceall-b', 'Org ReplaceAll B', 'active')
+		ON CONFLICT DO NOTHING
+	`, tenants.A.OrganizationID, tenants.B.OrganizationID)
+	if err != nil {
+		t.Fatalf("insert organizations: %v", err)
+	}
+
+	pageRepo := repository.NewPageRepository(db)
+	sectionRepo := repository.NewSectionRepository(db)
+
+	page, err := pageRepo.Create(ctx, tenants.A.Scope, repository.CreatePageParams{
+		Name:       "ReplaceAll Page",
+		Title:      "ReplaceAll",
+		Slug:       strings.ReplaceAll("page-"+testutil.UniqueCode("replaceall"), ".", "-"),
+		Type:       domain.PageTypeCampaign,
+		Status:     domain.PageStatusDraft,
+		Visibility: domain.PageVisibilityPublic,
+		Locale:     "id-ID",
+		Timezone:   "Asia/Jakarta",
+	})
+	if err != nil {
+		t.Fatalf("create page: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Exec(context.Background(), "DELETE FROM landing_pages WHERE id = $1", page.ID)
+	})
+
+	// Seed 3 sections through ReplaceAll (all new).
+	seeded, err := sectionRepo.ReplaceAll(ctx, tenants.A.Scope, repository.ReplaceAllParams{
+		LandingPageID: page.ID,
+		Items: []repository.ReplaceSectionItem{
+			{Key: "hero-a", Type: domain.SectionTypeHero, Name: "A", IsEnabled: true, Content: map[string]any{}, Style: map[string]any{}},
+			{Key: "hero-b", Type: domain.SectionTypeHero, Name: "B", IsEnabled: true, Content: map[string]any{}, Style: map[string]any{}},
+			{Key: "hero-c", Type: domain.SectionTypeHero, Name: "C", IsEnabled: true, Content: map[string]any{}, Style: map[string]any{}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("seed ReplaceAll: %v", err)
+	}
+	if len(seeded) != 3 {
+		t.Fatalf("expected 3 seeded sections, got %d", len(seeded))
+	}
+	byKey := map[string]domain.LandingSection{}
+	for _, s := range seeded {
+		byKey[s.Key] = s
+	}
+	sectionB := byKey["hero-b"]
+
+	// Replace: reorder C before A, rename C, drop B, add D — in one call.
+	final, err := sectionRepo.ReplaceAll(ctx, tenants.A.Scope, repository.ReplaceAllParams{
+		LandingPageID: page.ID,
+		Items: []repository.ReplaceSectionItem{
+			{ID: byKey["hero-c"].ID, Key: "hero-c", Type: domain.SectionTypeHero, Name: "C-renamed", IsEnabled: true, Content: map[string]any{}, Style: map[string]any{}},
+			{ID: byKey["hero-a"].ID, Key: "hero-a", Type: domain.SectionTypeHero, Name: "A", IsEnabled: true, Content: map[string]any{}, Style: map[string]any{}},
+			{Key: "hero-d", Type: domain.SectionTypeHero, Name: "D", IsEnabled: true, Content: map[string]any{}, Style: map[string]any{}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("second ReplaceAll: %v", err)
+	}
+
+	if len(final) != 3 {
+		t.Fatalf("expected 3 sections after replace, got %d", len(final))
+	}
+	wantOrder := []struct {
+		key  string
+		name string
+		sort int
+	}{
+		{"hero-c", "C-renamed", 10},
+		{"hero-a", "A", 20},
+		{"hero-d", "D", 30},
+	}
+	for i, want := range wantOrder {
+		if final[i].Key != want.key || final[i].Name != want.name || final[i].SortOrder != want.sort {
+			t.Fatalf("section[%d] = {key:%q name:%q sort:%d}, want %+v", i, final[i].Key, final[i].Name, final[i].SortOrder, want)
+		}
+	}
+	// C kept its identity, was not recreated.
+	if final[0].ID != byKey["hero-c"].ID {
+		t.Fatalf("hero-c id changed: was %q now %q", byKey["hero-c"].ID, final[0].ID)
+	}
+	// B is gone.
+	if _, err := sectionRepo.FindByID(ctx, tenants.A.Scope, sectionB.ID); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("dropped section B: expected pgx.ErrNoRows, got %v", err)
+	}
+
+	// Tenant B cannot ReplaceAll into Tenant A's page, and Tenant A's data is untouched.
+	if _, err := sectionRepo.ReplaceAll(ctx, tenants.B.Scope, repository.ReplaceAllParams{
+		LandingPageID: page.ID,
+		Items: []repository.ReplaceSectionItem{
+			{Key: "hero-x", Type: domain.SectionTypeHero, Name: "X", IsEnabled: true, Content: map[string]any{}, Style: map[string]any{}},
+		},
+	}); err == nil {
+		t.Fatal("Tenant B ReplaceAll on Tenant A page: expected error, got nil")
+	}
+	stillThere, err := sectionRepo.ListByPage(ctx, tenants.A.Scope, page.ID)
+	if err != nil {
+		t.Fatalf("list after cross-tenant attempt: %v", err)
+	}
+	if len(stillThere) != 3 {
+		t.Fatalf("cross-tenant ReplaceAll must not change Tenant A data, got %d sections", len(stillThere))
+	}
+}
+
 func TestSectionTenantIsolationSuite(t *testing.T) {
 	db := testutil.OpenTestDatabase(t)
 	repo := repository.NewSectionRepository(db)
