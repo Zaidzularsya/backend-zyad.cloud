@@ -518,6 +518,32 @@ func TestSectionServiceReplaceAllStopsWhenQuotaExceeded(t *testing.T) {
 	}
 }
 
+func TestSectionServiceReplaceAllSkipsQuotaWhenNotGrowing(t *testing.T) {
+	repo := &sectionServiceRepoStub{
+		listByPageItems: []landingdomain.LandingSection{
+			{ID: "s1", Key: "hero-1"},
+			{ID: "s2", Key: "cta-1"},
+		},
+	}
+	guard := &sectionServiceQuotaGuardStub{err: errors.New("must not be called")}
+	service := NewSectionService(repo, WithLandingSectionQuotaGuard(guard))
+
+	// Same count as existing (edit / reorder), so no billing entitlement check.
+	_, err := service.ReplaceAll(context.Background(), mustLandingScope(t), coretenant.OrganizationTypeCustomer, "page-1", []repository.ReplaceSectionItem{
+		{ID: "s2", Key: "cta-1", Type: landingdomain.SectionTypeCTA, Name: "CTA"},
+		{ID: "s1", Key: "hero-1", Type: landingdomain.SectionTypeHero, Name: "Hero renamed"},
+	}, "actor-1")
+	if err != nil {
+		t.Fatalf("ReplaceAll() error = %v; edit-only replace must not hit the quota guard", err)
+	}
+	if !repo.replaceAllCalled {
+		t.Fatal("ReplaceAll() should reach the repository for an edit-only replace")
+	}
+	if guard.organizationID != "" {
+		t.Fatal("quota guard must not be invoked when the section count does not grow")
+	}
+}
+
 func TestSectionServiceSanitizeStyleMapDropsUnknownKeysAndUnsafeURLs(t *testing.T) {
 	svc := &sectionService{}
 

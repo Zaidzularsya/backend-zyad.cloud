@@ -222,16 +222,27 @@ func (s *sectionService) ReplaceAll(
 		sanitized[i] = item
 	}
 
+	// Only enforce the section quota when this call would grow the page's
+	// section count. Editing / reordering / trimming an existing set never hit
+	// billing entitlements with the legacy per-section endpoints (only Create
+	// did), so a full-page replace must not regress that: an org without the
+	// landing feature can still maintain the sections it already has.
 	if s.quotaGuard != nil {
-		if err := s.quotaGuard.RequireQuotaValue(
-			ctx,
-			scope.OrganizationID(),
-			domain.FeatureLandingMaxSections,
-			"limit",
-			int64(len(sanitized)),
-			0,
-		); err != nil {
+		existing, err := s.sectionRepo.ListByPage(ctx, scope, pageID)
+		if err != nil {
 			return nil, err
+		}
+		if len(sanitized) > len(existing) {
+			if err := s.quotaGuard.RequireQuotaValue(
+				ctx,
+				scope.OrganizationID(),
+				domain.FeatureLandingMaxSections,
+				"limit",
+				int64(len(sanitized)),
+				0,
+			); err != nil {
+				return nil, err
+			}
 		}
 	}
 
