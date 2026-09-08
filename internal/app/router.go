@@ -215,6 +215,45 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		deps.LandingAdminIntegrationHandler.RegisterRoutes(protected, deps.PermissionChecker)
 	}
 
+	// CRM API (tenant-only). Unlike landing, CRM is gated behind a single
+	// root group carrying RequireCustomerTenant (platform organizations get
+	// 403 on every /app/crm/* route) and RequireEntitlement("crm.enabled")
+	// (the whole module is off unless the tenant's plan has it) — see
+	// docs/reference-crm.md "Tenant Boundary" and "Security Baseline".
+	crmGroup := protected.Group("/app/crm")
+	crmGroup.Use(
+		middleware.RequireActiveTenant(),
+		middleware.RequireCustomerTenant(),
+		middleware.RequireEntitlement(deps.CRMEntitlementChecker, "crm.enabled"),
+	)
+	if deps.CRMCompanyHandler != nil {
+		deps.CRMCompanyHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	}
+	if deps.CRMContactHandler != nil {
+		deps.CRMContactHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	}
+	if deps.CRMLeadHandler != nil {
+		deps.CRMLeadHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	}
+	if deps.CRMPipelineHandler != nil {
+		deps.CRMPipelineHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	}
+	if deps.CRMDealHandler != nil {
+		deps.CRMDealHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	}
+	if deps.CRMActivityHandler != nil {
+		deps.CRMActivityHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	}
+	if deps.CRMQuotationHandler != nil {
+		deps.CRMQuotationHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	}
+	if deps.CRMInvoiceHandler != nil {
+		deps.CRMInvoiceHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	}
+	if deps.CRMIntegrationHandler != nil {
+		deps.CRMIntegrationHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	}
+
 	publicTenantMiddleware, err := middleware.ResolvePublicOrganization(
 		deps.PublicHostResolver,
 		middleware.PublicHostOptions{

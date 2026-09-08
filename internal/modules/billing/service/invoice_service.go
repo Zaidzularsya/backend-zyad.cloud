@@ -16,6 +16,7 @@ type InvoiceStore interface {
 	Create(ctx context.Context, params repository.CreateInvoiceParams) (model.Invoice, error)
 	FindByID(ctx context.Context, organizationID string, id string) (model.Invoice, error)
 	List(ctx context.Context, filter repository.InvoiceListFilter) ([]model.Invoice, int64, error)
+	ListAllOrganizations(ctx context.Context, filter repository.InvoiceListFilter) ([]model.Invoice, int64, error)
 	ListItems(ctx context.Context, invoiceID string) ([]model.InvoiceItem, error)
 	UpdateStatus(ctx context.Context, params repository.UpdateInvoiceStatusParams) (model.Invoice, error)
 }
@@ -32,12 +33,35 @@ func NewInvoiceService(store InvoiceStore) *InvoiceService {
 	}
 }
 
+// List returns invoices for a single tenant. query.OrganizationID must be
+// set by the caller (e.g. from a verified tenant context) — this method
+// refuses to run an unscoped, cross-tenant query.
 func (s *InvoiceService) List(ctx context.Context, query dto.InvoiceListQuery) (dto.InvoiceListResponse, error) {
 	filter, page, perPage, err := invoiceListFilter(query)
 	if err != nil {
 		return dto.InvoiceListResponse{}, err
 	}
 	invoices, total, err := s.store.List(ctx, filter)
+	if err != nil {
+		return dto.InvoiceListResponse{}, err
+	}
+	return dto.InvoiceListResponse{
+		Items: invoiceResponses(invoices),
+		Meta:  paginationMeta(page, perPage, total),
+	}, nil
+}
+
+// ListAllOrganizations lists invoices across every tenant. Intended for
+// platform-admin endpoints only — callers must gate access themselves.
+func (s *InvoiceService) ListAllOrganizations(
+	ctx context.Context,
+	query dto.InvoiceListQuery,
+) (dto.InvoiceListResponse, error) {
+	filter, page, perPage, err := invoiceListFilter(query)
+	if err != nil {
+		return dto.InvoiceListResponse{}, err
+	}
+	invoices, total, err := s.store.ListAllOrganizations(ctx, filter)
 	if err != nil {
 		return dto.InvoiceListResponse{}, err
 	}

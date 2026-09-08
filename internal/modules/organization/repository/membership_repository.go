@@ -122,15 +122,20 @@ func (r *MembershipRepository) Create(
 	return membership, nil
 }
 
-func (r *MembershipRepository) FindByID(ctx context.Context, id string) (model.Membership, error) {
+func (r *MembershipRepository) FindByID(
+	ctx context.Context,
+	organizationID string,
+	id string,
+) (model.Membership, error) {
 	var membership model.Membership
 	err := r.db.QueryRow(ctx, `
 		SELECT `+membershipSelectColumns+`
 		FROM organization_memberships
 		WHERE id = $1::uuid
+			AND organization_id = $2::uuid
 			AND status <> 'removed'
 			AND removed_at IS NULL
-	`, strings.TrimSpace(id)).Scan(membershipScanDest(&membership)...)
+	`, strings.TrimSpace(id), strings.TrimSpace(organizationID)).Scan(membershipScanDest(&membership)...)
 	if err != nil {
 		return model.Membership{}, err
 	}
@@ -280,6 +285,7 @@ func (r *MembershipRepository) ListByUser(
 
 func (r *MembershipRepository) UpdateStatus(
 	ctx context.Context,
+	organizationID string,
 	id string,
 	status model.MembershipStatus,
 	changedAt time.Time,
@@ -290,16 +296,15 @@ func (r *MembershipRepository) UpdateStatus(
 	}
 	defer tx.Rollback(ctx)
 
-	organizationID, err := findMembershipOrganizationID(ctx, tx, id)
-	if err != nil {
-		return model.Membership{}, err
-	}
 	if err := lockOrganization(ctx, tx, organizationID); err != nil {
 		return model.Membership{}, err
 	}
 	membership, err := lockMembership(ctx, tx, id)
 	if err != nil {
 		return model.Membership{}, err
+	}
+	if membership.OrganizationID != strings.TrimSpace(organizationID) {
+		return model.Membership{}, pgx.ErrNoRows
 	}
 	if membership.IsOwner && membership.IsActive() && status != model.MembershipStatusActive {
 		if err := ensureAnotherActiveOwner(ctx, tx, membership); err != nil {
@@ -355,6 +360,7 @@ func (r *MembershipRepository) UpdateStatus(
 
 func (r *MembershipRepository) SetOwner(
 	ctx context.Context,
+	organizationID string,
 	id string,
 	isOwner bool,
 	changedAt time.Time,
@@ -365,16 +371,15 @@ func (r *MembershipRepository) SetOwner(
 	}
 	defer tx.Rollback(ctx)
 
-	organizationID, err := findMembershipOrganizationID(ctx, tx, id)
-	if err != nil {
-		return model.Membership{}, err
-	}
 	if err := lockOrganization(ctx, tx, organizationID); err != nil {
 		return model.Membership{}, err
 	}
 	membership, err := lockMembership(ctx, tx, id)
 	if err != nil {
 		return model.Membership{}, err
+	}
+	if membership.OrganizationID != strings.TrimSpace(organizationID) {
+		return model.Membership{}, pgx.ErrNoRows
 	}
 	if membership.IsOwner && membership.IsActive() && !isOwner {
 		if err := ensureAnotherActiveOwner(ctx, tx, membership); err != nil {
@@ -404,10 +409,11 @@ func (r *MembershipRepository) SetOwner(
 
 func (r *MembershipRepository) Remove(
 	ctx context.Context,
+	organizationID string,
 	id string,
 	removedAt time.Time,
 ) (model.Membership, error) {
-	return r.UpdateStatus(ctx, id, model.MembershipStatusRemoved, removedAt)
+	return r.UpdateStatus(ctx, organizationID, id, model.MembershipStatusRemoved, removedAt)
 }
 
 func (r *MembershipRepository) TransferOwnership(
@@ -554,18 +560,6 @@ func lockMembership(ctx context.Context, tx pgx.Tx, id string) (model.Membership
 		FOR UPDATE
 	`, strings.TrimSpace(id)).Scan(membershipScanDest(&membership)...)
 	return membership, err
-}
-
-func findMembershipOrganizationID(ctx context.Context, tx pgx.Tx, id string) (string, error) {
-	var organizationID string
-	err := tx.QueryRow(ctx, `
-		SELECT organization_id
-		FROM organization_memberships
-		WHERE id = $1::uuid
-			AND status <> 'removed'
-			AND removed_at IS NULL
-	`, strings.TrimSpace(id)).Scan(&organizationID)
-	return organizationID, err
 }
 
 func lockOrganization(ctx context.Context, tx pgx.Tx, organizationID string) error {

@@ -24,6 +24,9 @@ import (
 	billinghandler "zyad.cloud/internal/modules/billing/handler"
 	billingrepo "zyad.cloud/internal/modules/billing/repository"
 	billingservice "zyad.cloud/internal/modules/billing/service"
+	crmhandler "zyad.cloud/internal/modules/crm/handler"
+	crmrepo "zyad.cloud/internal/modules/crm/repository"
+	crmservice "zyad.cloud/internal/modules/crm/service"
 	landinghandler "zyad.cloud/internal/modules/landing/handler"
 	landingrepo "zyad.cloud/internal/modules/landing/repository"
 	landingservice "zyad.cloud/internal/modules/landing/service"
@@ -363,6 +366,46 @@ func New(ctx context.Context) (*App, error) {
 	landingAnalyticsSvc := landingservice.NewAnalyticsService(landingAnalyticsRepo, landingPageRepo, db)
 	publicLandingHandler := landinghandler.NewPublicLandingHandler(landingResolverSvc, landingVisibilitySvc, landingSubmissionSvc, landingAnalyticsSvc)
 
+	crmEntitlementChecker := subscriptionEntitlementChecker{guard: subscriptionGuardService}
+	crmCompanyRepo := crmrepo.NewCompanyRepository(db)
+	crmContactRepo := crmrepo.NewContactRepository(db)
+	crmLeadRepo := crmrepo.NewLeadRepository(db)
+	crmCompanySvc := crmservice.NewCompanyService(crmCompanyRepo)
+	crmContactSvc := crmservice.NewContactService(
+		crmContactRepo,
+		crmservice.WithContactQuotaGuard(subscriptionGuardService),
+	)
+	crmLeadSvc := crmservice.NewLeadService(
+		crmLeadRepo,
+		crmContactRepo,
+		crmCompanyRepo,
+		crmservice.WithLeadContactQuotaGuard(subscriptionGuardService),
+	)
+	crmPipelineRepo := crmrepo.NewPipelineRepository(db)
+	crmDealRepo := crmrepo.NewDealRepository(db)
+	crmPipelineSvc := crmservice.NewPipelineService(
+		crmPipelineRepo,
+		crmservice.WithPipelineFeatureGate(subscriptionGuardService),
+	)
+	crmDealSvc := crmservice.NewDealService(crmDealRepo, crmPipelineRepo)
+	crmActivityRepo := crmrepo.NewActivityRepository(db)
+	crmActivitySvc := crmservice.NewActivityService(crmActivityRepo, crmLeadRepo, crmContactRepo, crmCompanyRepo, crmDealRepo)
+	crmQuotationRepo := crmrepo.NewQuotationRepository(db)
+	crmInvoiceRepo := crmrepo.NewInvoiceRepository(db)
+	crmQuotationSvc := crmservice.NewQuotationService(crmQuotationRepo)
+	crmInvoiceSvc := crmservice.NewInvoiceService(crmInvoiceRepo, crmQuotationRepo)
+	crmIntegrationRepo := crmrepo.NewIntegrationRepository(db)
+	crmIntegrationSvc := crmservice.NewIntegrationService(crmIntegrationRepo, cfg.App.Secret)
+	crmCompanyHandler := crmhandler.NewCompanyHandler(crmCompanySvc)
+	crmContactHandler := crmhandler.NewContactHandler(crmContactSvc)
+	crmLeadHandler := crmhandler.NewLeadHandler(crmLeadSvc)
+	crmPipelineHandler := crmhandler.NewPipelineHandler(crmPipelineSvc)
+	crmDealHandler := crmhandler.NewDealHandler(crmDealSvc)
+	crmActivityHandler := crmhandler.NewActivityHandler(crmActivitySvc)
+	crmQuotationHandler := crmhandler.NewQuotationHandler(crmQuotationSvc)
+	crmInvoiceHandler := crmhandler.NewInvoiceHandler(crmInvoiceSvc)
+	crmIntegrationHandler := crmhandler.NewIntegrationHandler(crmIntegrationSvc)
+
 	router, err := newRouter(Dependencies{
 		Config:                           cfg,
 		Logger:                           log,
@@ -404,6 +447,16 @@ func New(ctx context.Context) (*App, error) {
 		LandingAdminRevisionHandler:      landingAdminRevisionHandler,
 		LandingAdminScheduleHandler:      landingAdminScheduleHandler,
 		LandingAdminIntegrationHandler:   landingAdminIntegrationHandler,
+		CRMEntitlementChecker:            crmEntitlementChecker,
+		CRMCompanyHandler:                crmCompanyHandler,
+		CRMContactHandler:                crmContactHandler,
+		CRMLeadHandler:                   crmLeadHandler,
+		CRMPipelineHandler:               crmPipelineHandler,
+		CRMDealHandler:                   crmDealHandler,
+		CRMActivityHandler:               crmActivityHandler,
+		CRMQuotationHandler:              crmQuotationHandler,
+		CRMInvoiceHandler:                crmInvoiceHandler,
+		CRMIntegrationHandler:            crmIntegrationHandler,
 		PermissionChecker:                permService,
 		Authenticator:                    authService,
 		OrganizationResolver:             organizationResolver,

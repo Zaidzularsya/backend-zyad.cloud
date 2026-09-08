@@ -3,12 +3,21 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"zyad.cloud/internal/modules/subscription/model"
 	"zyad.cloud/internal/platform/database"
+)
+
+// ErrOrganizationScopeRequired is returned by List() when no OrganizationID
+// filter is set and AllOrganizations wasn't explicitly opted into — this
+// keeps "forgot to scope the query" from silently becoming a cross-tenant
+// data leak.
+var ErrOrganizationScopeRequired = errors.New(
+	"organization_id is required unless listing across all organizations",
 )
 
 const subscriptionSelectColumns = `
@@ -35,10 +44,14 @@ type SubscriptionRepository struct {
 
 type SubscriptionListFilter struct {
 	OrganizationID string
-	PlanID         string
-	Status         model.SubscriptionStatus
-	Limit          int
-	Offset         int
+	// AllOrganizations must be set explicitly to list across every tenant
+	// (platform-admin use only) when OrganizationID is left empty. See
+	// List() and ListAllOrganizations().
+	AllOrganizations bool
+	PlanID           string
+	Status           model.SubscriptionStatus
+	Limit            int
+	Offset           int
 }
 
 type CreateSubscriptionParams struct {
@@ -207,7 +220,32 @@ func (r *SubscriptionRepository) FindUsableByOrganization(ctx context.Context, o
 	return subscription, nil
 }
 
-func (r *SubscriptionRepository) List(ctx context.Context, filter SubscriptionListFilter) ([]model.Subscription, int64, error) {
+// List returns subscriptions for a single tenant. filter.OrganizationID must
+// be set — use ListAllOrganizations for platform-admin cross-tenant listing.
+func (r *SubscriptionRepository) List(
+	ctx context.Context,
+	filter SubscriptionListFilter,
+) ([]model.Subscription, int64, error) {
+	if strings.TrimSpace(filter.OrganizationID) == "" && !filter.AllOrganizations {
+		return nil, 0, ErrOrganizationScopeRequired
+	}
+	return r.list(ctx, filter)
+}
+
+// ListAllOrganizations lists subscriptions across every tenant. Intended for
+// platform-admin endpoints only — callers must gate access themselves.
+func (r *SubscriptionRepository) ListAllOrganizations(
+	ctx context.Context,
+	filter SubscriptionListFilter,
+) ([]model.Subscription, int64, error) {
+	filter.AllOrganizations = true
+	return r.list(ctx, filter)
+}
+
+func (r *SubscriptionRepository) list(
+	ctx context.Context,
+	filter SubscriptionListFilter,
+) ([]model.Subscription, int64, error) {
 	where, args := subscriptionWhere(filter)
 	var total int64
 	if err := r.db.QueryRow(ctx, "SELECT count(*) FROM customer_subscriptions"+where, args...).Scan(&total); err != nil {

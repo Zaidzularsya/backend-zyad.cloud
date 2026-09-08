@@ -9,6 +9,7 @@ import (
 	permissionhandler "zyad.cloud/internal/core/permission/handler"
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	billinghandler "zyad.cloud/internal/modules/billing/handler"
+	crmhandler "zyad.cloud/internal/modules/crm/handler"
 	landinghandler "zyad.cloud/internal/modules/landing/handler"
 	organizationhandler "zyad.cloud/internal/modules/organization/handler"
 	producthandler "zyad.cloud/internal/modules/product/handler"
@@ -59,6 +60,16 @@ type Dependencies struct {
 	LandingAdminRevisionHandler      *landinghandler.AdminRevisionHandler
 	LandingAdminScheduleHandler      *landinghandler.AdminScheduleHandler
 	LandingAdminIntegrationHandler   *landinghandler.AdminIntegrationHandler
+	CRMEntitlementChecker            middleware.EntitlementChecker
+	CRMCompanyHandler                *crmhandler.CompanyHandler
+	CRMContactHandler                *crmhandler.ContactHandler
+	CRMLeadHandler                   *crmhandler.LeadHandler
+	CRMPipelineHandler               *crmhandler.PipelineHandler
+	CRMDealHandler                   *crmhandler.DealHandler
+	CRMActivityHandler               *crmhandler.ActivityHandler
+	CRMQuotationHandler              *crmhandler.QuotationHandler
+	CRMInvoiceHandler                *crmhandler.InvoiceHandler
+	CRMIntegrationHandler            *crmhandler.IntegrationHandler
 	MediaStorage                     storage.MediaStorage
 	PermissionChecker                permissionmiddleware.CombinedPermissionChecker
 	Authenticator                    middleware.AccessTokenAuthenticator

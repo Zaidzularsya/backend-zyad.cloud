@@ -14,7 +14,7 @@ import (
 )
 
 type PlatformInvoiceService interface {
-	List(ctx context.Context, query dto.InvoiceListQuery) (dto.InvoiceListResponse, error)
+	ListAllOrganizations(ctx context.Context, query dto.InvoiceListQuery) (dto.InvoiceListResponse, error)
 	Create(ctx context.Context, request dto.CreateInvoiceRequest) (dto.InvoiceResponse, error)
 }
 
@@ -59,7 +59,7 @@ func (h *PlatformBillingHandler) ListInvoices(c *gin.Context) {
 		corehttp.Fail(c, validationHandlerError(err))
 		return
 	}
-	result, err := h.invoices.List(c.Request.Context(), query)
+	result, err := h.invoices.ListAllOrganizations(c.Request.Context(), query)
 	if err != nil {
 		corehttp.Fail(c, err)
 		return

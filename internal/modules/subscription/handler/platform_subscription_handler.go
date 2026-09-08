@@ -22,7 +22,10 @@ func validationHandlerError(err error) error {
 }
 
 type PlatformSubscriptionService interface {
-	List(ctx context.Context, query dto.SubscriptionListQuery) (dto.SubscriptionListResponse, error)
+	ListAllOrganizations(
+		ctx context.Context,
+		query dto.SubscriptionListQuery,
+	) (dto.SubscriptionListResponse, error)
 	Create(ctx context.Context, request dto.CreateSubscriptionRequest) (dto.SubscriptionResponse, error)
 	UpdateByID(ctx context.Context, id string, request dto.UpdateSubscriptionRequest) (dto.SubscriptionResponse, error)
 	ChangeStatusByID(
@@ -66,7 +69,7 @@ func (h *PlatformSubscriptionHandler) ListSubscriptions(c *gin.Context) {
 		corehttp.Fail(c, validationHandlerError(err))
 		return
 	}
-	result, err := h.subscriptions.List(c.Request.Context(), query)
+	result, err := h.subscriptions.ListAllOrganizations(c.Request.Context(), query)
 	if err != nil {
 		corehttp.Fail(c, err)
 		return

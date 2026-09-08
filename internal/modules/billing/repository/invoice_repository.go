@@ -49,10 +49,14 @@ type InvoiceRepository struct {
 
 type InvoiceListFilter struct {
 	OrganizationID string
-	SubscriptionID string
-	Status         model.InvoiceStatus
-	Limit          int
-	Offset         int
+	// AllOrganizations must be set explicitly to list across every tenant
+	// (platform-admin use only) when OrganizationID is left empty. See
+	// List() and ListAllOrganizations().
+	AllOrganizations bool
+	SubscriptionID   string
+	Status           model.InvoiceStatus
+	Limit            int
+	Offset           int
 }
 
 type CreateInvoiceParams struct {
@@ -192,7 +196,27 @@ func (r *InvoiceRepository) FindByIDUnscoped(ctx context.Context, id string) (mo
 	return invoice, nil
 }
 
+// List returns invoices for a single tenant. filter.OrganizationID must be
+// set — use ListAllOrganizations for platform-admin cross-tenant listing.
 func (r *InvoiceRepository) List(ctx context.Context, filter InvoiceListFilter) ([]model.Invoice, int64, error) {
+	if strings.TrimSpace(filter.OrganizationID) == "" && !filter.AllOrganizations {
+		return nil, 0, ErrOrganizationScopeRequired
+	}
+	return r.list(ctx, filter)
+}
+
+// ListAllOrganizations lists invoices across every tenant. Callers are
+// responsible for gating this to platform-admin access — it intentionally
+// bypasses tenant isolation.
+func (r *InvoiceRepository) ListAllOrganizations(
+	ctx context.Context,
+	filter InvoiceListFilter,
+) ([]model.Invoice, int64, error) {
+	filter.AllOrganizations = true
+	return r.list(ctx, filter)
+}
+
+func (r *InvoiceRepository) list(ctx context.Context, filter InvoiceListFilter) ([]model.Invoice, int64, error) {
 	where, args := invoiceWhere(filter)
 	var total int64
 	if err := r.db.QueryRow(ctx, "SELECT count(*) FROM billing_invoices"+where, args...).Scan(&total); err != nil {

@@ -171,7 +171,13 @@ func (r *PaymentRepository) FindEventByProviderEventID(
 	return event, nil
 }
 
+// List returns payments for a single tenant. filter.OrganizationID must be
+// set — there is no cross-tenant variant because nothing in the codebase
+// legitimately needs to list payments across organizations.
 func (r *PaymentRepository) List(ctx context.Context, filter PaymentListFilter) ([]model.Payment, int64, error) {
+	if strings.TrimSpace(filter.OrganizationID) == "" {
+		return nil, 0, ErrOrganizationScopeRequired
+	}
 	where, args := paymentWhere(filter)
 	var total int64
 	if err := r.db.QueryRow(ctx, "SELECT count(*) FROM billing_payments"+where, args...).Scan(&total); err != nil {

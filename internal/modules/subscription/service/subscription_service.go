@@ -29,6 +29,10 @@ type SubscriptionStore interface {
 	FindByIDUnscoped(ctx context.Context, id string) (model.Subscription, error)
 	FindUsableByOrganization(ctx context.Context, organizationID string) (model.Subscription, error)
 	List(ctx context.Context, filter repository.SubscriptionListFilter) ([]model.Subscription, int64, error)
+	ListAllOrganizations(
+		ctx context.Context,
+		filter repository.SubscriptionListFilter,
+	) ([]model.Subscription, int64, error)
 	Update(ctx context.Context, params repository.UpdateSubscriptionParams) (model.Subscription, error)
 	CreateEvent(ctx context.Context, params repository.SubscriptionEventParams) (model.SubscriptionEvent, error)
 }
@@ -69,12 +73,35 @@ func NewSubscriptionService(
 	}
 }
 
+// List returns subscriptions for a single tenant. query.OrganizationID must
+// be set by the caller (e.g. from a verified tenant context) — this method
+// refuses to run an unscoped, cross-tenant query.
 func (s *SubscriptionService) List(ctx context.Context, query dto.SubscriptionListQuery) (dto.SubscriptionListResponse, error) {
 	filter, page, perPage, err := subscriptionListFilter(query)
 	if err != nil {
 		return dto.SubscriptionListResponse{}, err
 	}
 	subscriptions, total, err := s.store.List(ctx, filter)
+	if err != nil {
+		return dto.SubscriptionListResponse{}, err
+	}
+	return dto.SubscriptionListResponse{
+		Items: subscriptionResponses(subscriptions),
+		Meta:  paginationMeta(page, perPage, total),
+	}, nil
+}
+
+// ListAllOrganizations lists subscriptions across every tenant. Intended for
+// platform-admin endpoints only — callers must gate access themselves.
+func (s *SubscriptionService) ListAllOrganizations(
+	ctx context.Context,
+	query dto.SubscriptionListQuery,
+) (dto.SubscriptionListResponse, error) {
+	filter, page, perPage, err := subscriptionListFilter(query)
+	if err != nil {
+		return dto.SubscriptionListResponse{}, err
+	}
+	subscriptions, total, err := s.store.ListAllOrganizations(ctx, filter)
 	if err != nil {
 		return dto.SubscriptionListResponse{}, err
 	}

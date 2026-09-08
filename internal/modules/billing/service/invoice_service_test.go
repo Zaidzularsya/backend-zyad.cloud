@@ -50,6 +50,13 @@ func (s *stubInvoiceStore) List(
 	return nil, 0, nil
 }
 
+func (s *stubInvoiceStore) ListAllOrganizations(
+	context.Context,
+	repository.InvoiceListFilter,
+) ([]model.Invoice, int64, error) {
+	return nil, 0, nil
+}
+
 func (s *stubInvoiceStore) ListItems(context.Context, string) ([]model.InvoiceItem, error) {
 	return s.items, nil
 }

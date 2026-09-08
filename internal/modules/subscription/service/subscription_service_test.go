@@ -57,6 +57,13 @@ func (s *stubSubscriptionStore) List(
 	return []model.Subscription{s.current}, 1, nil
 }
 
+func (s *stubSubscriptionStore) ListAllOrganizations(
+	context.Context,
+	repository.SubscriptionListFilter,
+) ([]model.Subscription, int64, error) {
+	return []model.Subscription{s.current}, 1, nil
+}
+
 func (s *stubSubscriptionStore) Update(
 	_ context.Context,
 	params repository.UpdateSubscriptionParams,

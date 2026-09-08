@@ -2,7 +2,16 @@ package repository
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
+)
+
+// ErrOrganizationScopeRequired is returned by List() when no OrganizationID
+// filter is set and AllOrganizations wasn't explicitly opted into — this
+// keeps "forgot to scope the query" from silently becoming a cross-tenant
+// data leak.
+var ErrOrganizationScopeRequired = errors.New(
+	"organization_id is required unless listing across all organizations",
 )
 
 func encodeMap(value map[string]any) (string, error) {

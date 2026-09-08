@@ -78,6 +78,7 @@ func TestMembershipRepositoryLifecycleAndOwnerGuardIntegration(t *testing.T) {
 
 	activeMember, err := membershipRepo.UpdateStatus(
 		ctx,
+		organization.ID,
 		member.ID,
 		model.MembershipStatusActive,
 		now.Add(time.Second),
@@ -171,6 +172,7 @@ func TestMembershipRepositoryLifecycleAndOwnerGuardIntegration(t *testing.T) {
 			defer waitGroup.Done()
 			_, updateErr := membershipRepo.UpdateStatus(
 				context.Background(),
+				organization.ID,
 				id,
 				model.MembershipStatusRemoved,
 				time.Now().UTC(),
