@@ -50,6 +50,17 @@ arsitektur dan hal-hal yang tidak terlihat dari OpenAPI saja.
   `iframe.contentDocument.querySelectorAll('[data-section-id]')` langsung
   (same-origin), lalu `store.insertBlock(blockId, index)`. Tidak ada panel
   "Struktur halaman" lagi — select/hapus/reorder semua dari kanvas.
+- **Header & Brand (tenant-wide)**: kanvas me-render `CanvasHeaderBar` pinned di
+  atas semua section (pesan bridge `canvas:set-chrome` dari `CanvasFrame`).
+  Klik → `canvas:select` dengan sentinel `HEADER_REGION_ID` (`__chrome:header__`)
+  → shell menampilkan `HeaderBrandPanel` (bukan `SectionPropertyPanel`). Store
+  terpisah `stores/landingChrome.ts` mengelola menu `landing_menus`
+  (location=header, dibuat otomatis kalau belum ada) + `landing_brandings`
+  default via endpoint admin `/admin/landing/menus[...]` &
+  `GET/PATCH /admin/landing/branding` — **persist langsung**, tidak lewat tombol
+  Publish page. Halaman standalone `/app/landing-pages/{navigation,brand-theme}`
+  **dihapus**; Reusable CTA manager + Media library pindah ke halaman Settings.
+  Editor menu footer (location=footer) belum dipindah — follow-up.
 - **Store** = buffer editor (bukan cache server): undo/redo (maks 50 langkah),
   `dirty` dari perbandingan serialisasi vs baseline, autosave debounce 2 detik,
   `pendingResave` untuk edit yang datang saat request lain in-flight. Blok baru
