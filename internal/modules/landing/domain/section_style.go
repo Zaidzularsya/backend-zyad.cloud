@@ -16,6 +16,8 @@ var AllowedStyleKeys = map[string]bool{
 	"colors":             true, // { primary, secondary, surface, text, muted }
 	"align":              true, // left | center | right
 	"visible":            true, // bool rendering hint (mirrors is_enabled)
+	"typography":         true, // { size, weight, color, lineHeight, align } — atomic element blocks
+	"box":                true, // { radius, borderWidth, borderColor, shadow, width, fullWidth } — atomic element blocks
 }
 
 // StyleURLKeys are leaf keys whose string value is treated as a URL. Their

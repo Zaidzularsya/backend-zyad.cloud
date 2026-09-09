@@ -554,6 +554,8 @@ func TestSectionServiceSanitizeStyleMapDropsUnknownKeysAndUnsafeURLs(t *testing.
 		"spacing":            map[string]any{"top": 40, "bottom": 24},
 		"hero":               map[string]any{"backgroundImage": "https://cdn.example.com/a.png", "overlay": "dark"},
 		"background":         map[string]any{"image": "javascript:alert(1)"},
+		"typography":         map[string]any{"size": 32, "weight": "700", "color": "#0f172a"},
+		"box":                map[string]any{"radius": 8, "shadow": "md", "fullWidth": true},
 		"evil":               "<script>alert(1)</script>",
 		"onmouseover":        "x",
 	}
@@ -579,6 +581,14 @@ func TestSectionServiceSanitizeStyleMapDropsUnknownKeysAndUnsafeURLs(t *testing.
 	bg := out["background"].(map[string]any)
 	if bg["image"] != "" {
 		t.Errorf("javascript: url should be blanked: %#v", bg["image"])
+	}
+	typo, ok := out["typography"].(map[string]any)
+	if !ok || typo["size"] != 32 || typo["weight"] != "700" || typo["color"] != "#0f172a" {
+		t.Errorf("typography style should survive intact: %#v", out["typography"])
+	}
+	box, ok := out["box"].(map[string]any)
+	if !ok || box["radius"] != 8 || box["shadow"] != "md" || box["fullWidth"] != true {
+		t.Errorf("box style should survive intact: %#v", out["box"])
 	}
 }
 

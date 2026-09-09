@@ -133,7 +133,7 @@ menginterpolasi `style.hero.backgroundImage` langsung ke CSS `url(...)`.
 
 - **Allowlist key top-level** (`domain.AllowedStyleKeys`):
   `variant`, `family`, `renderer_component`, `spacing`, `background`, `hero`,
-  `colors`, `align`, `visible`. Key lain dibuang.
+  `colors`, `align`, `visible`, `typography`, `box`. Key lain dibuang.
 - Leaf string di key gambar/URL (`domain.StyleURLKeys`: `image`,
   `backgroundImage`, `url`, `src`) lewat `sanitizeStyleURL`: hanya menerima
   `http(s)://...` atau path relatif `/...`, menolak nilai yang mengandung
@@ -158,7 +158,9 @@ Bentuk `style` yang dikenal builder (semua opsional):
   "hero":      { "backgroundImage": "https://...", "overlay": "dark" }, // dipakai EnterpriseTemplateSection
   "colors":    { "primary": "#2563EB", "secondary": "...", "surface": "...", "text": "...", "muted": "..." },
   "align":     "center",           // left | center | right — SectionRenderer generik
-  "visible":   true
+  "visible":   true,
+  "typography": { "size": 32, "weight": "700", "color": "#0f172a", "lineHeight": 1.3, "align": "center" }, // blok elemen atomik (Headline / Paragraph / Button)
+  "box":       { "radius": 8, "borderWidth": 1, "borderColor": "#e2e8f0", "shadow": "md", "width": 480, "fullWidth": false } // blok elemen atomik (Button / Image / Divider)
 }
 ```
 
@@ -174,9 +176,15 @@ Satu sumber kebenaran, menggantikan tiga daftar lama yang divergen
 (`sectionPresets` hardcoded, `SECTION_CONTENT_SCHEMAS`, `section-registry`):
 
 - `frontend/src/features/landing/shared/blocks/types.ts` — `BlockDefinition`
-- `frontend/src/features/landing/shared/blocks/catalog.ts` — `BLOCK_CATALOG`
-  (15 blok), `blockById`, `blocksByGroup`, `defaultBlockForType`,
-  `resolveBlockForSection`
+- `frontend/src/features/landing/shared/blocks/catalog.ts` — `BLOCK_CATALOG`,
+  `blockById`, `blocksByGroup`, `defaultBlockForType`, `resolveBlockForSection`
+
+Grup `elements` (label "Komponen") berisi blok atomik kecil yang bisa disusun
+bebas: `element.headline`, `element.paragraph`, `element.button`, `element.image`,
+`element.divider`. Semua persist sebagai `section_type = 'content'` + penanda
+`style.variant = 'element.*'` (tanpa migration), renderer di
+`renderer/sections/element/*.vue`, tampilan diatur lewat `style.typography` /
+`style.box` dari tab APPEARANCE property panel.
 
 `BlockDefinition`:
 
@@ -244,5 +252,7 @@ dari seed-nya sendiri, tidak ada `sectionType` frontend-only.
   renderer yang mengonsumsi field `media` / `cta`.
 - Floating toolbar inline (bold/italic/link) — formatting kaya lewat
   RichTextField di property panel.
-- Drag presisi dari palette langsung ke posisi di dalam canvas (saat ini drop
-  diarahkan ke list "Struktur halaman").
+- Drop bebas-posisi (koordinat) dari palette ke canvas. Sudah didukung: drag
+  block dari palette lalu lepas di antara section pada canvas (indikator garis
+  sisip, pesan bridge `canvas:drag` + `canvas:request-insert`); yang belum adalah
+  penempatan bebas di luar urutan vertikal.
