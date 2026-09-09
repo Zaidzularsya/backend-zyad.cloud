@@ -14,9 +14,11 @@ arsitektur dan hal-hal yang tidak terlihat dari OpenAPI saja.
 ```
 ┌─ LandingBuilderPage.vue (3 pane) ──────────────────────────────────────────┐
 │  ┌ BlockPalette ┐  ┌ CanvasFrame ── <iframe> ─┐  ┌ SectionPropertyPanel ┐  │
-│  │ katalog blok │  │  src=/landing-canvas/:id  │  │  Konten / Gaya /      │  │
-│  │ PageOutline  │  │  ↕ postMessage (bridge)   │  │  Advanced            │  │
-│  └──────────────┘  └──────────────────────────┘  └──────────────────────┘  │
+│  │ katalog blok │  │  src=/landing-canvas/:id  │  │  Content / Appearance │  │
+│  │ (akordeon    │  │  ↕ postMessage (bridge)   │  │  / Spacing / Advanced │  │
+│  │  per grup)   │  │  drag palette → drop di   │  │  (akordeon)           │  │
+│  └──────────────┘  │  antara section (pointer) │  └──────────────────────┘  │
+│                    └──────────────────────────┘                            │
 │         Pinia store: stores/landingBuilder.ts                              │
 │         sections[] · selectedId · dirty · history(undo/redo) · autosave    │
 └───────────────────────────────────────────────────────────────────────────┘
@@ -34,9 +36,20 @@ arsitektur dan hal-hal yang tidak terlihat dari OpenAPI saja.
   memasang listener parallax, semua `.fade-up` dipaksa terlihat.
 - **Bridge** (`shared/canvas/bridge.ts`): protokol `postMessage` bertipe, semua
   pesan divalidasi terhadap `window.location.origin` dan berprefiks `canvas:`.
+  Payload di-`JSON` round-trip (`toPlain`) sebelum dikirim — `postMessage`
+  structured clone tidak bisa meng-clone Vue reactive proxy (`sections` dari
+  store).
   - parent → iframe: `set-sections`, `set-selected`, `set-device`
   - iframe → parent: `ready`, `select`, `reorder`, `request-insert`,
     `request-delete`, `inline-edit`, `size`
+- **Drag palette → canvas** (`CanvasFrame.startBlockDrag`): HTML5 DnD tidak
+  menyeberang batas iframe dengan andal, jadi drag dari palette bersifat
+  pointer-driven dan di-host di `CanvasFrame` (parent). Saat drag aktif,
+  `iframe.style.pointerEvents = 'none'` supaya parent tetap menerima
+  `pointermove`/`pointerup` di atas iframe; posisi sisip dihitung dengan membaca
+  `iframe.contentDocument.querySelectorAll('[data-section-id]')` langsung
+  (same-origin), lalu `store.insertBlock(blockId, index)`. Tidak ada panel
+  "Struktur halaman" lagi — select/hapus/reorder semua dari kanvas.
 - **Store** = buffer editor (bukan cache server): undo/redo (maks 50 langkah),
   `dirty` dari perbandingan serialisasi vs baseline, autosave debounce 2 detik,
   `pendingResave` untuk edit yang datang saat request lain in-flight. Blok baru
@@ -179,12 +192,18 @@ Satu sumber kebenaran, menggantikan tiga daftar lama yang divergen
 - `frontend/src/features/landing/shared/blocks/catalog.ts` — `BLOCK_CATALOG`,
   `blockById`, `blocksByGroup`, `defaultBlockForType`, `resolveBlockForSection`
 
-Grup `elements` (label "Komponen") berisi blok atomik kecil yang bisa disusun
-bebas: `element.headline`, `element.paragraph`, `element.button`, `element.image`,
-`element.divider`. Semua persist sebagai `section_type = 'content'` + penanda
+Palette dikelompokkan dengan taksonomi standar page builder (`BlockGroup`):
+`layout` · `text` · `media` · `interactive` · `section` · `social-proof` ·
+`conversion` · `navigation`. Tiap grup adalah akordeon `<details>` (grup elemen
+atomik terbuka default, grup section besar tertutup; state disimpan di
+`localStorage`).
+
+Blok atomik kecil (`element.headline`, `element.paragraph`, `element.button`,
+`element.image`, `element.divider`) tersebar di grup layout/text/media/interactive.
+Semua persist sebagai `section_type = 'content'` + penanda
 `style.variant = 'element.*'` (tanpa migration), renderer di
-`renderer/sections/element/*.vue`, tampilan diatur lewat `style.typography` /
-`style.box` dari tab APPEARANCE property panel.
+`renderer/sections/element/*.vue` (+ `useElementStyle.ts`), tampilan diatur lewat
+`style.typography` / `style.box` dari akordeon APPEARANCE property panel.
 
 `BlockDefinition`:
 
@@ -222,8 +241,9 @@ dari seed-nya sendiri, tidak ada `sectionType` frontend-only.
 **Frontend** (`frontend/src/`):
 - `stores/landingBuilder.ts` — store editor
 - `features/landing/builder/pages/LandingBuilderPage.vue` — shell 3-pane
-- `features/landing/builder/components/` — `BlockPalette`, `PageOutlineList`,
-  `CanvasFrame`, `SectionPropertyPanel`, `SectionContentForm`,
+- `features/landing/builder/components/` — `BlockPalette` (akordeon grup),
+  `CanvasFrame` (host drag palette→kanvas), `SectionPropertyPanel` (akordeon
+  Content/Appearance/Spacing/Advanced), `SectionContentForm`, `AppearanceForm`,
   `fields/{ColorField,SpacingField}`
 - `features/landing/renderer/pages/LandingCanvasFramePage.vue` — isi iframe
 - `features/landing/renderer/components/` — `LandingPageRenderer` (`editMode`),
@@ -253,6 +273,7 @@ dari seed-nya sendiri, tidak ada `sectionType` frontend-only.
 - Floating toolbar inline (bold/italic/link) — formatting kaya lewat
   RichTextField di property panel.
 - Drop bebas-posisi (koordinat) dari palette ke canvas. Sudah didukung: drag
-  block dari palette lalu lepas di antara section pada canvas (indikator garis
-  sisip, pesan bridge `canvas:drag` + `canvas:request-insert`); yang belum adalah
-  penempatan bebas di luar urutan vertikal.
+  block dari palette lalu lepas di antara section pada canvas (pointer-driven,
+  indikator garis sisip, `store.insertBlock`); yang belum adalah penempatan bebas
+  di luar urutan vertikal.
+- Auto-scroll kanvas saat drag mendekati tepi atas/bawah viewport.
