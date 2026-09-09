@@ -50,16 +50,25 @@ arsitektur dan hal-hal yang tidak terlihat dari OpenAPI saja.
   `iframe.contentDocument.querySelectorAll('[data-section-id]')` langsung
   (same-origin), lalu `store.insertBlock(blockId, index)`. Tidak ada panel
   "Struktur halaman" lagi — select/hapus/reorder semua dari kanvas.
-- **Header & Brand (tenant-wide)**: kanvas me-render `CanvasHeaderBar` pinned di
-  atas semua section (pesan bridge `canvas:set-chrome` dari `CanvasFrame`).
-  Klik → `canvas:select` dengan sentinel `HEADER_REGION_ID` (`__chrome:header__`)
-  → shell menampilkan `HeaderBrandPanel` (bukan `SectionPropertyPanel`). Store
-  terpisah `stores/landingChrome.ts` mengelola menu `landing_menus`
-  (location=header, dibuat otomatis kalau belum ada) + `landing_brandings`
-  default via endpoint admin `/admin/landing/menus[...]` &
-  `GET/PATCH /admin/landing/branding` — **persist langsung**, tidak lewat tombol
-  Publish page. Halaman standalone `/app/landing-pages/{navigation,brand-theme}`
-  **dihapus**; Reusable CTA manager + Media library pindah ke halaman Settings.
+- **Header = section `header` per-page** (migration `000089` menambah `header` ke
+  CHECK `landing_page_sections_type_check` + `landing_section_templates_type_check`;
+  `domain.SectionTypeHeader`). `pageService.Create` men-seed 1 section `header` di
+  `sort_order 0` untuk page non-template (lewat repo → tak kena quota). Dirender
+  `HeaderSection.vue` (`sticky top-0`), pola sama footer: kontennya
+  di-`content-override` dengan hasil synthesize — item link dari menu tenant
+  `landing_menus` location=header, logo/nama dari branding
+  (`LandingPageRenderer.contentOverrideFor`). Page yang section `header`-nya
+  dihapus = tanpa menu. `MarketingLayout.vue` menyembunyikan `<nav>` bila page
+  punya section `header` (event `landing-header-mode`).
+- **Panel Header di builder**: `HeaderSectionPanel.vue` (dipilih saat
+  `selectedSection.type === 'header'`) — akordeon "Tampilan header (halaman ini)"
+  (schema `section.content`: sticky/transparentOnTop/showLoginCta/ctaLabel/ctaUrl/
+  logoUrl → `patchSection`, ikut autosave/publish) + "Navigasi (semua halaman)" &
+  "Brand (semua halaman)" (store `stores/landingChrome.ts` → `/admin/landing/menus[...]`
+  & `GET/PATCH /admin/landing/branding`, **persist langsung**). Item menu tenant
+  di-push ke iframe via `canvas:set-chrome` sebagai content-override header.
+  Halaman standalone `/app/landing-pages/{navigation,brand-theme}` **dihapus**;
+  Reusable CTA manager + Media library pindah ke halaman Settings.
   Editor menu footer (location=footer) belum dipindah — follow-up.
 - **Store** = buffer editor (bukan cache server): undo/redo (maks 50 langkah),
   `dirty` dari perbandingan serialisasi vs baseline, autosave debounce 2 detik,

@@ -23,6 +23,7 @@ const (
 	SectionTypePartnerLogos    SectionType = "partner_logos"
 	SectionTypeStatistics      SectionType = "statistics"
 	SectionTypeFooter          SectionType = "footer"
+	SectionTypeHeader          SectionType = "header"
 )
 
 func (s SectionType) IsValid() bool {
@@ -44,7 +45,8 @@ func (s SectionType) IsValid() bool {
 		SectionTypeNewsletter,
 		SectionTypePartnerLogos,
 		SectionTypeStatistics,
-		SectionTypeFooter:
+		SectionTypeFooter,
+		SectionTypeHeader:
 		return true
 	default:
 		return false
