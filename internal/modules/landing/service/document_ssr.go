@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"fmt"
 	"html"
 	"regexp"
@@ -22,8 +23,19 @@ const ssrBaseCSS = `*,*::before,*::after{box-sizing:border-box}
 html,body{margin:0;padding:0}
 img,video,iframe{max-width:100%}`
 
-const ssrChromeCSS = `.zyad-tenant-nav{display:flex;flex-wrap:wrap;gap:8px 24px;align-items:center;padding:16px 24px;border-bottom:1px solid #e2e8f0}
-.zyad-tenant-nav a{color:#0f172a;text-decoration:none;font-size:14px;font-weight:500}
+const ssrChromeCSS = `.zyad-tenant-header{display:flex;align-items:center;gap:24px;padding:14px 24px;font-family:'Inter','Segoe UI',system-ui,sans-serif}
+.zyad-tenant-header--solid{background:#fff;border-bottom:1px solid #e5e7eb}
+.zyad-tenant-header--glass{background:rgba(255,255,255,.72);backdrop-filter:blur(8px);border-bottom:1px solid #e5e7eb}
+.zyad-tenant-header--transparent{background:transparent}
+.zyad-tenant-header--sticky{position:sticky;top:0;z-index:50}
+.zyad-tenant-header--left{justify-content:space-between}
+.zyad-tenant-header--center{justify-content:center}
+.zyad-tenant-header--right{justify-content:flex-end}
+.zyad-tenant-header__brand{display:flex;align-items:center;gap:8px;font-weight:700;color:#0f172a;text-decoration:none;font-size:16px}
+.zyad-tenant-header__brand img{height:28px;width:auto;display:block}
+.zyad-tenant-header__nav{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
+.zyad-tenant-header__nav a{color:#475569;text-decoration:none;font-size:14px;font-weight:500}
+.zyad-tenant-header__action{display:inline-block;padding:9px 18px;border-radius:8px;background:#2563eb;color:#fff;font-weight:600;font-size:14px;text-decoration:none;white-space:nowrap}
 .zyad-tenant-footer{padding:48px 24px;background:#0f172a;color:#cbd5e1;font-size:14px}
 .zyad-tenant-footer__top{max-width:1120px;margin:0 auto;display:flex;flex-wrap:wrap;gap:32px;justify-content:space-between}
 .zyad-tenant-footer__brand{display:flex;align-items:center;gap:10px;color:#fff;font-weight:800;font-size:16px}
@@ -37,7 +49,54 @@ var (
 	navSentinelRe    = regexp.MustCompile(`(?is)<div\b[^>]*\bdata-zyad-slot="tenant-nav"[^>]*>.*?</div>`)
 	footerSentinelRe = regexp.MustCompile(`(?is)<div\b[^>]*\bdata-zyad-slot="tenant-footer"[^>]*>.*?</div>`)
 	safeSSRHrefRe    = regexp.MustCompile(`^(#|/(?:[^/]|$)|https?://|mailto:|tel:)`)
+	dataZyadHeaderRe = regexp.MustCompile(`(?is)\bdata-zyad-header\s*=\s*("([^"]*)"|'([^']*)')`)
 )
+
+// ssrHeaderPresentation mirrors the FE TenantHeaderPresentation (per-page).
+type ssrHeaderPresentation struct {
+	Sticky      bool   `json:"sticky"`
+	Variant     string `json:"variant"`
+	Align       string `json:"align"`
+	ShowAction  bool   `json:"showAction"`
+	ActionLabel string `json:"actionLabel"`
+	ActionURL   string `json:"actionUrl"`
+}
+
+func defaultSSRHeaderPresentation() ssrHeaderPresentation {
+	return ssrHeaderPresentation{
+		Sticky: true, Variant: "solid", Align: "left",
+		ShowAction: true, ActionLabel: "Masuk", ActionURL: "/login",
+	}
+}
+
+// parseSSRHeaderPresentation pulls the data-zyad-header JSON out of a matched
+// sentinel opening tag (bluemonday entity-encodes the value).
+func parseSSRHeaderPresentation(sentinel string) ssrHeaderPresentation {
+	p := defaultSSRHeaderPresentation()
+	m := dataZyadHeaderRe.FindStringSubmatch(sentinel)
+	if m == nil {
+		return p
+	}
+	raw := m[2]
+	if raw == "" {
+		raw = m[3]
+	}
+	raw = html.UnescapeString(raw)
+	if raw == "" {
+		return p
+	}
+	// Unmarshal onto the defaults so keys absent from the JSON keep their default.
+	if err := json.Unmarshal([]byte(raw), &p); err != nil {
+		return defaultSSRHeaderPresentation()
+	}
+	if p.Variant != "solid" && p.Variant != "transparent" && p.Variant != "glass" {
+		p.Variant = "solid"
+	}
+	if p.Align != "left" && p.Align != "center" && p.Align != "right" {
+		p.Align = "left"
+	}
+	return p
+}
 
 type ssrChromeLink struct {
 	Label  string
@@ -120,10 +179,12 @@ func fillGrapesSentinels(
 	branding domain.LandingBranding,
 	page domain.LandingPage,
 ) string {
-	if nav := headerChromeLinks(menus); len(nav) > 0 {
-		replacement := `<div data-zyad-slot="tenant-nav" class="zyad-slot">` + buildNavMarkup(nav) + `</div>`
-		markup = navSentinelRe.ReplaceAllStringFunc(markup, func(string) string { return replacement })
-	}
+	nav := headerChromeLinks(menus)
+	markup = navSentinelRe.ReplaceAllStringFunc(markup, func(sentinel string) string {
+		pres := parseSSRHeaderPresentation(sentinel)
+		return `<div data-zyad-slot="tenant-nav" class="zyad-slot">` +
+			buildHeaderMarkup(nav, branding, pres) + `</div>`
+	})
 
 	columns := footerChromeColumns(menus)
 	replacement := `<div data-zyad-slot="tenant-footer" class="zyad-slot">` +
@@ -133,13 +194,42 @@ func fillGrapesSentinels(
 	return markup
 }
 
-func buildNavMarkup(links []ssrChromeLink) string {
+func buildHeaderMarkup(links []ssrChromeLink, branding domain.LandingBranding, p ssrHeaderPresentation) string {
 	var b strings.Builder
-	b.WriteString(`<nav class="zyad-tenant-nav">`)
+	b.WriteString(`<div class="zyad-tenant-header zyad-tenant-header--` + p.Variant +
+		` zyad-tenant-header--` + p.Align)
+	if p.Sticky {
+		b.WriteString(` zyad-tenant-header--sticky`)
+	}
+	b.WriteString(`">`)
+
+	b.WriteString(`<a class="zyad-tenant-header__brand" href="/">`)
+	if logo := strings.TrimSpace(branding.LogoLightURL); (strings.HasPrefix(logo, "https://") ||
+		strings.HasPrefix(logo, "http://")) && !strings.ContainsAny(logo, "\"'<> \t\r\n") {
+		b.WriteString(`<img src="` + html.EscapeString(logo) + `" alt="` +
+			html.EscapeString(branding.CompanyName) + `">`)
+	}
+	if branding.CompanyName != "" {
+		b.WriteString(`<span>` + html.EscapeString(branding.CompanyName) + `</span>`)
+	}
+	b.WriteString(`</a>`)
+
+	b.WriteString(`<nav class="zyad-tenant-header__nav">`)
 	for _, link := range links {
 		writeAnchor(&b, link)
 	}
 	b.WriteString(`</nav>`)
+
+	if p.ShowAction && (p.ActionLabel != "" || p.ActionURL != "") {
+		label := p.ActionLabel
+		if label == "" {
+			label = "Masuk"
+		}
+		b.WriteString(`<a class="zyad-tenant-header__action" href="` +
+			html.EscapeString(safeSSRHref(p.ActionURL)) + `">` + html.EscapeString(label) + `</a>`)
+	}
+
+	b.WriteString(`</div>`)
 	return b.String()
 }
 

@@ -74,13 +74,18 @@ func TestRenderGrapesDocumentFillsTenantSentinels(t *testing.T) {
 	if strings.Contains(doc, "placeholder") || strings.Contains(doc, "dashed red") {
 		t.Fatalf("sentinel placeholder not replaced: %s", doc)
 	}
-	// Header nav filled, sorted by sort_order, disabled item dropped.
-	navIdx := strings.Index(doc, `<nav class="zyad-tenant-nav">`)
-	if navIdx < 0 {
-		t.Fatalf("tenant-nav not filled: %s", doc)
+	// Header filled: brand + nav (sorted, disabled item dropped) + default action.
+	if !strings.Contains(doc, `class="zyad-tenant-header zyad-tenant-header--solid zyad-tenant-header--left zyad-tenant-header--sticky"`) {
+		t.Fatalf("tenant-header not filled with default presentation: %s", doc)
 	}
-	if !strings.Contains(doc, `<a href="/">Beranda</a><a href="/pricing">Harga</a>`) {
+	if !strings.Contains(doc, `<nav class="zyad-tenant-header__nav"><a href="/">Beranda</a><a href="/pricing">Harga</a></nav>`) {
 		t.Fatalf("nav links wrong/unsorted: %s", doc)
+	}
+	if !strings.Contains(doc, `<a class="zyad-tenant-header__brand" href="/"><img src="https://cdn.test/logo.png" alt="Acme"><span>Acme</span></a>`) {
+		t.Fatalf("header brand not rendered: %s", doc)
+	}
+	if !strings.Contains(doc, `<a class="zyad-tenant-header__action" href="/login">Masuk</a>`) {
+		t.Fatalf("header action not rendered: %s", doc)
 	}
 	if strings.Contains(doc, ">Off<") {
 		t.Fatalf("disabled nav item leaked: %s", doc)
@@ -93,6 +98,22 @@ func TestRenderGrapesDocumentFillsTenantSentinels(t *testing.T) {
 	}
 	if !strings.Contains(doc, `class="zyad-tenant-footer__copyright"`) {
 		t.Fatalf("footer copyright missing: %s", doc)
+	}
+}
+
+func TestRenderGrapesDocumentAppliesHeaderPresentation(t *testing.T) {
+	page := grapesResolvedFixture()
+	// bluemonday-style entity-encoded attribute value.
+	page.HTML = `<div data-zyad-slot="tenant-nav" data-zyad-header="{&#34;sticky&#34;:false,&#34;variant&#34;:&#34;transparent&#34;,&#34;align&#34;:&#34;center&#34;,&#34;showAction&#34;:false,&#34;actionLabel&#34;:&#34;Masuk&#34;,&#34;actionUrl&#34;:&#34;/login&#34;}"></div><main>x</main>`
+
+	doc := RenderGrapesDocument(page)
+
+	// The class attribute (not the CSS block) reflects the presentation.
+	if !strings.Contains(doc, `class="zyad-tenant-header zyad-tenant-header--transparent zyad-tenant-header--center"`) {
+		t.Fatalf("presentation not applied (variant/align/no-sticky): %s", doc)
+	}
+	if strings.Contains(doc, `<a class="zyad-tenant-header__action"`) {
+		t.Fatalf("showAction:false must drop the action button: %s", doc)
 	}
 }
 
