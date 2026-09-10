@@ -7,6 +7,11 @@ Route menu tetap sama: `/app/landing-pages/content` (nama route `*-content`).
 Source of truth kontrak HTTP tetap `api/openapi.yaml`. Dokumen ini menjelaskan
 arsitektur dan hal-hal yang tidak terlihat dari OpenAPI saja.
 
+> **Catatan pivot (10 Sep 2026):** builder section berbasis komponen Vue di
+> bawah ini **dibekukan** untuk page lama. Page baru memakai **GrapesJS** —
+> lihat bagian **8. GrapesJS builder** di akhir dokumen. Kedua builder hidup
+> berdampingan lewat kolom `landing_pages.builder` (`'sections'` | `'grapesjs'`).
+
 ---
 
 ## 1. Arsitektur
@@ -347,3 +352,100 @@ dari seed-nya sendiri, tidak ada `sectionType` frontend-only.
   indikator garis sisip, `store.insertBlock`); yang belum adalah penempatan bebas
   di luar urutan vertikal.
 - Auto-scroll kanvas saat drag mendekati tepi atas/bawah viewport.
+
+---
+
+## 8. GrapesJS builder (`landing_pages.builder = 'grapesjs'`)
+
+Page baru dibuat dengan builder GrapesJS (drag bebas, nesting sungguhan, style
+manager visual breakpoint-scoped, layer tree). Section builder di atas tetap
+melayani page `builder = 'sections'` lama tanpa migrasi.
+
+### Model data
+
+- `landing_pages.builder varchar NOT NULL DEFAULT 'sections'`
+  CHECK `IN ('sections','grapesjs')` (migration `000090`).
+- Tabel `landing_page_documents` 1:1 dengan page — working copy editor:
+  `{landing_page_id PK/FK, organization_id, project jsonb, html text, css text,
+  updated_by, timestamps}`. `apply_organization_rls` + carve-out public-read
+  (pola migration `000036`).
+- Publish tetap menulis `landing_page_versions.snapshot`, tapi berbentuk
+  `{builder:'grapesjs', page, seo, html, css, project, snapshot_time}` — html/css
+  sudah **disanitasi** (`document_sanitizer.go`). Page published diserve dari
+  snapshot ini.
+
+### Endpoint
+
+| Method | Path | Permission | Fungsi |
+|---|---|---|---|
+| `GET` | `/admin/landing-pages/:id/document` | `landing.page.read` | ambil working copy (empty doc kalau belum pernah disimpan) |
+| `PUT` | `/admin/landing-pages/:id/document` | `landing.section.manage` | simpan working copy `{project, html, css}` (cap: project 4 MB, html+css 2 MB masing-masing; **tanpa sanitasi** — working copy tak pernah dirender mentah) |
+
+Publish memakai endpoint yang sama (`POST /admin/landing-pages/:id/publish`);
+`publishService.Publish` bercabang di `page.Builder`. `ValidateForPublish` untuk
+grapesjs mensyaratkan document ada dengan HTML non-kosong.
+
+### Sanitasi (surface keamanan utama — tidak ada CSP di repo)
+
+`service/document_sanitizer.go`:
+- `SanitizeGrapesHTML` — bluemonday allowlist page-builder: tag
+  struktural/layout/media/link, attr `class/id/style/title/role/dir/lang/aria-*/
+  data-zyad-slot` + `href/target/rel` (a), `src/srcset/alt/width/height` (img),
+  atribut tabel. **Tanpa** `script/style/iframe/object/embed`, tanpa handler
+  `on*`. Nilai atribut `style` inline di-re-sanitasi lewat CSS sanitizer.
+- `SanitizeGrapesCSS` — netralkan `url()` tak-aman → `url(about:blank)` dulu
+  (`isSafeCSSURL`: izinkan `http(s)://`, `data:image/`, `#anchor`, path relatif
+  bersih; tolak `javascript:`/`vbscript:`/`//`/karakter kutip-spasi), lalu buang
+  `expression()`/`-moz-binding`/`behavior:`/`@import`/`@charset`.
+- Render publik: `<iframe srcdoc>` **tanpa `allow-scripts`** (lapis kedua).
+
+### Resolve
+
+`resolver_service.go` `resolvePageData` short-circuit untuk grapesjs →
+`resolveGrapesPage`:
+- **published** → html/css dari `landing_page_versions.snapshot` terakhir.
+- **draft preview / fallback** → live `landing_page_documents` disanitasi on-read.
+- `Menus` + `Branding` tetap dikembalikan live (dipakai live tenant chrome —
+  blok sentinel `data-zyad-slot`, roadmap Fase 5b).
+- `ResolvedPage` punya field tambahan `Builder`, `HTML`, `CSS`.
+
+### Frontend
+
+- `stores/landingDocument.ts` — store tipis: `load` / `applyEditorSnapshot`
+  (debounce autosave 1.5 s, in-flight guard + `pendingResave`) / `save` /
+  `publish`. Undo/redo dipegang GrapesJS sendiri.
+- `features/landing/builder/grapes/GrapesEditor.vue` — shell + `grapesjs.init`
+  (`storageManager:{type:'none'}`), listener perubahan → snapshot ke store.
+- `features/landing/builder/pages/LandingContentPage.vue` — switch by
+  `page.builder`: `grapesjs` → `GrapesEditor`; `sections` → `LandingBuilderPage`
+  (legacy, punya header + page picker sendiri).
+- `landing.api.ts` — `getDocument` / `saveDocument` (+ `normalizeDocument`).
+
+### Peta file (tambahan GrapesJS)
+
+**Backend:**
+- `domain/landing_document.go`, `domain/landing_page.go` (`PageBuilder`)
+- `repository/document_repository.go` — `GetByPageID`, `Upsert`
+- `service/document_service.go` — `Get`, `Save` (cap ukuran, cek page ada)
+- `service/document_sanitizer.go` — `SanitizeGrapesHTML/CSS`,
+  `buildGrapesJSSnapshot`, `grapesSnapshotMarkup`
+- `handler/admin_document_handler.go`
+- `service/publish_service.go`, `service/resolver_service.go` — branch `builder`
+- `migrations/000090_add_landing_builder_and_documents.{up,down}.sql`
+
+**Frontend:**
+- `stores/landingDocument.ts`
+- `features/landing/builder/grapes/{GrapesEditor.vue, grapes.config.ts,
+  grapes.blocks.ts, grapes.devices.ts, grapes.i18n.id.ts}`
+- `features/landing/builder/pages/LandingContentPage.vue`
+- `features/landing/renderer/components/GrapesPageFrame.vue` (render publik — Fase 4)
+
+### Belum dikerjakan
+
+- Fase 4 render publik (`GrapesPageFrame.vue` + branch di `DynamicLandingPage` /
+  `LandingPreviewPage`).
+- Fase 5 asset manager (media API) + starter template.
+- Fase 5b live tenant chrome (`data-zyad-slot`).
+- Fase 6 rename `LandingBuilderPage.vue` → `LegacySectionBuilderPage.vue`,
+  marker FROZEN.
+- Fase 7 (opsional) SSR `GET /public/landing/render` untuk SEO + nginx CSP.
