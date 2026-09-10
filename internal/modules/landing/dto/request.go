@@ -393,3 +393,11 @@ type PublicAnalyticsEventRequest struct {
 	SessionID   string         `json:"session_id"`
 	Context     map[string]any `json:"context"`
 }
+
+// SaveDocumentRequest is the GrapesJS working-copy payload for a landing page
+// whose builder == "grapesjs" (PUT /admin/landing-pages/:id/document).
+type SaveDocumentRequest struct {
+	Project map[string]any `json:"project"`
+	HTML    string         `json:"html"`
+	CSS     string         `json:"css"`
+}

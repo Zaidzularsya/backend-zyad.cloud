@@ -311,6 +311,8 @@ func New(ctx context.Context) (*App, error) {
 		landingSectionRepo,
 		landingservice.WithLandingSectionQuotaGuard(subscriptionGuardService),
 	)
+	landingDocumentRepo := landingrepo.NewDocumentRepository(db)
+	landingDocumentSvc := landingservice.NewDocumentService(landingDocumentRepo, landingPageRepo)
 
 	landingDomainRepo := landingrepo.NewDomainRepository(db)
 	landingDomainSvc := landingservice.NewDomainService(
@@ -348,6 +350,7 @@ func New(ctx context.Context) (*App, error) {
 
 	landingAdminPageHandler := landinghandler.NewAdminPageHandler(landingPageSvc, landingVisibilitySvc, landingRevisionSvc, landingPublishSvc)
 	landingAdminSectionHandler := landinghandler.NewAdminSectionHandler(landingSectionSvc, landingRevisionSvc)
+	landingAdminDocumentHandler := landinghandler.NewAdminDocumentHandler(landingDocumentSvc)
 	landingAdminBrandingHandler := landinghandler.NewAdminBrandingHandler(landingBrandingSvc)
 	landingAdminDomainHandler := landinghandler.NewAdminDomainHandler(landingDomainSvc)
 	landingAdminFormHandler := landinghandler.NewAdminFormHandler(landingFormSvc)
@@ -434,6 +437,7 @@ func New(ctx context.Context) (*App, error) {
 		UserHandler:                      userHandler,
 		LandingAdminPageHandler:          landingAdminPageHandler,
 		LandingAdminSectionHandler:       landingAdminSectionHandler,
+		LandingAdminDocumentHandler:      landingAdminDocumentHandler,
 		LandingAdminBrandingHandler:      landingAdminBrandingHandler,
 		LandingAdminDomainHandler:        landingAdminDomainHandler,
 		LandingAdminFormHandler:          landingAdminFormHandler,

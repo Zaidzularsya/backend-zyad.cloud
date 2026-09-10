@@ -37,6 +37,25 @@ func (v PageVisibility) IsValid() bool {
 	}
 }
 
+// PageBuilder identifies which editor authors a landing page's content.
+type PageBuilder string
+
+const (
+	// PageBuilderSections is the legacy Vue section model (landing_page_sections).
+	PageBuilderSections PageBuilder = "sections"
+	// PageBuilderGrapesJS is the GrapesJS visual builder (landing_page_documents).
+	PageBuilderGrapesJS PageBuilder = "grapesjs"
+)
+
+func (b PageBuilder) IsValid() bool {
+	switch b {
+	case PageBuilderSections, PageBuilderGrapesJS:
+		return true
+	default:
+		return false
+	}
+}
+
 type PageType string
 
 const (
@@ -78,13 +97,13 @@ type TrustBadge struct {
 // approval flow, analytics hooks) that require subsystems that don't
 // exist yet; AnalyticsHooks stays an opaque passthrough for forward-compat.
 type PageSettings struct {
-	PublishRequireApproval bool           `json:"publish_require_approval"`
-	LeadNotificationEmails []string       `json:"lead_notification_emails"`
-	FooterCopyrightText    string         `json:"footer_copyright_text"`
-	TrustBadges            []TrustBadge   `json:"trust_badges"`
-	SecondaryCTATrackingKey string        `json:"secondary_cta_tracking_key"`
-	NewsletterFormID       string         `json:"newsletter_form_id"`
-	AnalyticsHooks         map[string]any `json:"analytics_hooks,omitempty"`
+	PublishRequireApproval  bool           `json:"publish_require_approval"`
+	LeadNotificationEmails  []string       `json:"lead_notification_emails"`
+	FooterCopyrightText     string         `json:"footer_copyright_text"`
+	TrustBadges             []TrustBadge   `json:"trust_badges"`
+	SecondaryCTATrackingKey string         `json:"secondary_cta_tracking_key"`
+	NewsletterFormID        string         `json:"newsletter_form_id"`
+	AnalyticsHooks          map[string]any `json:"analytics_hooks,omitempty"`
 }
 
 type LandingPage struct {
@@ -94,6 +113,7 @@ type LandingPage struct {
 	Title            string
 	Slug             string
 	Type             PageType
+	Builder          PageBuilder
 	Status           PageStatus
 	Visibility       PageVisibility
 	PasswordHash     string

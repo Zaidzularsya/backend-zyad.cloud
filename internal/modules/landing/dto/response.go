@@ -299,3 +299,12 @@ type PublicSubmissionResponse struct {
 	SuccessMessage string  `json:"success_message"`
 	RedirectURL    *string `json:"redirect_url,omitempty"`
 }
+
+// LandingDocumentResponse is the stored GrapesJS working copy of a page.
+type LandingDocumentResponse struct {
+	LandingPageID string         `json:"landing_page_id"`
+	Project       map[string]any `json:"project"`
+	HTML          string         `json:"html"`
+	CSS           string         `json:"css"`
+	UpdatedAt     time.Time      `json:"updated_at"`
+}

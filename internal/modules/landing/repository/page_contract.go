@@ -23,6 +23,7 @@ type CreatePageParams struct {
 	Title      string
 	Slug       string
 	Type       domain.PageType
+	Builder    domain.PageBuilder
 	Status     domain.PageStatus
 	Visibility domain.PageVisibility
 	SEO        map[string]any
