@@ -17,7 +17,7 @@ arsitektur dan hal-hal yang tidak terlihat dari OpenAPI saja.
 ## 1. Arsitektur
 
 ```
-┌─ LandingBuilderPage.vue (3 pane) ──────────────────────────────────────────┐
+┌─ LegacySectionBuilderPage.vue (3 pane, FROZEN) ────────────────────────────┐
 │  ┌ BlockPalette ┐  ┌ CanvasFrame ── <iframe> ─┐  ┌ SectionPropertyPanel ┐  │
 │  │ katalog blok │  │  src=/landing-canvas/:id  │  │  Content / Appearance │  │
 │  │ (akordeon    │  │  ↕ postMessage (bridge)   │  │  / Spacing / Advanced │  │
@@ -313,9 +313,10 @@ dari seed-nya sendiri, tidak ada `sectionType` frontend-only.
 - `domain/section_style.go` — `AllowedStyleKeys`, `StyleURLKeys`
 - `service/revision_service.go` — `AutosaveDraft` (sudah ada, kini dipanggil)
 
-**Frontend** (`frontend/src/`):
+**Frontend** (`frontend/src/`) — semua FROZEN (path `page.builder = 'sections'`):
 - `stores/landingBuilder.ts` — store editor
-- `features/landing/builder/pages/LandingBuilderPage.vue` — shell 3-pane
+- `features/landing/builder/pages/LegacySectionBuilderPage.vue` — shell 3-pane
+  (dulu `LandingBuilderPage.vue`; di-rename Fase 6, badge "Builder lama")
 - `features/landing/builder/components/` — `BlockPalette` (akordeon grup),
   `CanvasFrame` (host drag palette→kanvas), `SectionPropertyPanel` (akordeon
   Content/Appearance/Spacing/Advanced), `SectionContentForm`, `AppearanceForm`,
@@ -417,8 +418,8 @@ grapesjs mensyaratkan document ada dengan HTML non-kosong.
 - `features/landing/builder/grapes/GrapesEditor.vue` — shell + `grapesjs.init`
   (`storageManager:{type:'none'}`), listener perubahan → snapshot ke store.
 - `features/landing/builder/pages/LandingContentPage.vue` — switch by
-  `page.builder`: `grapesjs` → `GrapesEditor`; `sections` → `LandingBuilderPage`
-  (legacy, punya header + page picker sendiri).
+  `page.builder`: `grapesjs` → `GrapesEditor`; `sections` →
+  `LegacySectionBuilderPage` (FROZEN, punya header + page picker sendiri).
 - `landing.api.ts` — `getDocument` / `saveDocument` (+ `normalizeDocument`).
 - `renderer/components/GrapesPageFrame.vue` — render publik. `DOMPurify(html)`
   (buang `script/style/iframe/object/embed/base/meta/link` + handler `on*`) +
@@ -495,8 +496,15 @@ grapesjs mensyaratkan document ada dengan HTML non-kosong.
 - `features/landing/renderer/pages/{DynamicLandingPage,LandingPreviewPage}.vue`
   (branch `builder`)
 
+### Legacy dibekukan (Fase 6)
+
+- `LandingBuilderPage.vue` → `LegacySectionBuilderPage.vue` (badge "Builder
+  lama" + notice). Marker `FROZEN` di `section-registry.ts`,
+  `stores/landingBuilder.ts`, `shared/canvas/bridge.ts`. e2e
+  `landing-builder.spec.ts` → `landing-builder-legacy.spec.ts` (tetap hijau).
+- Section builder + section renderer tetap dikirim untuk page `builder =
+  'sections'`; tidak ada fitur baru di sana.
+
 ### Belum dikerjakan
 
-- Fase 6 rename `LandingBuilderPage.vue` → `LegacySectionBuilderPage.vue`,
-  marker FROZEN.
 - Fase 7 (opsional) SSR `GET /public/landing/render` untuk SEO + nginx CSP.
