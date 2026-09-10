@@ -434,6 +434,21 @@ grapesjs mensyaratkan document ada dengan HTML non-kosong.
   `description`/`og:*` dari `page.seo`. `LandingPreviewPage` admin/draft preview
   memuat working copy lewat `landingApi.getDocument` (bukan `getSections`).
 
+### Asset manager & starter template (Fase 5, tanpa endpoint baru)
+
+- **Asset manager** — `GrapesEditor.vue` menyambungkan asset manager bawaan
+  GrapesJS ke media API lama (`GET/POST/DELETE /admin/landing/media`): isi
+  daftar dari `landingApi.getMedia` (`AssetManager.add`), override `uploadFile`
+  → `landingApi.uploadMedia` (FormData `file`) lalu `add({src, mediaId})`,
+  dan `landingApi.deleteMedia(mediaId)` pada event `asset:remove`. `img src`
+  hasil upload (`public_url`, `http(s)` / site-relative) lolos `AllowStandardURLs`
+  di sanitizer Fase 2 — tak ada allowlist origin tambahan.
+- **Starter template** — `builder/grapes/starter-templates.ts`: 4 kerangka HTML+CSS
+  (`Kosong` / `SaaS landing` / `Company profile` / `Pricing`), repo-versioned
+  (bukan konsep backend). Picker overlay muncul **hanya untuk dokumen kosong**
+  (`project.pages` kosong & html kosong / `<body></body>`) → `editor.setComponents`
+  + `setStyle` lalu snapshot (masuk autosave).
+
 ### Peta file (tambahan GrapesJS)
 
 **Backend:**
@@ -451,13 +466,13 @@ grapesjs mensyaratkan document ada dengan HTML non-kosong.
 - `features/landing/builder/grapes/{GrapesEditor.vue, grapes.config.ts,
   grapes.blocks.ts, grapes.devices.ts, grapes.i18n.id.ts}`
 - `features/landing/builder/pages/LandingContentPage.vue`
+- `features/landing/builder/grapes/starter-templates.ts`
 - `features/landing/renderer/components/GrapesPageFrame.vue` (render publik)
 - `features/landing/renderer/pages/{DynamicLandingPage,LandingPreviewPage}.vue`
   (branch `builder`)
 
 ### Belum dikerjakan
 
-- Fase 5 asset manager (media API) + starter template.
 - Fase 5b live tenant chrome (`data-zyad-slot`).
 - Fase 6 rename `LandingBuilderPage.vue` → `LegacySectionBuilderPage.vue`,
   marker FROZEN.
