@@ -142,11 +142,17 @@ func (h *AdminPageHandler) CreatePage(c *gin.Context) {
 		return
 	}
 
+	builder := domain.PageBuilder(req.Builder)
+	if builder == "" {
+		builder = domain.PageBuilderSections
+	}
+
 	params := repository.CreatePageParams{
 		Name:       req.Name,
 		Title:      req.Title,
 		Slug:       req.Slug,
 		Type:       domain.PageType(req.PageType),
+		Builder:    builder,
 		Status:     domain.PageStatusDraft,
 		Visibility: domain.PageVisibility(req.Visibility),
 		Locale:     req.Locale,
@@ -255,12 +261,17 @@ func pageSettingsToDomain(req dto.PageSettingsRequest) domain.PageSettings {
 }
 
 func pageResponseFromDomain(page domain.LandingPage) dto.PageResponse {
+	builder := string(page.Builder)
+	if builder == "" {
+		builder = string(domain.PageBuilderSections)
+	}
 	return dto.PageResponse{
 		ID:               page.ID,
 		Name:             page.Name,
 		Title:            page.Title,
 		Slug:             page.Slug,
 		PageType:         string(page.Type),
+		Builder:          builder,
 		Status:           string(page.Status),
 		Visibility:       string(page.Visibility),
 		Locale:           page.Locale,

@@ -78,13 +78,14 @@ func (s *pageService) Create(ctx context.Context, scope coretenant.Scope, params
 		return domain.LandingPage{}, mapPagePersistenceError(err)
 	}
 
-	// Every real (non-template) page starts with a sticky Header section at the
-	// very top. Its link items are synthesized at render time from the tenant's
-	// location=header menu (see the frontend renderer); deleting this section
-	// leaves the page without a menu. Seeded via the repo so it does not count
-	// against the section quota. Non-fatal: page create still succeeds if this
-	// fails, the header can be re-added from the builder palette.
-	if !params.IsTemplate {
+	// Every real (non-template) section-builder page starts with a sticky Header
+	// section at the very top. Its link items are synthesized at render time from
+	// the tenant's location=header menu (see the frontend renderer); deleting this
+	// section leaves the page without a menu. Seeded via the repo so it does not
+	// count against the section quota. Non-fatal: page create still succeeds if
+	// this fails, the header can be re-added from the builder palette. GrapesJS
+	// pages have no sections, so they are not seeded.
+	if !params.IsTemplate && params.Builder != domain.PageBuilderGrapesJS {
 		_, _ = s.sectionRepo.Create(ctx, scope, repository.CreateSectionParams{
 			LandingPageID: page.ID,
 			Key:           "header",

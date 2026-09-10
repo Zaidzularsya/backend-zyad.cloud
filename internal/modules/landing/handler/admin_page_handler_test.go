@@ -74,6 +74,39 @@ func TestAdminPageHandlerCreatePageAcceptsSlugValidator(t *testing.T) {
 	if pageSvc.receivedCreate.Type != domain.PageTypeCompanyProfile {
 		t.Fatalf("expected page type company_profile, got %s", pageSvc.receivedCreate.Type)
 	}
+	if pageSvc.receivedCreate.Builder != domain.PageBuilderSections {
+		t.Fatalf("expected builder to default to sections, got %q", pageSvc.receivedCreate.Builder)
+	}
+}
+
+func TestAdminPageHandlerCreatePageAcceptsGrapesJSBuilder(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	pageSvc := &fakePageService{createPage: domain.LandingPage{ID: "p1", Builder: domain.PageBuilderGrapesJS}}
+	handler := NewAdminPageHandler(pageSvc, nil, nil, nil)
+
+	router := gin.New()
+	router.POST("/admin/landing-pages", func(c *gin.Context) {
+		tc := verifiedTenantContext(t)
+		c.Request = c.Request.WithContext(coretenant.WithContext(c.Request.Context(), tc))
+		permissionmiddleware.SetUserID(c, "33333333-3333-3333-3333-333333333333")
+		handler.CreatePage(c)
+	})
+
+	body := `{"name":"g","title":"g","slug":"g","page_type":"campaign","builder":"grapesjs","visibility":"public"}`
+	req := httptest.NewRequest(http.MethodPost, "/admin/landing-pages", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body %s", rec.Code, rec.Body.String())
+	}
+	if pageSvc.receivedCreate.Builder != domain.PageBuilderGrapesJS {
+		t.Fatalf("expected builder grapesjs, got %q", pageSvc.receivedCreate.Builder)
+	}
+	if !strings.Contains(rec.Body.String(), `"builder":"grapesjs"`) {
+		t.Fatalf("response missing builder: %s", rec.Body.String())
+	}
 }
 
 func TestAdminPageHandlerListDefaultsToNonTemplatePages(t *testing.T) {

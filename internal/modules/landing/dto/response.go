@@ -28,6 +28,7 @@ type PageResponse struct {
 	Title            string               `json:"title"`
 	Slug             string               `json:"slug"`
 	PageType         string               `json:"page_type"`
+	Builder          string               `json:"builder"`
 	Status           string               `json:"status"`
 	Visibility       string               `json:"visibility"`
 	Locale           string               `json:"locale"`

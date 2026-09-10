@@ -40,6 +40,7 @@ type CreatePageRequest struct {
 	Title      string               `json:"title" binding:"required,min=1,max=255"`
 	Slug       string               `json:"slug" binding:"required,lowercase,alphanumhyphen"`
 	PageType   string               `json:"page_type" binding:"required"`
+	Builder    string               `json:"builder" binding:"omitempty,oneof=sections grapesjs"`
 	Visibility string               `json:"visibility" binding:"required"`
 	Locale     string               `json:"locale"`
 	Timezone   string               `json:"timezone"`
