@@ -43,8 +43,9 @@ func TestPublishServiceIntegration(t *testing.T) {
 	formRepo := repository.NewFormRepository(db)
 	brandingRepo := repository.NewBrandingRepository(db)
 	versionRepo := repository.NewVersionRepository(db)
+	documentRepo := repository.NewDocumentRepository(db)
 
-	publishService := service.NewPublishService(db, pageRepo, sectionRepo, formRepo, brandingRepo, versionRepo, "test-secret")
+	publishService := service.NewPublishService(db, pageRepo, sectionRepo, formRepo, brandingRepo, versionRepo, documentRepo, "test-secret")
 
 	userID := "11111111-1111-1111-1111-111111111111"
 
@@ -145,4 +146,69 @@ func TestPublishServiceIntegration(t *testing.T) {
 			t.Errorf("Expected ErrInvalidToken, got %v", err)
 		}
 	})
+}
+
+func TestPublishServiceGrapesJSIntegration(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+
+	_, _ = db.Exec(ctx, `INSERT INTO users (id, name, email, status)
+		VALUES ('11111111-1111-1111-1111-111111111111','Mock User A','mock_a@example.com','active')
+		ON CONFLICT DO NOTHING`)
+	_, _ = db.Exec(ctx, `INSERT INTO organizations (id, type, slug, name, status)
+		VALUES ($1,'customer','organization-a','Organization A','active') ON CONFLICT DO NOTHING`, tenants.A.OrganizationID)
+
+	pageRepo := repository.NewPageRepository(db)
+	sectionRepo := repository.NewSectionRepository(db)
+	formRepo := repository.NewFormRepository(db)
+	brandingRepo := repository.NewBrandingRepository(db)
+	versionRepo := repository.NewVersionRepository(db)
+	documentRepo := repository.NewDocumentRepository(db)
+	publishService := service.NewPublishService(db, pageRepo, sectionRepo, formRepo, brandingRepo, versionRepo, documentRepo, "test-secret")
+	userID := "11111111-1111-1111-1111-111111111111"
+
+	page, err := pageRepo.Create(ctx, tenants.A.Scope, repository.CreatePageParams{
+		Name:       "GrapesJS Page",
+		Title:      "GJS Title",
+		Slug:       strings.ReplaceAll(testutil.UniqueCode("gjs-pub-"), ".", "-"),
+		Type:       domain.PageTypeCampaign,
+		Builder:    domain.PageBuilderGrapesJS,
+		Status:     domain.PageStatusDraft,
+		Visibility: domain.PageVisibilityPublic,
+		CreatedBy:  userID,
+	})
+	if err != nil {
+		t.Fatalf("CreatePage: %v", err)
+	}
+
+	// No document yet → publish must fail validation.
+	if checklist, _ := publishService.ValidateForPublish(ctx, tenants.A.Scope, page.ID); checklist.IsValid {
+		t.Fatalf("expected invalid checklist for a grapesjs page with no document")
+	}
+
+	if _, err := documentRepo.Upsert(ctx, tenants.A.Scope, repository.UpsertDocumentParams{
+		LandingPageID: page.ID,
+		Project:       map[string]any{"pages": []any{}},
+		HTML:          `<section><script>alert(1)</script><h1>Halo</h1></section>`,
+		CSS:           `@import url(x); h1{color:red}`,
+		UpdatedBy:     userID,
+	}); err != nil {
+		t.Fatalf("Upsert document: %v", err)
+	}
+
+	version, err := publishService.Publish(ctx, tenants.A.Scope, page.ID, "gjs release", userID)
+	if err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if version.Snapshot["builder"] != string(domain.PageBuilderGrapesJS) {
+		t.Fatalf("snapshot builder = %v", version.Snapshot["builder"])
+	}
+	html, _ := version.Snapshot["html"].(string)
+	if strings.Contains(html, "<script") || !strings.Contains(html, "<h1>Halo</h1>") {
+		t.Fatalf("snapshot html not sanitized: %q", html)
+	}
+	if css, _ := version.Snapshot["css"].(string); strings.Contains(strings.ToLower(css), "@import") {
+		t.Fatalf("snapshot css not sanitized: %q", css)
+	}
 }

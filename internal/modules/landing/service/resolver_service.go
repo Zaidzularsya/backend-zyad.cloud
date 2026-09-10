@@ -24,6 +24,7 @@ type resolverService struct {
 	formRepo       repository.FormRepository
 	brandingRepo   repository.BrandingRepository
 	reusableRepo   repository.ReusableRepository
+	documentRepo   repository.DocumentRepository
 	publishService PublishService
 }
 
@@ -36,6 +37,7 @@ func NewResolverService(
 	formRepo repository.FormRepository,
 	brandingRepo repository.BrandingRepository,
 	reusableRepo repository.ReusableRepository,
+	documentRepo repository.DocumentRepository,
 	publishService PublishService,
 ) ResolverService {
 	return &resolverService{
@@ -47,6 +49,7 @@ func NewResolverService(
 		formRepo:       formRepo,
 		brandingRepo:   brandingRepo,
 		reusableRepo:   reusableRepo,
+		documentRepo:   documentRepo,
 		publishService: publishService,
 	}
 }
@@ -89,6 +92,10 @@ func (s *resolverService) resolvePageData(ctx context.Context, scope tenant.Scop
 			return ResolvedPage{}, ErrPageNotPublished
 		}
 		isDraftPreview = true
+	}
+
+	if page.Builder == domain.PageBuilderGrapesJS {
+		return s.resolveGrapesPage(ctx, scope, page, isDraftPreview), nil
 	}
 
 	if isDraftPreview {
@@ -158,6 +165,42 @@ func (s *resolverService) resolvePageData(ctx context.Context, scope tenant.Scop
 		CTAs:     s.resolveCTAs(ctx, scope),
 		IsDraft:  false,
 	}, nil
+}
+
+// resolveGrapesPage serves a GrapesJS page as sanitized HTML+CSS. Menus and
+// branding stay live (tenant chrome is substituted client-side, Phase 5b).
+func (s *resolverService) resolveGrapesPage(ctx context.Context, scope tenant.Scope, page domain.LandingPage, isDraftPreview bool) ResolvedPage {
+	branding, _ := s.resolverRepo.ResolveBranding(ctx, scope, page.ID)
+	if branding.ID == "" {
+		branding, _ = s.brandingRepo.GetDefault(ctx, scope)
+	}
+
+	resolved := ResolvedPage{
+		Page:     page,
+		Builder:  string(domain.PageBuilderGrapesJS),
+		Branding: branding,
+		Menus:    s.resolveMenus(ctx, scope),
+		CTAs:     s.resolveCTAs(ctx, scope),
+		IsDraft:  isDraftPreview,
+	}
+
+	if !isDraftPreview {
+		if versions, err := s.resolverRepo.ResolveVersions(ctx, scope, page.ID); err == nil && len(versions) > 0 {
+			resolved.Snapshot = versions[0].Snapshot
+			resolved.HTML, resolved.CSS = grapesSnapshotMarkup(versions[0].Snapshot)
+			return resolved
+		}
+		// Published but no snapshot — fall through to the live document below.
+	}
+
+	// Draft preview (or the no-snapshot fallback): the working copy is
+	// untrusted-ish, so sanitize on read.
+	doc, err := s.documentRepo.GetByPageID(ctx, scope, page.ID)
+	if err == nil {
+		resolved.HTML = SanitizeGrapesHTML(doc.HTML)
+		resolved.CSS = SanitizeGrapesCSS(doc.CSS)
+	}
+	return resolved
 }
 
 func (s *resolverService) resolveSections(ctx context.Context, scope tenant.Scope, pageID string) []domain.LandingSection {

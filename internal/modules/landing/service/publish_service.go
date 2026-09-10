@@ -30,6 +30,7 @@ type publishService struct {
 	formRepo      repository.FormRepository
 	brandingRepo  repository.BrandingRepository
 	versionRepo   repository.VersionRepository
+	documentRepo  repository.DocumentRepository
 	previewSecret string
 }
 
@@ -40,6 +41,7 @@ func NewPublishService(
 	formRepo repository.FormRepository,
 	brandingRepo repository.BrandingRepository,
 	versionRepo repository.VersionRepository,
+	documentRepo repository.DocumentRepository,
 	previewSecret string,
 ) PublishService {
 	if previewSecret == "" {
@@ -60,6 +62,7 @@ func NewPublishService(
 		formRepo:      formRepo,
 		brandingRepo:  brandingRepo,
 		versionRepo:   versionRepo,
+		documentRepo:  documentRepo,
 		previewSecret: previewSecret,
 	}
 }
@@ -87,6 +90,15 @@ func (s *publishService) ValidateForPublish(ctx context.Context, scope tenant.Sc
 	if strings.TrimSpace(page.Slug) == "" {
 		result.Errors = append(result.Errors, "Page slug is missing.")
 		result.IsValid = false
+	}
+
+	if page.Builder == domain.PageBuilderGrapesJS {
+		doc, docErr := s.documentRepo.GetByPageID(ctx, scope, pageID)
+		if docErr != nil || strings.TrimSpace(doc.HTML) == "" {
+			result.Errors = append(result.Errors, "Page has no saved content yet.")
+			result.IsValid = false
+		}
+		return result, nil
 	}
 
 	// Check sections
@@ -131,14 +143,23 @@ func (s *publishService) Publish(ctx context.Context, scope tenant.Scope, pageID
 	if err != nil {
 		return domain.LandingPageVersion{}, err
 	}
-	sections, _ := s.sectionRepo.ListByPage(ctx, scope, pageID)
-	forms, _ := s.formRepo.ListByPage(ctx, scope, pageID)
 
-	snapshot := map[string]any{
-		"page":          page,
-		"sections":      sections,
-		"forms":         forms,
-		"snapshot_time": time.Now().UTC(),
+	var snapshot map[string]any
+	if page.Builder == domain.PageBuilderGrapesJS {
+		doc, docErr := s.documentRepo.GetByPageID(ctx, scope, pageID)
+		if docErr != nil {
+			return domain.LandingPageVersion{}, ErrValidationFailed
+		}
+		snapshot = buildGrapesJSSnapshot(page, doc, time.Now().UTC())
+	} else {
+		sections, _ := s.sectionRepo.ListByPage(ctx, scope, pageID)
+		forms, _ := s.formRepo.ListByPage(ctx, scope, pageID)
+		snapshot = map[string]any{
+			"page":          page,
+			"sections":      sections,
+			"forms":         forms,
+			"snapshot_time": time.Now().UTC(),
+		}
 	}
 
 	// 2. We use a manual transaction approach, but our repos use db pool directly.

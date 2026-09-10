@@ -42,14 +42,15 @@ func TestResolverServiceIntegration(t *testing.T) {
 	formRepo := repository.NewFormRepository(db)
 	brandingRepo := repository.NewBrandingRepository(db)
 	versionRepo := repository.NewVersionRepository(db)
+	documentRepo := repository.NewDocumentRepository(db)
 	resolverRepo := repository.NewResolverRepository(db)
 	reusableRepo := repository.NewReusableRepository(db)
 
-	publishService := service.NewPublishService(db, pageRepo, sectionRepo, formRepo, brandingRepo, versionRepo, "test-secret")
-	resolverService := service.NewResolverService(db, resolverRepo, versionRepo, pageRepo, sectionRepo, formRepo, brandingRepo, reusableRepo, publishService)
+	publishService := service.NewPublishService(db, pageRepo, sectionRepo, formRepo, brandingRepo, versionRepo, documentRepo, "test-secret")
+	resolverService := service.NewResolverService(db, resolverRepo, versionRepo, pageRepo, sectionRepo, formRepo, brandingRepo, reusableRepo, documentRepo, publishService)
 
 	slug := strings.ReplaceAll(testutil.UniqueCode("resolve-page-"), ".", "-")
-	
+
 	// Create Page
 	page, err := pageRepo.Create(ctx, tenants.A.Scope, repository.CreatePageParams{
 		Name:       "Resolve Test Page",
@@ -73,7 +74,7 @@ func TestResolverServiceIntegration(t *testing.T) {
 
 	t.Run("ResolveBySlug - Draft with Valid Token", func(t *testing.T) {
 		token, _ := publishService.GeneratePreviewToken(ctx, tenants.A.Scope, page.ID, 60)
-		
+
 		resolved, err := resolverService.ResolveBySlug(ctx, tenants.A.Scope, slug, token)
 		if err != nil {
 			t.Fatalf("ResolveBySlug: %v", err)
@@ -231,4 +232,71 @@ func TestResolverServiceIntegration(t *testing.T) {
 			t.Errorf("Expected CTAs to include the secondary CTA by tracking key, got %+v", resolved.CTAs)
 		}
 	})
+}
+
+func TestResolverServiceGrapesJSIntegration(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+
+	userID := "22222222-2222-2222-2222-222222222222"
+	_, _ = db.Exec(ctx, `INSERT INTO users (id, name, email, status)
+		VALUES ($1,'Mock User B','mock_b@example.com','active') ON CONFLICT DO NOTHING`, userID)
+	_, _ = db.Exec(ctx, `INSERT INTO organizations (id, type, slug, name, status)
+		VALUES ($1,'customer','organization-b','Organization B','active') ON CONFLICT DO NOTHING`, tenants.A.OrganizationID)
+
+	pageRepo := repository.NewPageRepository(db)
+	sectionRepo := repository.NewSectionRepository(db)
+	formRepo := repository.NewFormRepository(db)
+	brandingRepo := repository.NewBrandingRepository(db)
+	versionRepo := repository.NewVersionRepository(db)
+	resolverRepo := repository.NewResolverRepository(db)
+	reusableRepo := repository.NewReusableRepository(db)
+	documentRepo := repository.NewDocumentRepository(db)
+	publishService := service.NewPublishService(db, pageRepo, sectionRepo, formRepo, brandingRepo, versionRepo, documentRepo, "test-secret")
+	resolverService := service.NewResolverService(db, resolverRepo, versionRepo, pageRepo, sectionRepo, formRepo, brandingRepo, reusableRepo, documentRepo, publishService)
+
+	slug := strings.ReplaceAll(testutil.UniqueCode("gjs-res-"), ".", "-")
+	page, err := pageRepo.Create(ctx, tenants.A.Scope, repository.CreatePageParams{
+		Name: "GJS Resolve", Title: "GJS Resolve", Slug: slug,
+		Type: domain.PageTypeCampaign, Builder: domain.PageBuilderGrapesJS,
+		Status: domain.PageStatusDraft, Visibility: domain.PageVisibilityPublic, CreatedBy: userID,
+	})
+	if err != nil {
+		t.Fatalf("CreatePage: %v", err)
+	}
+	if _, err := documentRepo.Upsert(ctx, tenants.A.Scope, repository.UpsertDocumentParams{
+		LandingPageID: page.ID,
+		Project:       map[string]any{"pages": []any{}},
+		HTML:          `<main><h1>Live</h1></main>`,
+		CSS:           `h1{color:blue}`,
+		UpdatedBy:     userID,
+	}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	// Draft preview → live document, sanitized.
+	token, _ := publishService.GeneratePreviewToken(ctx, tenants.A.Scope, page.ID, 10)
+	preview, err := resolverService.ResolveBySlug(ctx, tenants.A.Scope, slug, token)
+	if err != nil {
+		t.Fatalf("ResolveBySlug (preview): %v", err)
+	}
+	if preview.Builder != string(domain.PageBuilderGrapesJS) || !strings.Contains(preview.HTML, "<h1>Live</h1>") {
+		t.Fatalf("preview resolve = %+v", preview)
+	}
+	if len(preview.Sections) != 0 {
+		t.Fatalf("grapesjs preview should carry no sections, got %d", len(preview.Sections))
+	}
+
+	// Published → served from the version snapshot.
+	if _, err := publishService.Publish(ctx, tenants.A.Scope, page.ID, "release", userID); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	pub, err := resolverService.ResolveBySlug(ctx, tenants.A.Scope, slug, "")
+	if err != nil {
+		t.Fatalf("ResolveBySlug (published): %v", err)
+	}
+	if pub.Builder != string(domain.PageBuilderGrapesJS) || !strings.Contains(pub.HTML, "<h1>Live</h1>") || !strings.Contains(pub.CSS, "color:blue") {
+		t.Fatalf("published resolve = %+v", pub)
+	}
 }

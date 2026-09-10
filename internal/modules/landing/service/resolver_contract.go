@@ -16,6 +16,12 @@ type ResolvedPage struct {
 	CTAs     []ResolvedCTA
 	Snapshot map[string]any
 	IsDraft  bool
+
+	// Set only for pages authored with the GrapesJS builder. When Builder is
+	// "grapesjs" the renderer ignores Sections/Forms and uses HTML+CSS instead.
+	Builder string
+	HTML    string
+	CSS     string
 }
 
 // ResolvedCTA is the public-safe projection of domain.LandingCTA, exposed so the
