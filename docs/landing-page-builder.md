@@ -449,6 +449,29 @@ grapesjs mensyaratkan document ada dengan HTML non-kosong.
   (`project.pages` kosong & html kosong / `<body></body>`) → `editor.setComponents`
   + `setStyle` lalu snapshot (masuk autosave).
 
+### Live tenant chrome (Fase 5b, tanpa endpoint / sanitizer baru)
+
+- **Blok sentinel** — `grapes.blocks.ts` kategori `Tenant`: `<div
+  data-zyad-slot="tenant-nav">` / `"tenant-footer"` (dikunci di editor via hint
+  `data-gjs-*` yang **tidak** ikut ke publish; hanya `data-zyad-slot` yang lolos
+  bluemonday Fase 2). Isi awalnya cuma placeholder span.
+- **Isi saat render** — `GrapesPageFrame.vue`: setelah `DOMPurify`, parse dokumen
+  (`DOMParser`), cari tiap `[data-zyad-slot]`, dan **bangun ulang** isinya dari
+  prop `chrome` = `{ nav, footer }` pakai DOM API (`createElement` +
+  `textContent` + `setAttribute` + `safeHref` — allow `#`/`/`/`http(s)`/`mailto`/
+  `tel`, sisanya → `#`). Tak ada string HTML user yang di-`innerHTML` → tak perlu
+  sanitizer server baru. Atribut `style` sentinel dibuang, placeholder hilang.
+  CSS chrome dasar disuntik ke `<style>` srcdoc.
+- **Sumber data** — `renderer/composables/useGrapesChrome.ts`
+  `buildGrapesChrome(resolvePayload, title)` → `nav` dari menu `location=header`
+  aktif (href via aturan `internal_page`/`anchor`/`external`), `footer` reuse
+  `useFooterContent` (brand + kolom `location=footer` + copyright).
+  `DynamicLandingPage.vue` + `LandingPreviewPage.vue` (jalur public-resolve)
+  membangun `chrome` dan meneruskannya ke `GrapesPageFrame`.
+- **Efek**: edit menu / branding tenant langsung tampil di semua page GrapesJS
+  ber-sentinel **tanpa re-publish** (resolve selalu kirim `Menus` + `Branding`
+  live untuk grapesjs).
+
 ### Peta file (tambahan GrapesJS)
 
 **Backend:**
@@ -468,12 +491,12 @@ grapesjs mensyaratkan document ada dengan HTML non-kosong.
 - `features/landing/builder/pages/LandingContentPage.vue`
 - `features/landing/builder/grapes/starter-templates.ts`
 - `features/landing/renderer/components/GrapesPageFrame.vue` (render publik)
+- `features/landing/renderer/composables/useGrapesChrome.ts` (live chrome)
 - `features/landing/renderer/pages/{DynamicLandingPage,LandingPreviewPage}.vue`
   (branch `builder`)
 
 ### Belum dikerjakan
 
-- Fase 5b live tenant chrome (`data-zyad-slot`).
 - Fase 6 rename `LandingBuilderPage.vue` → `LegacySectionBuilderPage.vue`,
   marker FROZEN.
 - Fase 7 (opsional) SSR `GET /public/landing/render` untuk SEO + nginx CSP.
