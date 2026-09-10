@@ -420,6 +420,19 @@ grapesjs mensyaratkan document ada dengan HTML non-kosong.
   `page.builder`: `grapesjs` → `GrapesEditor`; `sections` → `LandingBuilderPage`
   (legacy, punya header + page picker sendiri).
 - `landing.api.ts` — `getDocument` / `saveDocument` (+ `normalizeDocument`).
+- `renderer/components/GrapesPageFrame.vue` — render publik. `DOMPurify(html)`
+  (buang `script/style/iframe/object/embed/base/meta/link` + handler `on*`) +
+  scrub CSS (`@import`, `</style` breakout) → `<iframe srcdoc>` dengan
+  `sandbox="allow-forms allow-popups allow-popups-to-escape-sandbox
+  allow-top-navigation-by-user-activation"` (**tanpa `allow-scripts`**).
+  Auto-height via `ResizeObserver` di `contentDocument.body` (srcdoc = same-origin)
+  + re-measure tertunda utk font/gambar telat.
+- `renderer/pages/DynamicLandingPage.vue` + `LandingPreviewPage.vue` — branch
+  `result.Builder === 'grapesjs'` → render `GrapesPageFrame` (bukan
+  `LandingPageRenderer`); emit `landing-header-mode: 'section'` tanpa syarat
+  supaya `MarketingLayout` menyembunyikan `<nav>`-nya; `document.title` + meta
+  `description`/`og:*` dari `page.seo`. `LandingPreviewPage` admin/draft preview
+  memuat working copy lewat `landingApi.getDocument` (bukan `getSections`).
 
 ### Peta file (tambahan GrapesJS)
 
@@ -438,12 +451,12 @@ grapesjs mensyaratkan document ada dengan HTML non-kosong.
 - `features/landing/builder/grapes/{GrapesEditor.vue, grapes.config.ts,
   grapes.blocks.ts, grapes.devices.ts, grapes.i18n.id.ts}`
 - `features/landing/builder/pages/LandingContentPage.vue`
-- `features/landing/renderer/components/GrapesPageFrame.vue` (render publik — Fase 4)
+- `features/landing/renderer/components/GrapesPageFrame.vue` (render publik)
+- `features/landing/renderer/pages/{DynamicLandingPage,LandingPreviewPage}.vue`
+  (branch `builder`)
 
 ### Belum dikerjakan
 
-- Fase 4 render publik (`GrapesPageFrame.vue` + branch di `DynamicLandingPage` /
-  `LandingPreviewPage`).
 - Fase 5 asset manager (media API) + starter template.
 - Fase 5b live tenant chrome (`data-zyad-slot`).
 - Fase 6 rename `LandingBuilderPage.vue` → `LegacySectionBuilderPage.vue`,
