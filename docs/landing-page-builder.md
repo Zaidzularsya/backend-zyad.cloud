@@ -61,12 +61,29 @@ arsitektur dan hal-hal yang tidak terlihat dari OpenAPI saja.
   dihapus = tanpa menu. `MarketingLayout.vue` menyembunyikan `<nav>` bila page
   punya section `header` (event `landing-header-mode`).
 - **Panel Header di builder**: `HeaderSectionPanel.vue` (dipilih saat
-  `selectedSection.type === 'header'`) — akordeon "Tampilan header (halaman ini)"
-  (schema `section.content`: sticky/transparentOnTop/showLoginCta/ctaLabel/ctaUrl/
-  logoUrl → `patchSection`, ikut autosave/publish) + "Navigasi (semua halaman)" &
-  "Brand (semua halaman)" (store `stores/landingChrome.ts` → `/admin/landing/menus[...]`
-  & `GET/PATCH /admin/landing/branding`, **persist langsung**). Item menu tenant
-  di-push ke iframe via `canvas:set-chrome` sebagai content-override header.
+  `selectedSection.type === 'header'`, judul aside `"Header"`) — `<details>`
+  collapsible per klasifikasi (tanpa box border), 4 area:
+  - **Brand & Logo** — override logo per-halaman (`section.content.logoUrl`) +
+    brand tenant-wide (nama, logo utama/light, logo mode gelap/dark) + sub-blok
+    collapsed "Tema situs" (warna secondary/accent, font judul & isi, kontak —
+    belum di-inject ke section). Upload logo lewat `fields/LogoUploadField.vue`
+    (`landingApi.uploadMedia` → `POST /admin/landing/media` → pakai `public_url`).
+    Brand persist via `saveBranding` (`PATCH /admin/landing/branding`); nama +
+    logo **live-preview** ke canvas sebelum disimpan lewat `landingChrome`
+    `brandDraft` (overlay di `canvasBranding`, di-clear saat save/reset).
+  - **Navigation** — hanya CRUD item menu tenant (store `stores/landingChrome.ts`
+    → `/admin/landing/menus[...]`): list + form add/edit di balik tombol
+    "Tambah item".
+  - **Action** — CTA (`showLoginCta` · `ctaLabel` · `ctaUrl` · `ctaColor`) +
+    placeholder disabled pencarian/notifikasi/menu profil ("segera hadir").
+  - **Preference** — perilaku/gaya navbar per-halaman (`section.content`:
+    `alignment` · `variant` solid/transparent/glass · `shadow` · `width` ·
+    `sticky` · `hideOnScroll` → `patchSection`, ikut autosave/publish).
+    `variant` menggantikan flag lama `transparentOnTop` (masih dibaca page lama).
+  Item menu + brand (nama/logo light/**dark**) di-push ke iframe via
+  `canvas:set-chrome` sebagai content-override header. `HeaderSection.vue` pakai
+  logo dark saat `variant` transparent/glass, light selain itu; `logoUrl`
+  (override halaman) menang mutlak.
   Halaman standalone `/app/landing-pages/{navigation,brand-theme}` **dihapus**;
   Reusable CTA manager + Media library pindah ke halaman Settings.
   Editor menu footer (location=footer) belum dipindah — follow-up.
