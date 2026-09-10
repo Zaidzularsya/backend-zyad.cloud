@@ -235,19 +235,43 @@ Palette dikelompokkan dengan taksonomi standar page builder (`BlockGroup`):
 atomik terbuka default, grup section besar tertutup; state disimpan di
 `localStorage`).
 
-Blok atomik kecil (`element.headline`, `element.paragraph`, `element.button`,
-`element.image`, `element.divider`) tersebar di grup layout/text/media/interactive.
-Semua persist sebagai `section_type = 'content'` + penanda
+`BlockDefinition` juga punya metadata opsional `kind` (`section` | `element` |
+`layout`, diturunkan `blockKind()` kalau kosong — `element.*` → `element`),
+`dataSource` (`static` | `module`) + `moduleKey` (reserved, mis. `pricing.default`
+→ `billing.plans` untuk binding modul nanti). `SectionContentForm` repeater item
+kini mendukung field `select` / `url` / `number` (item `select` baru di-seed dgn
+opsi pertama).
+
+Blok atomik & layout primitive — semua persist `section_type = 'content'` +
 `style.variant = 'element.*'` (tanpa migration), renderer di
-`renderer/sections/element/*.vue` (+ `useElementStyle.ts`), tampilan diatur lewat
-`style.typography` / `style.box` dari akordeon APPEARANCE property panel.
+`renderer/sections/element/*.vue` (+ `useElementStyle.ts`):
+
+| variant | isi |
+|---|---|
+| `element.headline` / `paragraph` / `button` / `image` / `divider` | elemen atomik |
+| `element.buttonGroup` / `element.buttonList` | `ElementButtonGroup.vue` — `content.items[]` (label/url/target/variant primary\|secondary\|ghost) + `content.{direction,gap,wrap,align}` |
+| `element.socialButtons` | `ElementSocialButtons.vue` — `content.items[]` (platform/url/label) + `content.{direction,gap,size,shape,style}`. Ikon inline-SVG dari `shared/icons/socialIcons.ts` (Simple Icons / CC0, **tanpa dependency**); `safeSocialHref()` hanya izinkan http(s)/mailto |
+| `element.container` | `ElementContainer.vue` — pembungkus `maxWidth/padding/gap/align`; `content.items[]` (kind headline\|paragraph\|button\|image) di-render dgn **reuse SFC element**. Slotted via repeater panel, bukan nested canvas |
+| `element.grid` | `ElementGrid.vue` — CSS grid responsif; `content.{columns,columnsTablet,columnsMobile,gap}` via custom prop `--cols*` + `@media`; `content.cells[]` (kind card\|headline\|paragraph\|button\|image) |
+
+Tampilan diatur lewat `style.typography` / `style.box` dari akordeon APPEARANCE.
 `style.box` (semua opsional): `radius` · `borderWidth` · `borderStyle`
-(solid/dashed/dotted) · `borderColor` · `shadow` · `width` · `fullWidth` · dan
-khusus `element.image` `height` + `objectFit`. Sub-key `box`/`typography` tidak
-di-allowlist per-key server-side (hanya top-level `AllowedStyleKeys`), jadi
+(solid/dashed/dotted) · `borderColor` · `shadow` · `width` · `fullWidth` ·
+`element.image` `height` + `objectFit` · dan **tata letak lanjutan** `zIndex` ·
+`position: 'relative'` · `offsetX` / `offsetY` (→ `transform: translate()`) ·
+`float` (elemen saja). `useElementStyle` mengeluarkan `layoutStyle` (di-bind ke
+`.element-block`) selain `boxStyle`; `SectionRenderer.wrapperStyle` mirror bagian
+non-`float` sehingga section utuh pun bisa overlap/nudge. Sub-key `box`/`typography`
+tidak di-allowlist per-key server-side (hanya top-level `AllowedStyleKeys`), jadi
 menambah leaf baru cukup di FE. Field schema `type: 'image'` di property panel
 (`SectionContentForm` → `fields/ImageField.vue`) menyediakan upload
 (`landingApi.uploadMedia` → `POST /admin/landing/media`) + preview + input URL.
+
+**Navigasi mobile**: `HeaderSection.vue` punya hamburger + drawer slide-down via
+CSS `@media (max-width: 768px)` (tanpa Tailwind, karena render di iframe); tutup
+saat klik link / `Esc` / `items` berubah. **Preview device**: `CanvasFrame.vue`
+kini me-resize `<iframe>` ke lebar device toggle (bukan cuma `max-width` wrapper),
+jadi `@media` section (hamburger, reflow grid) aktif akurat di kanvas builder.
 `SectionPropertyPanel` & `HeaderSectionPanel` memakai `<details>` collapsible
 tanpa bingkai box (summary + chevron + `border-t` antar akordeon).
 
