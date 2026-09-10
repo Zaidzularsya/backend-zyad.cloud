@@ -3500,6 +3500,53 @@ paths:
       responses:
         "200":
           description: Public landing page resolved successfully
+  /api/v1/public/landing/render:
+    get:
+      summary: Server-render a published GrapesJS landing page as HTML (SEO)
+      description: >
+        Returns a full, script-free `text/html` document for a published page
+        whose `builder` is `grapesjs` (HTML/CSS from the version snapshot, with
+        `<head>` metadata from SEO settings and the `data-zyad-slot` tenant
+        chrome substituted server-side). Non-GrapesJS pages return 404. The SPA
+        keeps using `/resolve`; nginx routes crawler / direct hits here.
+      operationId: renderPublicLandingPage
+      tags:
+        - Public Landing
+      parameters:
+        - name: slug
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: HTML document
+          content:
+            text/html:
+              schema:
+                type: string
+        "404":
+          description: Page not found or not a GrapesJS page
+  /api/v1/public/landing/render/{slug}:
+    get:
+      summary: Server-render a published GrapesJS landing page as HTML (SEO)
+      operationId: renderPublicLandingPageBySlug
+      tags:
+        - Public Landing
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: HTML document
+          content:
+            text/html:
+              schema:
+                type: string
+        "404":
+          description: Page not found or not a GrapesJS page
   /api/v1/public/landing/preview/{token}:
     get:
       summary: Preview public landing page

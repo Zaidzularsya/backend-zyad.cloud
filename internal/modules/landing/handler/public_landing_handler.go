@@ -40,6 +40,8 @@ func (h *PublicLandingHandler) RegisterRoutes(router *gin.RouterGroup) {
 	group := router.Group("/public/landing")
 
 	group.GET("/resolve", h.Resolve)
+	group.GET("/render", h.RenderHTML)
+	group.GET("/render/:slug", h.RenderHTML)
 	group.GET("/preview/:token", h.Preview)
 	group.POST("/access/:publicPageId", h.RequestAccess)
 	group.POST("/forms/:formKey/submissions", h.SubmitForm)
@@ -83,6 +85,60 @@ func (h *PublicLandingHandler) Resolve(c *gin.Context) {
 	}
 
 	corehttp.OK(c, "Page resolved successfully", resolved)
+}
+
+// RenderHTML serves a published GrapesJS page as a full, script-free HTML
+// document for crawlers and no-JS clients (SEO). nginx routes bot / direct hits
+// for GrapesJS slugs here; the SPA keeps using /resolve. Sections pages have no
+// server-rendered HTML and return 404.
+func (h *PublicLandingHandler) RenderHTML(c *gin.Context) {
+	tenantContext, err := coretenant.RequireContext(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	scope, err := coretenant.NewScope(tenantContext)
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+
+	slug := c.Param("slug")
+	if slug == "" {
+		slug = c.Query("slug")
+	}
+	customDomain := tenantContext.RequestHost()
+
+	var resolved service.ResolvedPage
+	var resolveErr error
+	if slug != "" {
+		resolved, resolveErr = h.resolverSvc.ResolveBySlug(c.Request.Context(), scope, slug, "")
+	} else if customDomain != "" && customDomain != "localhost" && customDomain != "localhost:8080" {
+		resolved, resolveErr = h.resolverSvc.ResolveByDomain(c.Request.Context(), scope, customDomain, "")
+	} else {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "Slug or valid domain is required", http.StatusBadRequest))
+		return
+	}
+
+	if resolveErr != nil {
+		corehttp.Fail(c, publicResolveError(resolveErr))
+		return
+	}
+
+	document := service.RenderGrapesDocument(resolved)
+	if document == "" {
+		corehttp.Fail(c, coreerrors.New("PUBLIC_PAGE_NOT_FOUND", "landing page was not found", http.StatusNotFound))
+		return
+	}
+
+	c.Header("Content-Security-Policy",
+		"default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; "+
+			"font-src 'self' https: data:; frame-src 'self' data:; script-src 'none'; "+
+			"base-uri 'none'; form-action 'self'")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("Referrer-Policy", "no-referrer")
+	c.Header("Cache-Control", "public, max-age=0, must-revalidate")
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(document))
 }
 
 func (h *PublicLandingHandler) Preview(c *gin.Context) {

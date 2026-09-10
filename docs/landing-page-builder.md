@@ -505,6 +505,33 @@ grapesjs mensyaratkan document ada dengan HTML non-kosong.
 - Section builder + section renderer tetap dikirim untuk page `builder =
   'sections'`; tidak ada fitur baru di sana.
 
-### Belum dikerjakan
+### SSR untuk SEO (Fase 7)
 
-- Fase 7 (opsional) SSR `GET /public/landing/render` untuk SEO + nginx CSP.
+`GET /api/v1/public/landing/render[/{slug}]` — dokumen `text/html` **penuh & tanpa
+script** untuk crawler / klien no-JS. Halaman non-GrapesJS → 404.
+
+- `service/document_ssr.go` `RenderGrapesDocument(resolved ResolvedPage) string`:
+  bungkus `resolved.HTML` (sudah disanitasi resolver) dalam `<head>` (title/meta
+  `description`/`robots`/`og:*` dari `page.SEO` `meta_title`/`meta_description`/
+  `open_graph.image_url`, fallback `page.Title`; `robots=noindex` bila visibility
+  ≠ public) + `<style>` (base + chrome CSS + `resolved.CSS`, `</style` di-escape).
+- **Substitusi sentinel server-side** — regex ganti isi `<div
+  data-zyad-slot="tenant-nav|tenant-footer">` dgn markup yang dibangun string
+  (label `html.EscapeString`, href lewat allowlist `safeSSRHref`: `#`/`/`(bukan
+  `//`)/`http(s)`/`mailto`/`tel`, sisanya `#`). Paritas dgn `GrapesPageFrame.vue`.
+  Non-greedy `.*?</div>` → sentinel tak boleh punya `<div>` bersarang (dikunci di
+  editor, sama seperti sisi FE).
+- **Header respons**: `Content-Type: text/html; charset=utf-8`,
+  `Content-Security-Policy: default-src 'self'; img-src 'self' data: https:;
+  style-src 'self' 'unsafe-inline'; font-src 'self' https: data:; frame-src
+  'self' data:; script-src 'none'; base-uri 'none'; form-action 'self'`,
+  `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
+  `Cache-Control: public, max-age=0, must-revalidate`.
+- Handler `PublicLandingHandler.RenderHTML` (route `GET /public/landing/render`
+  + `/render/:slug`), reuse `resolverSvc` — **tak ada dependency / migration
+  baru**.
+
+**nginx (belum diterapkan — keputusan infra terpisah):** route hit bot /
+akses langsung untuk slug GrapesJS ke `/api/v1/public/landing/render/$slug`
+(mis. `map $http_user_agent $is_bot` + `location`), SPA tetap ke index. Cukup
+tambah CSP page biasa di vhost bila mau — endpoint sudah kirim CSP sendiri.
