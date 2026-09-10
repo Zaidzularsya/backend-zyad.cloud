@@ -197,6 +197,7 @@ func TestPageRepositorySettingsRoundtripIntegration(t *testing.T) {
 		Visibility: domain.PageVisibilityPublic,
 		Locale:     "id-ID",
 		Timezone:   "Asia/Jakarta",
+		Builder:    domain.PageBuilderGrapesJS,
 		Settings: &domain.PageSettings{
 			PublishRequireApproval: true,
 			LeadNotificationEmails: []string{"ops@example.com"},
@@ -209,6 +210,34 @@ func TestPageRepositorySettingsRoundtripIntegration(t *testing.T) {
 		cleanupCtx := context.Background()
 		_, _ = db.Exec(cleanupCtx, "DELETE FROM landing_pages WHERE id = $1", created.ID)
 	})
+
+	// builder must round-trip through Create / FindByID / FindBySlug / List /
+	// Update — a missing column in any of those SELECTs makes LandingContentPage
+	// mount the legacy builder for a GrapesJS page.
+	if created.Builder != domain.PageBuilderGrapesJS {
+		t.Fatalf("Create: builder = %q, want grapesjs", created.Builder)
+	}
+	if bySlug, err := repo.FindBySlug(ctx, tenants.A.Scope, slug); err != nil {
+		t.Fatalf("FindBySlug: %v", err)
+	} else if bySlug.Builder != domain.PageBuilderGrapesJS {
+		t.Fatalf("FindBySlug: builder = %q, want grapesjs", bySlug.Builder)
+	}
+	if listed, _, err := repo.List(ctx, tenants.A.Scope, repository.PageListFilter{}); err != nil {
+		t.Fatalf("List: %v", err)
+	} else {
+		var found bool
+		for _, p := range listed {
+			if p.ID == created.ID {
+				found = true
+				if p.Builder != domain.PageBuilderGrapesJS {
+					t.Fatalf("List: builder = %q, want grapesjs", p.Builder)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("List: created page %s not returned", created.ID)
+		}
+	}
 
 	if !created.Settings.PublishRequireApproval {
 		t.Errorf("expected PublishRequireApproval true after Create, got false")
@@ -244,6 +273,9 @@ func TestPageRepositorySettingsRoundtripIntegration(t *testing.T) {
 	}
 	if updated.Settings.PublishRequireApproval {
 		t.Errorf("expected PublishRequireApproval to be replaced (false) since Update replaces settings wholesale, got true")
+	}
+	if updated.Builder != domain.PageBuilderGrapesJS {
+		t.Errorf("Update: builder = %q, want grapesjs (Update must not blank it)", updated.Builder)
 	}
 }
 

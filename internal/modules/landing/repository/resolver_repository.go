@@ -24,7 +24,7 @@ func (r *resolverRepository) ResolveBySlug(ctx context.Context, scope coretenant
 		SELECT
 			id, organization_id, name, title, slug, page_type, status,
 			visibility, password_hash, seo, settings, locale, timezone,
-			is_homepage, is_template, created_by, created_at, updated_at
+			is_homepage, is_template, created_by, created_at, updated_at, builder
 		FROM landing_pages
 		WHERE organization_id = $1
 			AND lower(slug) = lower($2)
@@ -40,7 +40,7 @@ func (r *resolverRepository) ResolveBySlug(ctx context.Context, scope coretenant
 			&page.ID, &page.OrganizationID, &page.Name, &page.Title, &page.Slug,
 			&page.Type, &page.Status, &page.Visibility, &passwordHash,
 			&page.SEO, &page.Settings, &page.Locale, &page.Timezone, &page.IsHomepage, &page.IsTemplate,
-			&createdBy, &page.CreatedAt, &page.UpdatedAt,
+			&createdBy, &page.CreatedAt, &page.UpdatedAt, &page.Builder,
 		)
 	})
 
@@ -65,7 +65,7 @@ func (r *resolverRepository) ResolveByDomain(ctx context.Context, scope coretena
 		SELECT
 			p.id, p.organization_id, p.name, p.title, p.slug, p.page_type, p.status,
 			p.visibility, p.password_hash, p.seo, p.settings, p.locale, p.timezone,
-			p.is_homepage, p.is_template, p.created_by, p.created_at, p.updated_at
+			p.is_homepage, p.is_template, p.created_by, p.created_at, p.updated_at, p.builder
 		FROM organization_domains d
 		JOIN landing_pages p ON p.organization_id = d.organization_id
 		LEFT JOIN landing_domain_bindings b
@@ -95,7 +95,7 @@ func (r *resolverRepository) ResolveByDomain(ctx context.Context, scope coretena
 			&page.ID, &page.OrganizationID, &page.Name, &page.Title, &page.Slug,
 			&page.Type, &page.Status, &page.Visibility, &passwordHash,
 			&page.SEO, &page.Settings, &page.Locale, &page.Timezone, &page.IsHomepage, &page.IsTemplate,
-			&createdBy, &page.CreatedAt, &page.UpdatedAt,
+			&createdBy, &page.CreatedAt, &page.UpdatedAt, &page.Builder,
 		)
 	})
 
