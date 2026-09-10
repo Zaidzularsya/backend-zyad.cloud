@@ -473,6 +473,33 @@ grapesjs mensyaratkan document ada dengan HTML non-kosong.
   ber-sentinel **tanpa re-publish** (resolve selalu kirim `Menus` + `Branding`
   live untuk grapesjs).
 
+### Header tenant live + panel editor (Fase 8)
+
+Blok **"Header tenant"** sekarang komponen GrapesJS `zyad-tenant-header`
+(`grapes.header-component.ts`), bukan kotak placeholder:
+
+- **Di kanvas**: komponen terkunci yang me-render preview LIVE (logo + nav +
+  action) dari `useLandingChromeStore` (`canvasNav` + `canvasBranding`).
+  `GrapesEditor.vue` `watch` store → re-render tiap preview saat menu tenant
+  berubah.
+- **Panel** `GrapesHeaderPanel.vue` (kanan, muncul saat header dipilih) — 3 area:
+  *Logo & Brand* + *Navigation* (tenant-wide, persist langsung ke
+  `/admin/landing/{branding,menus}`) + *Action & Tampilan* (per-halaman).
+- **Ekspor** `toHTML` → `<div data-zyad-slot="tenant-nav" data-zyad-header='
+  {sticky,variant,align,showAction,actionLabel,actionUrl}'>`. Item nav & logo
+  tetap tenant-wide (diisi saat render); hanya *presentasi* yang nempel di page.
+- **Sanitizer** (`document_sanitizer.go`): atribut `data-zyad-header` masuk
+  allowlist `.Globally()` (blob JSON, di-parse defensif). Tak ada tag baru.
+- **Isi saat render**:
+  - `GrapesPageFrame.vue` `fillHeader` — baca `data-zyad-header` dari sentinel,
+    bangun `<div class="zyad-tenant-header zyad-tenant-header--{variant}
+    --{align} [--sticky]">` + brand + `<nav class="__nav">` + action; `chrome`
+    dapat field `brand: { name, logoUrl }`.
+  - `document_ssr.go` `buildHeaderMarkup` + `parseSSRHeaderPresentation`
+    (`html.UnescapeString` + `json.Unmarshal` onto defaults, enum di-clamp) —
+    output & class identik dgn FE.
+- Tanpa migration / dependency / endpoint baru.
+
 ### Peta file (tambahan GrapesJS)
 
 **Backend:**
@@ -480,17 +507,21 @@ grapesjs mensyaratkan document ada dengan HTML non-kosong.
 - `repository/document_repository.go` — `GetByPageID`, `Upsert`
 - `service/document_service.go` — `Get`, `Save` (cap ukuran, cek page ada)
 - `service/document_sanitizer.go` — `SanitizeGrapesHTML/CSS`,
-  `buildGrapesJSSnapshot`, `grapesSnapshotMarkup`
-- `handler/admin_document_handler.go`
+  `buildGrapesJSSnapshot`, `grapesSnapshotMarkup`, allowlist `data-zyad-header`
+- `service/document_ssr.go` — `RenderGrapesDocument`, `fillGrapesSentinels`,
+  `buildHeaderMarkup` / `parseSSRHeaderPresentation`
+- `handler/admin_document_handler.go`, `handler/public_landing_handler.go`
+  (`RenderHTML`)
 - `service/publish_service.go`, `service/resolver_service.go` — branch `builder`
+  (+ `builder` di semua query page/resolver repo)
 - `migrations/000090_add_landing_builder_and_documents.{up,down}.sql`
 
 **Frontend:**
 - `stores/landingDocument.ts`
 - `features/landing/builder/grapes/{GrapesEditor.vue, grapes.config.ts,
-  grapes.blocks.ts, grapes.devices.ts, grapes.i18n.id.ts}`
+  grapes.blocks.ts, grapes.devices.ts, grapes.i18n.id.ts, grapes.header-component.ts,
+  GrapesHeaderPanel.vue, starter-templates.ts}`
 - `features/landing/builder/pages/LandingContentPage.vue`
-- `features/landing/builder/grapes/starter-templates.ts`
 - `features/landing/renderer/components/GrapesPageFrame.vue` (render publik)
 - `features/landing/renderer/composables/useGrapesChrome.ts` (live chrome)
 - `features/landing/renderer/pages/{DynamicLandingPage,LandingPreviewPage}.vue`
