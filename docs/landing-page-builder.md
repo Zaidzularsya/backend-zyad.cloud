@@ -241,6 +241,15 @@ Semua persist sebagai `section_type = 'content'` + penanda
 `style.variant = 'element.*'` (tanpa migration), renderer di
 `renderer/sections/element/*.vue` (+ `useElementStyle.ts`), tampilan diatur lewat
 `style.typography` / `style.box` dari akordeon APPEARANCE property panel.
+`style.box` (semua opsional): `radius` · `borderWidth` · `borderStyle`
+(solid/dashed/dotted) · `borderColor` · `shadow` · `width` · `fullWidth` · dan
+khusus `element.image` `height` + `objectFit`. Sub-key `box`/`typography` tidak
+di-allowlist per-key server-side (hanya top-level `AllowedStyleKeys`), jadi
+menambah leaf baru cukup di FE. Field schema `type: 'image'` di property panel
+(`SectionContentForm` → `fields/ImageField.vue`) menyediakan upload
+(`landingApi.uploadMedia` → `POST /admin/landing/media`) + preview + input URL.
+`SectionPropertyPanel` & `HeaderSectionPanel` memakai `<details>` collapsible
+tanpa bingkai box (summary + chevron + `border-t` antar akordeon).
 
 `BlockDefinition`:
 
