@@ -278,6 +278,24 @@ type CTARequest struct {
 	TrackingKey string `json:"tracking_key" binding:"required,lowercase,alphanumhyphen"`
 }
 
+// PricingPlanRequest binds tenant pricing-plan card payloads.
+type PricingPlanRequest struct {
+	Name          string   `json:"name" binding:"required,min=1,max=100"`
+	PriceLabel    string   `json:"price_label" binding:"required,min=1,max=100"`
+	IntervalLabel string   `json:"interval_label"`
+	Description   string   `json:"description"`
+	Features      []string `json:"features"`
+	CTALabel      string   `json:"cta_label"`
+	CTAURL        string   `json:"cta_url"`
+	IsFeatured    bool     `json:"is_featured"`
+	IsEnabled     bool     `json:"is_enabled"`
+}
+
+// PricingPlanReorderRequest binds the new sort order for pricing plans.
+type PricingPlanReorderRequest struct {
+	PlanIDs []string `json:"plan_ids" binding:"required,min=1,dive,required"`
+}
+
 // SectionTemplateRequest binds Section Template parameters.
 type SectionTemplateRequest struct {
 	Name        string         `json:"name" binding:"required,min=1,max=200"`

@@ -166,6 +166,58 @@ func TestRenderGrapesDocumentPreservesCustomStyleOnSentinel(t *testing.T) {
 	}
 }
 
+func TestRenderGrapesDocumentFillsPricingPlansSentinel(t *testing.T) {
+	page := grapesResolvedFixture()
+	page.HTML = `<div data-zyad-slot="pricing-plans"><span>placeholder</span></div><main>x</main>`
+	page.PricingPlans = []ResolvedPricingPlan{
+		{
+			ID: "p1", Name: "Starter", PriceLabel: "Rp 199.000", IntervalLabel: "/bulan",
+			Features: []string{"5 halaman", "Domain kustom"}, CTALabel: "Mulai", CTAURL: "/daftar",
+		},
+		{
+			ID: "p2", Name: "Pro", PriceLabel: "Rp 499.000", IntervalLabel: "/bulan",
+			Features: []string{"Halaman tanpa batas"}, CTALabel: "Mulai", CTAURL: "/daftar", IsFeatured: true,
+		},
+	}
+
+	doc := RenderGrapesDocument(page)
+
+	if strings.Contains(doc, "placeholder") {
+		t.Fatalf("sentinel placeholder not replaced: %s", doc)
+	}
+	if !strings.Contains(doc, `<p class="zyad-pricing-plans__name">Starter</p>`) ||
+		!strings.Contains(doc, `<p class="zyad-pricing-plans__name">Pro</p>`) {
+		t.Fatalf("plan names not rendered: %s", doc)
+	}
+	if !strings.Contains(doc, `class="zyad-pricing-plans__card zyad-pricing-plans__card--featured"`) {
+		t.Fatalf("featured plan card class missing: %s", doc)
+	}
+	if !strings.Contains(doc, `<span class="zyad-pricing-plans__badge">Populer</span>`) {
+		t.Fatalf("featured badge missing: %s", doc)
+	}
+	if !strings.Contains(doc, `<li>5 halaman</li>`) {
+		t.Fatalf("plan features not rendered: %s", doc)
+	}
+	if !strings.Contains(doc, `<a class="zyad-pricing-plans__cta" href="/daftar">Mulai</a>`) {
+		t.Fatalf("plan CTA not rendered: %s", doc)
+	}
+}
+
+func TestRenderGrapesDocumentDropsDuplicatePricingPlansSentinel(t *testing.T) {
+	page := grapesResolvedFixture()
+	page.HTML = `<div data-zyad-slot="pricing-plans"></div><main>x</main><div data-zyad-slot="pricing-plans"></div>`
+	page.PricingPlans = []ResolvedPricingPlan{{ID: "p1", Name: "Starter", PriceLabel: "Rp 199.000"}}
+
+	doc := RenderGrapesDocument(page)
+
+	if n := strings.Count(doc, `class="zyad-pricing-plans"`); n != 1 {
+		t.Fatalf("expected exactly 1 rendered pricing block, got %d: %s", n, doc)
+	}
+	if n := strings.Count(doc, `data-zyad-slot="pricing-plans"`); n != 1 {
+		t.Fatalf("expected exactly 1 remaining pricing-plans sentinel, got %d: %s", n, doc)
+	}
+}
+
 func TestRenderGrapesDocumentDropsDuplicateSentinels(t *testing.T) {
 	// A page mistakenly ending up with two "Header tenant" / "Footer tenant"
 	// blocks (a builder bug the GrapesEditor.vue guard now prevents going

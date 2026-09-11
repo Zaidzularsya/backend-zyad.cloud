@@ -54,6 +54,30 @@ func (f *fakeNavigationRepository) DeleteCTA(context.Context, coretenant.Scope, 
 	return nil
 }
 
+func (f *fakeNavigationRepository) CreatePricingPlan(context.Context, coretenant.Scope, repository.CreatePricingPlanParams) (domain.LandingPricingPlan, error) {
+	return domain.LandingPricingPlan{}, nil
+}
+
+func (f *fakeNavigationRepository) GetPricingPlan(context.Context, coretenant.Scope, string) (domain.LandingPricingPlan, error) {
+	return domain.LandingPricingPlan{}, nil
+}
+
+func (f *fakeNavigationRepository) ListPricingPlans(context.Context, coretenant.Scope) ([]domain.LandingPricingPlan, error) {
+	return nil, nil
+}
+
+func (f *fakeNavigationRepository) UpdatePricingPlan(context.Context, coretenant.Scope, string, repository.UpdatePricingPlanParams) (domain.LandingPricingPlan, error) {
+	return domain.LandingPricingPlan{}, nil
+}
+
+func (f *fakeNavigationRepository) ReorderPricingPlans(context.Context, coretenant.Scope, []string) error {
+	return nil
+}
+
+func (f *fakeNavigationRepository) DeletePricingPlan(context.Context, coretenant.Scope, string, string) error {
+	return nil
+}
+
 func (f *fakeNavigationRepository) CreateMenu(context.Context, coretenant.Scope, repository.CreateMenuParams) (domain.LandingMenu, error) {
 	return domain.LandingMenu{}, nil
 }

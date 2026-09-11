@@ -557,6 +557,347 @@ func (r *reusableRepository) DeleteCTA(ctx context.Context, scope coretenant.Sco
 	})
 }
 
+func (r *reusableRepository) CreatePricingPlan(ctx context.Context, scope coretenant.Scope, params CreatePricingPlanParams) (domain.LandingPricingPlan, error) {
+	if !scope.IsValid() {
+		return domain.LandingPricingPlan{}, coretenant.ErrInvalidScope
+	}
+
+	query := `
+		INSERT INTO landing_pricing_plans (
+			organization_id, name, price_label, interval_label, description, features,
+			cta_label, cta_url, is_featured, is_enabled,
+			sort_order, created_by
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+			COALESCE((SELECT MAX(sort_order) + 1 FROM landing_pricing_plans WHERE organization_id = $1 AND deleted_at IS NULL), 0),
+			$11
+		) RETURNING
+			id, name, price_label, interval_label, description, features, cta_label, cta_url,
+			is_featured, is_enabled, sort_order, created_by, updated_by, created_at, updated_at
+	`
+
+	features := params.Features
+	if features == nil {
+		features = []string{}
+	}
+
+	var p domain.LandingPricingPlan
+	var createdBy, updatedBy, intervalLabel, description *string
+
+	if params.IntervalLabel != "" {
+		intervalLabel = &params.IntervalLabel
+	}
+	if params.Description != "" {
+		description = &params.Description
+	}
+
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var cb interface{} = nil
+		if params.CreatedBy != "" {
+			cb = params.CreatedBy
+		}
+
+		return tx.QueryRow(ctx, query,
+			scope.OrganizationID(),
+			params.Name,
+			params.PriceLabel,
+			intervalLabel,
+			description,
+			features,
+			params.CTALabel,
+			params.CTAURL,
+			params.IsFeatured,
+			params.IsEnabled,
+			cb,
+		).Scan(
+			&p.ID, &p.Name, &p.PriceLabel, &intervalLabel, &description, &p.Features,
+			&p.CTALabel, &p.CTAURL, &p.IsFeatured, &p.IsEnabled, &p.SortOrder,
+			&createdBy, &updatedBy, &p.CreatedAt, &p.UpdatedAt,
+		)
+	})
+
+	if err != nil {
+		return domain.LandingPricingPlan{}, err
+	}
+	p.OrganizationID = scope.OrganizationID()
+	if intervalLabel != nil {
+		p.IntervalLabel = *intervalLabel
+	}
+	if description != nil {
+		p.Description = *description
+	}
+	if createdBy != nil {
+		p.CreatedBy = *createdBy
+	}
+	if updatedBy != nil {
+		p.UpdatedBy = *updatedBy
+	}
+
+	return p, nil
+}
+
+func (r *reusableRepository) GetPricingPlan(ctx context.Context, scope coretenant.Scope, id string) (domain.LandingPricingPlan, error) {
+	if !scope.IsValid() {
+		return domain.LandingPricingPlan{}, coretenant.ErrInvalidScope
+	}
+
+	query := `
+		SELECT
+			id, name, price_label, interval_label, description, features, cta_label, cta_url,
+			is_featured, is_enabled, sort_order, created_by, updated_by, created_at, updated_at
+		FROM landing_pricing_plans
+		WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL
+	`
+
+	var p domain.LandingPricingPlan
+	var createdBy, updatedBy, intervalLabel, description *string
+
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, query, id, scope.OrganizationID()).Scan(
+			&p.ID, &p.Name, &p.PriceLabel, &intervalLabel, &description, &p.Features,
+			&p.CTALabel, &p.CTAURL, &p.IsFeatured, &p.IsEnabled, &p.SortOrder,
+			&createdBy, &updatedBy, &p.CreatedAt, &p.UpdatedAt,
+		)
+	})
+
+	if err != nil {
+		return domain.LandingPricingPlan{}, err
+	}
+	p.OrganizationID = scope.OrganizationID()
+	if intervalLabel != nil {
+		p.IntervalLabel = *intervalLabel
+	}
+	if description != nil {
+		p.Description = *description
+	}
+	if createdBy != nil {
+		p.CreatedBy = *createdBy
+	}
+	if updatedBy != nil {
+		p.UpdatedBy = *updatedBy
+	}
+
+	return p, nil
+}
+
+func (r *reusableRepository) ListPricingPlans(ctx context.Context, scope coretenant.Scope) ([]domain.LandingPricingPlan, error) {
+	if !scope.IsValid() {
+		return nil, coretenant.ErrInvalidScope
+	}
+
+	query := `
+		SELECT
+			id, name, price_label, interval_label, description, features, cta_label, cta_url,
+			is_featured, is_enabled, sort_order, created_by, updated_by, created_at, updated_at
+		FROM landing_pricing_plans
+		WHERE organization_id = $1 AND deleted_at IS NULL
+		ORDER BY sort_order ASC, created_at ASC
+	`
+
+	var plans []domain.LandingPricingPlan
+
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, scope.OrganizationID())
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var p domain.LandingPricingPlan
+			var createdBy, updatedBy, intervalLabel, description *string
+
+			err := rows.Scan(
+				&p.ID, &p.Name, &p.PriceLabel, &intervalLabel, &description, &p.Features,
+				&p.CTALabel, &p.CTAURL, &p.IsFeatured, &p.IsEnabled, &p.SortOrder,
+				&createdBy, &updatedBy, &p.CreatedAt, &p.UpdatedAt,
+			)
+			if err != nil {
+				return err
+			}
+			p.OrganizationID = scope.OrganizationID()
+			if intervalLabel != nil {
+				p.IntervalLabel = *intervalLabel
+			}
+			if description != nil {
+				p.Description = *description
+			}
+			if createdBy != nil {
+				p.CreatedBy = *createdBy
+			}
+			if updatedBy != nil {
+				p.UpdatedBy = *updatedBy
+			}
+			plans = append(plans, p)
+		}
+		return rows.Err()
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return plans, nil
+}
+
+func (r *reusableRepository) UpdatePricingPlan(ctx context.Context, scope coretenant.Scope, id string, params UpdatePricingPlanParams) (domain.LandingPricingPlan, error) {
+	if !scope.IsValid() {
+		return domain.LandingPricingPlan{}, coretenant.ErrInvalidScope
+	}
+
+	query := `UPDATE landing_pricing_plans SET updated_at = NOW()`
+	var args []interface{}
+	argCount := 1
+
+	if params.Name != nil {
+		args = append(args, *params.Name)
+		query += fmt.Sprintf(", name = $%d", argCount)
+		argCount++
+	}
+	if params.PriceLabel != nil {
+		args = append(args, *params.PriceLabel)
+		query += fmt.Sprintf(", price_label = $%d", argCount)
+		argCount++
+	}
+	if params.IntervalLabel != nil {
+		args = append(args, *params.IntervalLabel)
+		query += fmt.Sprintf(", interval_label = $%d", argCount)
+		argCount++
+	}
+	if params.Description != nil {
+		args = append(args, *params.Description)
+		query += fmt.Sprintf(", description = $%d", argCount)
+		argCount++
+	}
+	if params.Features != nil {
+		args = append(args, *params.Features)
+		query += fmt.Sprintf(", features = $%d", argCount)
+		argCount++
+	}
+	if params.CTALabel != nil {
+		args = append(args, *params.CTALabel)
+		query += fmt.Sprintf(", cta_label = $%d", argCount)
+		argCount++
+	}
+	if params.CTAURL != nil {
+		args = append(args, *params.CTAURL)
+		query += fmt.Sprintf(", cta_url = $%d", argCount)
+		argCount++
+	}
+	if params.IsFeatured != nil {
+		args = append(args, *params.IsFeatured)
+		query += fmt.Sprintf(", is_featured = $%d", argCount)
+		argCount++
+	}
+	if params.IsEnabled != nil {
+		args = append(args, *params.IsEnabled)
+		query += fmt.Sprintf(", is_enabled = $%d", argCount)
+		argCount++
+	}
+	if params.UpdatedBy != "" {
+		args = append(args, params.UpdatedBy)
+		query += fmt.Sprintf(", updated_by = $%d", argCount)
+		argCount++
+	}
+
+	args = append(args, id, scope.OrganizationID())
+	query += fmt.Sprintf(" WHERE id = $%d AND organization_id = $%d AND deleted_at IS NULL RETURNING ", argCount, argCount+1)
+	query += `id, name, price_label, interval_label, description, features, cta_label, cta_url,
+		is_featured, is_enabled, sort_order, created_by, updated_by, created_at, updated_at`
+
+	var p domain.LandingPricingPlan
+	var createdBy, updatedBy, intervalLabel, description *string
+
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, query, args...).Scan(
+			&p.ID, &p.Name, &p.PriceLabel, &intervalLabel, &description, &p.Features,
+			&p.CTALabel, &p.CTAURL, &p.IsFeatured, &p.IsEnabled, &p.SortOrder,
+			&createdBy, &updatedBy, &p.CreatedAt, &p.UpdatedAt,
+		)
+	})
+
+	if err != nil {
+		return domain.LandingPricingPlan{}, err
+	}
+	p.OrganizationID = scope.OrganizationID()
+	if intervalLabel != nil {
+		p.IntervalLabel = *intervalLabel
+	}
+	if description != nil {
+		p.Description = *description
+	}
+	if createdBy != nil {
+		p.CreatedBy = *createdBy
+	}
+	if updatedBy != nil {
+		p.UpdatedBy = *updatedBy
+	}
+
+	return p, nil
+}
+
+func (r *reusableRepository) ReorderPricingPlans(ctx context.Context, scope coretenant.Scope, planIDs []string) error {
+	if !scope.IsValid() {
+		return coretenant.ErrInvalidScope
+	}
+
+	return r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		query1 := `
+			UPDATE landing_pricing_plans
+			SET sort_order = sort_order + 1000000, updated_at = NOW()
+			WHERE organization_id = $1
+		`
+		_, err := tx.Exec(ctx, query1, scope.OrganizationID())
+		if err != nil {
+			return err
+		}
+
+		query2 := `
+			UPDATE landing_pricing_plans
+			SET sort_order = $1, updated_at = NOW()
+			WHERE id = $2 AND organization_id = $3
+		`
+		for i, id := range planIDs {
+			cmdTag, err := tx.Exec(ctx, query2, i, id, scope.OrganizationID())
+			if err != nil {
+				return err
+			}
+			if cmdTag.RowsAffected() == 0 {
+				return pgx.ErrNoRows
+			}
+		}
+
+		return nil
+	})
+}
+
+func (r *reusableRepository) DeletePricingPlan(ctx context.Context, scope coretenant.Scope, id string, deletedBy string) error {
+	if !scope.IsValid() {
+		return coretenant.ErrInvalidScope
+	}
+
+	query := `
+		UPDATE landing_pricing_plans
+		SET deleted_at = NOW(), updated_by = $1
+		WHERE id = $2 AND organization_id = $3 AND deleted_at IS NULL
+	`
+
+	return r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var ub interface{} = nil
+		if deletedBy != "" {
+			ub = deletedBy
+		}
+		cmdTag, err := tx.Exec(ctx, query, ub, id, scope.OrganizationID())
+		if err != nil {
+			return err
+		}
+		if cmdTag.RowsAffected() == 0 {
+			return pgx.ErrNoRows
+		}
+		return nil
+	})
+}
+
 func (r *reusableRepository) CreateMenu(ctx context.Context, scope coretenant.Scope, params CreateMenuParams) (domain.LandingMenu, error) {
 	if !scope.IsValid() {
 		return domain.LandingMenu{}, coretenant.ErrInvalidScope

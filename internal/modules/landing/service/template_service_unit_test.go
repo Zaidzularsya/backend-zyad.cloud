@@ -98,6 +98,55 @@ func (s *templateServiceReusableRepoStub) DeleteCTA(
 	return nil
 }
 
+func (s *templateServiceReusableRepoStub) CreatePricingPlan(
+	context.Context,
+	coretenant.Scope,
+	repository.CreatePricingPlanParams,
+) (domain.LandingPricingPlan, error) {
+	return domain.LandingPricingPlan{}, nil
+}
+
+func (s *templateServiceReusableRepoStub) GetPricingPlan(
+	context.Context,
+	coretenant.Scope,
+	string,
+) (domain.LandingPricingPlan, error) {
+	return domain.LandingPricingPlan{}, nil
+}
+
+func (s *templateServiceReusableRepoStub) ListPricingPlans(
+	context.Context,
+	coretenant.Scope,
+) ([]domain.LandingPricingPlan, error) {
+	return nil, nil
+}
+
+func (s *templateServiceReusableRepoStub) UpdatePricingPlan(
+	context.Context,
+	coretenant.Scope,
+	string,
+	repository.UpdatePricingPlanParams,
+) (domain.LandingPricingPlan, error) {
+	return domain.LandingPricingPlan{}, nil
+}
+
+func (s *templateServiceReusableRepoStub) ReorderPricingPlans(
+	context.Context,
+	coretenant.Scope,
+	[]string,
+) error {
+	return nil
+}
+
+func (s *templateServiceReusableRepoStub) DeletePricingPlan(
+	context.Context,
+	coretenant.Scope,
+	string,
+	string,
+) error {
+	return nil
+}
+
 func (s *templateServiceReusableRepoStub) CreateMenu(
 	context.Context,
 	coretenant.Scope,

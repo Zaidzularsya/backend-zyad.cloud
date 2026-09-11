@@ -108,13 +108,14 @@ func (s *resolverService) resolvePageData(ctx context.Context, scope tenant.Scop
 		}
 
 		return ResolvedPage{
-			Page:     page,
-			Sections: sections,
-			Forms:    forms,
-			Branding: branding,
-			Menus:    s.resolveMenus(ctx, scope),
-			CTAs:     s.resolveCTAs(ctx, scope),
-			IsDraft:  true,
+			Page:         page,
+			Sections:     sections,
+			Forms:        forms,
+			Branding:     branding,
+			Menus:        s.resolveMenus(ctx, scope),
+			CTAs:         s.resolveCTAs(ctx, scope),
+			PricingPlans: s.resolvePricingPlans(ctx, scope),
+			IsDraft:      true,
 		}, nil
 	}
 
@@ -129,12 +130,13 @@ func (s *resolverService) resolvePageData(ctx context.Context, scope tenant.Scop
 			branding, _ = s.brandingRepo.GetDefault(ctx, scope)
 		}
 		return ResolvedPage{
-			Page:     page,
-			Sections: sections,
-			Forms:    forms,
-			Branding: branding,
-			Menus:    s.resolveMenus(ctx, scope),
-			CTAs:     s.resolveCTAs(ctx, scope),
+			Page:         page,
+			Sections:     sections,
+			Forms:        forms,
+			Branding:     branding,
+			Menus:        s.resolveMenus(ctx, scope),
+			CTAs:         s.resolveCTAs(ctx, scope),
+			PricingPlans: s.resolvePricingPlans(ctx, scope),
 		}, nil
 	}
 
@@ -156,14 +158,15 @@ func (s *resolverService) resolvePageData(ctx context.Context, scope tenant.Scop
 	}
 
 	return ResolvedPage{
-		Page:     page,
-		Sections: sections,
-		Forms:    forms,
-		Snapshot: latestVersion.Snapshot,
-		Branding: branding,
-		Menus:    s.resolveMenus(ctx, scope),
-		CTAs:     s.resolveCTAs(ctx, scope),
-		IsDraft:  false,
+		Page:         page,
+		Sections:     sections,
+		Forms:        forms,
+		Snapshot:     latestVersion.Snapshot,
+		Branding:     branding,
+		Menus:        s.resolveMenus(ctx, scope),
+		CTAs:         s.resolveCTAs(ctx, scope),
+		PricingPlans: s.resolvePricingPlans(ctx, scope),
+		IsDraft:      false,
 	}, nil
 }
 
@@ -176,12 +179,13 @@ func (s *resolverService) resolveGrapesPage(ctx context.Context, scope tenant.Sc
 	}
 
 	resolved := ResolvedPage{
-		Page:     page,
-		Builder:  string(domain.PageBuilderGrapesJS),
-		Branding: branding,
-		Menus:    s.resolveMenus(ctx, scope),
-		CTAs:     s.resolveCTAs(ctx, scope),
-		IsDraft:  isDraftPreview,
+		Page:         page,
+		Builder:      string(domain.PageBuilderGrapesJS),
+		Branding:     branding,
+		Menus:        s.resolveMenus(ctx, scope),
+		CTAs:         s.resolveCTAs(ctx, scope),
+		PricingPlans: s.resolvePricingPlans(ctx, scope),
+		IsDraft:      isDraftPreview,
 	}
 
 	if !isDraftPreview {
@@ -257,6 +261,38 @@ func (s *resolverService) resolveCTAs(ctx context.Context, scope tenant.Scope) [
 			Target:      string(cta.Target),
 			Destination: cta.Destination,
 			TrackingKey: cta.TrackingKey,
+		})
+	}
+	return resolved
+}
+
+func (s *resolverService) resolvePricingPlans(ctx context.Context, scope tenant.Scope) []ResolvedPricingPlan {
+	if s.reusableRepo == nil {
+		return nil
+	}
+	plans, err := s.reusableRepo.ListPricingPlans(ctx, scope)
+	if err != nil {
+		return nil
+	}
+	resolved := make([]ResolvedPricingPlan, 0, len(plans))
+	for _, plan := range plans {
+		if !plan.IsEnabled {
+			continue
+		}
+		features := plan.Features
+		if features == nil {
+			features = []string{}
+		}
+		resolved = append(resolved, ResolvedPricingPlan{
+			ID:            plan.ID,
+			Name:          plan.Name,
+			PriceLabel:    plan.PriceLabel,
+			IntervalLabel: plan.IntervalLabel,
+			Description:   plan.Description,
+			Features:      features,
+			CTALabel:      plan.CTALabel,
+			CTAURL:        plan.CTAURL,
+			IsFeatured:    plan.IsFeatured,
 		})
 	}
 	return resolved

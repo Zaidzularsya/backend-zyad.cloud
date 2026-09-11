@@ -58,6 +58,7 @@ type Dependencies struct {
 	LandingAdminTemplateHandler      *landinghandler.AdminTemplateHandler
 	LandingAdminMediaHandler         *landinghandler.AdminMediaHandler
 	LandingAdminNavigationHandler    *landinghandler.AdminNavigationHandler
+	LandingAdminPricingHandler       *landinghandler.AdminPricingHandler
 	LandingAdminRevisionHandler      *landinghandler.AdminRevisionHandler
 	LandingAdminScheduleHandler      *landinghandler.AdminScheduleHandler
 	LandingAdminIntegrationHandler   *landinghandler.AdminIntegrationHandler

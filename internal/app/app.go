@@ -346,6 +346,7 @@ func New(ctx context.Context) (*App, error) {
 		landingservice.WithMediaPublicBaseURL(cfg.App.URL),
 	)
 	landingNavigationSvc := landingservice.NewNavigationService(landingReusableRepo, landingPageRepo)
+	landingPricingSvc := landingservice.NewPricingService(landingReusableRepo)
 	landingDeliverySvc := landingservice.NewDeliveryService(landingIntegrationRepo, landingSubmissionRepo)
 
 	landingAdminPageHandler := landinghandler.NewAdminPageHandler(landingPageSvc, landingVisibilitySvc, landingRevisionSvc, landingPublishSvc)
@@ -359,6 +360,7 @@ func New(ctx context.Context) (*App, error) {
 	landingAdminTemplateHandler := landinghandler.NewAdminTemplateHandler(landingTemplateSvc)
 	landingAdminMediaHandler := landinghandler.NewAdminMediaHandler(landingMediaSvc)
 	landingAdminNavigationHandler := landinghandler.NewAdminNavigationHandler(landingNavigationSvc)
+	landingAdminPricingHandler := landinghandler.NewAdminPricingHandler(landingPricingSvc)
 	landingAdminRevisionHandler := landinghandler.NewAdminRevisionHandler(landingRevisionSvc)
 	landingAdminScheduleHandler := landinghandler.NewAdminScheduleHandler(landingRevisionSvc)
 	landingAdminIntegrationHandler := landinghandler.NewAdminIntegrationHandler(landingDeliverySvc)
@@ -448,6 +450,7 @@ func New(ctx context.Context) (*App, error) {
 		LandingAdminMediaHandler:         landingAdminMediaHandler,
 		MediaStorage:                     mediaStorage,
 		LandingAdminNavigationHandler:    landingAdminNavigationHandler,
+		LandingAdminPricingHandler:       landingAdminPricingHandler,
 		LandingAdminRevisionHandler:      landingAdminRevisionHandler,
 		LandingAdminScheduleHandler:      landingAdminScheduleHandler,
 		LandingAdminIntegrationHandler:   landingAdminIntegrationHandler,

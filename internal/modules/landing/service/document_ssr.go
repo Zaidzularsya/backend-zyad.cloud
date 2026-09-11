@@ -43,11 +43,24 @@ const ssrChromeCSS = `.zyad-tenant-header{display:flex;align-items:center;gap:24
 .zyad-tenant-footer__title{color:#fff;font-weight:600;margin:0 0 10px}
 .zyad-tenant-footer__col nav{display:flex;flex-direction:column;gap:6px}
 .zyad-tenant-footer__col a{color:#cbd5e1;text-decoration:none}
-.zyad-tenant-footer__copyright{max-width:1120px;margin:28px auto 0;border-top:1px solid #1e293b;padding-top:16px;font-size:13px}`
+.zyad-tenant-footer__copyright{max-width:1120px;margin:28px auto 0;border-top:1px solid #1e293b;padding-top:16px;font-size:13px}
+.zyad-pricing-plans{padding:64px 24px;font-family:'Inter','Segoe UI',system-ui,sans-serif}
+.zyad-pricing-plans__grid{max-width:1120px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:24px}
+.zyad-pricing-plans__card{padding:32px 28px;border:1px solid #e2e8f0;border-radius:16px;background:#fff}
+.zyad-pricing-plans__card--featured{border-color:#465fff;box-shadow:0 12px 32px rgba(70,95,255,.16)}
+.zyad-pricing-plans__badge{display:inline-block;margin:0 0 12px;padding:4px 10px;border-radius:999px;background:#465fff;color:#fff;font-size:12px;font-weight:600}
+.zyad-pricing-plans__name{margin:0 0 8px;font-size:18px;font-weight:700;color:#0f172a}
+.zyad-pricing-plans__price{margin:0 0 4px;font-size:32px;font-weight:800;color:#0f172a}
+.zyad-pricing-plans__interval{font-size:14px;font-weight:500;color:#64748b}
+.zyad-pricing-plans__desc{margin:8px 0 20px;font-size:14px;color:#475569}
+.zyad-pricing-plans__features{list-style:none;margin:0 0 24px;padding:0;display:flex;flex-direction:column;gap:10px;font-size:14px;color:#334155}
+.zyad-pricing-plans__cta{display:block;text-align:center;padding:11px 20px;border-radius:10px;background:#465fff;color:#fff;font-weight:600;text-decoration:none}
+.zyad-pricing-plans__card--featured .zyad-pricing-plans__cta{background:#2563eb}`
 
 var (
 	navSentinelRe     = regexp.MustCompile(`(?is)<div\b[^>]*\bdata-zyad-slot="tenant-nav"[^>]*>.*?</div>`)
 	footerSentinelRe  = regexp.MustCompile(`(?is)<div\b[^>]*\bdata-zyad-slot="tenant-footer"[^>]*>.*?</div>`)
+	pricingSentinelRe = regexp.MustCompile(`(?is)<div\b[^>]*\bdata-zyad-slot="pricing-plans"[^>]*>.*?</div>`)
 	sentinelOpenTagRe = regexp.MustCompile(`(?is)^<div\b[^>]*>`)
 	safeSSRHrefRe     = regexp.MustCompile(`^(#|/(?:[^/]|$)|https?://|mailto:|tel:)`)
 	dataZyadHeaderRe  = regexp.MustCompile(`(?is)\bdata-zyad-header\s*=\s*("([^"]*)"|'([^']*)')`)
@@ -145,7 +158,7 @@ func RenderGrapesDocument(resolved ResolvedPage) string {
 		robots = "noindex, nofollow"
 	}
 
-	body := fillGrapesSentinels(resolved.HTML, resolved.Menus, resolved.Branding, page)
+	body := fillGrapesSentinels(resolved.HTML, resolved.Menus, resolved.PricingPlans, resolved.Branding, page)
 	css := strings.ReplaceAll(resolved.CSS, "</style", `<\/style`)
 
 	var b strings.Builder
@@ -187,6 +200,7 @@ func seoString(seo map[string]any, key string) string {
 func fillGrapesSentinels(
 	markup string,
 	menus []ResolvedMenu,
+	plans []ResolvedPricingPlan,
 	branding domain.LandingBranding,
 	page domain.LandingPage,
 ) string {
@@ -217,7 +231,58 @@ func fillGrapesSentinels(
 		return sentinelOpenTag(sentinel) + footerMarkup + `</div>`
 	})
 
+	pricingMarkup := buildPricingMarkup(plans)
+	pricingFilled := false
+	markup = pricingSentinelRe.ReplaceAllStringFunc(markup, func(sentinel string) string {
+		if pricingFilled {
+			return ""
+		}
+		pricingFilled = true
+		return sentinelOpenTag(sentinel) + pricingMarkup + `</div>`
+	})
+
 	return markup
+}
+
+func buildPricingMarkup(plans []ResolvedPricingPlan) string {
+	var b strings.Builder
+	b.WriteString(`<div class="zyad-pricing-plans"><div class="zyad-pricing-plans__grid">`)
+	for _, plan := range plans {
+		cardClass := "zyad-pricing-plans__card"
+		if plan.IsFeatured {
+			cardClass += " zyad-pricing-plans__card--featured"
+		}
+		b.WriteString(`<div class="` + cardClass + `">`)
+		if plan.IsFeatured {
+			b.WriteString(`<span class="zyad-pricing-plans__badge">Populer</span>`)
+		}
+		b.WriteString(`<p class="zyad-pricing-plans__name">` + html.EscapeString(plan.Name) + `</p>`)
+		b.WriteString(`<p class="zyad-pricing-plans__price">` + html.EscapeString(plan.PriceLabel))
+		if plan.IntervalLabel != "" {
+			b.WriteString(` <span class="zyad-pricing-plans__interval">` + html.EscapeString(plan.IntervalLabel) + `</span>`)
+		}
+		b.WriteString(`</p>`)
+		if plan.Description != "" {
+			b.WriteString(`<p class="zyad-pricing-plans__desc">` + html.EscapeString(plan.Description) + `</p>`)
+		}
+		if len(plan.Features) > 0 {
+			b.WriteString(`<ul class="zyad-pricing-plans__features">`)
+			for _, feature := range plan.Features {
+				if feature == "" {
+					continue
+				}
+				b.WriteString(`<li>` + html.EscapeString(feature) + `</li>`)
+			}
+			b.WriteString(`</ul>`)
+		}
+		if plan.CTALabel != "" {
+			b.WriteString(`<a class="zyad-pricing-plans__cta" href="` +
+				html.EscapeString(safeSSRHref(plan.CTAURL)) + `">` + html.EscapeString(plan.CTALabel) + `</a>`)
+		}
+		b.WriteString(`</div>`)
+	}
+	b.WriteString(`</div></div>`)
+	return b.String()
 }
 
 func buildHeaderMarkup(links []ssrChromeLink, branding domain.LandingBranding, p ssrHeaderPresentation) string {

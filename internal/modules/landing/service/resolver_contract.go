@@ -8,14 +8,15 @@ import (
 )
 
 type ResolvedPage struct {
-	Page     domain.LandingPage
-	Branding domain.LandingBranding
-	Sections []domain.LandingSection
-	Forms    []domain.LandingForm
-	Menus    []ResolvedMenu
-	CTAs     []ResolvedCTA
-	Snapshot map[string]any
-	IsDraft  bool
+	Page         domain.LandingPage
+	Branding     domain.LandingBranding
+	Sections     []domain.LandingSection
+	Forms        []domain.LandingForm
+	Menus        []ResolvedMenu
+	CTAs         []ResolvedCTA
+	PricingPlans []ResolvedPricingPlan
+	Snapshot     map[string]any
+	IsDraft      bool
 
 	// Set only for pages authored with the GrapesJS builder. When Builder is
 	// "grapesjs" the renderer ignores Sections/Forms and uses HTML+CSS instead.
@@ -33,6 +34,21 @@ type ResolvedCTA struct {
 	Target      string `json:"target"`
 	Destination string `json:"destination"`
 	TrackingKey string `json:"tracking_key"`
+}
+
+// ResolvedPricingPlan is the public-safe projection of a tenant's own
+// domain.LandingPricingPlan, used to fill the `zyad-pricing-plans` block
+// (data-zyad-slot="pricing-plans") client-side.
+type ResolvedPricingPlan struct {
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	PriceLabel    string   `json:"price_label"`
+	IntervalLabel string   `json:"interval_label,omitempty"`
+	Description   string   `json:"description,omitempty"`
+	Features      []string `json:"features"`
+	CTALabel      string   `json:"cta_label"`
+	CTAURL        string   `json:"cta_url,omitempty"`
+	IsFeatured    bool     `json:"is_featured"`
 }
 
 type ResolvedMenu struct {

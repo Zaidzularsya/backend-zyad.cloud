@@ -44,6 +44,32 @@ type UpdateCTAParams struct {
 	UpdatedBy   string
 }
 
+type CreatePricingPlanParams struct {
+	Name          string
+	PriceLabel    string
+	IntervalLabel string
+	Description   string
+	Features      []string
+	CTALabel      string
+	CTAURL        string
+	IsFeatured    bool
+	IsEnabled     bool
+	CreatedBy     string
+}
+
+type UpdatePricingPlanParams struct {
+	Name          *string
+	PriceLabel    *string
+	IntervalLabel *string
+	Description   *string
+	Features      *[]string
+	CTALabel      *string
+	CTAURL        *string
+	IsFeatured    *bool
+	IsEnabled     *bool
+	UpdatedBy     string
+}
+
 type CreateMenuParams struct {
 	Name      string
 	Location  domain.MenuLocation
@@ -93,6 +119,14 @@ type ReusableRepository interface {
 	ListCTAs(context.Context, coretenant.Scope) ([]domain.LandingCTA, error)
 	UpdateCTA(context.Context, coretenant.Scope, string, UpdateCTAParams) (domain.LandingCTA, error)
 	DeleteCTA(context.Context, coretenant.Scope, string, string) error
+
+	// Pricing Plans
+	CreatePricingPlan(context.Context, coretenant.Scope, CreatePricingPlanParams) (domain.LandingPricingPlan, error)
+	GetPricingPlan(context.Context, coretenant.Scope, string) (domain.LandingPricingPlan, error)
+	ListPricingPlans(context.Context, coretenant.Scope) ([]domain.LandingPricingPlan, error)
+	UpdatePricingPlan(context.Context, coretenant.Scope, string, UpdatePricingPlanParams) (domain.LandingPricingPlan, error)
+	ReorderPricingPlans(context.Context, coretenant.Scope, []string) error
+	DeletePricingPlan(context.Context, coretenant.Scope, string, string) error
 
 	// Menus
 	CreateMenu(context.Context, coretenant.Scope, CreateMenuParams) (domain.LandingMenu, error)
