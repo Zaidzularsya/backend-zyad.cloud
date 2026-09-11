@@ -179,8 +179,18 @@ func fillGrapesSentinels(
 	branding domain.LandingBranding,
 	page domain.LandingPage,
 ) string {
+	// A tenant-chrome sentinel should appear at most once per page (dropping
+	// "Header tenant" / "Footer tenant" twice is a builder mistake, guarded
+	// against in GrapesEditor.vue). Defensively, only the first match is
+	// filled — any extra sentinel is dropped so an already-duplicated
+	// document self-heals instead of rendering the header/footer twice.
 	nav := headerChromeLinks(menus)
+	navFilled := false
 	markup = navSentinelRe.ReplaceAllStringFunc(markup, func(sentinel string) string {
+		if navFilled {
+			return ""
+		}
+		navFilled = true
 		pres := parseSSRHeaderPresentation(sentinel)
 		return `<div data-zyad-slot="tenant-nav" class="zyad-slot">` +
 			buildHeaderMarkup(nav, branding, pres) + `</div>`
@@ -189,7 +199,14 @@ func fillGrapesSentinels(
 	columns := footerChromeColumns(menus)
 	replacement := `<div data-zyad-slot="tenant-footer" class="zyad-slot">` +
 		buildFooterMarkup(branding, columns, footerCopyright(branding, page)) + `</div>`
-	markup = footerSentinelRe.ReplaceAllStringFunc(markup, func(string) string { return replacement })
+	footerFilled := false
+	markup = footerSentinelRe.ReplaceAllStringFunc(markup, func(string) string {
+		if footerFilled {
+			return ""
+		}
+		footerFilled = true
+		return replacement
+	})
 
 	return markup
 }

@@ -139,6 +139,34 @@ func TestRenderGrapesDocumentSanitisesChromeHrefsAndLabels(t *testing.T) {
 	}
 }
 
+func TestRenderGrapesDocumentDropsDuplicateSentinels(t *testing.T) {
+	// A page mistakenly ending up with two "Header tenant" / "Footer tenant"
+	// blocks (a builder bug the GrapesEditor.vue guard now prevents going
+	// forward) must self-heal at render time: only the first of each is
+	// filled, the rest are dropped rather than rendering twice.
+	page := grapesResolvedFixture()
+	page.HTML = `<div data-zyad-slot="tenant-nav"><span>placeholder</span></div>` +
+		`<main><h1>Konten</h1></main>` +
+		`<div data-zyad-slot="tenant-nav"><span>placeholder</span></div>` +
+		`<div data-zyad-slot="tenant-footer"><span>placeholder</span></div>` +
+		`<div data-zyad-slot="tenant-footer"><span>placeholder</span></div>`
+
+	doc := RenderGrapesDocument(page)
+
+	if n := strings.Count(doc, `class="zyad-tenant-header `); n != 1 {
+		t.Fatalf("expected exactly 1 rendered header, got %d: %s", n, doc)
+	}
+	if n := strings.Count(doc, `class="zyad-tenant-footer"`); n != 1 {
+		t.Fatalf("expected exactly 1 rendered footer, got %d: %s", n, doc)
+	}
+	if n := strings.Count(doc, `data-zyad-slot="tenant-nav"`); n != 1 {
+		t.Fatalf("expected exactly 1 remaining tenant-nav sentinel, got %d: %s", n, doc)
+	}
+	if n := strings.Count(doc, `data-zyad-slot="tenant-footer"`); n != 1 {
+		t.Fatalf("expected exactly 1 remaining tenant-footer sentinel, got %d: %s", n, doc)
+	}
+}
+
 func TestRenderGrapesDocumentEmptyForNonGrapesPage(t *testing.T) {
 	if got := RenderGrapesDocument(ResolvedPage{Page: domain.LandingPage{Title: "x"}}); got != "" {
 		t.Fatalf("expected empty string for a page with no HTML, got %q", got)
