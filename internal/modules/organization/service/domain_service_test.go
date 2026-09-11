@@ -41,6 +41,37 @@ func (s *domainStoreStub) Create(
 	return s.domain, nil
 }
 
+func (s *domainStoreStub) CreateCustomDomain(
+	_ context.Context,
+	params repository.CreateDomainParams,
+	checkQuota func(int64) error,
+) (model.OrganizationDomain, error) {
+	var used int64
+	for _, domain := range s.domains {
+		if domain.Type == params.Type {
+			used++
+		}
+	}
+	if checkQuota != nil {
+		if err := checkQuota(used); err != nil {
+			return model.OrganizationDomain{}, &repository.QuotaCheckError{Err: err}
+		}
+	}
+	s.createParams = params
+	s.domain = model.OrganizationDomain{
+		ID:                        "22222222-2222-2222-2222-222222222222",
+		OrganizationID:            params.OrganizationID,
+		Type:                      params.Type,
+		CanonicalHost:             params.CanonicalHost,
+		Status:                    model.DomainStatusPending,
+		VerificationChallengeHash: params.VerificationChallengeHash,
+		SSLStatus:                 params.SSLStatus,
+		CreatedAt:                 time.Now(),
+		UpdatedAt:                 time.Now(),
+	}
+	return s.domain, nil
+}
+
 func (s *domainStoreStub) FindByID(
 	context.Context,
 	string,
@@ -368,6 +399,13 @@ func TestDomainServiceCreateSubdomainAutoVerifies(t *testing.T) {
 	if store.createParams.VerificationChallengeHash != "" {
 		t.Fatalf("subdomain should not store challenge hash: %#v", store.createParams)
 	}
+	if store.createParams.SSLStatus != model.DomainSSLStatusNotRequired {
+		t.Fatalf(
+			"subdomain SSL is the platform's responsibility (wildcard cert), want ssl_status=%s, got %s",
+			model.DomainSSLStatusNotRequired,
+			store.createParams.SSLStatus,
+		)
+	}
 }
 
 func TestDomainServiceVerifyActiveDomainIsIdempotent(t *testing.T) {
@@ -545,5 +583,37 @@ func TestDomainServiceCreateCustomStopsWhenBillingGuardFails(t *testing.T) {
 	}
 	if store.createParams.OrganizationID != "" {
 		t.Fatalf("Create() should not persist domain when guard fails: %#v", store.createParams)
+	}
+}
+
+func TestDomainServiceCreateCustomPropagatesQuotaExceededAsIs(t *testing.T) {
+	quotaExceeded := errors.New("quota exceeded")
+	store := &domainStoreStub{
+		domains: []model.OrganizationDomain{
+			{ID: "active-1", Type: model.DomainTypeCustom, Status: model.DomainStatusActive},
+		},
+	}
+	guard := &domainBillingGuardStub{quotaErr: quotaExceeded}
+	service := NewDomainService(
+		store,
+		nil,
+		"example.test",
+		WithDomainBillingGuard(guard),
+	)
+
+	_, err := service.Create(
+		context.Background(),
+		"11111111-1111-1111-1111-111111111111",
+		dto.CreateDomainRequest{
+			Type:          "custom",
+			CanonicalHost: "www.example.com",
+		},
+		"33333333-3333-3333-3333-333333333333",
+	)
+	if !errors.Is(err, quotaExceeded) {
+		t.Fatalf("Create() error = %v, want the guard's quota error unwrapped as-is", err)
+	}
+	if store.createParams.OrganizationID != "" {
+		t.Fatalf("Create() should not persist domain when quota is exceeded: %#v", store.createParams)
 	}
 }

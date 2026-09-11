@@ -31,6 +31,11 @@ var domainLabelPattern = regexp.MustCompile(
 
 type DomainStore interface {
 	Create(context.Context, repository.CreateDomainParams) (model.OrganizationDomain, error)
+	CreateCustomDomain(
+		context.Context,
+		repository.CreateDomainParams,
+		func(usedSameType int64) error,
+	) (model.OrganizationDomain, error)
 	FindByID(context.Context, string, string) (model.OrganizationDomain, error)
 	ListByOrganization(
 		context.Context,
@@ -203,18 +208,21 @@ func (s *DomainService) Create(
 		}
 	}
 	if domainType == model.DomainTypeCustom {
-		if err := s.requireCustomDomainCreate(ctx, strings.TrimSpace(organizationID)); err != nil {
+		if err := s.requireCustomDomainFeature(ctx, strings.TrimSpace(organizationID)); err != nil {
 			return dto.DomainChallengeResponse{}, err
 		}
 	}
 	if domainType == model.DomainTypeSubdomain {
 		// Subdomain platform berada di zona DNS milik platform sehingga
 		// tenant tidak mungkin memasang TXT challenge — langsung aktif.
+		// Sertifikat TLS-nya juga tanggung jawab platform (wildcard cert di
+		// reverse proxy), bukan sesuatu yang perlu diprovision per-domain
+		// oleh aplikasi, jadi ssl_status tidak pernah "pending" selamanya.
 		domain, err := s.store.Create(ctx, repository.CreateDomainParams{
 			OrganizationID: strings.TrimSpace(organizationID),
 			Type:           domainType,
 			CanonicalHost:  host,
-			SSLStatus:      model.DomainSSLStatusPending,
+			SSLStatus:      model.DomainSSLStatusNotRequired,
 			ActorUserID:    strings.TrimSpace(actorUserID),
 		})
 		if err != nil {
@@ -248,15 +256,42 @@ func (s *DomainService) Create(
 			err,
 		)
 	}
-	domain, err := s.store.Create(ctx, repository.CreateDomainParams{
-		OrganizationID:            strings.TrimSpace(organizationID),
-		Type:                      domainType,
-		CanonicalHost:             host,
-		VerificationChallengeHash: coreauth.HashToken(token),
-		SSLStatus:                 model.DomainSSLStatusPending,
-		ActorUserID:               strings.TrimSpace(actorUserID),
-	})
+	organizationIDTrimmed := strings.TrimSpace(organizationID)
+	// Quota (semua custom domain yang belum dihapus, termasuk pending/failed,
+	// supaya namespace host global tidak bisa dipenuhi lewat domain yang
+	// tidak pernah diverifikasi) dihitung ulang dan dicek di dalam transaksi
+	// yang sama dengan insert-nya, dengan organization row dikunci — supaya
+	// dua request Create bersamaan tidak bisa sama-sama lolos cek quota lalu
+	// sama-sama insert (TOCTOU race).
+	domain, err := s.store.CreateCustomDomain(
+		ctx,
+		repository.CreateDomainParams{
+			OrganizationID:            organizationIDTrimmed,
+			Type:                      domainType,
+			CanonicalHost:             host,
+			VerificationChallengeHash: coreauth.HashToken(token),
+			SSLStatus:                 model.DomainSSLStatusPending,
+			ActorUserID:               strings.TrimSpace(actorUserID),
+		},
+		func(used int64) error {
+			if s.guard == nil {
+				return nil
+			}
+			return s.guard.RequireQuotaValue(
+				ctx,
+				organizationIDTrimmed,
+				featureDomainMaxCustomDomains,
+				"limit",
+				used,
+				1,
+			)
+		},
+	)
 	if err != nil {
+		var quotaErr *repository.QuotaCheckError
+		if errors.As(err, &quotaErr) {
+			return dto.DomainChallengeResponse{}, quotaErr.Err
+		}
 		return dto.DomainChallengeResponse{}, mapDomainError(
 			"DOMAIN_CREATE_FAILED",
 			"failed to create organization domain",
@@ -276,40 +311,19 @@ const (
 	featureDomainMaxCustomDomains = "domain.max_custom_domains"
 )
 
-func (s *DomainService) requireCustomDomainCreate(
+// requireCustomDomainFeature hanya mengecek entitlement domain.enabled.
+// Pengecekan quota (domain.max_custom_domains) dilakukan belakangan, di
+// dalam transaksi terkunci CreateCustomDomain, karena nilai "used"-nya harus
+// segar pada saat insert, bukan pada saat validasi awal ini.
+func (s *DomainService) requireCustomDomainFeature(
 	ctx context.Context,
 	organizationID string,
 ) error {
 	if s == nil || s.guard == nil {
 		return nil
 	}
-	if _, err := s.guard.RequireFeature(ctx, organizationID, featureDomainEnabled); err != nil {
-		return err
-	}
-	// Semua custom domain yang belum dihapus mengonsumsi quota (termasuk
-	// pending/failed) supaya namespace host global tidak bisa dipenuhi
-	// lewat domain yang tidak pernah diverifikasi.
-	_, used, err := s.store.ListByOrganization(ctx, organizationID, repository.DomainListFilter{
-		Type:           model.DomainTypeCustom,
-		IncludeDeleted: false,
-		Limit:          1,
-		Offset:         0,
-	})
-	if err != nil {
-		return mapDomainError(
-			"DOMAIN_LIST_FAILED",
-			"failed to list organization domains",
-			err,
-		)
-	}
-	return s.guard.RequireQuotaValue(
-		ctx,
-		organizationID,
-		featureDomainMaxCustomDomains,
-		"limit",
-		used,
-		1,
-	)
+	_, err := s.guard.RequireFeature(ctx, organizationID, featureDomainEnabled)
+	return err
 }
 
 func (s *DomainService) Verify(

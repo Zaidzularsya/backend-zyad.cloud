@@ -81,18 +81,126 @@ func (r *DomainRepository) Create(
 	ctx context.Context,
 	params CreateDomainParams,
 ) (model.OrganizationDomain, error) {
-	sslStatus := params.SSLStatus
-	if sslStatus == "" {
-		sslStatus = model.DomainSSLStatusPending
-	}
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return model.OrganizationDomain{}, err
 	}
 	defer tx.Rollback(ctx)
 
+	domain, err := insertDomainTx(ctx, tx, params)
+	if err != nil {
+		return model.OrganizationDomain{}, err
+	}
+	if err := insertDomainAudit(
+		ctx,
+		tx,
+		domain,
+		params.ActorUserID,
+		"organization_domain_created",
+		map[string]any{
+			"domain_id":      domain.ID,
+			"canonical_host": domain.CanonicalHost,
+			"type":           string(domain.Type),
+			"status":         string(domain.Status),
+			"ssl_status":     string(domain.SSLStatus),
+		},
+		domain.CreatedAt,
+	); err != nil {
+		return model.OrganizationDomain{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return model.OrganizationDomain{}, err
+	}
+	return domain, nil
+}
+
+// QuotaCheckError wraps the error returned by the caller-supplied quota
+// callback in CreateCustomDomain, so the service layer can tell a quota
+// rejection apart from a genuine database failure and propagate it as-is
+// instead of mapping it to a generic error.
+type QuotaCheckError struct {
+	Err error
+}
+
+func (e *QuotaCheckError) Error() string { return e.Err.Error() }
+func (e *QuotaCheckError) Unwrap() error { return e.Err }
+
+// CreateCustomDomain creates a domain while holding an exclusive lock on the
+// organization row for the whole transaction, counting existing domains of
+// the same type and running checkQuota before inserting. This closes a
+// TOCTOU race where two concurrent requests could each read a stale "used"
+// count, both pass the same quota limit in the service layer, and both
+// insert — letting a tenant exceed its custom domain quota.
+func (r *DomainRepository) CreateCustomDomain(
+	ctx context.Context,
+	params CreateDomainParams,
+	checkQuota func(usedSameType int64) error,
+) (model.OrganizationDomain, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return model.OrganizationDomain{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	organizationID := strings.TrimSpace(params.OrganizationID)
+	if err := lockOrganization(ctx, tx, organizationID); err != nil {
+		return model.OrganizationDomain{}, err
+	}
+
+	if checkQuota != nil {
+		var used int64
+		if err := tx.QueryRow(ctx, `
+			SELECT count(*)
+			FROM organization_domains
+			WHERE organization_id = $1::uuid
+				AND type = $2
+				AND deleted_at IS NULL
+		`, organizationID, string(params.Type)).Scan(&used); err != nil {
+			return model.OrganizationDomain{}, err
+		}
+		if err := checkQuota(used); err != nil {
+			return model.OrganizationDomain{}, &QuotaCheckError{Err: err}
+		}
+	}
+
+	domain, err := insertDomainTx(ctx, tx, params)
+	if err != nil {
+		return model.OrganizationDomain{}, err
+	}
+	if err := insertDomainAudit(
+		ctx,
+		tx,
+		domain,
+		params.ActorUserID,
+		"organization_domain_created",
+		map[string]any{
+			"domain_id":      domain.ID,
+			"canonical_host": domain.CanonicalHost,
+			"type":           string(domain.Type),
+			"status":         string(domain.Status),
+			"ssl_status":     string(domain.SSLStatus),
+		},
+		domain.CreatedAt,
+	); err != nil {
+		return model.OrganizationDomain{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return model.OrganizationDomain{}, err
+	}
+	return domain, nil
+}
+
+func insertDomainTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	params CreateDomainParams,
+) (model.OrganizationDomain, error) {
+	sslStatus := params.SSLStatus
+	if sslStatus == "" {
+		sslStatus = model.DomainSSLStatusPending
+	}
 	var domain model.OrganizationDomain
-	err = tx.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 		INSERT INTO organization_domains (
 			organization_id,
 			type,
@@ -122,26 +230,6 @@ func (r *DomainRepository) Create(
 		string(sslStatus),
 	).Scan(domainScanDest(&domain)...)
 	if err != nil {
-		return model.OrganizationDomain{}, err
-	}
-	if err := insertDomainAudit(
-		ctx,
-		tx,
-		domain,
-		params.ActorUserID,
-		"organization_domain_created",
-		map[string]any{
-			"domain_id":      domain.ID,
-			"canonical_host": domain.CanonicalHost,
-			"type":           string(domain.Type),
-			"status":         string(domain.Status),
-			"ssl_status":     string(domain.SSLStatus),
-		},
-		domain.CreatedAt,
-	); err != nil {
-		return model.OrganizationDomain{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
 		return model.OrganizationDomain{}, err
 	}
 	return domain, nil
