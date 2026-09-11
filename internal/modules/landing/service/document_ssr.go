@@ -46,11 +46,22 @@ const ssrChromeCSS = `.zyad-tenant-header{display:flex;align-items:center;gap:24
 .zyad-tenant-footer__copyright{max-width:1120px;margin:28px auto 0;border-top:1px solid #1e293b;padding-top:16px;font-size:13px}`
 
 var (
-	navSentinelRe    = regexp.MustCompile(`(?is)<div\b[^>]*\bdata-zyad-slot="tenant-nav"[^>]*>.*?</div>`)
-	footerSentinelRe = regexp.MustCompile(`(?is)<div\b[^>]*\bdata-zyad-slot="tenant-footer"[^>]*>.*?</div>`)
-	safeSSRHrefRe    = regexp.MustCompile(`^(#|/(?:[^/]|$)|https?://|mailto:|tel:)`)
-	dataZyadHeaderRe = regexp.MustCompile(`(?is)\bdata-zyad-header\s*=\s*("([^"]*)"|'([^']*)')`)
+	navSentinelRe     = regexp.MustCompile(`(?is)<div\b[^>]*\bdata-zyad-slot="tenant-nav"[^>]*>.*?</div>`)
+	footerSentinelRe  = regexp.MustCompile(`(?is)<div\b[^>]*\bdata-zyad-slot="tenant-footer"[^>]*>.*?</div>`)
+	sentinelOpenTagRe = regexp.MustCompile(`(?is)^<div\b[^>]*>`)
+	safeSSRHrefRe     = regexp.MustCompile(`^(#|/(?:[^/]|$)|https?://|mailto:|tel:)`)
+	dataZyadHeaderRe  = regexp.MustCompile(`(?is)\bdata-zyad-header\s*=\s*("([^"]*)"|'([^']*)')`)
 )
+
+// sentinelOpenTag returns the sentinel's original opening tag (e.g.
+// `<div data-zyad-slot="tenant-nav" class="my-style" id="ihq2">`) with the
+// now-consumed data-zyad-header attribute stripped, so any class/id/inline
+// style the author added via the GrapesJS Style Manager survives the fill —
+// only the actual chrome content is replaced, not the tag carrying it.
+func sentinelOpenTag(sentinel string) string {
+	tag := sentinelOpenTagRe.FindString(sentinel)
+	return dataZyadHeaderRe.ReplaceAllString(tag, "")
+}
 
 // ssrHeaderPresentation mirrors the FE TenantHeaderPresentation (per-page).
 type ssrHeaderPresentation struct {
@@ -192,20 +203,18 @@ func fillGrapesSentinels(
 		}
 		navFilled = true
 		pres := parseSSRHeaderPresentation(sentinel)
-		return `<div data-zyad-slot="tenant-nav" class="zyad-slot">` +
-			buildHeaderMarkup(nav, branding, pres) + `</div>`
+		return sentinelOpenTag(sentinel) + buildHeaderMarkup(nav, branding, pres) + `</div>`
 	})
 
 	columns := footerChromeColumns(menus)
-	replacement := `<div data-zyad-slot="tenant-footer" class="zyad-slot">` +
-		buildFooterMarkup(branding, columns, footerCopyright(branding, page)) + `</div>`
+	footerMarkup := buildFooterMarkup(branding, columns, footerCopyright(branding, page))
 	footerFilled := false
-	markup = footerSentinelRe.ReplaceAllStringFunc(markup, func(string) string {
+	markup = footerSentinelRe.ReplaceAllStringFunc(markup, func(sentinel string) string {
 		if footerFilled {
 			return ""
 		}
 		footerFilled = true
-		return replacement
+		return sentinelOpenTag(sentinel) + footerMarkup + `</div>`
 	})
 
 	return markup

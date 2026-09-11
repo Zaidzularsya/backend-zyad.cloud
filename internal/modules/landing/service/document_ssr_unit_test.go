@@ -139,6 +139,33 @@ func TestRenderGrapesDocumentSanitisesChromeHrefsAndLabels(t *testing.T) {
 	}
 }
 
+func TestRenderGrapesDocumentPreservesCustomStyleOnSentinel(t *testing.T) {
+	// A class/id/inline-style the author added via GrapesJS's Style Manager
+	// (e.g. transparent background + position:fixed to overlay a hero section)
+	// must survive the fill — only the consumed data-zyad-header attribute is
+	// stripped, the rest of the opening tag (and its CSS rule, carried in
+	// resolved.CSS) is reused as-is.
+	page := grapesResolvedFixture()
+	page.HTML = `<div data-zyad-slot="tenant-nav" class="hdr-x" id="ihq2" style="opacity:.9" ` +
+		`data-zyad-header="{&#34;sticky&#34;:true,&#34;variant&#34;:&#34;solid&#34;,&#34;align&#34;:&#34;left&#34;,` +
+		`&#34;showAction&#34;:true,&#34;actionLabel&#34;:&#34;Masuk&#34;,&#34;actionUrl&#34;:&#34;/login&#34;}">` +
+		`</div><main>x</main>` +
+		`<div data-zyad-slot="tenant-footer" class="ftr-x"></div>`
+
+	doc := RenderGrapesDocument(page)
+
+	if !strings.Contains(doc, `class="hdr-x"`) || !strings.Contains(doc, `id="ihq2"`) ||
+		!strings.Contains(doc, `style="opacity:.9"`) {
+		t.Fatalf("custom class/id/style on the header sentinel not preserved: %s", doc)
+	}
+	if !strings.Contains(doc, `class="ftr-x"`) {
+		t.Fatalf("custom class on the footer sentinel not preserved: %s", doc)
+	}
+	if strings.Contains(doc, "data-zyad-header") {
+		t.Fatalf("consumed data-zyad-header attribute should be stripped: %s", doc)
+	}
+}
+
 func TestRenderGrapesDocumentDropsDuplicateSentinels(t *testing.T) {
 	// A page mistakenly ending up with two "Header tenant" / "Footer tenant"
 	// blocks (a builder bug the GrapesEditor.vue guard now prevents going
