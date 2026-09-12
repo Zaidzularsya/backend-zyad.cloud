@@ -2,9 +2,10 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"net/http"
 
+	coreerrors "zyad.cloud/internal/core/errors"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/landing/domain"
 	"zyad.cloud/internal/modules/landing/repository"
@@ -53,25 +54,36 @@ func NewDomainService(
 }
 
 func (s *defaultDomainService) BindDomain(ctx context.Context, scope coretenant.Scope, params BindDomainParams) (domain.DomainBinding, error) {
-	if err := s.requireCustomDomainFeature(ctx, scope.OrganizationID()); err != nil {
-		return domain.DomainBinding{}, err
-	}
 	// First check if the domain exists and is verified in the organization
 	availableDomains, err := s.ListAvailableDomains(ctx, scope)
 	if err != nil {
 		return domain.DomainBinding{}, fmt.Errorf("check available domains: %w", err)
 	}
 
+	var matchedDomain domain.AvailableDomain
 	domainVerified := false
 	for _, d := range availableDomains {
 		if d.ID == params.OrganizationDomainID {
+			matchedDomain = d
 			domainVerified = true
 			break
 		}
 	}
 
 	if !domainVerified {
-		return domain.DomainBinding{}, errors.New("domain is not available or not verified")
+		return domain.DomainBinding{}, coreerrors.New(
+			"DOMAIN_NOT_AVAILABLE",
+			"domain is not available or not verified",
+			http.StatusNotFound,
+		)
+	}
+
+	// Custom domains require an entitlement (billing feature); platform subdomains
+	// don't consume that entitlement and must always be bindable.
+	if matchedDomain.Type == string(organizationmodel.DomainTypeCustom) {
+		if err := s.requireCustomDomainFeature(ctx, scope.OrganizationID()); err != nil {
+			return domain.DomainBinding{}, err
+		}
 	}
 
 	// Verify the page exists
@@ -88,7 +100,11 @@ func (s *defaultDomainService) BindDomain(ctx context.Context, scope coretenant.
 
 	for _, b := range bindings {
 		if b.OrganizationDomainID == params.OrganizationDomainID {
-			return domain.DomainBinding{}, errors.New("domain is already bound to this page")
+			return domain.DomainBinding{}, coreerrors.New(
+				"DOMAIN_ALREADY_BOUND",
+				"domain is already bound to this page",
+				http.StatusConflict,
+			)
 		}
 	}
 
