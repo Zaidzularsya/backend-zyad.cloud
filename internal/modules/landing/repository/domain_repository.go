@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/jackc/pgx/v5"
+	coreerrors "zyad.cloud/internal/core/errors"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/landing/domain"
 	"zyad.cloud/internal/platform/database"
@@ -83,7 +85,11 @@ func (r *defaultDomainRepository) UnbindDomain(ctx context.Context, scope corete
 			return fmt.Errorf("unbind domain: %w", err)
 		}
 		if tag.RowsAffected() == 0 {
-			return errors.New("domain binding not found")
+			return coreerrors.New(
+				"DOMAIN_BINDING_NOT_FOUND",
+				"domain binding not found",
+				http.StatusNotFound,
+			)
 		}
 		return nil
 	})
@@ -116,7 +122,11 @@ func (r *defaultDomainRepository) SetPrimaryBinding(ctx context.Context, scope c
 		}
 
 		if tag.RowsAffected() == 0 {
-			return errors.New("domain binding not found or not associated with page")
+			return coreerrors.New(
+				"DOMAIN_BINDING_NOT_FOUND",
+				"domain binding not found or not associated with page",
+				http.StatusNotFound,
+			)
 		}
 
 		return nil

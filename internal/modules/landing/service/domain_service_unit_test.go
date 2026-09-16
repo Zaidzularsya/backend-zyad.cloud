@@ -125,7 +125,7 @@ func (s *landingDomainFeatureGateStub) RequireFeature(
 func TestDomainServiceBindDomainRequiresCustomDomainEntitlement(t *testing.T) {
 	repo := &landingDomainRepoStub{
 		availableDomains: []landingdomain.AvailableDomain{
-			{ID: "domain-1", OrganizationID: landingServiceOrganizationID},
+			{ID: "domain-1", OrganizationID: landingServiceOrganizationID, Type: "custom"},
 		},
 	}
 	featureErr := errors.New("feature disabled")
@@ -156,7 +156,7 @@ func TestDomainServiceBindDomainRequiresCustomDomainEntitlement(t *testing.T) {
 func TestDomainServiceBindDomainAllowsFeatureEnabled(t *testing.T) {
 	repo := &landingDomainRepoStub{
 		availableDomains: []landingdomain.AvailableDomain{
-			{ID: "domain-1", OrganizationID: landingServiceOrganizationID},
+			{ID: "domain-1", OrganizationID: landingServiceOrganizationID, Type: "custom"},
 		},
 	}
 	features := &landingDomainFeatureGateStub{}
@@ -176,6 +176,36 @@ func TestDomainServiceBindDomainAllowsFeatureEnabled(t *testing.T) {
 	}
 	if result.ID != "binding-1" || !repo.bindCalled {
 		t.Fatalf("result = %#v repo=%#v", result, repo)
+	}
+}
+
+func TestDomainServiceBindDomainSkipsEntitlementForSubdomain(t *testing.T) {
+	repo := &landingDomainRepoStub{
+		availableDomains: []landingdomain.AvailableDomain{
+			{ID: "domain-1", OrganizationID: landingServiceOrganizationID, Type: "subdomain"},
+		},
+	}
+	featureErr := errors.New("feature disabled")
+	features := &landingDomainFeatureGateStub{err: featureErr}
+	service := NewDomainService(
+		repo,
+		&landingDomainPageRepoStub{},
+		nil,
+		WithLandingDomainFeatureGate(features),
+	)
+
+	result, err := service.BindDomain(context.Background(), mustLandingScope(t), BindDomainParams{
+		OrganizationDomainID: "domain-1",
+		LandingPageID:        "page-1",
+	})
+	if err != nil {
+		t.Fatalf("BindDomain() error = %v, want nil (subdomain must not require the custom-domain entitlement)", err)
+	}
+	if result.ID != "binding-1" || !repo.bindCalled {
+		t.Fatalf("result = %#v repo=%#v", result, repo)
+	}
+	if features.featureKey != "" {
+		t.Fatalf("RequireFeature should not be called for a subdomain, got featureKey = %q", features.featureKey)
 	}
 }
 
