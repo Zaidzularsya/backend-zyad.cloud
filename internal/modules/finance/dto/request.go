@@ -122,3 +122,57 @@ type CreateBankReconciliationRequest struct {
 	StatementEndingBalance string `json:"statement_ending_balance" binding:"required"`
 	Notes                  string `json:"notes"`
 }
+
+type CreateBusinessPartnerRequest struct {
+	PartnerType      string `json:"partner_type" binding:"required"`
+	Code             string `json:"code" binding:"required"`
+	Name             string `json:"name" binding:"required"`
+	TaxID            string `json:"tax_id"`
+	Address          string `json:"address"`
+	ControlAccountID string `json:"control_account_id" binding:"required"`
+}
+
+type UpdateBusinessPartnerRequest struct {
+	Name     string `json:"name" binding:"required"`
+	TaxID    string `json:"tax_id"`
+	Address  string `json:"address"`
+	IsActive bool   `json:"is_active"`
+}
+
+type BusinessPartnerListQuery struct {
+	PartnerType     string `form:"partner_type"`
+	IncludeInactive bool   `form:"include_inactive"`
+}
+
+type CreateARAPTransactionRequest struct {
+	PartnerID       string `json:"partner_id" binding:"required"`
+	TransactionType string `json:"transaction_type" binding:"required"`
+	TransactionDate string `json:"transaction_date" binding:"required"`
+	DueDate         string `json:"due_date" binding:"required"`
+	ReferenceNumber string `json:"reference_number"`
+	Amount          string `json:"amount" binding:"required"`
+	ContraAccountID string `json:"contra_account_id" binding:"required"`
+	Description     string `json:"description"`
+}
+
+type ARAPTransactionListQuery struct {
+	PartnerID       string `form:"partner_id"`
+	TransactionType string `form:"transaction_type"`
+	Status          string `form:"status"`
+	Page            int    `form:"page"`
+	PerPage         int    `form:"per_page"`
+}
+
+type CreateARAPPaymentRequest struct {
+	PartnerID         string `json:"partner_id" binding:"required"`
+	ARAPTransactionID string `json:"ar_ap_transaction_id" binding:"required"`
+	PaymentDate       string `json:"payment_date" binding:"required"`
+	Amount            string `json:"amount" binding:"required"`
+	CashBankAccountID string `json:"cash_bank_account_id" binding:"required"`
+	Notes             string `json:"notes"`
+}
+
+type AgingReportQuery struct {
+	TransactionType string `form:"transaction_type" binding:"required"`
+	AsOfDate        string `form:"as_of_date" binding:"required"`
+}

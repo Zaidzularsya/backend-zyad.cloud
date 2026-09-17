@@ -7,20 +7,22 @@ import (
 )
 
 const (
-	ErrCodeAccountNotFound        = "FINANCE_ACCOUNT_NOT_FOUND"
-	ErrCodeAccountCodeTaken       = "FINANCE_ACCOUNT_CODE_TAKEN"
-	ErrCodeFiscalYearExists       = "FINANCE_FISCAL_YEAR_EXISTS"
-	ErrCodeFiscalYearNotFound     = "FINANCE_FISCAL_YEAR_NOT_FOUND"
-	ErrCodeFiscalPeriodNotFound   = "FINANCE_FISCAL_PERIOD_NOT_FOUND"
-	ErrCodeNoFiscalPeriod         = "FINANCE_NO_FISCAL_PERIOD"
-	ErrCodePeriodClosed           = "FINANCE_PERIOD_CLOSED"
-	ErrCodeJournalNotFound        = "FINANCE_JOURNAL_NOT_FOUND"
-	ErrCodeJournalUnbalanced      = "FINANCE_JOURNAL_UNBALANCED"
-	ErrCodeJournalNotDraft        = "FINANCE_JOURNAL_NOT_DRAFT"
-	ErrCodeJournalNotPosted       = "FINANCE_JOURNAL_NOT_POSTED"
-	ErrCodeJournalAlreadyReversed = "FINANCE_JOURNAL_ALREADY_REVERSED"
-	ErrCodeValidation             = "FINANCE_VALIDATION_ERROR"
-	ErrCodeReconciliationNotFound = "FINANCE_RECONCILIATION_NOT_FOUND"
+	ErrCodeAccountNotFound         = "FINANCE_ACCOUNT_NOT_FOUND"
+	ErrCodeAccountCodeTaken        = "FINANCE_ACCOUNT_CODE_TAKEN"
+	ErrCodeFiscalYearExists        = "FINANCE_FISCAL_YEAR_EXISTS"
+	ErrCodeFiscalYearNotFound      = "FINANCE_FISCAL_YEAR_NOT_FOUND"
+	ErrCodeFiscalPeriodNotFound    = "FINANCE_FISCAL_PERIOD_NOT_FOUND"
+	ErrCodeNoFiscalPeriod          = "FINANCE_NO_FISCAL_PERIOD"
+	ErrCodePeriodClosed            = "FINANCE_PERIOD_CLOSED"
+	ErrCodeJournalNotFound         = "FINANCE_JOURNAL_NOT_FOUND"
+	ErrCodeJournalUnbalanced       = "FINANCE_JOURNAL_UNBALANCED"
+	ErrCodeJournalNotDraft         = "FINANCE_JOURNAL_NOT_DRAFT"
+	ErrCodeJournalNotPosted        = "FINANCE_JOURNAL_NOT_POSTED"
+	ErrCodeJournalAlreadyReversed  = "FINANCE_JOURNAL_ALREADY_REVERSED"
+	ErrCodeValidation              = "FINANCE_VALIDATION_ERROR"
+	ErrCodeReconciliationNotFound  = "FINANCE_RECONCILIATION_NOT_FOUND"
+	ErrCodePartnerNotFound         = "FINANCE_PARTNER_NOT_FOUND"
+	ErrCodeARAPTransactionNotFound = "FINANCE_ARAP_TRANSACTION_NOT_FOUND"
 )
 
 func AccountNotFoundError() error {
@@ -73,6 +75,14 @@ func JournalAlreadyReversedError() error {
 
 func ReconciliationNotFoundError() error {
 	return coreerrors.New(ErrCodeReconciliationNotFound, "bank reconciliation not found", http.StatusNotFound)
+}
+
+func PartnerNotFoundError() error {
+	return coreerrors.New(ErrCodePartnerNotFound, "business partner not found", http.StatusNotFound)
+}
+
+func ARAPTransactionNotFoundError() error {
+	return coreerrors.New(ErrCodeARAPTransactionNotFound, "AR/AP transaction not found", http.StatusNotFound)
 }
 
 func ValidationError(message string) error {

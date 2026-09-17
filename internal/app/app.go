@@ -371,16 +371,19 @@ func New(ctx context.Context) (*App, error) {
 	financeJournalRepo := financerepo.NewJournalRepository(db)
 	financeLedgerRepo := financerepo.NewLedgerRepository(db)
 	financeCashBankRepo := financerepo.NewCashBankRepository(db)
+	financeARAPRepo := financerepo.NewARAPRepository(db)
 	financeAccountSvc := financeservice.NewAccountService(financeAccountRepo)
 	financeFiscalSvc := financeservice.NewFiscalService(financeFiscalRepo)
 	financeJournalSvc := financeservice.NewJournalService(financeJournalRepo)
 	financeLedgerSvc := financeservice.NewLedgerService(financeLedgerRepo, financeAccountRepo)
 	financeReportSvc := financeservice.NewReportService(financeLedgerRepo)
 	financeCashBankSvc := financeservice.NewCashBankService(financeCashBankRepo, financeJournalRepo, financeLedgerRepo)
+	financeARAPSvc := financeservice.NewARAPService(financeARAPRepo, financeJournalRepo)
 	platformFinanceCoAHandler := financehandler.NewPlatformCoAHandler(financeAccountSvc, financeFiscalSvc, permService)
 	platformFinanceJournalHandler := financehandler.NewPlatformJournalHandler(financeJournalSvc, permService)
 	platformFinanceReportHandler := financehandler.NewPlatformReportHandler(financeLedgerSvc, financeReportSvc, permService)
 	platformFinanceCashBankHandler := financehandler.NewPlatformCashBankHandler(financeCashBankSvc, permService)
+	platformFinanceARAPHandler := financehandler.NewPlatformARAPHandler(financeARAPSvc, permService)
 
 	landingAdminPageHandler := landinghandler.NewAdminPageHandler(landingPageSvc, landingVisibilitySvc, landingRevisionSvc, landingPublishSvc)
 	landingAdminSectionHandler := landinghandler.NewAdminSectionHandler(landingSectionSvc, landingRevisionSvc)
@@ -503,6 +506,7 @@ func New(ctx context.Context) (*App, error) {
 		PlatformFinanceJournalHandler:    platformFinanceJournalHandler,
 		PlatformFinanceReportHandler:     platformFinanceReportHandler,
 		PlatformFinanceCashBankHandler:   platformFinanceCashBankHandler,
+		PlatformFinanceARAPHandler:       platformFinanceARAPHandler,
 		PermissionChecker:                permService,
 		Authenticator:                    authService,
 		OrganizationResolver:             organizationResolver,

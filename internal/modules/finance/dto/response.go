@@ -229,6 +229,79 @@ type BankReconciliationResponse struct {
 	CreatedAt              string  `json:"created_at"`
 }
 
+type BusinessPartnerResponse struct {
+	ID                 string `json:"id"`
+	PartnerType        string `json:"partner_type"`
+	Code               string `json:"code"`
+	Name               string `json:"name"`
+	TaxID              string `json:"tax_id,omitempty"`
+	Address            string `json:"address,omitempty"`
+	ControlAccountID   string `json:"control_account_id"`
+	ControlAccountCode string `json:"control_account_code,omitempty"`
+	ControlAccountName string `json:"control_account_name,omitempty"`
+	IsActive           bool   `json:"is_active"`
+	CreatedAt          string `json:"created_at"`
+	UpdatedAt          string `json:"updated_at"`
+}
+
+type ARAPTransactionResponse struct {
+	ID                string `json:"id"`
+	PartnerID         string `json:"partner_id"`
+	PartnerCode       string `json:"partner_code,omitempty"`
+	PartnerName       string `json:"partner_name,omitempty"`
+	TransactionType   string `json:"transaction_type"`
+	TransactionDate   string `json:"transaction_date"`
+	DueDate           string `json:"due_date"`
+	ReferenceNumber   string `json:"reference_number,omitempty"`
+	Amount            string `json:"amount"`
+	ContraAccountID   string `json:"contra_account_id"`
+	ContraAccountCode string `json:"contra_account_code,omitempty"`
+	ContraAccountName string `json:"contra_account_name,omitempty"`
+	Description       string `json:"description,omitempty"`
+	Status            string `json:"status"`
+	JournalEntryID    string `json:"journal_entry_id"`
+	PaidAmount        string `json:"paid_amount"`
+	OutstandingAmount string `json:"outstanding_amount"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
+}
+
+type ARAPTransactionListResponse struct {
+	Items []ARAPTransactionResponse `json:"items"`
+	Meta  PaginationMeta            `json:"meta"`
+}
+
+type ARAPPaymentResponse struct {
+	ID                   string `json:"id"`
+	PartnerID            string `json:"partner_id"`
+	PaymentDate          string `json:"payment_date"`
+	Amount               string `json:"amount"`
+	CashBankAccountID    string `json:"cash_bank_account_id"`
+	CashBankAccountLabel string `json:"cash_bank_account_label,omitempty"`
+	JournalEntryID       string `json:"journal_entry_id"`
+	Notes                string `json:"notes,omitempty"`
+	CreatedAt            string `json:"created_at"`
+}
+
+type AgingBucketResponse struct {
+	Label  string `json:"label"`
+	Amount string `json:"amount"`
+}
+
+type AgingRowResponse struct {
+	PartnerID   string                `json:"partner_id"`
+	PartnerCode string                `json:"partner_code"`
+	PartnerName string                `json:"partner_name"`
+	Buckets     []AgingBucketResponse `json:"buckets"`
+	Total       string                `json:"total"`
+}
+
+type AgingReportResponse struct {
+	AsOfDate   string             `json:"as_of_date"`
+	Rows       []AgingRowResponse `json:"rows"`
+	GrandTotal string             `json:"grand_total"`
+}
+
 type AccountLedgerResponse struct {
 	AccountID      string                      `json:"account_id"`
 	AccountCode    string                      `json:"account_code"`

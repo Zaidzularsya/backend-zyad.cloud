@@ -2,9 +2,11 @@ package service
 
 import (
 	"math/big"
+	"time"
 
 	"zyad.cloud/internal/modules/finance/dto"
 	"zyad.cloud/internal/modules/finance/model"
+	"zyad.cloud/internal/modules/finance/repository"
 )
 
 func zeroRat() *big.Rat {
@@ -155,6 +157,128 @@ func cashTransactionResponse(t model.CashTransaction) dto.CashTransactionRespons
 		ReconciledAt:             formatOptionalTime(t.ReconciledAt),
 		CreatedAt:                formatTime(t.CreatedAt),
 		UpdatedAt:                formatTime(t.UpdatedAt),
+	}
+}
+
+func businessPartnerResponse(p model.BusinessPartner) dto.BusinessPartnerResponse {
+	return dto.BusinessPartnerResponse{
+		ID:                 p.ID,
+		PartnerType:        string(p.PartnerType),
+		Code:               p.Code,
+		Name:               p.Name,
+		TaxID:              p.TaxID,
+		Address:            p.Address,
+		ControlAccountID:   p.ControlAccountID,
+		ControlAccountCode: p.ControlAccountCode,
+		ControlAccountName: p.ControlAccountName,
+		IsActive:           p.IsActive,
+		CreatedAt:          formatTime(p.CreatedAt),
+		UpdatedAt:          formatTime(p.UpdatedAt),
+	}
+}
+
+func arapTransactionResponse(t model.ARAPTransaction) dto.ARAPTransactionResponse {
+	return dto.ARAPTransactionResponse{
+		ID:                t.ID,
+		PartnerID:         t.PartnerID,
+		PartnerCode:       t.PartnerCode,
+		PartnerName:       t.PartnerName,
+		TransactionType:   string(t.TransactionType),
+		TransactionDate:   formatDate(t.TransactionDate),
+		DueDate:           formatDate(t.DueDate),
+		ReferenceNumber:   t.ReferenceNumber,
+		Amount:            t.Amount,
+		ContraAccountID:   t.ContraAccountID,
+		ContraAccountCode: t.ContraAccountCode,
+		ContraAccountName: t.ContraAccountName,
+		Description:       t.Description,
+		Status:            string(t.Status),
+		JournalEntryID:    t.JournalEntryID,
+		PaidAmount:        t.PaidAmount,
+		OutstandingAmount: t.OutstandingAmount,
+		CreatedAt:         formatTime(t.CreatedAt),
+		UpdatedAt:         formatTime(t.UpdatedAt),
+	}
+}
+
+func arapPaymentResponse(p model.ARAPPayment) dto.ARAPPaymentResponse {
+	return dto.ARAPPaymentResponse{
+		ID:                   p.ID,
+		PartnerID:            p.PartnerID,
+		PaymentDate:          formatDate(p.PaymentDate),
+		Amount:               p.Amount,
+		CashBankAccountID:    p.CashBankAccountID,
+		CashBankAccountLabel: p.CashBankAccountLabel,
+		JournalEntryID:       p.JournalEntryID,
+		Notes:                p.Notes,
+		CreatedAt:            formatTime(p.CreatedAt),
+	}
+}
+
+var agingBucketLabels = []string{"Belum Jatuh Tempo", "1-30 Hari", "31-60 Hari", "61-90 Hari", "Lebih dari 90 Hari"}
+
+func buildAgingReport(rows []repository.AgingBucketRow, asOf time.Time) dto.AgingReportResponse {
+	type rowAccumulator struct {
+		partnerCode string
+		partnerName string
+		buckets     []*big.Rat
+		total       *big.Rat
+	}
+	order := make([]string, 0)
+	byPartner := map[string]*rowAccumulator{}
+
+	for _, row := range rows {
+		acc, ok := byPartner[row.PartnerID]
+		if !ok {
+			buckets := make([]*big.Rat, len(agingBucketLabels))
+			for i := range buckets {
+				buckets[i] = zeroRat()
+			}
+			acc = &rowAccumulator{partnerCode: row.PartnerCode, partnerName: row.PartnerName, buckets: buckets, total: zeroRat()}
+			byPartner[row.PartnerID] = acc
+			order = append(order, row.PartnerID)
+		}
+		outstanding, err := moneyRat(row.Outstanding)
+		if err != nil {
+			continue
+		}
+		bucketIndex := agingBucketIndex(row.DueDate, asOf)
+		acc.buckets[bucketIndex].Add(acc.buckets[bucketIndex], outstanding)
+		acc.total.Add(acc.total, outstanding)
+	}
+
+	responseRows := make([]dto.AgingRowResponse, 0, len(order))
+	grandTotal := zeroRat()
+	for _, partnerID := range order {
+		acc := byPartner[partnerID]
+		buckets := make([]dto.AgingBucketResponse, 0, len(agingBucketLabels))
+		for i, label := range agingBucketLabels {
+			buckets = append(buckets, dto.AgingBucketResponse{Label: label, Amount: formatMoney(acc.buckets[i])})
+		}
+		responseRows = append(responseRows, dto.AgingRowResponse{
+			PartnerID: partnerID, PartnerCode: acc.partnerCode, PartnerName: acc.partnerName,
+			Buckets: buckets, Total: formatMoney(acc.total),
+		})
+		grandTotal.Add(grandTotal, acc.total)
+	}
+
+	return dto.AgingReportResponse{AsOfDate: formatDate(asOf), Rows: responseRows, GrandTotal: formatMoney(grandTotal)}
+}
+
+func agingBucketIndex(dueDate, asOf time.Time) int {
+	if dueDate.After(asOf) {
+		return 0
+	}
+	daysOverdue := int(asOf.Sub(dueDate).Hours() / 24)
+	switch {
+	case daysOverdue <= 30:
+		return 1
+	case daysOverdue <= 60:
+		return 2
+	case daysOverdue <= 90:
+		return 3
+	default:
+		return 4
 	}
 }
 
