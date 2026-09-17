@@ -2,11 +2,13 @@ package handler
 
 import (
 	"context"
+	"net/http"
 
 	corehttp "zyad.cloud/internal/core/http"
 	"zyad.cloud/internal/core/middleware"
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	"zyad.cloud/internal/modules/finance/dto"
+	"zyad.cloud/internal/shared/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -99,7 +101,7 @@ func (h *PlatformCashBankHandler) ListTransactions(c *gin.Context) {
 		corehttp.Fail(c, err)
 		return
 	}
-	corehttp.OK(c, "cash transactions retrieved successfully", result)
+	response.JSON(c, http.StatusOK, "cash transactions retrieved successfully", result.Items, result.Meta)
 }
 
 func (h *PlatformCashBankHandler) CreateTransaction(c *gin.Context) {
