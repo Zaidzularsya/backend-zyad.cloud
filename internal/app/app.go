@@ -373,6 +373,7 @@ func New(ctx context.Context) (*App, error) {
 	financeCashBankRepo := financerepo.NewCashBankRepository(db)
 	financeARAPRepo := financerepo.NewARAPRepository(db)
 	financeFixedAssetRepo := financerepo.NewFixedAssetRepository(db)
+	financeTaxRepo := financerepo.NewTaxRepository(db)
 	financeAccountSvc := financeservice.NewAccountService(financeAccountRepo)
 	financeFiscalSvc := financeservice.NewFiscalService(financeFiscalRepo)
 	financeJournalSvc := financeservice.NewJournalService(financeJournalRepo)
@@ -381,12 +382,14 @@ func New(ctx context.Context) (*App, error) {
 	financeCashBankSvc := financeservice.NewCashBankService(financeCashBankRepo, financeJournalRepo, financeLedgerRepo)
 	financeARAPSvc := financeservice.NewARAPService(financeARAPRepo, financeJournalRepo)
 	financeFixedAssetSvc := financeservice.NewFixedAssetService(financeFixedAssetRepo, financeJournalRepo)
+	financeTaxSvc := financeservice.NewTaxService(financeTaxRepo, financeJournalRepo)
 	platformFinanceCoAHandler := financehandler.NewPlatformCoAHandler(financeAccountSvc, financeFiscalSvc, permService)
 	platformFinanceJournalHandler := financehandler.NewPlatformJournalHandler(financeJournalSvc, permService)
 	platformFinanceReportHandler := financehandler.NewPlatformReportHandler(financeLedgerSvc, financeReportSvc, permService)
 	platformFinanceCashBankHandler := financehandler.NewPlatformCashBankHandler(financeCashBankSvc, permService)
 	platformFinanceARAPHandler := financehandler.NewPlatformARAPHandler(financeARAPSvc, permService)
 	platformFinanceFixedAssetHandler := financehandler.NewPlatformFixedAssetHandler(financeFixedAssetSvc, permService)
+	platformFinanceTaxHandler := financehandler.NewPlatformTaxHandler(financeTaxSvc, permService)
 
 	landingAdminPageHandler := landinghandler.NewAdminPageHandler(landingPageSvc, landingVisibilitySvc, landingRevisionSvc, landingPublishSvc)
 	landingAdminSectionHandler := landinghandler.NewAdminSectionHandler(landingSectionSvc, landingRevisionSvc)
@@ -511,6 +514,7 @@ func New(ctx context.Context) (*App, error) {
 		PlatformFinanceCashBankHandler:   platformFinanceCashBankHandler,
 		PlatformFinanceARAPHandler:       platformFinanceARAPHandler,
 		PlatformFinanceFixedAssetHandler: platformFinanceFixedAssetHandler,
+		PlatformFinanceTaxHandler:        platformFinanceTaxHandler,
 		PermissionChecker:                permService,
 		Authenticator:                    authService,
 		OrganizationResolver:             organizationResolver,

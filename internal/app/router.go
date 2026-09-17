@@ -244,6 +244,9 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.PlatformFinanceFixedAssetHandler != nil {
 		deps.PlatformFinanceFixedAssetHandler.RegisterRoutes(protected)
 	}
+	if deps.PlatformFinanceTaxHandler != nil {
+		deps.PlatformFinanceTaxHandler.RegisterRoutes(protected)
+	}
 
 	// CRM API (tenant-only). Unlike landing, CRM is gated behind a single
 	// root group carrying RequireCustomerTenant (platform organizations get

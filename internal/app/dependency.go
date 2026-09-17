@@ -82,6 +82,7 @@ type Dependencies struct {
 	PlatformFinanceCashBankHandler   *financehandler.PlatformCashBankHandler
 	PlatformFinanceARAPHandler       *financehandler.PlatformARAPHandler
 	PlatformFinanceFixedAssetHandler *financehandler.PlatformFixedAssetHandler
+	PlatformFinanceTaxHandler        *financehandler.PlatformTaxHandler
 	MediaStorage                     storage.MediaStorage
 	PermissionChecker                permissionmiddleware.CombinedPermissionChecker
 	Authenticator                    middleware.AccessTokenAuthenticator

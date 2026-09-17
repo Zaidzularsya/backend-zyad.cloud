@@ -370,6 +370,65 @@ type PostDepreciationResponse struct {
 	Items       []PostDepreciationResultItem `json:"items"`
 }
 
+type TaxTypeResponse struct {
+	ID       string `json:"id"`
+	Code     string `json:"code"`
+	Name     string `json:"name"`
+	Category string `json:"category"`
+}
+
+type TaxRateResponse struct {
+	ID            string  `json:"id"`
+	TaxTypeID     string  `json:"tax_type_id"`
+	TaxTypeCode   string  `json:"tax_type_code,omitempty"`
+	RatePercent   string  `json:"rate_percent"`
+	EffectiveDate string  `json:"effective_date"`
+	EndDate       *string `json:"end_date,omitempty"`
+	Notes         string  `json:"notes,omitempty"`
+	CreatedAt     string  `json:"created_at"`
+}
+
+type TaxTransactionResponse struct {
+	ID                string `json:"id"`
+	TaxTypeID         string `json:"tax_type_id"`
+	TaxTypeCode       string `json:"tax_type_code,omitempty"`
+	TaxTypeName       string `json:"tax_type_name,omitempty"`
+	TransactionDate   string `json:"transaction_date"`
+	ReferenceNumber   string `json:"reference_number,omitempty"`
+	Amount            string `json:"amount"`
+	Direction         string `json:"direction"`
+	TaxAccountID      string `json:"tax_account_id"`
+	TaxAccountCode    string `json:"tax_account_code,omitempty"`
+	TaxAccountName    string `json:"tax_account_name,omitempty"`
+	ContraAccountID   string `json:"contra_account_id"`
+	ContraAccountCode string `json:"contra_account_code,omitempty"`
+	ContraAccountName string `json:"contra_account_name,omitempty"`
+	Description       string `json:"description,omitempty"`
+	JournalEntryID    string `json:"journal_entry_id"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
+}
+
+type TaxTransactionListResponse struct {
+	Items []TaxTransactionResponse `json:"items"`
+	Meta  PaginationMeta           `json:"meta"`
+}
+
+type TaxSummaryRowResponse struct {
+	TaxTypeID   string `json:"tax_type_id"`
+	TaxTypeCode string `json:"tax_type_code"`
+	TaxTypeName string `json:"tax_type_name"`
+	Increase    string `json:"increase"`
+	Decrease    string `json:"decrease"`
+	Net         string `json:"net"`
+}
+
+type TaxSummaryResponse struct {
+	StartDate string                  `json:"start_date"`
+	EndDate   string                  `json:"end_date"`
+	Rows      []TaxSummaryRowResponse `json:"rows"`
+}
+
 type AccountLedgerResponse struct {
 	AccountID      string                      `json:"account_id"`
 	AccountCode    string                      `json:"account_code"`

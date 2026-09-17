@@ -31,11 +31,13 @@ func main() {
 	cashBankRepo := financerepo.NewCashBankRepository(db)
 	arapRepo := financerepo.NewARAPRepository(db)
 	fixedAssetRepo := financerepo.NewFixedAssetRepository(db)
+	taxRepo := financerepo.NewTaxRepository(db)
 
 	fiscalSvc := financeservice.NewFiscalService(fiscalRepo)
 	cashBankSvc := financeservice.NewCashBankService(cashBankRepo, journalRepo, ledgerRepo)
 	arapSvc := financeservice.NewARAPService(arapRepo, journalRepo)
 	fixedAssetSvc := financeservice.NewFixedAssetService(fixedAssetRepo, journalRepo)
+	taxSvc := financeservice.NewTaxService(taxRepo, journalRepo)
 	ledgerSvc := financeservice.NewLedgerService(ledgerRepo, accountRepo)
 
 	fy, err := fiscalSvc.CreateFiscalYear(ctx, dto.CreateFiscalYearRequest{Year: 2097})
@@ -44,7 +46,7 @@ func main() {
 
 	accounts, err := accountRepo.List(ctx, financerepo.AccountListFilter{})
 	must(err, "list accounts")
-	var piutangID, utangID, pendapatanID, bebanID, bankID, peralatanID, akumPenyusutanID, bebanPenyusutanID string
+	var piutangID, utangID, pendapatanID, bebanID, bankID, peralatanID, akumPenyusutanID, bebanPenyusutanID, ppnKeluaranID string
 	for _, a := range accounts {
 		switch a.AccountCode {
 		case "1103":
@@ -63,6 +65,8 @@ func main() {
 			akumPenyusutanID = a.ID
 		case "5205":
 			bebanPenyusutanID = a.ID
+		case "2102":
+			ppnKeluaranID = a.ID
 		}
 	}
 
@@ -184,6 +188,48 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("post depreciation run 2 (idempotency check): posted", postResultAgain.PostedCount)
+
+	// Tax: PPN Keluaran collected on a cash sale, then settled to the state.
+	taxTypes, err := taxSvc.ListTypes(ctx)
+	must(err, "list tax types")
+	var ppnKeluaranTypeID string
+	for _, tt := range taxTypes {
+		if tt.Code == "PPN_KELUARAN" {
+			ppnKeluaranTypeID = tt.ID
+		}
+	}
+	if ppnKeluaranTypeID == "" {
+		fmt.Println("FAIL: PPN_KELUARAN tax type not found (seed missing?)")
+		os.Exit(1)
+	}
+
+	_, err = taxSvc.CreateTransaction(ctx, dto.CreateTaxTransactionRequest{
+		TaxTypeID: ppnKeluaranTypeID, TransactionDate: "2097-02-10", Amount: "220000",
+		Direction: "increase", TaxAccountID: ppnKeluaranID, ContraAccountID: bankID,
+		Description: "PPN keluaran atas penjualan tunai (smoke test)",
+	}, "")
+	must(err, "create tax transaction (increase)")
+
+	_, err = taxSvc.CreateTransaction(ctx, dto.CreateTaxTransactionRequest{
+		TaxTypeID: ppnKeluaranTypeID, TransactionDate: "2097-03-10", Amount: "220000",
+		Direction: "decrease", TaxAccountID: ppnKeluaranID, ContraAccountID: bankID,
+		Description: "Setor PPN ke kas negara (smoke test)",
+	}, "")
+	must(err, "create tax transaction (decrease)")
+
+	taxSummary, err := taxSvc.Summary(ctx, dto.TaxSummaryQuery{StartDate: "2097-01-01", EndDate: "2097-12-31"})
+	must(err, "tax summary")
+	var ppnRow *dto.TaxSummaryRowResponse
+	for i := range taxSummary.Rows {
+		if taxSummary.Rows[i].TaxTypeCode == "PPN_KELUARAN" {
+			ppnRow = &taxSummary.Rows[i]
+		}
+	}
+	if ppnRow == nil || ppnRow.Increase != "220000.00" || ppnRow.Decrease != "220000.00" || ppnRow.Net != "0.00" {
+		fmt.Println("FAIL: expected PPN_KELUARAN summary increase=220000.00 decrease=220000.00 net=0.00, got", ppnRow)
+		os.Exit(1)
+	}
+	fmt.Println("tax summary PPN_KELUARAN: increase", ppnRow.Increase, "decrease", ppnRow.Decrease, "net", ppnRow.Net)
 
 	tb, err := ledgerSvc.TrialBalance(ctx, dto.TrialBalanceQuery{AsOfDate: "2097-12-31"})
 	must(err, "trial balance")

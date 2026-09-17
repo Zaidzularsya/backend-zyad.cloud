@@ -25,6 +25,8 @@ const (
 	ErrCodeARAPTransactionNotFound = "FINANCE_ARAP_TRANSACTION_NOT_FOUND"
 	ErrCodeAssetCategoryNotFound   = "FINANCE_ASSET_CATEGORY_NOT_FOUND"
 	ErrCodeFixedAssetNotFound      = "FINANCE_FIXED_ASSET_NOT_FOUND"
+	ErrCodeTaxTypeNotFound         = "FINANCE_TAX_TYPE_NOT_FOUND"
+	ErrCodeTaxTransactionNotFound  = "FINANCE_TAX_TRANSACTION_NOT_FOUND"
 )
 
 func AccountNotFoundError() error {
@@ -93,6 +95,14 @@ func AssetCategoryNotFoundError() error {
 
 func FixedAssetNotFoundError() error {
 	return coreerrors.New(ErrCodeFixedAssetNotFound, "fixed asset not found", http.StatusNotFound)
+}
+
+func TaxTypeNotFoundError() error {
+	return coreerrors.New(ErrCodeTaxTypeNotFound, "tax type not found", http.StatusNotFound)
+}
+
+func TaxTransactionNotFoundError() error {
+	return coreerrors.New(ErrCodeTaxTransactionNotFound, "tax transaction not found", http.StatusNotFound)
 }
 
 func ValidationError(message string) error {

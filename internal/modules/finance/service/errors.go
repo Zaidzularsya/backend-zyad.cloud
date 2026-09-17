@@ -87,6 +87,16 @@ func mapFixedAssetError(err error) error {
 	return err
 }
 
+func mapTaxError(err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return finance.TaxTypeNotFoundError()
+	}
+	if isUniqueViolation(err) {
+		return finance.ValidationError("a tax rate for this tax type already exists effective on this date")
+	}
+	return err
+}
+
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"

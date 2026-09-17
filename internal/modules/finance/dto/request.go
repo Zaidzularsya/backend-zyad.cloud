@@ -212,3 +212,39 @@ type FixedAssetListQuery struct {
 type PostDepreciationRequest struct {
 	AsOfDate string `json:"as_of_date" binding:"required"`
 }
+
+type CreateTaxRateRequest struct {
+	TaxTypeID     string `json:"tax_type_id" binding:"required"`
+	RatePercent   string `json:"rate_percent" binding:"required"`
+	EffectiveDate string `json:"effective_date" binding:"required"`
+	EndDate       string `json:"end_date"`
+	Notes         string `json:"notes"`
+}
+
+type TaxRateListQuery struct {
+	TaxTypeID string `form:"tax_type_id" binding:"required"`
+}
+
+type CreateTaxTransactionRequest struct {
+	TaxTypeID       string `json:"tax_type_id" binding:"required"`
+	TransactionDate string `json:"transaction_date" binding:"required"`
+	ReferenceNumber string `json:"reference_number"`
+	Amount          string `json:"amount" binding:"required"`
+	Direction       string `json:"direction" binding:"required"`
+	TaxAccountID    string `json:"tax_account_id" binding:"required"`
+	ContraAccountID string `json:"contra_account_id" binding:"required"`
+	Description     string `json:"description"`
+}
+
+type TaxTransactionListQuery struct {
+	TaxTypeID string `form:"tax_type_id"`
+	StartDate string `form:"start_date"`
+	EndDate   string `form:"end_date"`
+	Page      int    `form:"page"`
+	PerPage   int    `form:"per_page"`
+}
+
+type TaxSummaryQuery struct {
+	StartDate string `form:"start_date" binding:"required"`
+	EndDate   string `form:"end_date" binding:"required"`
+}
