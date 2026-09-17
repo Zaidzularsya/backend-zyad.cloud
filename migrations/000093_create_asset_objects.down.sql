@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS asset_objects CASCADE;
