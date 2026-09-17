@@ -2,11 +2,13 @@ package handler
 
 import (
 	"context"
+	"net/http"
 
 	corehttp "zyad.cloud/internal/core/http"
 	"zyad.cloud/internal/core/middleware"
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	"zyad.cloud/internal/modules/finance/dto"
+	"zyad.cloud/internal/shared/response"
 
 	"github.com/gin-gonic/gin"
 )
@@ -85,7 +87,7 @@ func (h *PlatformFixedAssetHandler) ListAssets(c *gin.Context) {
 		corehttp.Fail(c, err)
 		return
 	}
-	corehttp.OK(c, "fixed assets retrieved successfully", result)
+	response.JSON(c, http.StatusOK, "fixed assets retrieved successfully", result.Items, result.Meta)
 }
 
 func (h *PlatformFixedAssetHandler) CreateAsset(c *gin.Context) {
