@@ -21,6 +21,9 @@ import (
 	permissionrepo "zyad.cloud/internal/core/permission/repository"
 	permissionservice "zyad.cloud/internal/core/permission/service"
 	corevalidation "zyad.cloud/internal/core/validation"
+	assethandler "zyad.cloud/internal/modules/asset/handler"
+	assetrepo "zyad.cloud/internal/modules/asset/repository"
+	assetservice "zyad.cloud/internal/modules/asset/service"
 	billinghandler "zyad.cloud/internal/modules/billing/handler"
 	billingrepo "zyad.cloud/internal/modules/billing/repository"
 	billingservice "zyad.cloud/internal/modules/billing/service"
@@ -349,6 +352,17 @@ func New(ctx context.Context) (*App, error) {
 	landingPricingSvc := landingservice.NewPricingService(landingReusableRepo)
 	landingDeliverySvc := landingservice.NewDeliveryService(landingIntegrationRepo, landingSubmissionRepo)
 
+	assetRepository := assetrepo.NewAssetRepository(db)
+	assetSvc := assetservice.NewAssetService(
+		assetRepository,
+		landingMediaRepo,
+		assetservice.WithAssetObjectStorage(mediaStorage),
+		assetservice.WithAssetEntitlementFinder(organizationEntitlementRepository),
+		assetservice.WithAssetLogger(log),
+	)
+	adminAssetHandler := assethandler.NewAdminAssetHandler(assetSvc)
+	platformAssetHandler := assethandler.NewPlatformAssetHandler(assetSvc)
+
 	landingAdminPageHandler := landinghandler.NewAdminPageHandler(landingPageSvc, landingVisibilitySvc, landingRevisionSvc, landingPublishSvc)
 	landingAdminSectionHandler := landinghandler.NewAdminSectionHandler(landingSectionSvc, landingRevisionSvc)
 	landingAdminDocumentHandler := landinghandler.NewAdminDocumentHandler(landingDocumentSvc)
@@ -464,6 +478,8 @@ func New(ctx context.Context) (*App, error) {
 		CRMQuotationHandler:              crmQuotationHandler,
 		CRMInvoiceHandler:                crmInvoiceHandler,
 		CRMIntegrationHandler:            crmIntegrationHandler,
+		AdminAssetHandler:                adminAssetHandler,
+		PlatformAssetHandler:             platformAssetHandler,
 		PermissionChecker:                permService,
 		Authenticator:                    authService,
 		OrganizationResolver:             organizationResolver,

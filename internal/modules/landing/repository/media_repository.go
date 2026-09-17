@@ -90,8 +90,12 @@ func (r *mediaRepository) Create(ctx context.Context, scope coretenant.Scope, pa
 		return domain.LandingMediaAsset{}, err
 	}
 	m.OrganizationID = scope.OrganizationID()
-	if createdBy != nil { m.CreatedBy = *createdBy }
-	if altText != nil { m.AltText = *altText }
+	if createdBy != nil {
+		m.CreatedBy = *createdBy
+	}
+	if altText != nil {
+		m.AltText = *altText
+	}
 
 	return m, nil
 }
@@ -125,8 +129,12 @@ func (r *mediaRepository) Get(ctx context.Context, scope coretenant.Scope, id st
 		return domain.LandingMediaAsset{}, err
 	}
 	m.OrganizationID = scope.OrganizationID()
-	if createdBy != nil { m.CreatedBy = *createdBy }
-	if altText != nil { m.AltText = *altText }
+	if createdBy != nil {
+		m.CreatedBy = *createdBy
+	}
+	if altText != nil {
+		m.AltText = *altText
+	}
 
 	return m, nil
 }
@@ -168,8 +176,12 @@ func (r *mediaRepository) List(ctx context.Context, scope coretenant.Scope) ([]d
 				return err
 			}
 			m.OrganizationID = scope.OrganizationID()
-			if createdBy != nil { m.CreatedBy = *createdBy }
-			if altText != nil { m.AltText = *altText }
+			if createdBy != nil {
+				m.CreatedBy = *createdBy
+			}
+			if altText != nil {
+				m.AltText = *altText
+			}
 			assets = append(assets, m)
 		}
 		return rows.Err()
@@ -203,6 +215,27 @@ func (r *mediaRepository) UpdateStatus(ctx context.Context, scope coretenant.Sco
 		}
 		return nil
 	})
+}
+
+func (r *mediaRepository) SumSizeBytes(ctx context.Context, scope coretenant.Scope) (int64, error) {
+	if !scope.IsValid() {
+		return 0, coretenant.ErrInvalidScope
+	}
+
+	query := `
+		SELECT COALESCE(SUM(size_bytes), 0)
+		FROM landing_media_assets
+		WHERE organization_id = $1 AND deleted_at IS NULL
+	`
+
+	var total int64
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, query, scope.OrganizationID()).Scan(&total)
+	})
+	if err != nil {
+		return 0, err
+	}
+	return total, nil
 }
 
 func (r *mediaRepository) Delete(ctx context.Context, scope coretenant.Scope, id string) error {

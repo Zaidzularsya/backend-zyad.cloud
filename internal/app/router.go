@@ -217,6 +217,12 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.LandingAdminScheduleHandler != nil {
 		deps.LandingAdminScheduleHandler.RegisterRoutes(protected, deps.PermissionChecker)
 	}
+	if deps.AdminAssetHandler != nil {
+		deps.AdminAssetHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
+	if deps.PlatformAssetHandler != nil {
+		deps.PlatformAssetHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
 	if deps.LandingAdminIntegrationHandler != nil {
 		deps.LandingAdminIntegrationHandler.RegisterRoutes(protected, deps.PermissionChecker)
 	}

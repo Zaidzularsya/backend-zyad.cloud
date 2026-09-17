@@ -26,4 +26,8 @@ type MediaRepository interface {
 	List(context.Context, coretenant.Scope) ([]domain.LandingMediaAsset, error)
 	UpdateStatus(context.Context, coretenant.Scope, string, domain.MediaProcessingStatus) error
 	Delete(context.Context, coretenant.Scope, string) error
+	// SumSizeBytes menjumlahkan size_bytes semua media aktif milik organization.
+	// Dipakai modul asset untuk menghitung total pemakaian storage tenant
+	// gabungan (landing media + asset object generik) untuk keperluan kuota.
+	SumSizeBytes(context.Context, coretenant.Scope) (int64, error)
 }
