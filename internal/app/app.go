@@ -30,6 +30,9 @@ import (
 	crmhandler "zyad.cloud/internal/modules/crm/handler"
 	crmrepo "zyad.cloud/internal/modules/crm/repository"
 	crmservice "zyad.cloud/internal/modules/crm/service"
+	financehandler "zyad.cloud/internal/modules/finance/handler"
+	financerepo "zyad.cloud/internal/modules/finance/repository"
+	financeservice "zyad.cloud/internal/modules/finance/service"
 	landinghandler "zyad.cloud/internal/modules/landing/handler"
 	landingrepo "zyad.cloud/internal/modules/landing/repository"
 	landingservice "zyad.cloud/internal/modules/landing/service"
@@ -363,6 +366,19 @@ func New(ctx context.Context) (*App, error) {
 	adminAssetHandler := assethandler.NewAdminAssetHandler(assetSvc)
 	platformAssetHandler := assethandler.NewPlatformAssetHandler(assetSvc)
 
+	financeAccountRepo := financerepo.NewAccountRepository(db)
+	financeFiscalRepo := financerepo.NewFiscalRepository(db)
+	financeJournalRepo := financerepo.NewJournalRepository(db)
+	financeLedgerRepo := financerepo.NewLedgerRepository(db)
+	financeAccountSvc := financeservice.NewAccountService(financeAccountRepo)
+	financeFiscalSvc := financeservice.NewFiscalService(financeFiscalRepo)
+	financeJournalSvc := financeservice.NewJournalService(financeJournalRepo)
+	financeLedgerSvc := financeservice.NewLedgerService(financeLedgerRepo, financeAccountRepo)
+	financeReportSvc := financeservice.NewReportService(financeLedgerRepo)
+	platformFinanceCoAHandler := financehandler.NewPlatformCoAHandler(financeAccountSvc, financeFiscalSvc, permService)
+	platformFinanceJournalHandler := financehandler.NewPlatformJournalHandler(financeJournalSvc, permService)
+	platformFinanceReportHandler := financehandler.NewPlatformReportHandler(financeLedgerSvc, financeReportSvc, permService)
+
 	landingAdminPageHandler := landinghandler.NewAdminPageHandler(landingPageSvc, landingVisibilitySvc, landingRevisionSvc, landingPublishSvc)
 	landingAdminSectionHandler := landinghandler.NewAdminSectionHandler(landingSectionSvc, landingRevisionSvc)
 	landingAdminDocumentHandler := landinghandler.NewAdminDocumentHandler(landingDocumentSvc)
@@ -480,6 +496,9 @@ func New(ctx context.Context) (*App, error) {
 		CRMIntegrationHandler:            crmIntegrationHandler,
 		AdminAssetHandler:                adminAssetHandler,
 		PlatformAssetHandler:             platformAssetHandler,
+		PlatformFinanceCoAHandler:        platformFinanceCoAHandler,
+		PlatformFinanceJournalHandler:    platformFinanceJournalHandler,
+		PlatformFinanceReportHandler:     platformFinanceReportHandler,
 		PermissionChecker:                permService,
 		Authenticator:                    authService,
 		OrganizationResolver:             organizationResolver,

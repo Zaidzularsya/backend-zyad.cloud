@@ -11,6 +11,7 @@ import (
 	assethandler "zyad.cloud/internal/modules/asset/handler"
 	billinghandler "zyad.cloud/internal/modules/billing/handler"
 	crmhandler "zyad.cloud/internal/modules/crm/handler"
+	financehandler "zyad.cloud/internal/modules/finance/handler"
 	landinghandler "zyad.cloud/internal/modules/landing/handler"
 	organizationhandler "zyad.cloud/internal/modules/organization/handler"
 	producthandler "zyad.cloud/internal/modules/product/handler"
@@ -75,6 +76,9 @@ type Dependencies struct {
 	CRMIntegrationHandler            *crmhandler.IntegrationHandler
 	AdminAssetHandler                *assethandler.AdminAssetHandler
 	PlatformAssetHandler             *assethandler.PlatformAssetHandler
+	PlatformFinanceCoAHandler        *financehandler.PlatformCoAHandler
+	PlatformFinanceJournalHandler    *financehandler.PlatformJournalHandler
+	PlatformFinanceReportHandler     *financehandler.PlatformReportHandler
 	MediaStorage                     storage.MediaStorage
 	PermissionChecker                permissionmiddleware.CombinedPermissionChecker
 	Authenticator                    middleware.AccessTokenAuthenticator
