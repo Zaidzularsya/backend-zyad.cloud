@@ -105,9 +105,29 @@ func (r *JournalRepository) Create(ctx context.Context, params CreateJournalEntr
 	}
 	defer tx.Rollback(ctx)
 
+	entryID, err := InsertJournalEntryTx(ctx, tx, params)
+	if err != nil {
+		return model.JournalEntry{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return model.JournalEntry{}, err
+	}
+	return r.FindByID(ctx, entryID)
+}
+
+// InsertJournalEntryTx resolves the fiscal period for EntryDate, verifies it
+// is open, and inserts the journal entry with status=posted plus all of its
+// lines, all within the caller's transaction. It does not commit — callers
+// (JournalRepository.Create, and other subledgers like CashBankRepository
+// that must post their own row and a journal entry atomically) own the
+// transaction boundary. Callers must have already validated that the lines
+// balance (sum(debit) == sum(credit)) — this is a service-layer invariant,
+// not re-checked here.
+func InsertJournalEntryTx(ctx context.Context, tx pgx.Tx, params CreateJournalEntryParams) (string, error) {
 	var fiscalPeriodID string
 	var periodStatus string
-	err = tx.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 		SELECT id, status
 		FROM finance_fiscal_periods
 		WHERE start_date <= $1 AND end_date >= $1
@@ -115,12 +135,12 @@ func (r *JournalRepository) Create(ctx context.Context, params CreateJournalEntr
 	`, params.EntryDate).Scan(&fiscalPeriodID, &periodStatus)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return model.JournalEntry{}, ErrNoFiscalPeriod
+			return "", ErrNoFiscalPeriod
 		}
-		return model.JournalEntry{}, err
+		return "", err
 	}
 	if periodStatus == string(model.FiscalStatusClosed) {
-		return model.JournalEntry{}, ErrFiscalPeriodClosed
+		return "", ErrFiscalPeriodClosed
 	}
 
 	now := time.Now().UTC()
@@ -137,7 +157,7 @@ func (r *JournalRepository) Create(ctx context.Context, params CreateJournalEntr
 		nullableUUID(params.SourceID), params.Reference, params.Description, now, nullableUUID(params.CreatedBy),
 	).Scan(&entryID)
 	if err != nil {
-		return model.JournalEntry{}, err
+		return "", err
 	}
 
 	for i, line := range params.Lines {
@@ -150,14 +170,11 @@ func (r *JournalRepository) Create(ctx context.Context, params CreateJournalEntr
 			entryID, i+1, line.AccountID, amountOrZero(line.Debit), amountOrZero(line.Credit),
 			line.Description, subledgerTypeOrDefault(line.SubledgerType), nullableUUID(line.SubledgerID),
 		); err != nil {
-			return model.JournalEntry{}, err
+			return "", err
 		}
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return model.JournalEntry{}, err
-	}
-	return r.FindByID(ctx, entryID)
+	return entryID, nil
 }
 
 func (r *JournalRepository) FindByID(ctx context.Context, id string) (model.JournalEntry, error) {

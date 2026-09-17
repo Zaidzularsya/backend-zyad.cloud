@@ -20,6 +20,7 @@ const (
 	ErrCodeJournalNotPosted       = "FINANCE_JOURNAL_NOT_POSTED"
 	ErrCodeJournalAlreadyReversed = "FINANCE_JOURNAL_ALREADY_REVERSED"
 	ErrCodeValidation             = "FINANCE_VALIDATION_ERROR"
+	ErrCodeReconciliationNotFound = "FINANCE_RECONCILIATION_NOT_FOUND"
 )
 
 func AccountNotFoundError() error {
@@ -68,6 +69,10 @@ func JournalNotPostedError() error {
 
 func JournalAlreadyReversedError() error {
 	return coreerrors.New(ErrCodeJournalAlreadyReversed, "journal entry is already reversed", http.StatusConflict)
+}
+
+func ReconciliationNotFoundError() error {
+	return coreerrors.New(ErrCodeReconciliationNotFound, "bank reconciliation not found", http.StatusNotFound)
 }
 
 func ValidationError(message string) error {

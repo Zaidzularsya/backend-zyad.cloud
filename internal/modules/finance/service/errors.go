@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"zyad.cloud/internal/modules/finance"
+	"zyad.cloud/internal/modules/finance/repository"
 )
 
 func mapAccountError(err error) error {
@@ -32,6 +33,13 @@ func mapFiscalYearError(err error) error {
 func mapFiscalPeriodError(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return finance.FiscalPeriodNotFoundError()
+	}
+	return err
+}
+
+func mapReconciliationError(err error) error {
+	if errors.Is(err, repository.ErrBankReconciliationNotFound) {
+		return finance.ReconciliationNotFoundError()
 	}
 	return err
 }

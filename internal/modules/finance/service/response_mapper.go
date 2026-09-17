@@ -114,3 +114,64 @@ func journalEntryResponses(entries []model.JournalEntry) []dto.JournalEntryRespo
 	}
 	return responses
 }
+
+func cashBankAccountResponse(a model.CashBankAccount) dto.CashBankAccountResponse {
+	return dto.CashBankAccountResponse{
+		ID:                a.ID,
+		AccountID:         a.AccountID,
+		AccountCode:       a.AccountCode,
+		AccountName:       a.AccountName,
+		Type:              string(a.Type),
+		BankName:          a.BankName,
+		AccountNumber:     a.AccountNumber,
+		AccountHolderName: a.AccountHolderName,
+		Currency:          a.Currency,
+		IsActive:          a.IsActive,
+		CreatedAt:         formatTime(a.CreatedAt),
+		UpdatedAt:         formatTime(a.UpdatedAt),
+	}
+}
+
+func cashTransactionResponse(t model.CashTransaction) dto.CashTransactionResponse {
+	label := t.CashBankAccountCode
+	if t.CashBankAccountLabel != "" {
+		label = t.CashBankAccountCode + " — " + t.CashBankAccountLabel
+	}
+	return dto.CashTransactionResponse{
+		ID:                       t.ID,
+		CashBankAccountID:        t.CashBankAccountID,
+		CashBankAccountLabel:     label,
+		TransactionDate:          formatDate(t.TransactionDate),
+		TransactionType:          string(t.TransactionType),
+		Amount:                   t.Amount,
+		CounterCashBankAccountID: t.CounterCashBankAccountID,
+		CounterCashBankLabel:     t.CounterCashBankLabel,
+		ContraAccountID:          t.ContraAccountID,
+		ContraAccountCode:        t.ContraAccountCode,
+		ContraAccountName:        t.ContraAccountName,
+		Reference:                t.Reference,
+		Description:              t.Description,
+		JournalEntryID:           t.JournalEntryID,
+		ReconciledAt:             formatOptionalTime(t.ReconciledAt),
+		CreatedAt:                formatTime(t.CreatedAt),
+		UpdatedAt:                formatTime(t.UpdatedAt),
+	}
+}
+
+func bankReconciliationResponse(r model.BankReconciliation) dto.BankReconciliationResponse {
+	statement, _ := moneyRat(r.StatementEndingBalance)
+	book, _ := moneyRat(r.BookEndingBalance)
+	diff := new(big.Rat).Sub(statement, book)
+	return dto.BankReconciliationResponse{
+		ID:                     r.ID,
+		CashBankAccountID:      r.CashBankAccountID,
+		StatementDate:          formatDate(r.StatementDate),
+		StatementEndingBalance: r.StatementEndingBalance,
+		BookEndingBalance:      r.BookEndingBalance,
+		Difference:             formatMoney(diff),
+		Status:                 string(r.Status),
+		Notes:                  r.Notes,
+		CompletedAt:            formatOptionalTime(r.CompletedAt),
+		CreatedAt:              formatTime(r.CreatedAt),
+	}
+}

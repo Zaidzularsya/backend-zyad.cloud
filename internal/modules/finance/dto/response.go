@@ -176,6 +176,59 @@ type AccountLedgerLineResponse struct {
 	RunningBalance string `json:"running_balance"`
 }
 
+type CashBankAccountResponse struct {
+	ID                string `json:"id"`
+	AccountID         string `json:"account_id"`
+	AccountCode       string `json:"account_code"`
+	AccountName       string `json:"account_name"`
+	Type              string `json:"type"`
+	BankName          string `json:"bank_name,omitempty"`
+	AccountNumber     string `json:"account_number,omitempty"`
+	AccountHolderName string `json:"account_holder_name,omitempty"`
+	Currency          string `json:"currency"`
+	IsActive          bool   `json:"is_active"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
+}
+
+type CashTransactionResponse struct {
+	ID                       string  `json:"id"`
+	CashBankAccountID        string  `json:"cash_bank_account_id"`
+	CashBankAccountLabel     string  `json:"cash_bank_account_label,omitempty"`
+	TransactionDate          string  `json:"transaction_date"`
+	TransactionType          string  `json:"transaction_type"`
+	Amount                   string  `json:"amount"`
+	CounterCashBankAccountID *string `json:"counter_cash_bank_account_id,omitempty"`
+	CounterCashBankLabel     string  `json:"counter_cash_bank_label,omitempty"`
+	ContraAccountID          *string `json:"contra_account_id,omitempty"`
+	ContraAccountCode        string  `json:"contra_account_code,omitempty"`
+	ContraAccountName        string  `json:"contra_account_name,omitempty"`
+	Reference                string  `json:"reference,omitempty"`
+	Description              string  `json:"description,omitempty"`
+	JournalEntryID           string  `json:"journal_entry_id"`
+	ReconciledAt             *string `json:"reconciled_at,omitempty"`
+	CreatedAt                string  `json:"created_at"`
+	UpdatedAt                string  `json:"updated_at"`
+}
+
+type CashTransactionListResponse struct {
+	Items []CashTransactionResponse `json:"items"`
+	Meta  PaginationMeta            `json:"meta"`
+}
+
+type BankReconciliationResponse struct {
+	ID                     string  `json:"id"`
+	CashBankAccountID      string  `json:"cash_bank_account_id"`
+	StatementDate          string  `json:"statement_date"`
+	StatementEndingBalance string  `json:"statement_ending_balance"`
+	BookEndingBalance      string  `json:"book_ending_balance"`
+	Difference             string  `json:"difference"`
+	Status                 string  `json:"status"`
+	Notes                  string  `json:"notes,omitempty"`
+	CompletedAt            *string `json:"completed_at,omitempty"`
+	CreatedAt              string  `json:"created_at"`
+}
+
 type AccountLedgerResponse struct {
 	AccountID      string                      `json:"account_id"`
 	AccountCode    string                      `json:"account_code"`

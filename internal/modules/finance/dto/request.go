@@ -81,3 +81,44 @@ type ProfitLossQuery struct {
 type BalanceSheetQuery struct {
 	AsOfDate string `form:"as_of_date" binding:"required"`
 }
+
+type CreateCashBankAccountRequest struct {
+	AccountID         string `json:"account_id" binding:"required"`
+	Type              string `json:"type" binding:"required"`
+	BankName          string `json:"bank_name"`
+	AccountNumber     string `json:"account_number"`
+	AccountHolderName string `json:"account_holder_name"`
+}
+
+type UpdateCashBankAccountRequest struct {
+	BankName          string `json:"bank_name"`
+	AccountNumber     string `json:"account_number"`
+	AccountHolderName string `json:"account_holder_name"`
+	IsActive          bool   `json:"is_active"`
+}
+
+type CreateCashTransactionRequest struct {
+	CashBankAccountID        string `json:"cash_bank_account_id" binding:"required"`
+	TransactionDate          string `json:"transaction_date" binding:"required"`
+	TransactionType          string `json:"transaction_type" binding:"required"`
+	Amount                   string `json:"amount" binding:"required"`
+	CounterCashBankAccountID string `json:"counter_cash_bank_account_id"`
+	ContraAccountID          string `json:"contra_account_id"`
+	Reference                string `json:"reference"`
+	Description              string `json:"description"`
+}
+
+type CashTransactionListQuery struct {
+	CashBankAccountID string `form:"cash_bank_account_id"`
+	StartDate         string `form:"start_date"`
+	EndDate           string `form:"end_date"`
+	Page              int    `form:"page"`
+	PerPage           int    `form:"per_page"`
+}
+
+type CreateBankReconciliationRequest struct {
+	CashBankAccountID      string `json:"cash_bank_account_id" binding:"required"`
+	StatementDate          string `json:"statement_date" binding:"required"`
+	StatementEndingBalance string `json:"statement_ending_balance" binding:"required"`
+	Notes                  string `json:"notes"`
+}

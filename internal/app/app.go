@@ -370,14 +370,17 @@ func New(ctx context.Context) (*App, error) {
 	financeFiscalRepo := financerepo.NewFiscalRepository(db)
 	financeJournalRepo := financerepo.NewJournalRepository(db)
 	financeLedgerRepo := financerepo.NewLedgerRepository(db)
+	financeCashBankRepo := financerepo.NewCashBankRepository(db)
 	financeAccountSvc := financeservice.NewAccountService(financeAccountRepo)
 	financeFiscalSvc := financeservice.NewFiscalService(financeFiscalRepo)
 	financeJournalSvc := financeservice.NewJournalService(financeJournalRepo)
 	financeLedgerSvc := financeservice.NewLedgerService(financeLedgerRepo, financeAccountRepo)
 	financeReportSvc := financeservice.NewReportService(financeLedgerRepo)
+	financeCashBankSvc := financeservice.NewCashBankService(financeCashBankRepo, financeJournalRepo, financeLedgerRepo)
 	platformFinanceCoAHandler := financehandler.NewPlatformCoAHandler(financeAccountSvc, financeFiscalSvc, permService)
 	platformFinanceJournalHandler := financehandler.NewPlatformJournalHandler(financeJournalSvc, permService)
 	platformFinanceReportHandler := financehandler.NewPlatformReportHandler(financeLedgerSvc, financeReportSvc, permService)
+	platformFinanceCashBankHandler := financehandler.NewPlatformCashBankHandler(financeCashBankSvc, permService)
 
 	landingAdminPageHandler := landinghandler.NewAdminPageHandler(landingPageSvc, landingVisibilitySvc, landingRevisionSvc, landingPublishSvc)
 	landingAdminSectionHandler := landinghandler.NewAdminSectionHandler(landingSectionSvc, landingRevisionSvc)
@@ -499,6 +502,7 @@ func New(ctx context.Context) (*App, error) {
 		PlatformFinanceCoAHandler:        platformFinanceCoAHandler,
 		PlatformFinanceJournalHandler:    platformFinanceJournalHandler,
 		PlatformFinanceReportHandler:     platformFinanceReportHandler,
+		PlatformFinanceCashBankHandler:   platformFinanceCashBankHandler,
 		PermissionChecker:                permService,
 		Authenticator:                    authService,
 		OrganizationResolver:             organizationResolver,

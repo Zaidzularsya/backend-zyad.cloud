@@ -206,6 +206,31 @@ func (r *LedgerRepository) GeneralLedger(ctx context.Context, start, end time.Ti
 	return result, rows.Err()
 }
 
+// AccountBalanceAsOf returns the account's normal-balance-signed cumulative
+// balance up to and including asOf (postings + opening balance).
+func (r *LedgerRepository) AccountBalanceAsOf(ctx context.Context, accountID string, asOf time.Time) (string, error) {
+	var amount string
+	err := r.db.QueryRow(ctx, `
+		WITH postings AS (
+			SELECT SUM(CASE WHEN a.normal_balance = 'debit' THEN jl.debit - jl.credit ELSE jl.credit - jl.debit END) AS amount
+			FROM finance_journal_lines jl
+			JOIN finance_journal_entries je ON je.id = jl.journal_entry_id
+			JOIN finance_accounts a ON a.id = jl.account_id
+			WHERE je.status = 'posted' AND je.entry_date <= $2 AND jl.account_id = $1::uuid
+		),
+		opening AS (
+			SELECT opening_balance AS amount
+			FROM finance_accounts
+			WHERE id = $1::uuid AND opening_balance_date IS NOT NULL AND opening_balance_date <= $2
+		)
+		SELECT (COALESCE((SELECT amount FROM postings), 0) + COALESCE((SELECT amount FROM opening), 0))::text
+	`, accountID, asOf).Scan(&amount)
+	if err != nil {
+		return "", err
+	}
+	return amount, nil
+}
+
 // AccountOpeningBalanceBefore returns the account's normal-balance-signed
 // cumulative balance strictly before `before` (postings + opening balance),
 // used as the starting point for an account ledger's running balance.
