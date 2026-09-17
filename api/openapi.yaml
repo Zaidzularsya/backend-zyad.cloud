@@ -4776,6 +4776,1296 @@ paths:
           description: Signature verification failed
         "503":
           description: DOKU webhook credentials are not configured
+  /api/v1/platform/finance/account-types:
+    get:
+      summary: List finance account types
+      operationId: listFinanceAccountTypes
+      tags: [Finance - Chart of Accounts]
+      security: [{BearerAuth: []}]
+      responses:
+        "200":
+          description: Finance account types retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceAccountTypeListEnvelope"
+        "403":
+          description: Missing platform.finance.coa.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/account-categories:
+    get:
+      summary: List finance account categories
+      operationId: listFinanceAccountCategories
+      tags: [Finance - Chart of Accounts]
+      security: [{BearerAuth: []}]
+      responses:
+        "200":
+          description: Finance account categories retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceAccountCategoryListEnvelope"
+        "403":
+          description: Missing platform.finance.coa.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/accounts:
+    get:
+      summary: List chart of accounts
+      operationId: listFinanceAccounts
+      tags: [Finance - Chart of Accounts]
+      security: [{BearerAuth: []}]
+      parameters:
+        - name: include_inactive
+          in: query
+          schema: {type: boolean}
+        - name: category_id
+          in: query
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Chart of accounts retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceAccountListEnvelope"
+        "403":
+          description: Missing platform.finance.coa.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create a chart-of-accounts entry
+      operationId: createFinanceAccount
+      tags: [Finance - Chart of Accounts]
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFinanceAccountRequest"
+      responses:
+        "201":
+          description: Account created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceAccountEnvelope"
+        "403":
+          description: Missing platform.finance.coa.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Account code is already in use
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid account payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/accounts/{id}:
+    get:
+      summary: Get a chart-of-accounts entry
+      operationId: getFinanceAccount
+      tags: [Finance - Chart of Accounts]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Account retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceAccountEnvelope"
+        "403":
+          description: Missing platform.finance.coa.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      summary: Update a chart-of-accounts entry
+      operationId: updateFinanceAccount
+      tags: [Finance - Chart of Accounts]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFinanceAccountRequest"
+      responses:
+        "200":
+          description: Account updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceAccountEnvelope"
+        "403":
+          description: Missing platform.finance.coa.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid account payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/fiscal-years:
+    get:
+      summary: List fiscal years
+      operationId: listFinanceFiscalYears
+      tags: [Finance - Fiscal Calendar]
+      security: [{BearerAuth: []}]
+      responses:
+        "200":
+          description: Fiscal years retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceFiscalYearListEnvelope"
+        "403":
+          description: Missing platform.finance.coa.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create a fiscal year (auto-generates its 12 monthly periods)
+      operationId: createFinanceFiscalYear
+      tags: [Finance - Fiscal Calendar]
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFinanceFiscalYearRequest"
+      responses:
+        "201":
+          description: Fiscal year created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceFiscalYearEnvelope"
+        "403":
+          description: Missing platform.finance.coa.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Fiscal year already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/fiscal-years/{id}/close:
+    post:
+      summary: Close a fiscal year for posting
+      operationId: closeFinanceFiscalYear
+      tags: [Finance - Fiscal Calendar]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Fiscal year closed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceFiscalYearEnvelope"
+        "403":
+          description: Missing platform.finance.coa.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Fiscal year not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/fiscal-years/{id}/reopen:
+    post:
+      summary: Reopen a closed fiscal year
+      operationId: reopenFinanceFiscalYear
+      tags: [Finance - Fiscal Calendar]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Fiscal year reopened successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceFiscalYearEnvelope"
+        "403":
+          description: Missing platform.finance.coa.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Fiscal year not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/fiscal-periods/{id}/close:
+    post:
+      summary: Close a fiscal period for posting
+      operationId: closeFinanceFiscalPeriod
+      tags: [Finance - Fiscal Calendar]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Fiscal period closed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceFiscalPeriodEnvelope"
+        "403":
+          description: Missing platform.finance.coa.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Fiscal period not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/fiscal-periods/{id}/reopen:
+    post:
+      summary: Reopen a closed fiscal period
+      operationId: reopenFinanceFiscalPeriod
+      tags: [Finance - Fiscal Calendar]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Fiscal period reopened successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceFiscalPeriodEnvelope"
+        "403":
+          description: Missing platform.finance.coa.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Fiscal period not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/journal-entries:
+    get:
+      summary: List journal entries
+      operationId: listFinanceJournalEntries
+      tags: [Finance - Journal]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: page, in: query, schema: {type: integer}}
+        - {name: per_page, in: query, schema: {type: integer}}
+        - {name: start_date, in: query, schema: {type: string, format: date}}
+        - {name: end_date, in: query, schema: {type: string, format: date}}
+        - {name: status, in: query, schema: {$ref: "#/components/schemas/FinanceJournalStatus"}}
+      responses:
+        "200":
+          description: Journal entries retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceJournalEntryListEnvelope"
+        "403":
+          description: Missing platform.finance.journal.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create and post a manual journal entry
+      operationId: createFinanceJournalEntry
+      tags: [Finance - Journal]
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFinanceJournalEntryRequest"
+      responses:
+        "201":
+          description: Journal entry created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceJournalEntryEnvelope"
+        "400":
+          description: Debit and credit totals do not balance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing platform.finance.journal.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: No fiscal period covers entry_date, or the period is closed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/journal-entries/{id}:
+    get:
+      summary: Get a journal entry
+      operationId: getFinanceJournalEntry
+      tags: [Finance - Journal]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Journal entry retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceJournalEntryEnvelope"
+        "403":
+          description: Missing platform.finance.journal.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Journal entry not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/journal-entries/{id}/reverse:
+    post:
+      summary: Reverse a posted journal entry
+      operationId: reverseFinanceJournalEntry
+      tags: [Finance - Journal]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReverseFinanceJournalEntryRequest"
+      responses:
+        "200":
+          description: Journal entry reversed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceJournalEntryEnvelope"
+        "403":
+          description: Missing platform.finance.journal.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Journal entry not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Journal entry is not posted, or is already reversed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/general-ledger:
+    get:
+      summary: General ledger (all accounts) for a date range
+      operationId: getFinanceGeneralLedger
+      tags: [Finance - Reports]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: start_date, in: query, required: true, schema: {type: string, format: date}}
+        - {name: end_date, in: query, required: true, schema: {type: string, format: date}}
+        - {name: account_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: General ledger retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceGeneralLedgerEnvelope"
+        "403":
+          description: Missing platform.finance.reports.view permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/account-ledger/{accountId}:
+    get:
+      summary: Ledger (running balance) for a single account
+      operationId: getFinanceAccountLedger
+      tags: [Finance - Reports]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: start_date, in: query, required: true, schema: {type: string, format: date}}
+        - {name: end_date, in: query, required: true, schema: {type: string, format: date}}
+      responses:
+        "200":
+          description: Account ledger retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceAccountLedgerEnvelope"
+        "403":
+          description: Missing platform.finance.reports.view permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/trial-balance:
+    get:
+      summary: Trial balance as of a date
+      operationId: getFinanceTrialBalance
+      tags: [Finance - Reports]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: as_of_date, in: query, required: true, schema: {type: string, format: date}}
+      responses:
+        "200":
+          description: Trial balance retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTrialBalanceEnvelope"
+        "403":
+          description: Missing platform.finance.reports.view permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/reports/profit-loss:
+    get:
+      summary: Profit & loss statement for a date range
+      operationId: getFinanceProfitLoss
+      tags: [Finance - Reports]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: start_date, in: query, required: true, schema: {type: string, format: date}}
+        - {name: end_date, in: query, required: true, schema: {type: string, format: date}}
+      responses:
+        "200":
+          description: Profit and loss report retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceProfitLossEnvelope"
+        "403":
+          description: Missing platform.finance.reports.view permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/reports/balance-sheet:
+    get:
+      summary: Balance sheet as of a date
+      operationId: getFinanceBalanceSheet
+      tags: [Finance - Reports]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: as_of_date, in: query, required: true, schema: {type: string, format: date}}
+      responses:
+        "200":
+          description: Balance sheet retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceBalanceSheetEnvelope"
+        "403":
+          description: Missing platform.finance.reports.view permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/cash-bank-accounts:
+    get:
+      summary: List cash & bank accounts
+      operationId: listFinanceCashBankAccounts
+      tags: [Finance - Cash & Bank]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: include_inactive, in: query, schema: {type: boolean}}
+      responses:
+        "200":
+          description: Cash and bank accounts retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceCashBankAccountListEnvelope"
+        "403":
+          description: Missing platform.finance.cashbank.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Register a cash or bank account against a GL account
+      operationId: createFinanceCashBankAccount
+      tags: [Finance - Cash & Bank]
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFinanceCashBankAccountRequest"
+      responses:
+        "201":
+          description: Cash/bank account created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceCashBankAccountEnvelope"
+        "403":
+          description: Missing platform.finance.cashbank.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid cash/bank account payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/cash-bank-accounts/{id}:
+    put:
+      summary: Update a cash or bank account
+      operationId: updateFinanceCashBankAccount
+      tags: [Finance - Cash & Bank]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFinanceCashBankAccountRequest"
+      responses:
+        "200":
+          description: Cash/bank account updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceCashBankAccountEnvelope"
+        "403":
+          description: Missing platform.finance.cashbank.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Cash/bank account not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/cash-transactions:
+    get:
+      summary: List cash & bank transactions
+      operationId: listFinanceCashTransactions
+      tags: [Finance - Cash & Bank]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: cash_bank_account_id, in: query, schema: {type: string, format: uuid}}
+        - {name: start_date, in: query, schema: {type: string, format: date}}
+        - {name: end_date, in: query, schema: {type: string, format: date}}
+        - {name: page, in: query, schema: {type: integer}}
+        - {name: per_page, in: query, schema: {type: integer}}
+      responses:
+        "200":
+          description: Cash transactions retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceCashTransactionListEnvelope"
+        "403":
+          description: Missing platform.finance.cashbank.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Record a cash-in, cash-out, or transfer transaction
+      operationId: createFinanceCashTransaction
+      tags: [Finance - Cash & Bank]
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFinanceCashTransactionRequest"
+      responses:
+        "201":
+          description: Cash transaction recorded successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceCashTransactionEnvelope"
+        "403":
+          description: Missing platform.finance.cashbank.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: No fiscal period covers transaction_date, or the period is closed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/cash-bank-accounts/{id}/reconciliations:
+    get:
+      summary: List bank reconciliations for a cash/bank account
+      operationId: listFinanceBankReconciliations
+      tags: [Finance - Cash & Bank]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Bank reconciliations retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceBankReconciliationListEnvelope"
+        "403":
+          description: Missing platform.finance.cashbank.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/bank-reconciliations:
+    post:
+      summary: Start a bank reconciliation (draft)
+      operationId: createFinanceBankReconciliation
+      tags: [Finance - Cash & Bank]
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFinanceBankReconciliationRequest"
+      responses:
+        "201":
+          description: Bank reconciliation created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceBankReconciliationEnvelope"
+        "403":
+          description: Missing platform.finance.cashbank.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid reconciliation payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/bank-reconciliations/{id}/complete:
+    post:
+      summary: Mark a bank reconciliation as completed
+      operationId: completeFinanceBankReconciliation
+      tags: [Finance - Cash & Bank]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Bank reconciliation completed successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceBankReconciliationEnvelope"
+        "403":
+          description: Missing platform.finance.cashbank.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Bank reconciliation not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/business-partners:
+    get:
+      summary: List business partners (customers/vendors)
+      operationId: listFinanceBusinessPartners
+      tags: [Finance - Accounts Receivable/Payable]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: partner_type, in: query, schema: {$ref: "#/components/schemas/FinancePartnerType"}}
+        - {name: include_inactive, in: query, schema: {type: boolean}}
+      responses:
+        "200":
+          description: Business partners retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceBusinessPartnerListEnvelope"
+        "403":
+          description: Missing platform.finance.arap.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create a business partner
+      operationId: createFinanceBusinessPartner
+      tags: [Finance - Accounts Receivable/Payable]
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFinanceBusinessPartnerRequest"
+      responses:
+        "201":
+          description: Business partner created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceBusinessPartnerEnvelope"
+        "403":
+          description: Missing platform.finance.arap.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid business partner payload, or code already in use
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/business-partners/{id}:
+    put:
+      summary: Update a business partner
+      operationId: updateFinanceBusinessPartner
+      tags: [Finance - Accounts Receivable/Payable]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFinanceBusinessPartnerRequest"
+      responses:
+        "200":
+          description: Business partner updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceBusinessPartnerEnvelope"
+        "403":
+          description: Missing platform.finance.arap.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Business partner not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/ar-ap-transactions:
+    get:
+      summary: List AR/AP transactions (invoices/bills)
+      operationId: listFinanceARAPTransactions
+      tags: [Finance - Accounts Receivable/Payable]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: partner_id, in: query, schema: {type: string, format: uuid}}
+        - {name: transaction_type, in: query, schema: {$ref: "#/components/schemas/FinanceARAPTransactionType"}}
+        - {name: status, in: query, schema: {$ref: "#/components/schemas/FinanceARAPTransactionStatus"}}
+        - {name: page, in: query, schema: {type: integer}}
+        - {name: per_page, in: query, schema: {type: integer}}
+      responses:
+        "200":
+          description: AR/AP transactions retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceARAPTransactionListEnvelope"
+        "403":
+          description: Missing platform.finance.arap.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create an AR/AP transaction (invoice or bill) and post its journal entry
+      operationId: createFinanceARAPTransaction
+      tags: [Finance - Accounts Receivable/Payable]
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFinanceARAPTransactionRequest"
+      responses:
+        "201":
+          description: AR/AP transaction created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceARAPTransactionEnvelope"
+        "400":
+          description: transaction_type does not match the partner's type
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing platform.finance.arap.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: No fiscal period covers transaction_date, or the period is closed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/ar-ap-payments:
+    post:
+      summary: Record a payment against an AR/AP transaction and post its journal entry
+      operationId: createFinanceARAPPayment
+      tags: [Finance - Accounts Receivable/Payable]
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFinanceARAPPaymentRequest"
+      responses:
+        "201":
+          description: AR/AP payment recorded successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceARAPPaymentEnvelope"
+        "400":
+          description: Payment amount exceeds the transaction's outstanding balance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Missing platform.finance.arap.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: No fiscal period covers payment_date, or the period is closed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/reports/aging:
+    get:
+      summary: Accounts receivable/payable aging report
+      operationId: getFinanceAgingReport
+      tags: [Finance - Accounts Receivable/Payable]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: transaction_type, in: query, required: true, schema: {$ref: "#/components/schemas/FinanceARAPTransactionType"}}
+        - {name: as_of_date, in: query, required: true, schema: {type: string, format: date}}
+      responses:
+        "200":
+          description: Aging report retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceAgingReportEnvelope"
+        "403":
+          description: Missing platform.finance.arap.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/asset-categories:
+    get:
+      summary: List fixed asset categories
+      operationId: listFinanceAssetCategories
+      tags: [Finance - Fixed Assets]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: include_inactive, in: query, schema: {type: boolean}}
+      responses:
+        "200":
+          description: Asset categories retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceAssetCategoryListEnvelope"
+        "403":
+          description: Missing platform.finance.asset.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create a fixed asset category (asset/accumulated depreciation/expense GL accounts)
+      operationId: createFinanceAssetCategory
+      tags: [Finance - Fixed Assets]
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFinanceAssetCategoryRequest"
+      responses:
+        "201":
+          description: Asset category created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceAssetCategoryEnvelope"
+        "403":
+          description: Missing platform.finance.asset.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid asset category payload, or code already in use
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/fixed-assets:
+    get:
+      summary: List fixed assets (with accumulated depreciation and book value)
+      operationId: listFinanceFixedAssets
+      tags: [Finance - Fixed Assets]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: asset_category_id, in: query, schema: {type: string, format: uuid}}
+        - {name: status, in: query, schema: {$ref: "#/components/schemas/FinanceFixedAssetStatus"}}
+        - {name: page, in: query, schema: {type: integer}}
+        - {name: per_page, in: query, schema: {type: integer}}
+      responses:
+        "200":
+          description: Fixed assets retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceFixedAssetListEnvelope"
+        "403":
+          description: Missing platform.finance.asset.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create a fixed asset (posts acquisition journal entry, generates full depreciation schedule)
+      operationId: createFinanceFixedAsset
+      tags: [Finance - Fixed Assets]
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFinanceFixedAssetRequest"
+      responses:
+        "201":
+          description: Fixed asset created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceFixedAssetEnvelope"
+        "403":
+          description: Missing platform.finance.asset.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid fixed asset payload (e.g. salvage_value >= acquisition_cost), or no fiscal period covers acquisition_date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/fixed-assets/{id}/depreciation-schedule:
+    get:
+      summary: Get a fixed asset's full depreciation schedule
+      operationId: getFinanceDepreciationSchedule
+      tags: [Finance - Fixed Assets]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Depreciation schedule retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceDepreciationScheduleListEnvelope"
+        "403":
+          description: Missing platform.finance.asset.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/fixed-assets/post-depreciation:
+    post:
+      summary: Post all pending depreciation schedule rows up to a date, across every asset
+      description: >-
+        Each pending schedule row with period_date <= as_of_date is posted in its own
+        transaction; a row whose fiscal period hasn't been created yet fails without
+        blocking the others. Re-running with the same or an earlier as_of_date is a
+        no-op for rows already posted.
+      operationId: postFinanceDepreciation
+      tags: [Finance - Fixed Assets]
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PostFinanceDepreciationRequest"
+      responses:
+        "200":
+          description: Depreciation posting run completed (see items for per-row posted/failed results)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostFinanceDepreciationEnvelope"
+        "403":
+          description: Missing platform.finance.asset.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/tax-types:
+    get:
+      summary: List tax types (fixed seeded vocabulary)
+      operationId: listFinanceTaxTypes
+      tags: [Finance - Tax]
+      security: [{BearerAuth: []}]
+      responses:
+        "200":
+          description: Tax types retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTaxTypeListEnvelope"
+        "403":
+          description: Missing platform.finance.tax.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/tax-rates:
+    get:
+      summary: List historical rates for a tax type
+      operationId: listFinanceTaxRates
+      tags: [Finance - Tax]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: tax_type_id, in: query, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Tax rates retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTaxRateListEnvelope"
+        "403":
+          description: Missing platform.finance.tax.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Add a tax rate effective from a date
+      operationId: createFinanceTaxRate
+      tags: [Finance - Tax]
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFinanceTaxRateRequest"
+      responses:
+        "201":
+          description: Tax rate created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTaxRateEnvelope"
+        "403":
+          description: Missing platform.finance.tax.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid rate payload, or a rate for this tax type already exists effective on this date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/tax-transactions:
+    get:
+      summary: List tax transactions
+      operationId: listFinanceTaxTransactions
+      tags: [Finance - Tax]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: tax_type_id, in: query, schema: {type: string, format: uuid}}
+        - {name: start_date, in: query, schema: {type: string, format: date}}
+        - {name: end_date, in: query, schema: {type: string, format: date}}
+        - {name: page, in: query, schema: {type: integer}}
+        - {name: per_page, in: query, schema: {type: integer}}
+      responses:
+        "200":
+          description: Tax transactions retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTaxTransactionListEnvelope"
+        "403":
+          description: Missing platform.finance.tax.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Record a tax transaction and post its journal entry
+      description: >-
+        direction is 'increase' or 'decrease' relative to tax_account's own normal
+        balance, so the same two values are correct whether tax_account is a
+        liability (e.g. PPN Keluaran payable) or an asset (e.g. PPN Masukan
+        recoverable) — the API resolves which side gets debited internally.
+      operationId: createFinanceTaxTransaction
+      tags: [Finance - Tax]
+      security: [{BearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFinanceTaxTransactionRequest"
+      responses:
+        "201":
+          description: Tax transaction recorded successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTaxTransactionEnvelope"
+        "403":
+          description: Missing platform.finance.tax.manage permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid payload, or no fiscal period covers transaction_date
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/platform/finance/reports/tax-summary:
+    get:
+      summary: Tax summary (increase/decrease/net per type) for a date range
+      operationId: getFinanceTaxSummary
+      tags: [Finance - Tax]
+      security: [{BearerAuth: []}]
+      parameters:
+        - {name: start_date, in: query, required: true, schema: {type: string, format: date}}
+        - {name: end_date, in: query, required: true, schema: {type: string, format: date}}
+      responses:
+        "200":
+          description: Tax summary retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FinanceTaxSummaryEnvelope"
+        "403":
+          description: Missing platform.finance.tax.read permission
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   parameters:
     OrganizationID:
@@ -7435,3 +8725,946 @@ components:
         created_at:
           type: string
           format: date-time
+    FinanceJournalStatus:
+      type: string
+      enum: [draft, posted, reversed]
+    FinancePartnerType:
+      type: string
+      enum: [customer, vendor]
+    FinanceARAPTransactionType:
+      type: string
+      enum: [receivable, payable]
+    FinanceARAPTransactionStatus:
+      type: string
+      enum: [open, partially_paid, paid, void]
+    FinanceFixedAssetStatus:
+      type: string
+      enum: [active, fully_depreciated]
+    FinanceTaxDirection:
+      type: string
+      enum: [increase, decrease]
+      description: >-
+        Relative to the chosen tax_account's own normal_balance: 'increase' always
+        moves the account further in its normal direction (credit for a liability
+        like PPN Keluaran, debit for an asset like PPN Masukan); 'decrease' the
+        other way.
+    FinanceTaxCategory:
+      type: string
+      enum: [output_vat, input_vat, withholding, corporate_income]
+    FinanceAccountType:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        code: {type: string, enum: [asset, liability, equity, revenue, expense]}
+        name: {type: string}
+        normal_balance: {type: string, enum: [debit, credit]}
+        financial_statement: {type: string, enum: [balance_sheet, profit_loss]}
+        sort_order: {type: integer}
+    FinanceAccountCategory:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        account_type_id: {type: string, format: uuid}
+        code: {type: string}
+        name: {type: string}
+        report_section: {type: string}
+        sort_order: {type: integer}
+    FinanceAccount:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        account_code: {type: string}
+        account_name: {type: string}
+        account_category_id: {type: string, format: uuid, nullable: true}
+        account_category_code: {type: string}
+        account_category_name: {type: string}
+        account_type_code: {type: string}
+        parent_account_id: {type: string, format: uuid, nullable: true}
+        is_header: {type: boolean}
+        normal_balance: {type: string, enum: [debit, credit]}
+        is_active: {type: boolean}
+        opening_balance: {type: string}
+        opening_balance_date: {type: string, format: date, nullable: true}
+        description: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    CreateFinanceAccountRequest:
+      type: object
+      required: [account_code, account_name, normal_balance]
+      properties:
+        account_code: {type: string}
+        account_name: {type: string}
+        account_category_id: {type: string, format: uuid}
+        parent_account_id: {type: string, format: uuid}
+        is_header: {type: boolean}
+        normal_balance: {type: string, enum: [debit, credit]}
+        opening_balance: {type: string}
+        opening_balance_date: {type: string, format: date}
+        description: {type: string}
+    UpdateFinanceAccountRequest:
+      type: object
+      required: [account_name]
+      properties:
+        account_name: {type: string}
+        account_category_id: {type: string, format: uuid}
+        parent_account_id: {type: string, format: uuid}
+        is_active: {type: boolean}
+        opening_balance: {type: string}
+        opening_balance_date: {type: string, format: date}
+        description: {type: string}
+    FinanceFiscalPeriod:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        fiscal_year_id: {type: string, format: uuid}
+        period_number: {type: integer}
+        start_date: {type: string, format: date}
+        end_date: {type: string, format: date}
+        status: {type: string, enum: [open, closed]}
+        closed_at: {type: string, format: date-time, nullable: true}
+    FinanceFiscalYear:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        year: {type: integer}
+        start_date: {type: string, format: date}
+        end_date: {type: string, format: date}
+        status: {type: string, enum: [open, closed]}
+        closed_at: {type: string, format: date-time, nullable: true}
+        periods:
+          type: array
+          items: {$ref: "#/components/schemas/FinanceFiscalPeriod"}
+    CreateFinanceFiscalYearRequest:
+      type: object
+      required: [year]
+      properties:
+        year: {type: integer}
+    FinanceAccountTypeListEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: "#/components/schemas/FinanceAccountType"}}
+    FinanceAccountCategoryListEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: "#/components/schemas/FinanceAccountCategory"}}
+    FinanceAccountListEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: "#/components/schemas/FinanceAccount"}}
+    FinanceAccountEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/FinanceAccount"}
+    FinanceFiscalYearListEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: "#/components/schemas/FinanceFiscalYear"}}
+    FinanceFiscalYearEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/FinanceFiscalYear"}
+    FinanceFiscalPeriodEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/FinanceFiscalPeriod"}
+    FinanceJournalLine:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        line_number: {type: integer}
+        account_id: {type: string, format: uuid}
+        account_code: {type: string}
+        account_name: {type: string}
+        debit: {type: string}
+        credit: {type: string}
+        description: {type: string}
+        subledger_type: {type: string, enum: [none, customer, vendor, asset, tax_code]}
+        subledger_id: {type: string, format: uuid, nullable: true}
+    FinanceJournalEntry:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        entry_number: {type: string}
+        entry_date: {type: string, format: date}
+        fiscal_period_id: {type: string, format: uuid}
+        source_type: {type: string, enum: [manual, opening_balance, depreciation, ar, ap, tax]}
+        source_id: {type: string, format: uuid, nullable: true}
+        reference: {type: string}
+        description: {type: string}
+        status: {$ref: "#/components/schemas/FinanceJournalStatus"}
+        posted_at: {type: string, format: date-time, nullable: true}
+        reversed_by_entry_id: {type: string, format: uuid, nullable: true}
+        lines:
+          type: array
+          items: {$ref: "#/components/schemas/FinanceJournalLine"}
+        total_debit: {type: string}
+        total_credit: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    CreateFinanceJournalLineRequest:
+      type: object
+      required: [account_id]
+      properties:
+        account_id: {type: string, format: uuid}
+        debit: {type: string}
+        credit: {type: string}
+        description: {type: string}
+    CreateFinanceJournalEntryRequest:
+      type: object
+      required: [entry_date, lines]
+      properties:
+        entry_date: {type: string, format: date}
+        reference: {type: string}
+        description: {type: string}
+        lines:
+          type: array
+          items: {$ref: "#/components/schemas/CreateFinanceJournalLineRequest"}
+    ReverseFinanceJournalEntryRequest:
+      type: object
+      properties:
+        reversal_date: {type: string, format: date}
+        reason: {type: string}
+    FinanceJournalEntryListEnvelope:
+      type: object
+      required: [success, message, data, meta]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: "#/components/schemas/FinanceJournalEntry"}}
+        meta: {$ref: "#/components/schemas/PaginationMeta"}
+    FinanceJournalEntryEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/FinanceJournalEntry"}
+    FinanceTrialBalanceLine:
+      type: object
+      properties:
+        account_id: {type: string, format: uuid}
+        account_code: {type: string}
+        account_name: {type: string}
+        debit: {type: string}
+        credit: {type: string}
+    FinanceTrialBalance:
+      type: object
+      properties:
+        as_of_date: {type: string, format: date}
+        lines:
+          type: array
+          items: {$ref: "#/components/schemas/FinanceTrialBalanceLine"}
+        total_debit: {type: string}
+        total_credit: {type: string}
+        is_balanced: {type: boolean}
+    FinanceReportLine:
+      type: object
+      properties:
+        account_id: {type: string, format: uuid}
+        account_code: {type: string}
+        account_name: {type: string}
+        amount: {type: string}
+    FinanceReportSection:
+      type: object
+      properties:
+        report_section: {type: string}
+        label: {type: string}
+        accounts:
+          type: array
+          items: {$ref: "#/components/schemas/FinanceReportLine"}
+        subtotal: {type: string}
+    FinanceProfitLoss:
+      type: object
+      properties:
+        start_date: {type: string, format: date}
+        end_date: {type: string, format: date}
+        sections:
+          type: array
+          items: {$ref: "#/components/schemas/FinanceReportSection"}
+        net_income: {type: string}
+    FinanceBalanceSheet:
+      type: object
+      properties:
+        as_of_date: {type: string, format: date}
+        asset_sections:
+          type: array
+          items: {$ref: "#/components/schemas/FinanceReportSection"}
+        liability_sections:
+          type: array
+          items: {$ref: "#/components/schemas/FinanceReportSection"}
+        equity_sections:
+          type: array
+          items: {$ref: "#/components/schemas/FinanceReportSection"}
+        current_year_net_income: {type: string}
+        total_assets: {type: string}
+        total_liabilities: {type: string}
+        total_equity: {type: string}
+        is_balanced:
+          type: boolean
+          description: total_assets == total_liabilities + total_equity, where total_equity includes current_year_net_income
+    FinanceGeneralLedgerLine:
+      type: object
+      properties:
+        entry_date: {type: string, format: date}
+        entry_number: {type: string}
+        account_id: {type: string, format: uuid}
+        account_code: {type: string}
+        account_name: {type: string}
+        description: {type: string}
+        debit: {type: string}
+        credit: {type: string}
+    FinanceGeneralLedger:
+      type: object
+      properties:
+        start_date: {type: string, format: date}
+        end_date: {type: string, format: date}
+        lines:
+          type: array
+          items: {$ref: "#/components/schemas/FinanceGeneralLedgerLine"}
+    FinanceAccountLedgerLine:
+      type: object
+      properties:
+        entry_date: {type: string, format: date}
+        entry_number: {type: string}
+        description: {type: string}
+        debit: {type: string}
+        credit: {type: string}
+        running_balance: {type: string}
+    FinanceAccountLedger:
+      type: object
+      properties:
+        account_id: {type: string, format: uuid}
+        account_code: {type: string}
+        account_name: {type: string}
+        start_date: {type: string, format: date}
+        end_date: {type: string, format: date}
+        opening_balance: {type: string}
+        lines:
+          type: array
+          items: {$ref: "#/components/schemas/FinanceAccountLedgerLine"}
+        closing_balance: {type: string}
+    FinanceGeneralLedgerEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/FinanceGeneralLedger"}
+    FinanceAccountLedgerEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/FinanceAccountLedger"}
+    FinanceTrialBalanceEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/FinanceTrialBalance"}
+    FinanceProfitLossEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/FinanceProfitLoss"}
+    FinanceBalanceSheetEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/FinanceBalanceSheet"}
+    FinanceCashBankAccount:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        account_id: {type: string, format: uuid}
+        account_code: {type: string}
+        account_name: {type: string}
+        type: {type: string, enum: [cash, bank]}
+        bank_name: {type: string}
+        account_number: {type: string}
+        account_holder_name: {type: string}
+        currency: {type: string}
+        is_active: {type: boolean}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    CreateFinanceCashBankAccountRequest:
+      type: object
+      required: [account_id, type]
+      properties:
+        account_id: {type: string, format: uuid}
+        type: {type: string, enum: [cash, bank]}
+        bank_name: {type: string}
+        account_number: {type: string}
+        account_holder_name: {type: string}
+    UpdateFinanceCashBankAccountRequest:
+      type: object
+      properties:
+        bank_name: {type: string}
+        account_number: {type: string}
+        account_holder_name: {type: string}
+        is_active: {type: boolean}
+    FinanceCashTransaction:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        cash_bank_account_id: {type: string, format: uuid}
+        cash_bank_account_label: {type: string}
+        transaction_date: {type: string, format: date}
+        transaction_type: {type: string, enum: [cash_in, cash_out, transfer]}
+        amount: {type: string}
+        counter_cash_bank_account_id: {type: string, format: uuid, nullable: true}
+        counter_cash_bank_label: {type: string}
+        contra_account_id: {type: string, format: uuid, nullable: true}
+        contra_account_code: {type: string}
+        contra_account_name: {type: string}
+        reference: {type: string}
+        description: {type: string}
+        journal_entry_id: {type: string, format: uuid}
+        reconciled_at: {type: string, format: date-time, nullable: true}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    CreateFinanceCashTransactionRequest:
+      type: object
+      required: [cash_bank_account_id, transaction_date, transaction_type, amount]
+      properties:
+        cash_bank_account_id: {type: string, format: uuid}
+        transaction_date: {type: string, format: date}
+        transaction_type: {type: string, enum: [cash_in, cash_out, transfer]}
+        amount: {type: string}
+        counter_cash_bank_account_id:
+          type: string
+          format: uuid
+          description: Required when transaction_type is 'transfer'
+        contra_account_id:
+          type: string
+          format: uuid
+          description: Required when transaction_type is 'cash_in' or 'cash_out'
+        reference: {type: string}
+        description: {type: string}
+    FinanceBankReconciliation:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        cash_bank_account_id: {type: string, format: uuid}
+        statement_date: {type: string, format: date}
+        statement_ending_balance: {type: string}
+        book_ending_balance: {type: string}
+        difference: {type: string}
+        status: {type: string, enum: [draft, completed]}
+        notes: {type: string}
+        completed_at: {type: string, format: date-time, nullable: true}
+        created_at: {type: string, format: date-time}
+    CreateFinanceBankReconciliationRequest:
+      type: object
+      required: [cash_bank_account_id, statement_date, statement_ending_balance]
+      properties:
+        cash_bank_account_id: {type: string, format: uuid}
+        statement_date: {type: string, format: date}
+        statement_ending_balance: {type: string}
+        notes: {type: string}
+    FinanceCashBankAccountListEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: "#/components/schemas/FinanceCashBankAccount"}}
+    FinanceCashBankAccountEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/FinanceCashBankAccount"}
+    FinanceCashTransactionListEnvelope:
+      type: object
+      required: [success, message, data, meta]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: "#/components/schemas/FinanceCashTransaction"}}
+        meta: {$ref: "#/components/schemas/PaginationMeta"}
+    FinanceCashTransactionEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/FinanceCashTransaction"}
+    FinanceBankReconciliationListEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: "#/components/schemas/FinanceBankReconciliation"}}
+    FinanceBankReconciliationEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/FinanceBankReconciliation"}
+    FinanceBusinessPartner:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        partner_type: {$ref: "#/components/schemas/FinancePartnerType"}
+        code: {type: string}
+        name: {type: string}
+        tax_id: {type: string}
+        address: {type: string}
+        control_account_id: {type: string, format: uuid}
+        control_account_code: {type: string}
+        control_account_name: {type: string}
+        is_active: {type: boolean}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    CreateFinanceBusinessPartnerRequest:
+      type: object
+      required: [partner_type, code, name, control_account_id]
+      properties:
+        partner_type: {$ref: "#/components/schemas/FinancePartnerType"}
+        code: {type: string}
+        name: {type: string}
+        tax_id: {type: string}
+        address: {type: string}
+        control_account_id: {type: string, format: uuid}
+    UpdateFinanceBusinessPartnerRequest:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+        tax_id: {type: string}
+        address: {type: string}
+        is_active: {type: boolean}
+    FinanceARAPTransaction:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        partner_id: {type: string, format: uuid}
+        partner_code: {type: string}
+        partner_name: {type: string}
+        transaction_type: {$ref: "#/components/schemas/FinanceARAPTransactionType"}
+        transaction_date: {type: string, format: date}
+        due_date: {type: string, format: date}
+        reference_number: {type: string}
+        amount: {type: string}
+        contra_account_id: {type: string, format: uuid}
+        contra_account_code: {type: string}
+        contra_account_name: {type: string}
+        description: {type: string}
+        status: {$ref: "#/components/schemas/FinanceARAPTransactionStatus"}
+        journal_entry_id: {type: string, format: uuid}
+        paid_amount: {type: string}
+        outstanding_amount: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    CreateFinanceARAPTransactionRequest:
+      type: object
+      required: [partner_id, transaction_type, transaction_date, due_date, amount, contra_account_id]
+      properties:
+        partner_id: {type: string, format: uuid}
+        transaction_type: {$ref: "#/components/schemas/FinanceARAPTransactionType"}
+        transaction_date: {type: string, format: date}
+        due_date: {type: string, format: date}
+        reference_number: {type: string}
+        amount: {type: string}
+        contra_account_id:
+          type: string
+          format: uuid
+          description: Revenue account for a receivable, or expense account for a payable
+        description: {type: string}
+    FinanceARAPPayment:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        partner_id: {type: string, format: uuid}
+        payment_date: {type: string, format: date}
+        amount: {type: string}
+        cash_bank_account_id: {type: string, format: uuid}
+        cash_bank_account_label: {type: string}
+        journal_entry_id: {type: string, format: uuid}
+        notes: {type: string}
+        created_at: {type: string, format: date-time}
+    CreateFinanceARAPPaymentRequest:
+      type: object
+      required: [partner_id, ar_ap_transaction_id, payment_date, amount, cash_bank_account_id]
+      properties:
+        partner_id: {type: string, format: uuid}
+        ar_ap_transaction_id: {type: string, format: uuid}
+        payment_date: {type: string, format: date}
+        amount:
+          type: string
+          description: Must not exceed the transaction's current outstanding_amount
+        cash_bank_account_id: {type: string, format: uuid}
+        notes: {type: string}
+    FinanceAgingBucket:
+      type: object
+      properties:
+        label: {type: string}
+        amount: {type: string}
+    FinanceAgingRow:
+      type: object
+      properties:
+        partner_id: {type: string, format: uuid}
+        partner_code: {type: string}
+        partner_name: {type: string}
+        buckets:
+          type: array
+          items: {$ref: "#/components/schemas/FinanceAgingBucket"}
+        total: {type: string}
+    FinanceAgingReport:
+      type: object
+      properties:
+        as_of_date: {type: string, format: date}
+        rows:
+          type: array
+          items: {$ref: "#/components/schemas/FinanceAgingRow"}
+        grand_total: {type: string}
+    FinanceBusinessPartnerListEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: "#/components/schemas/FinanceBusinessPartner"}}
+    FinanceBusinessPartnerEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/FinanceBusinessPartner"}
+    FinanceARAPTransactionListEnvelope:
+      type: object
+      required: [success, message, data, meta]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: "#/components/schemas/FinanceARAPTransaction"}}
+        meta: {$ref: "#/components/schemas/PaginationMeta"}
+    FinanceARAPTransactionEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/FinanceARAPTransaction"}
+    FinanceARAPPaymentEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/FinanceARAPPayment"}
+    FinanceAgingReportEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/FinanceAgingReport"}
+    FinanceAssetCategory:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        code: {type: string}
+        name: {type: string}
+        asset_account_id: {type: string, format: uuid}
+        asset_account_code: {type: string}
+        asset_account_name: {type: string}
+        accumulated_depreciation_account_id: {type: string, format: uuid}
+        accumulated_depreciation_account_code: {type: string}
+        accumulated_depreciation_account_name: {type: string}
+        depreciation_expense_account_id: {type: string, format: uuid}
+        depreciation_expense_account_code: {type: string}
+        depreciation_expense_account_name: {type: string}
+        default_useful_life_months: {type: integer, nullable: true}
+        is_active: {type: boolean}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    CreateFinanceAssetCategoryRequest:
+      type: object
+      required: [code, name, asset_account_id, accumulated_depreciation_account_id, depreciation_expense_account_id]
+      properties:
+        code: {type: string}
+        name: {type: string}
+        asset_account_id: {type: string, format: uuid}
+        accumulated_depreciation_account_id: {type: string, format: uuid}
+        depreciation_expense_account_id: {type: string, format: uuid}
+        default_useful_life_months: {type: integer, nullable: true}
+    FinanceFixedAsset:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        asset_category_id: {type: string, format: uuid}
+        asset_category_code: {type: string}
+        asset_category_name: {type: string}
+        asset_code: {type: string}
+        asset_name: {type: string}
+        acquisition_date: {type: string, format: date}
+        acquisition_cost: {type: string}
+        salvage_value: {type: string}
+        useful_life_months: {type: integer}
+        description: {type: string}
+        status: {$ref: "#/components/schemas/FinanceFixedAssetStatus"}
+        acquisition_journal_entry_id: {type: string, format: uuid}
+        accumulated_depreciation:
+          type: string
+          description: Sum of posted depreciation schedule rows for this asset
+        book_value:
+          type: string
+          description: acquisition_cost - accumulated_depreciation
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    CreateFinanceFixedAssetRequest:
+      type: object
+      required: [asset_category_id, asset_code, asset_name, acquisition_date, acquisition_cost, useful_life_months, contra_account_id]
+      properties:
+        asset_category_id: {type: string, format: uuid}
+        asset_code: {type: string}
+        asset_name: {type: string}
+        acquisition_date: {type: string, format: date}
+        acquisition_cost: {type: string}
+        salvage_value:
+          type: string
+          description: Defaults to 0; must be less than acquisition_cost
+        useful_life_months: {type: integer, minimum: 1}
+        description: {type: string}
+        contra_account_id:
+          type: string
+          format: uuid
+          description: Funding account credited for the acquisition (e.g. a cash/bank account, or an AP control account)
+    FinanceDepreciationSchedule:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        sequence_number: {type: integer}
+        period_date:
+          type: string
+          format: date
+          description: Last day of the period's month
+        depreciation_amount: {type: string}
+        status: {type: string, enum: [pending, posted]}
+        journal_entry_id: {type: string, format: uuid, nullable: true}
+        posted_at: {type: string, format: date-time, nullable: true}
+    PostFinanceDepreciationRequest:
+      type: object
+      required: [as_of_date]
+      properties:
+        as_of_date: {type: string, format: date}
+    PostFinanceDepreciationResultItem:
+      type: object
+      properties:
+        schedule_id: {type: string, format: uuid}
+        asset_code: {type: string}
+        period_date: {type: string, format: date}
+        status: {type: string, enum: [posted, failed]}
+        reason:
+          type: string
+          description: Present when status is 'failed' (e.g. the fiscal period for period_date has not been created yet)
+    PostFinanceDepreciationResult:
+      type: object
+      properties:
+        posted_count: {type: integer}
+        failed_count: {type: integer}
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/PostFinanceDepreciationResultItem"}
+    FinanceTaxType:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        code: {type: string, enum: [PPN_KELUARAN, PPN_MASUKAN, PPH21, PPH23, PPH_BADAN]}
+        name: {type: string}
+        category: {$ref: "#/components/schemas/FinanceTaxCategory"}
+    FinanceTaxRate:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        tax_type_id: {type: string, format: uuid}
+        tax_type_code: {type: string}
+        rate_percent: {type: string}
+        effective_date: {type: string, format: date}
+        end_date: {type: string, format: date, nullable: true}
+        notes: {type: string}
+        created_at: {type: string, format: date-time}
+    CreateFinanceTaxRateRequest:
+      type: object
+      required: [tax_type_id, rate_percent, effective_date]
+      properties:
+        tax_type_id: {type: string, format: uuid}
+        rate_percent: {type: string}
+        effective_date: {type: string, format: date}
+        end_date:
+          type: string
+          format: date
+          description: Leave empty if this rate is still current
+        notes: {type: string}
+    FinanceTaxTransaction:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        tax_type_id: {type: string, format: uuid}
+        tax_type_code: {type: string}
+        tax_type_name: {type: string}
+        transaction_date: {type: string, format: date}
+        reference_number: {type: string}
+        amount: {type: string}
+        direction: {$ref: "#/components/schemas/FinanceTaxDirection"}
+        tax_account_id: {type: string, format: uuid}
+        tax_account_code: {type: string}
+        tax_account_name: {type: string}
+        contra_account_id: {type: string, format: uuid}
+        contra_account_code: {type: string}
+        contra_account_name: {type: string}
+        description: {type: string}
+        journal_entry_id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    CreateFinanceTaxTransactionRequest:
+      type: object
+      required: [tax_type_id, transaction_date, amount, direction, tax_account_id, contra_account_id]
+      properties:
+        tax_type_id: {type: string, format: uuid}
+        transaction_date: {type: string, format: date}
+        reference_number: {type: string}
+        amount: {type: string}
+        direction: {$ref: "#/components/schemas/FinanceTaxDirection"}
+        tax_account_id:
+          type: string
+          format: uuid
+          description: The GL liability/asset account for this tax type (e.g. PPN Keluaran payable)
+        contra_account_id: {type: string, format: uuid}
+        description: {type: string}
+    FinanceTaxSummaryRow:
+      type: object
+      properties:
+        tax_type_id: {type: string, format: uuid}
+        tax_type_code: {type: string}
+        tax_type_name: {type: string}
+        increase: {type: string}
+        decrease: {type: string}
+        net: {type: string}
+    FinanceTaxSummary:
+      type: object
+      properties:
+        start_date: {type: string, format: date}
+        end_date: {type: string, format: date}
+        rows:
+          type: array
+          items: {$ref: "#/components/schemas/FinanceTaxSummaryRow"}
+    FinanceAssetCategoryListEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: "#/components/schemas/FinanceAssetCategory"}}
+    FinanceAssetCategoryEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/FinanceAssetCategory"}
+    FinanceFixedAssetListEnvelope:
+      type: object
+      required: [success, message, data, meta]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: "#/components/schemas/FinanceFixedAsset"}}
+        meta: {$ref: "#/components/schemas/PaginationMeta"}
+    FinanceFixedAssetEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/FinanceFixedAsset"}
+    FinanceDepreciationScheduleListEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: "#/components/schemas/FinanceDepreciationSchedule"}}
+    PostFinanceDepreciationEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/PostFinanceDepreciationResult"}
+    FinanceTaxTypeListEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: "#/components/schemas/FinanceTaxType"}}
+    FinanceTaxRateListEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: "#/components/schemas/FinanceTaxRate"}}
+    FinanceTaxRateEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/FinanceTaxRate"}
+    FinanceTaxTransactionListEnvelope:
+      type: object
+      required: [success, message, data, meta]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: "#/components/schemas/FinanceTaxTransaction"}}
+        meta: {$ref: "#/components/schemas/PaginationMeta"}
+    FinanceTaxTransactionEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/FinanceTaxTransaction"}
+    FinanceTaxSummaryEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: "#/components/schemas/FinanceTaxSummary"}
