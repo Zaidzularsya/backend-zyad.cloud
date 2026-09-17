@@ -67,6 +67,26 @@ func mapARAPError(err error) error {
 	return err
 }
 
+func mapAssetCategoryError(err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return finance.AssetCategoryNotFoundError()
+	}
+	if isUniqueViolation(err) {
+		return finance.ValidationError("asset category code is already in use")
+	}
+	return err
+}
+
+func mapFixedAssetError(err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return finance.FixedAssetNotFoundError()
+	}
+	if isUniqueViolation(err) {
+		return finance.ValidationError("asset code is already in use")
+	}
+	return err
+}
+
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"

@@ -23,6 +23,8 @@ const (
 	ErrCodeReconciliationNotFound  = "FINANCE_RECONCILIATION_NOT_FOUND"
 	ErrCodePartnerNotFound         = "FINANCE_PARTNER_NOT_FOUND"
 	ErrCodeARAPTransactionNotFound = "FINANCE_ARAP_TRANSACTION_NOT_FOUND"
+	ErrCodeAssetCategoryNotFound   = "FINANCE_ASSET_CATEGORY_NOT_FOUND"
+	ErrCodeFixedAssetNotFound      = "FINANCE_FIXED_ASSET_NOT_FOUND"
 )
 
 func AccountNotFoundError() error {
@@ -83,6 +85,14 @@ func PartnerNotFoundError() error {
 
 func ARAPTransactionNotFoundError() error {
 	return coreerrors.New(ErrCodeARAPTransactionNotFound, "AR/AP transaction not found", http.StatusNotFound)
+}
+
+func AssetCategoryNotFoundError() error {
+	return coreerrors.New(ErrCodeAssetCategoryNotFound, "asset category not found", http.StatusNotFound)
+}
+
+func FixedAssetNotFoundError() error {
+	return coreerrors.New(ErrCodeFixedAssetNotFound, "fixed asset not found", http.StatusNotFound)
 }
 
 func ValidationError(message string) error {

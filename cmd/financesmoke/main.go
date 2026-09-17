@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"os"
 
 	"zyad.cloud/internal/config"
@@ -29,10 +30,12 @@ func main() {
 	ledgerRepo := financerepo.NewLedgerRepository(db)
 	cashBankRepo := financerepo.NewCashBankRepository(db)
 	arapRepo := financerepo.NewARAPRepository(db)
+	fixedAssetRepo := financerepo.NewFixedAssetRepository(db)
 
 	fiscalSvc := financeservice.NewFiscalService(fiscalRepo)
 	cashBankSvc := financeservice.NewCashBankService(cashBankRepo, journalRepo, ledgerRepo)
 	arapSvc := financeservice.NewARAPService(arapRepo, journalRepo)
+	fixedAssetSvc := financeservice.NewFixedAssetService(fixedAssetRepo, journalRepo)
 	ledgerSvc := financeservice.NewLedgerService(ledgerRepo, accountRepo)
 
 	fy, err := fiscalSvc.CreateFiscalYear(ctx, dto.CreateFiscalYearRequest{Year: 2097})
@@ -41,7 +44,7 @@ func main() {
 
 	accounts, err := accountRepo.List(ctx, financerepo.AccountListFilter{})
 	must(err, "list accounts")
-	var piutangID, utangID, pendapatanID, bebanID, bankID string
+	var piutangID, utangID, pendapatanID, bebanID, bankID, peralatanID, akumPenyusutanID, bebanPenyusutanID string
 	for _, a := range accounts {
 		switch a.AccountCode {
 		case "1103":
@@ -54,6 +57,12 @@ func main() {
 			bebanID = a.ID
 		case "1102":
 			bankID = a.ID
+		case "1201":
+			peralatanID = a.ID
+		case "1202":
+			akumPenyusutanID = a.ID
+		case "5205":
+			bebanPenyusutanID = a.ID
 		}
 	}
 
@@ -120,6 +129,62 @@ func main() {
 	must(err, "aging report")
 	fmt.Println("aging rows:", len(aging.Rows), "grand total:", aging.GrandTotal)
 
+	// Fixed asset: peralatan kantor 3.600.000, umur 12 bulan, dibeli tunai dari bank.
+	category, err := fixedAssetSvc.CreateCategory(ctx, dto.CreateAssetCategoryRequest{
+		Code: "PERALATAN-SMOKE", Name: "Peralatan Kantor (smoke test)",
+		AssetAccountID: peralatanID, AccumulatedDepreciationAccountID: akumPenyusutanID,
+		DepreciationExpenseAccountID: bebanPenyusutanID,
+	})
+	must(err, "create asset category")
+
+	asset, err := fixedAssetSvc.CreateAsset(ctx, dto.CreateFixedAssetRequest{
+		AssetCategoryID: category.ID, AssetCode: "AST-SMOKE-001", AssetName: "Laptop Kantor (smoke test)",
+		AcquisitionDate: "2097-01-15", AcquisitionCost: "3600000", UsefulLifeMonths: 12, ContraAccountID: bankID,
+	}, "")
+	must(err, "create fixed asset")
+	fmt.Println("fixed asset:", asset.AssetCode, "cost", asset.AcquisitionCost, "book value", asset.BookValue)
+
+	schedule, err := fixedAssetSvc.ListSchedules(ctx, asset.ID)
+	must(err, "list depreciation schedule")
+	if len(schedule) != 12 {
+		fmt.Println("FAIL: expected 12 depreciation schedule rows, got", len(schedule))
+		os.Exit(1)
+	}
+	scheduleTotal, err := sumScheduleAmounts(schedule)
+	must(err, "sum depreciation schedule")
+	if scheduleTotal != "3600000.00" {
+		fmt.Println("FAIL: expected schedule to sum to 3600000.00, got", scheduleTotal)
+		os.Exit(1)
+	}
+	fmt.Println("depreciation schedule: 12 rows, total", scheduleTotal)
+
+	// Post depreciation through end of January — should post exactly period 1.
+	postResult, err := fixedAssetSvc.PostDepreciation(ctx, dto.PostDepreciationRequest{AsOfDate: "2097-01-31"}, "")
+	must(err, "post depreciation (first run)")
+	fmt.Println("post depreciation run 1: posted", postResult.PostedCount, "failed", postResult.FailedCount)
+	if postResult.PostedCount != 1 {
+		fmt.Println("FAIL: expected exactly 1 schedule row posted, got", postResult.PostedCount)
+		os.Exit(1)
+	}
+
+	assetAfterPost, err := fixedAssetSvc.ListAssets(ctx, dto.FixedAssetListQuery{AssetCategoryID: category.ID})
+	must(err, "list assets after posting")
+	if len(assetAfterPost.Items) != 1 || assetAfterPost.Items[0].AccumulatedDepreciation != "300000.00" {
+		fmt.Println("FAIL: expected accumulated depreciation 300000.00 after posting period 1")
+		os.Exit(1)
+	}
+	fmt.Println("asset after posting: accumulated depreciation", assetAfterPost.Items[0].AccumulatedDepreciation,
+		"book value", assetAfterPost.Items[0].BookValue)
+
+	// Re-running the same as-of date must be a no-op (idempotent).
+	postResultAgain, err := fixedAssetSvc.PostDepreciation(ctx, dto.PostDepreciationRequest{AsOfDate: "2097-01-31"}, "")
+	must(err, "post depreciation (second run)")
+	if postResultAgain.PostedCount != 0 {
+		fmt.Println("FAIL: expected re-running post-depreciation for the same date to post 0 rows, got", postResultAgain.PostedCount)
+		os.Exit(1)
+	}
+	fmt.Println("post depreciation run 2 (idempotency check): posted", postResultAgain.PostedCount)
+
 	tb, err := ledgerSvc.TrialBalance(ctx, dto.TrialBalanceQuery{AsOfDate: "2097-12-31"})
 	must(err, "trial balance")
 	fmt.Println("trial balance:", tb.TotalDebit, tb.TotalCredit, "balanced:", tb.IsBalanced)
@@ -150,4 +215,16 @@ func must(err error, step string) {
 		fmt.Println("FAIL at", step, ":", err)
 		os.Exit(1)
 	}
+}
+
+func sumScheduleAmounts(schedule []dto.DepreciationScheduleResponse) (string, error) {
+	total := new(big.Rat)
+	for _, row := range schedule {
+		amount, ok := new(big.Rat).SetString(row.DepreciationAmount)
+		if !ok {
+			return "", fmt.Errorf("invalid depreciation amount %q", row.DepreciationAmount)
+		}
+		total.Add(total, amount)
+	}
+	return total.FloatString(2), nil
 }

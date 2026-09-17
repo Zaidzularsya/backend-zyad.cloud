@@ -302,6 +302,74 @@ type AgingReportResponse struct {
 	GrandTotal string             `json:"grand_total"`
 }
 
+type AssetCategoryResponse struct {
+	ID                                 string `json:"id"`
+	Code                               string `json:"code"`
+	Name                               string `json:"name"`
+	AssetAccountID                     string `json:"asset_account_id"`
+	AssetAccountCode                   string `json:"asset_account_code,omitempty"`
+	AssetAccountName                   string `json:"asset_account_name,omitempty"`
+	AccumulatedDepreciationAccountID   string `json:"accumulated_depreciation_account_id"`
+	AccumulatedDepreciationAccountCode string `json:"accumulated_depreciation_account_code,omitempty"`
+	AccumulatedDepreciationAccountName string `json:"accumulated_depreciation_account_name,omitempty"`
+	DepreciationExpenseAccountID       string `json:"depreciation_expense_account_id"`
+	DepreciationExpenseAccountCode     string `json:"depreciation_expense_account_code,omitempty"`
+	DepreciationExpenseAccountName     string `json:"depreciation_expense_account_name,omitempty"`
+	DefaultUsefulLifeMonths            *int   `json:"default_useful_life_months,omitempty"`
+	IsActive                           bool   `json:"is_active"`
+	CreatedAt                          string `json:"created_at"`
+	UpdatedAt                          string `json:"updated_at"`
+}
+
+type FixedAssetResponse struct {
+	ID                        string `json:"id"`
+	AssetCategoryID           string `json:"asset_category_id"`
+	AssetCategoryCode         string `json:"asset_category_code,omitempty"`
+	AssetCategoryName         string `json:"asset_category_name,omitempty"`
+	AssetCode                 string `json:"asset_code"`
+	AssetName                 string `json:"asset_name"`
+	AcquisitionDate           string `json:"acquisition_date"`
+	AcquisitionCost           string `json:"acquisition_cost"`
+	SalvageValue              string `json:"salvage_value"`
+	UsefulLifeMonths          int    `json:"useful_life_months"`
+	Description               string `json:"description,omitempty"`
+	Status                    string `json:"status"`
+	AcquisitionJournalEntryID string `json:"acquisition_journal_entry_id"`
+	AccumulatedDepreciation   string `json:"accumulated_depreciation"`
+	BookValue                 string `json:"book_value"`
+	CreatedAt                 string `json:"created_at"`
+	UpdatedAt                 string `json:"updated_at"`
+}
+
+type FixedAssetListResponse struct {
+	Items []FixedAssetResponse `json:"items"`
+	Meta  PaginationMeta       `json:"meta"`
+}
+
+type DepreciationScheduleResponse struct {
+	ID                 string  `json:"id"`
+	SequenceNumber     int     `json:"sequence_number"`
+	PeriodDate         string  `json:"period_date"`
+	DepreciationAmount string  `json:"depreciation_amount"`
+	Status             string  `json:"status"`
+	JournalEntryID     *string `json:"journal_entry_id,omitempty"`
+	PostedAt           *string `json:"posted_at,omitempty"`
+}
+
+type PostDepreciationResultItem struct {
+	ScheduleID string `json:"schedule_id"`
+	AssetCode  string `json:"asset_code"`
+	PeriodDate string `json:"period_date"`
+	Status     string `json:"status"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+type PostDepreciationResponse struct {
+	PostedCount int                          `json:"posted_count"`
+	FailedCount int                          `json:"failed_count"`
+	Items       []PostDepreciationResultItem `json:"items"`
+}
+
 type AccountLedgerResponse struct {
 	AccountID      string                      `json:"account_id"`
 	AccountCode    string                      `json:"account_code"`

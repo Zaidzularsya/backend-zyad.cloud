@@ -176,3 +176,39 @@ type AgingReportQuery struct {
 	TransactionType string `form:"transaction_type" binding:"required"`
 	AsOfDate        string `form:"as_of_date" binding:"required"`
 }
+
+type CreateAssetCategoryRequest struct {
+	Code                             string `json:"code" binding:"required"`
+	Name                             string `json:"name" binding:"required"`
+	AssetAccountID                   string `json:"asset_account_id" binding:"required"`
+	AccumulatedDepreciationAccountID string `json:"accumulated_depreciation_account_id" binding:"required"`
+	DepreciationExpenseAccountID     string `json:"depreciation_expense_account_id" binding:"required"`
+	DefaultUsefulLifeMonths          *int   `json:"default_useful_life_months"`
+}
+
+type AssetCategoryListQuery struct {
+	IncludeInactive bool `form:"include_inactive"`
+}
+
+type CreateFixedAssetRequest struct {
+	AssetCategoryID  string `json:"asset_category_id" binding:"required"`
+	AssetCode        string `json:"asset_code" binding:"required"`
+	AssetName        string `json:"asset_name" binding:"required"`
+	AcquisitionDate  string `json:"acquisition_date" binding:"required"`
+	AcquisitionCost  string `json:"acquisition_cost" binding:"required"`
+	SalvageValue     string `json:"salvage_value"`
+	UsefulLifeMonths int    `json:"useful_life_months" binding:"required"`
+	Description      string `json:"description"`
+	ContraAccountID  string `json:"contra_account_id" binding:"required"`
+}
+
+type FixedAssetListQuery struct {
+	AssetCategoryID string `form:"asset_category_id"`
+	Status          string `form:"status"`
+	Page            int    `form:"page"`
+	PerPage         int    `form:"per_page"`
+}
+
+type PostDepreciationRequest struct {
+	AsOfDate string `json:"as_of_date" binding:"required"`
+}

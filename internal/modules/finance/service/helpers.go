@@ -40,6 +40,15 @@ func formatMoney(value *big.Rat) string {
 	return value.FloatString(2)
 }
 
+// roundMoney rounds value to 2 decimal places via the same round-trip
+// formatMoney/moneyRat already use for persisted amounts, so callers doing
+// further exact-decimal arithmetic (e.g. depreciation schedule generation)
+// stay consistent with what gets stored.
+func roundMoney(value *big.Rat) *big.Rat {
+	rounded, _ := moneyRat(formatMoney(value))
+	return rounded
+}
+
 func parseRequiredDate(value string) (time.Time, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
