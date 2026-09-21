@@ -248,15 +248,20 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		deps.PlatformFinanceTaxHandler.RegisterRoutes(protected)
 	}
 
-	// CRM API (tenant-only). Unlike landing, CRM is gated behind a single
-	// root group carrying RequireCustomerTenant (platform organizations get
-	// 403 on every /app/crm/* route) and RequireEntitlement("crm.enabled")
-	// (the whole module is off unless the tenant's plan has it) — see
+	// CRM API. Gated behind a single root group carrying
+	// RequireCustomerOrPlatformTenant (both tenant orgs and the platform's
+	// own organization are allowed in — the platform uses the same CRM to
+	// track its own sales/leads to prospective tenants) and
+	// RequireEntitlement("crm.enabled") (bypassed entirely for the platform
+	// organization, see SubscriptionGuardService.RequireFeature — platform
+	// never subscribes to a plan). Access within CRM is differentiated by
+	// permission grants, not organization type — see migration
+	// 000119_seed_crm_super_admin_permissions and
 	// docs/reference-crm.md "Tenant Boundary" and "Security Baseline".
 	crmGroup := protected.Group("/app/crm")
 	crmGroup.Use(
 		middleware.RequireActiveTenant(),
-		middleware.RequireCustomerTenant(),
+		middleware.RequireCustomerOrPlatformTenant(),
 		middleware.RequireEntitlement(deps.CRMEntitlementChecker, "crm.enabled"),
 	)
 	if deps.CRMCompanyHandler != nil {
