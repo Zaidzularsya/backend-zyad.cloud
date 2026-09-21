@@ -251,6 +251,7 @@ func New(ctx context.Context) (*App, error) {
 	subscriptionGuardService := subscriptionservice.NewSubscriptionGuardService(
 		subscriptionRepo,
 		organizationEntitlementRuntimeService,
+		subscriptionservice.WithOrganizationTypeResolver(organizationrepo.NewOrganizationRepository(db)),
 	)
 	organizationSelfService := organizationservice.NewSelfService(
 		organizationrepo.NewSelfRepository(db),

@@ -163,6 +163,25 @@ func RequireCustomerTenant() gin.HandlerFunc {
 	})
 }
 
+// RequireCustomerOrPlatformTenant allows both tenant (customer) and the
+// platform's own organization through — used by modules like CRM that the
+// platform organization now also uses for its own sales/lead tracking,
+// distinguished by permission grants rather than organization type.
+func RequireCustomerOrPlatformTenant() gin.HandlerFunc {
+	return requireTenant(func(tenantContext coretenant.Context) error {
+		switch tenantContext.OrganizationType() {
+		case coretenant.OrganizationTypeCustomer, coretenant.OrganizationTypePlatform:
+			return nil
+		default:
+			return coreerrors.New(
+				"CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED",
+				"customer or platform organization context is required",
+				http.StatusForbidden,
+			)
+		}
+	})
+}
+
 func TenantLogFields(c *gin.Context) map[string]any {
 	tenantContext, ok := TenantContext(c)
 	if !ok {
