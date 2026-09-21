@@ -269,7 +269,7 @@ type CreateQuotationRequest struct {
 	DealID          string            `json:"deal_id"`
 	ContactID       string            `json:"contact_id"`
 	CompanyID       string            `json:"company_id"`
-	QuotationNumber string            `json:"quotation_number" binding:"required"`
+	QuotationNumber string            `json:"quotation_number"`
 	ValidUntil      *string           `json:"valid_until"`
 	Currency        string            `json:"currency"`
 	Notes           string            `json:"notes"`
@@ -305,7 +305,7 @@ type CreateInvoiceRequest struct {
 	DealID        string            `json:"deal_id"`
 	ContactID     string            `json:"contact_id"`
 	CompanyID     string            `json:"company_id"`
-	InvoiceNumber string            `json:"invoice_number" binding:"required"`
+	InvoiceNumber string            `json:"invoice_number"`
 	IssueDate     *string           `json:"issue_date"`
 	DueDate       *string           `json:"due_date"`
 	Currency      string            `json:"currency"`

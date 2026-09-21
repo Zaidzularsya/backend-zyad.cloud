@@ -12,10 +12,26 @@ import (
 type dealService struct {
 	repo         repository.DealRepository
 	pipelineRepo repository.PipelineRepository
+	contactRepo  repository.ContactRepository
 }
 
-func NewDealService(repo repository.DealRepository, pipelineRepo repository.PipelineRepository) DealService {
-	return &dealService{repo: repo, pipelineRepo: pipelineRepo}
+type DealServiceOption func(*dealService)
+
+// WithDealContactSync makes CloseWon best-effort sync the linked Contact's
+// lifecycle_stage/is_customer to "customer" — without it, that sync is
+// skipped entirely (contactRepo stays nil).
+func WithDealContactSync(repo repository.ContactRepository) DealServiceOption {
+	return func(s *dealService) {
+		s.contactRepo = repo
+	}
+}
+
+func NewDealService(repo repository.DealRepository, pipelineRepo repository.PipelineRepository, opts ...DealServiceOption) DealService {
+	service := &dealService{repo: repo, pipelineRepo: pipelineRepo}
+	for _, opt := range opts {
+		opt(service)
+	}
+	return service
 }
 
 func (s *dealService) validateStageInPipeline(ctx context.Context, scope coretenant.Scope, pipelineID string, stageID string) error {
@@ -95,6 +111,20 @@ func (s *dealService) CloseWon(ctx context.Context, scope coretenant.Scope, id s
 	if err != nil {
 		return domain.Deal{}, crmmodule.MapNotFound(err, "DEAL_NOT_OPEN", "deal not found, already deleted, or not open")
 	}
+
+	if s.contactRepo != nil && deal.ContactID != nil {
+		customerStage := domain.ContactLifecycleCustomer
+		isCustomer := true
+		// Best-effort: a failure syncing the linked Contact's status must not
+		// undo or fail the Deal that already won — the win is the primary
+		// fact, this sync is a secondary derived effect.
+		_, _ = s.contactRepo.Update(ctx, scope, *deal.ContactID, repository.UpdateContactParams{
+			LifecycleStage: &customerStage,
+			IsCustomer:     &isCustomer,
+			UpdatedBy:      updatedBy,
+		})
+	}
+
 	return deal, nil
 }
 
