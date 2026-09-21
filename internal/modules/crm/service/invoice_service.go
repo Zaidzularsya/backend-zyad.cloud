@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"math/big"
+	"strings"
+	"time"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	crmmodule "zyad.cloud/internal/modules/crm"
@@ -12,37 +15,40 @@ import (
 type invoiceService struct {
 	repo          repository.InvoiceRepository
 	quotationRepo repository.QuotationRepository
+	numberRepo    repository.DocumentCounterRepository
 }
 
-func NewInvoiceService(repo repository.InvoiceRepository, quotationRepo repository.QuotationRepository) InvoiceService {
-	return &invoiceService{repo: repo, quotationRepo: quotationRepo}
+func NewInvoiceService(repo repository.InvoiceRepository, quotationRepo repository.QuotationRepository, numberRepo repository.DocumentCounterRepository) InvoiceService {
+	return &invoiceService{repo: repo, quotationRepo: quotationRepo, numberRepo: numberRepo}
 }
 
 // computeInvoiceTotals mirrors quotationService.computeTotals but without a
 // separate discount_total header field (crm_invoices doesn't have one —
 // discounts are only tracked per line item, already folded into LineTotal).
-// Same float64-arithmetic caveat applies.
+// Money arithmetic uses math/big.Rat (not float64) — see computeTotals.
 func (s *invoiceService) computeInvoiceTotals(items []InvoiceLineInput, taxTotalInput string) (subtotal string, grandTotal string, lineItems []repository.InvoiceItemInput, err error) {
-	var subtotalValue float64
+	subtotalValue := new(big.Rat)
+	hundred := big.NewRat(100, 1)
 
 	lineItems = make([]repository.InvoiceItemInput, 0, len(items))
 	for i, item := range items {
-		quantity, parseErr := parseDecimalOrDefault(item.Quantity, 1)
+		quantity, parseErr := parseDecimalOrDefault(item.Quantity, "1")
 		if parseErr != nil {
 			return "", "", nil, ErrInvalidQuotationAmount
 		}
-		unitPrice, parseErr := parseDecimalOrDefault(item.UnitPrice, 0)
+		unitPrice, parseErr := parseDecimalOrDefault(item.UnitPrice, "0")
 		if parseErr != nil {
 			return "", "", nil, ErrInvalidQuotationAmount
 		}
-		discountPercent, parseErr := parseDecimalOrDefault(item.DiscountPercent, 0)
+		discountPercent, parseErr := parseDecimalOrDefault(item.DiscountPercent, "0")
 		if parseErr != nil {
 			return "", "", nil, ErrInvalidQuotationAmount
 		}
 
-		lineSubtotal := quantity * unitPrice
-		lineTotal := lineSubtotal - (lineSubtotal * discountPercent / 100)
-		subtotalValue += lineSubtotal
+		lineSubtotal := new(big.Rat).Mul(quantity, unitPrice)
+		discountAmount := new(big.Rat).Quo(new(big.Rat).Mul(lineSubtotal, discountPercent), hundred)
+		lineTotal := new(big.Rat).Sub(lineSubtotal, discountAmount)
+		subtotalValue.Add(subtotalValue, lineSubtotal)
 
 		lineItems = append(lineItems, repository.InvoiceItemInput{
 			Description:     item.Description,
@@ -54,28 +60,37 @@ func (s *invoiceService) computeInvoiceTotals(items []InvoiceLineInput, taxTotal
 		})
 	}
 
-	taxTotalValue, err := parseDecimalOrDefault(taxTotalInput, 0)
+	taxTotalValue, err := parseDecimalOrDefault(taxTotalInput, "0")
 	if err != nil {
 		return "", "", nil, ErrInvalidQuotationAmount
 	}
 
-	var lineTotalSum float64
+	lineTotalSum := new(big.Rat)
 	for _, item := range lineItems {
-		v, _ := parseDecimalOrDefault(item.LineTotal, 0)
-		lineTotalSum += v
+		v, _ := parseDecimalOrDefault(item.LineTotal, "0")
+		lineTotalSum.Add(lineTotalSum, v)
 	}
-	grandTotalValue := lineTotalSum + taxTotalValue
+	grandTotalValue := new(big.Rat).Add(lineTotalSum, taxTotalValue)
 
 	return formatDecimal(subtotalValue), formatDecimal(grandTotalValue), lineItems, nil
 }
 
 func (s *invoiceService) Create(ctx context.Context, scope coretenant.Scope, input CreateInvoiceInput) (domain.Invoice, error) {
+	invoiceNumber := strings.TrimSpace(input.InvoiceNumber)
+	if invoiceNumber == "" {
+		seq, numErr := s.numberRepo.NextNumber(ctx, scope, "invoice")
+		if numErr != nil {
+			return domain.Invoice{}, numErr
+		}
+		invoiceNumber = formatDocumentNumber("INV", time.Now().UTC().Year(), seq)
+	}
+
 	params := repository.CreateInvoiceParams{
 		QuotationID:   input.QuotationID,
 		DealID:        input.DealID,
 		ContactID:     input.ContactID,
 		CompanyID:     input.CompanyID,
-		InvoiceNumber: input.InvoiceNumber,
+		InvoiceNumber: invoiceNumber,
 		IssueDate:     input.IssueDate,
 		DueDate:       input.DueDate,
 		Currency:      input.Currency,

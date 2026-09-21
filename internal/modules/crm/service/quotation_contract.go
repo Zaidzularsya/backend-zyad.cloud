@@ -11,9 +11,8 @@ import (
 
 // QuotationLineInput is the raw (unpriced-total) line item a caller submits.
 // QuotationService.computeTotals fills in LineTotal/Subtotal/DiscountTotal/
-// GrandTotal from these before handing off to the repository — see that
-// method's doc comment for the float64-arithmetic simplification this
-// implies.
+// GrandTotal from these before handing off to the repository, using
+// math/big.Rat arithmetic (see that method's doc comment).
 type QuotationLineInput struct {
 	Description     string
 	Quantity        string
