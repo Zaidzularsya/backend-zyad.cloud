@@ -23,19 +23,24 @@ const ssrBaseCSS = `*,*::before,*::after{box-sizing:border-box}
 html,body{margin:0;padding:0}
 img,video,iframe{max-width:100%}`
 
-const ssrChromeCSS = `.zyad-tenant-header{display:flex;align-items:center;gap:24px;padding:14px 24px;font-family:'Inter','Segoe UI',system-ui,sans-serif}
+const ssrChromeCSS = `.zyad-tenant-header{padding:14px 24px;font-family:'Inter','Segoe UI',system-ui,sans-serif}
 .zyad-tenant-header--solid{background:#fff;border-bottom:1px solid #e5e7eb}
 .zyad-tenant-header--glass{background:rgba(255,255,255,.72);backdrop-filter:blur(8px);border-bottom:1px solid #e5e7eb}
 .zyad-tenant-header--transparent{background:transparent}
 .zyad-tenant-header--sticky{position:sticky;top:0;z-index:50}
-.zyad-tenant-header--left{justify-content:space-between}
-.zyad-tenant-header--center{justify-content:center}
-.zyad-tenant-header--right{justify-content:flex-end}
-.zyad-tenant-header__brand{display:flex;align-items:center;gap:8px;font-weight:700;color:#0f172a;text-decoration:none;font-size:16px}
+.zyad-tenant-header--fixed{position:fixed;top:0;left:0;right:0;z-index:50}
+.zyad-tenant-header__inner{display:flex;align-items:center;gap:24px;width:100%}
+.zyad-tenant-header--container .zyad-tenant-header__inner{max-width:1120px;margin:0 auto}
+.zyad-tenant-header--group-left .zyad-tenant-header__inner{justify-content:flex-start}
+.zyad-tenant-header--group-center .zyad-tenant-header__inner{justify-content:center}
+.zyad-tenant-header--group-right .zyad-tenant-header__inner{justify-content:flex-end}
+.zyad-tenant-header--split .zyad-tenant-header__nav{margin-left:auto}
+.zyad-tenant-header--spread .zyad-tenant-header__nav{flex:1;justify-content:center}
+.zyad-tenant-header__brand{display:flex;flex:0 0 auto;align-items:center;gap:8px;font-weight:700;color:#0f172a;text-decoration:none;font-size:16px}
 .zyad-tenant-header__brand img{height:28px;width:auto;display:block}
 .zyad-tenant-header__nav{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
 .zyad-tenant-header__nav a{color:#475569;text-decoration:none;font-size:14px;font-weight:500}
-.zyad-tenant-header__action{display:inline-block;padding:9px 18px;border-radius:8px;background:#2563eb;color:#fff;font-weight:600;font-size:14px;text-decoration:none;white-space:nowrap}
+.zyad-tenant-header__action{display:inline-block;flex:0 0 auto;padding:9px 18px;border-radius:8px;background:#2563eb;color:#fff;font-weight:600;font-size:14px;text-decoration:none;white-space:nowrap}
 .zyad-tenant-footer{padding:48px 24px;background:#0f172a;color:#cbd5e1;font-size:14px}
 .zyad-tenant-footer__top{max-width:1120px;margin:0 auto;display:flex;flex-wrap:wrap;gap:32px;justify-content:space-between}
 .zyad-tenant-footer__brand{display:flex;align-items:center;gap:10px;color:#fff;font-weight:800;font-size:16px}
@@ -78,9 +83,11 @@ func sentinelOpenTag(sentinel string) string {
 
 // ssrHeaderPresentation mirrors the FE TenantHeaderPresentation (per-page).
 type ssrHeaderPresentation struct {
-	Sticky      bool   `json:"sticky"`
+	Position    string `json:"position"`
 	Variant     string `json:"variant"`
-	Align       string `json:"align"`
+	Layout      string `json:"layout"`
+	GroupAlign  string `json:"groupAlign"`
+	Container   bool   `json:"container"`
 	ShowAction  bool   `json:"showAction"`
 	ActionLabel string `json:"actionLabel"`
 	ActionURL   string `json:"actionUrl"`
@@ -88,18 +95,30 @@ type ssrHeaderPresentation struct {
 
 func defaultSSRHeaderPresentation() ssrHeaderPresentation {
 	return ssrHeaderPresentation{
-		Sticky: true, Variant: "solid", Align: "left",
+		Position: "sticky", Variant: "solid", Layout: "grouped", GroupAlign: "left", Container: true,
 		ShowAction: true, ActionLabel: "Masuk", ActionURL: "/login",
 	}
 }
 
+var (
+	validSSRPositions   = map[string]bool{"static": true, "sticky": true, "fixed": true}
+	validSSRVariants    = map[string]bool{"solid": true, "transparent": true, "glass": true}
+	validSSRLayouts     = map[string]bool{"grouped": true, "split": true, "spread": true}
+	validSSRGroupAligns = map[string]bool{"left": true, "center": true, "right": true}
+)
+
 // parseSSRHeaderPresentation pulls the data-zyad-header JSON out of a matched
-// sentinel opening tag (bluemonday entity-encodes the value).
+// sentinel opening tag (bluemonday entity-encodes the value). Mirrors
+// grapes.header-component.ts parseHeaderPresentation() — keep both in sync,
+// including the legacy sticky/align migration: presentations saved before
+// this field set only had `sticky: boolean` + `align`, and that old behavior
+// (whole bar shifts as one group) is exactly today's 'grouped' layout, so
+// legacy `align` maps onto `groupAlign` under layout:'grouped'.
 func parseSSRHeaderPresentation(sentinel string) ssrHeaderPresentation {
-	p := defaultSSRHeaderPresentation()
+	d := defaultSSRHeaderPresentation()
 	m := dataZyadHeaderRe.FindStringSubmatch(sentinel)
 	if m == nil {
-		return p
+		return d
 	}
 	raw := m[2]
 	if raw == "" {
@@ -107,19 +126,69 @@ func parseSSRHeaderPresentation(sentinel string) ssrHeaderPresentation {
 	}
 	raw = html.UnescapeString(raw)
 	if raw == "" {
-		return p
+		return d
 	}
-	// Unmarshal onto the defaults so keys absent from the JSON keep their default.
+
+	var p map[string]any
 	if err := json.Unmarshal([]byte(raw), &p); err != nil {
-		return defaultSSRHeaderPresentation()
+		return d
 	}
-	if p.Variant != "solid" && p.Variant != "transparent" && p.Variant != "glass" {
-		p.Variant = "solid"
+
+	legacyAlign, hasLegacyAlign := p["align"].(string)
+	legacySticky, hasLegacySticky := p["sticky"].(bool)
+
+	position := d.Position
+	if v, ok := p["position"].(string); ok && validSSRPositions[v] {
+		position = v
+	} else if hasLegacySticky {
+		if legacySticky {
+			position = "sticky"
+		} else {
+			position = "static"
+		}
 	}
-	if p.Align != "left" && p.Align != "center" && p.Align != "right" {
-		p.Align = "left"
+
+	layout := d.Layout
+	if v, ok := p["layout"].(string); ok && validSSRLayouts[v] {
+		layout = v
 	}
-	return p
+
+	groupAlign := d.GroupAlign
+	if v, ok := p["groupAlign"].(string); ok && validSSRGroupAligns[v] {
+		groupAlign = v
+	} else if hasLegacyAlign && validSSRGroupAligns[legacyAlign] {
+		groupAlign = legacyAlign
+	}
+
+	variant := d.Variant
+	if v, ok := p["variant"].(string); ok && validSSRVariants[v] {
+		variant = v
+	}
+
+	container := d.Container
+	if v, ok := p["container"].(bool); ok {
+		container = v
+	}
+
+	showAction := d.ShowAction
+	if v, ok := p["showAction"].(bool); ok {
+		showAction = v
+	}
+
+	actionLabel := d.ActionLabel
+	if v, ok := p["actionLabel"].(string); ok {
+		actionLabel = v
+	}
+
+	actionURL := d.ActionURL
+	if v, ok := p["actionUrl"].(string); ok {
+		actionURL = v
+	}
+
+	return ssrHeaderPresentation{
+		Position: position, Variant: variant, Layout: layout, GroupAlign: groupAlign,
+		Container: container, ShowAction: showAction, ActionLabel: actionLabel, ActionURL: actionURL,
+	}
 }
 
 type ssrChromeLink struct {
@@ -286,13 +355,29 @@ func buildPricingMarkup(plans []ResolvedPricingPlan) string {
 }
 
 func buildHeaderMarkup(links []ssrChromeLink, branding domain.LandingBranding, p ssrHeaderPresentation) string {
-	var b strings.Builder
-	b.WriteString(`<div class="zyad-tenant-header zyad-tenant-header--` + p.Variant +
-		` zyad-tenant-header--` + p.Align)
-	if p.Sticky {
-		b.WriteString(` zyad-tenant-header--sticky`)
+	containerActive := p.Layout != "spread" && p.Container
+
+	classes := []string{
+		"zyad-tenant-header",
+		"zyad-tenant-header--" + p.Variant,
+		"zyad-tenant-header--" + p.Layout,
 	}
-	b.WriteString(`">`)
+	if p.Layout == "grouped" {
+		classes = append(classes, "zyad-tenant-header--group-"+p.GroupAlign)
+	}
+	if p.Position == "sticky" {
+		classes = append(classes, "zyad-tenant-header--sticky")
+	}
+	if p.Position == "fixed" {
+		classes = append(classes, "zyad-tenant-header--fixed")
+	}
+	if containerActive {
+		classes = append(classes, "zyad-tenant-header--container")
+	}
+
+	var b strings.Builder
+	b.WriteString(`<div class="` + strings.Join(classes, " ") + `">`)
+	b.WriteString(`<div class="zyad-tenant-header__inner">`)
 
 	b.WriteString(`<a class="zyad-tenant-header__brand" href="/">`)
 	if logo := strings.TrimSpace(branding.LogoLightURL); (strings.HasPrefix(logo, "https://") ||
@@ -320,7 +405,7 @@ func buildHeaderMarkup(links []ssrChromeLink, branding domain.LandingBranding, p
 			html.EscapeString(safeSSRHref(p.ActionURL)) + `">` + html.EscapeString(label) + `</a>`)
 	}
 
-	b.WriteString(`</div>`)
+	b.WriteString(`</div></div>`)
 	return b.String()
 }
 
