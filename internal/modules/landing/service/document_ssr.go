@@ -355,7 +355,7 @@ func buildPricingMarkup(plans []ResolvedPricingPlan) string {
 }
 
 func buildHeaderMarkup(links []ssrChromeLink, branding domain.LandingBranding, p ssrHeaderPresentation) string {
-	containerActive := p.Layout != "spread" && p.Container
+	containerActive := p.Container
 
 	classes := []string{
 		"zyad-tenant-header",
