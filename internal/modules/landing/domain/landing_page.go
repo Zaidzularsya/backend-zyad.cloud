@@ -97,13 +97,14 @@ type TrustBadge struct {
 // approval flow, analytics hooks) that require subsystems that don't
 // exist yet; AnalyticsHooks stays an opaque passthrough for forward-compat.
 type PageSettings struct {
-	PublishRequireApproval  bool           `json:"publish_require_approval"`
-	LeadNotificationEmails  []string       `json:"lead_notification_emails"`
-	FooterCopyrightText     string         `json:"footer_copyright_text"`
-	TrustBadges             []TrustBadge   `json:"trust_badges"`
-	SecondaryCTATrackingKey string         `json:"secondary_cta_tracking_key"`
-	NewsletterFormID        string         `json:"newsletter_form_id"`
-	AnalyticsHooks          map[string]any `json:"analytics_hooks,omitempty"`
+	PublishRequireApproval bool           `json:"publish_require_approval"`
+	LeadNotificationEmails []string       `json:"lead_notification_emails"`
+	FooterCopyrightText    string         `json:"footer_copyright_text"`
+	TrustBadges            []TrustBadge   `json:"trust_badges"`
+	SecondaryCTALabel      string         `json:"secondary_cta_label"`
+	SecondaryCTAURL        string         `json:"secondary_cta_url"`
+	NewsletterFormID       string         `json:"newsletter_form_id"`
+	AnalyticsHooks         map[string]any `json:"analytics_hooks,omitempty"`
 }
 
 type LandingPage struct {
