@@ -36,10 +36,10 @@ const ssrChromeCSS = `.zyad-tenant-header{padding:14px 24px;font-family:'Inter',
 .zyad-tenant-header--group-right .zyad-tenant-header__inner{justify-content:flex-end}
 .zyad-tenant-header--split .zyad-tenant-header__nav{margin-left:auto}
 .zyad-tenant-header--spread .zyad-tenant-header__nav{flex:1;justify-content:center}
-.zyad-tenant-header__brand{display:flex;flex:0 0 auto;align-items:center;gap:8px;font-weight:700;color:#0f172a;text-decoration:none;font-size:16px}
+.zyad-tenant-header__brand{display:flex;flex:0 0 auto;align-items:center;gap:8px;font-weight:700;color:var(--zyad-header-brand-color, #0f172a);text-decoration:none;font-size:16px}
 .zyad-tenant-header__brand img{height:28px;width:auto;display:block}
 .zyad-tenant-header__nav{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
-.zyad-tenant-header__nav a{color:#475569;text-decoration:none;font-size:14px;font-weight:500}
+.zyad-tenant-header__nav a{color:var(--zyad-header-nav-color, #475569);text-decoration:none;font-size:14px;font-weight:500}
 .zyad-tenant-header__action{display:inline-block;flex:0 0 auto;padding:9px 18px;border-radius:8px;background:#2563eb;color:#fff;font-weight:600;font-size:14px;text-decoration:none;white-space:nowrap}
 .zyad-tenant-footer{padding:48px 24px;background:#0f172a;color:#cbd5e1;font-size:14px}
 .zyad-tenant-footer__top{max-width:1120px;margin:0 auto;display:flex;flex-wrap:wrap;gap:32px;justify-content:space-between}
@@ -91,12 +91,15 @@ type ssrHeaderPresentation struct {
 	ShowAction  bool   `json:"showAction"`
 	ActionLabel string `json:"actionLabel"`
 	ActionURL   string `json:"actionUrl"`
+	BrandColor  string `json:"brandColor"`
+	NavColor    string `json:"navColor"`
 }
 
 func defaultSSRHeaderPresentation() ssrHeaderPresentation {
 	return ssrHeaderPresentation{
 		Position: "sticky", Variant: "solid", Layout: "grouped", GroupAlign: "left", Container: true,
 		ShowAction: true, ActionLabel: "Masuk", ActionURL: "/login",
+		BrandColor: "#0f172a", NavColor: "#475569",
 	}
 }
 
@@ -105,7 +108,20 @@ var (
 	validSSRVariants    = map[string]bool{"solid": true, "transparent": true, "glass": true}
 	validSSRLayouts     = map[string]bool{"grouped": true, "split": true, "spread": true}
 	validSSRGroupAligns = map[string]bool{"left": true, "center": true, "right": true}
+	// Accepts hex/rgb(a)()/hsl(a)()/bare CSS color keywords — rejects anything
+	// else so a stored value can never break out of the CSS custom property
+	// it's substituted into. Mirrors grapes.header-component.ts's
+	// `safeHeaderColor` and GrapesPageFrame.vue's `safeColor`. Keep in sync.
+	safeSSRColorRe = regexp.MustCompile(`^(#[0-9a-fA-F]{3,8}|[a-zA-Z]{3,24}|(?:rgb|rgba|hsl|hsla)\([\d.,%\s/]+\))$`)
 )
+
+func safeSSRColor(raw, fallback string) string {
+	v := strings.TrimSpace(raw)
+	if v == "" || !safeSSRColorRe.MatchString(v) {
+		return fallback
+	}
+	return v
+}
 
 // parseSSRHeaderPresentation pulls the data-zyad-header JSON out of a matched
 // sentinel opening tag (bluemonday entity-encodes the value). Mirrors
@@ -185,9 +201,20 @@ func parseSSRHeaderPresentation(sentinel string) ssrHeaderPresentation {
 		actionURL = v
 	}
 
+	brandColor := d.BrandColor
+	if v, ok := p["brandColor"].(string); ok {
+		brandColor = safeSSRColor(v, d.BrandColor)
+	}
+
+	navColor := d.NavColor
+	if v, ok := p["navColor"].(string); ok {
+		navColor = safeSSRColor(v, d.NavColor)
+	}
+
 	return ssrHeaderPresentation{
 		Position: position, Variant: variant, Layout: layout, GroupAlign: groupAlign,
 		Container: container, ShowAction: showAction, ActionLabel: actionLabel, ActionURL: actionURL,
+		BrandColor: brandColor, NavColor: navColor,
 	}
 }
 
@@ -375,8 +402,11 @@ func buildHeaderMarkup(links []ssrChromeLink, branding domain.LandingBranding, p
 		classes = append(classes, "zyad-tenant-header--container")
 	}
 
+	styleVars := `--zyad-header-brand-color:` + html.EscapeString(p.BrandColor) +
+		`;--zyad-header-nav-color:` + html.EscapeString(p.NavColor) + `;`
+
 	var b strings.Builder
-	b.WriteString(`<div class="` + strings.Join(classes, " ") + `">`)
+	b.WriteString(`<div class="` + strings.Join(classes, " ") + `" style="` + styleVars + `">`)
 	b.WriteString(`<div class="zyad-tenant-header__inner">`)
 
 	b.WriteString(`<a class="zyad-tenant-header__brand" href="/">`)
