@@ -26,6 +26,15 @@ type SubscriptionGuardEntitlementEvaluator interface {
 	RequireFeature(ctx context.Context, organizationID string, featureKey string) (organizationmodel.Entitlement, error)
 }
 
+// SubscriptionGuardOrganizationStore resolves an organization's type so
+// RequireFeature can bypass subscription/entitlement checks for platform-type
+// organizations (Zyad itself never subscribes to a plan). Optional — nil
+// preserves the pre-existing behavior (every organization goes through the
+// full subscription check).
+type SubscriptionGuardOrganizationStore interface {
+	FindByID(ctx context.Context, id string) (organizationmodel.Organization, error)
+}
+
 type QuotaInput struct {
 	OrganizationID string
 	FeatureKey     string
@@ -37,18 +46,34 @@ type QuotaInput struct {
 type SubscriptionGuardService struct {
 	subscriptions SubscriptionGuardSubscriptionStore
 	entitlements  SubscriptionGuardEntitlementEvaluator
+	organizations SubscriptionGuardOrganizationStore
 	now           func() time.Time
+}
+
+type SubscriptionGuardOption func(*SubscriptionGuardService)
+
+// WithOrganizationTypeResolver enables the platform-organization bypass in
+// RequireFeature. Without it, RequireFeature behaves exactly as before.
+func WithOrganizationTypeResolver(store SubscriptionGuardOrganizationStore) SubscriptionGuardOption {
+	return func(s *SubscriptionGuardService) {
+		s.organizations = store
+	}
 }
 
 func NewSubscriptionGuardService(
 	subscriptions SubscriptionGuardSubscriptionStore,
 	entitlements SubscriptionGuardEntitlementEvaluator,
+	opts ...SubscriptionGuardOption,
 ) *SubscriptionGuardService {
-	return &SubscriptionGuardService{
+	service := &SubscriptionGuardService{
 		subscriptions: subscriptions,
 		entitlements:  entitlements,
 		now:           time.Now,
 	}
+	for _, opt := range opts {
+		opt(service)
+	}
+	return service
 }
 
 func (s *SubscriptionGuardService) RequireFeature(
@@ -56,6 +81,19 @@ func (s *SubscriptionGuardService) RequireFeature(
 	organizationID string,
 	featureKey string,
 ) (organizationmodel.Entitlement, error) {
+	isPlatform, err := s.isPlatformOrganization(ctx, organizationID)
+	if err != nil {
+		return organizationmodel.Entitlement{}, err
+	}
+	if isPlatform {
+		// Platform organizations never subscribe to a plan — treat them as
+		// unconditionally entitled. The zero-value Entitlement has a nil
+		// Limits map, which guardLimit() (used by RequireQuota) already
+		// treats as "no limit", so this also covers quota guards called
+		// directly from service layers (e.g. ContactService.requireCreateQuota),
+		// not just the RequireEntitlement middleware.
+		return organizationmodel.Entitlement{OrganizationID: organizationID, FeatureKey: featureKey}, nil
+	}
 	if err := s.requireUsableSubscription(ctx, organizationID); err != nil {
 		return organizationmodel.Entitlement{}, err
 	}
@@ -64,6 +102,17 @@ func (s *SubscriptionGuardService) RequireFeature(
 		return organizationmodel.Entitlement{}, err
 	}
 	return entitlement, nil
+}
+
+func (s *SubscriptionGuardService) isPlatformOrganization(ctx context.Context, organizationID string) (bool, error) {
+	if s.organizations == nil {
+		return false, nil
+	}
+	org, err := s.organizations.FindByID(ctx, strings.TrimSpace(organizationID))
+	if err != nil {
+		return false, err
+	}
+	return org.IsPlatform(), nil
 }
 
 func (s *SubscriptionGuardService) RequireQuota(ctx context.Context, input QuotaInput) (organizationmodel.Entitlement, error) {

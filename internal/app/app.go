@@ -251,6 +251,7 @@ func New(ctx context.Context) (*App, error) {
 	subscriptionGuardService := subscriptionservice.NewSubscriptionGuardService(
 		subscriptionRepo,
 		organizationEntitlementRuntimeService,
+		subscriptionservice.WithOrganizationTypeResolver(organizationrepo.NewOrganizationRepository(db)),
 	)
 	organizationSelfService := organizationservice.NewSelfService(
 		organizationrepo.NewSelfRepository(db),
@@ -434,13 +435,18 @@ func New(ctx context.Context) (*App, error) {
 		crmPipelineRepo,
 		crmservice.WithPipelineFeatureGate(subscriptionGuardService),
 	)
-	crmDealSvc := crmservice.NewDealService(crmDealRepo, crmPipelineRepo)
+	crmDealSvc := crmservice.NewDealService(
+		crmDealRepo,
+		crmPipelineRepo,
+		crmservice.WithDealContactSync(crmContactRepo),
+	)
 	crmActivityRepo := crmrepo.NewActivityRepository(db)
 	crmActivitySvc := crmservice.NewActivityService(crmActivityRepo, crmLeadRepo, crmContactRepo, crmCompanyRepo, crmDealRepo)
 	crmQuotationRepo := crmrepo.NewQuotationRepository(db)
 	crmInvoiceRepo := crmrepo.NewInvoiceRepository(db)
-	crmQuotationSvc := crmservice.NewQuotationService(crmQuotationRepo)
-	crmInvoiceSvc := crmservice.NewInvoiceService(crmInvoiceRepo, crmQuotationRepo)
+	crmDocumentCounterRepo := crmrepo.NewDocumentCounterRepository(db)
+	crmQuotationSvc := crmservice.NewQuotationService(crmQuotationRepo, crmDocumentCounterRepo)
+	crmInvoiceSvc := crmservice.NewInvoiceService(crmInvoiceRepo, crmQuotationRepo, crmDocumentCounterRepo)
 	crmIntegrationRepo := crmrepo.NewIntegrationRepository(db)
 	crmIntegrationSvc := crmservice.NewIntegrationService(crmIntegrationRepo, cfg.App.Secret)
 	crmCompanyHandler := crmhandler.NewCompanyHandler(crmCompanySvc)

@@ -8,10 +8,23 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	coreerrors "zyad.cloud/internal/core/errors"
+	coretenant "zyad.cloud/internal/core/tenant"
 	organizationmodel "zyad.cloud/internal/modules/organization/model"
 	subscriptionmodel "zyad.cloud/internal/modules/subscription/model"
 	"zyad.cloud/internal/modules/subscription/repository"
 )
+
+type stubSubscriptionGuardOrganizationStore struct {
+	organization organizationmodel.Organization
+	err          error
+}
+
+func (s stubSubscriptionGuardOrganizationStore) FindByID(
+	context.Context,
+	string,
+) (organizationmodel.Organization, error) {
+	return s.organization, s.err
+}
 
 type stubSubscriptionGuardSubscriptionStore struct {
 	usableErr error
@@ -116,6 +129,43 @@ func TestSubscriptionGuardAllowsFeatureAndQuota(t *testing.T) {
 	if entitlement.FeatureKey != "landing.max_pages" {
 		t.Fatalf("FeatureKey = %s, want landing.max_pages", entitlement.FeatureKey)
 	}
+}
+
+func TestSubscriptionGuardBypassesPlatformOrganization(t *testing.T) {
+	// The subscription store is set up to fail (no rows, no latest
+	// subscription) so that if the bypass didn't actually skip
+	// requireUsableSubscription, this test would fail with
+	// SUBSCRIPTION_NOT_FOUND instead of succeeding.
+	service := NewSubscriptionGuardService(
+		stubSubscriptionGuardSubscriptionStore{usableErr: pgx.ErrNoRows},
+		stubSubscriptionGuardEntitlementEvaluator{
+			err: coreerrors.New("ORGANIZATION_FEATURE_NOT_ENTITLED", "not entitled", http.StatusForbidden),
+		},
+		WithOrganizationTypeResolver(stubSubscriptionGuardOrganizationStore{
+			organization: organizationmodel.Organization{Type: coretenant.OrganizationTypePlatform},
+		}),
+	)
+
+	entitlement, err := service.RequireFeature(context.Background(), "platform-org", "crm.enabled")
+	if err != nil {
+		t.Fatalf("RequireFeature() error = %v, want nil (platform bypass)", err)
+	}
+	if entitlement.FeatureKey != "crm.enabled" {
+		t.Fatalf("FeatureKey = %s, want crm.enabled", entitlement.FeatureKey)
+	}
+}
+
+func TestSubscriptionGuardStillEnforcesCustomerOrganization(t *testing.T) {
+	service := NewSubscriptionGuardService(
+		stubSubscriptionGuardSubscriptionStore{usableErr: pgx.ErrNoRows},
+		stubSubscriptionGuardEntitlementEvaluator{},
+		WithOrganizationTypeResolver(stubSubscriptionGuardOrganizationStore{
+			organization: organizationmodel.Organization{Type: coretenant.OrganizationTypeCustomer},
+		}),
+	)
+
+	_, err := service.RequireFeature(context.Background(), "tenant-org", "crm.enabled")
+	assertAppErrorCode(t, err, "SUBSCRIPTION_NOT_FOUND")
 }
 
 func assertAppErrorCode(t *testing.T, err error, code string) {

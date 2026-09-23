@@ -25,9 +25,11 @@ type ResolvedPage struct {
 	CSS     string
 }
 
-// ResolvedCTA is the public-safe projection of domain.LandingCTA, exposed so the
-// renderer can resolve PageSettings.SecondaryCTATrackingKey to a label/url
-// without a separate authenticated request (FTR-FE-014).
+// ResolvedCTA is the public-safe projection of domain.LandingCTA. The footer
+// secondary CTA now reads PageSettings.SecondaryCTALabel/SecondaryCTAURL
+// directly instead of looking one of these up by tracking key — this type
+// stays for other reusable-CTA consumers of the admin CTA API
+// (/admin/landing/ctas), not the footer secondary CTA anymore.
 type ResolvedCTA struct {
 	ID          string `json:"id"`
 	Label       string `json:"label"`

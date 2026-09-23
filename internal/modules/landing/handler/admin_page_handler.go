@@ -234,13 +234,14 @@ func pageSettingsFromDomain(settings domain.PageSettings) dto.PageSettingsRespon
 		badges = append(badges, dto.TrustBadgeItem{ImageURL: b.ImageURL, Label: b.Label})
 	}
 	return dto.PageSettingsResponse{
-		PublishRequireApproval:  settings.PublishRequireApproval,
-		LeadNotificationEmails:  settings.LeadNotificationEmails,
-		FooterCopyrightText:     settings.FooterCopyrightText,
-		TrustBadges:             badges,
-		SecondaryCTATrackingKey: settings.SecondaryCTATrackingKey,
-		NewsletterFormID:        settings.NewsletterFormID,
-		AnalyticsHooks:          settings.AnalyticsHooks,
+		PublishRequireApproval: settings.PublishRequireApproval,
+		LeadNotificationEmails: settings.LeadNotificationEmails,
+		FooterCopyrightText:    settings.FooterCopyrightText,
+		TrustBadges:            badges,
+		SecondaryCTALabel:      settings.SecondaryCTALabel,
+		SecondaryCTAURL:        settings.SecondaryCTAURL,
+		NewsletterFormID:       settings.NewsletterFormID,
+		AnalyticsHooks:         settings.AnalyticsHooks,
 	}
 }
 
@@ -250,13 +251,14 @@ func pageSettingsToDomain(req dto.PageSettingsRequest) domain.PageSettings {
 		badges = append(badges, domain.TrustBadge{ImageURL: b.ImageURL, Label: b.Label})
 	}
 	return domain.PageSettings{
-		PublishRequireApproval:  req.PublishRequireApproval,
-		LeadNotificationEmails:  req.LeadNotificationEmails,
-		FooterCopyrightText:     req.FooterCopyrightText,
-		TrustBadges:             badges,
-		SecondaryCTATrackingKey: req.SecondaryCTATrackingKey,
-		NewsletterFormID:        req.NewsletterFormID,
-		AnalyticsHooks:          req.AnalyticsHooks,
+		PublishRequireApproval: req.PublishRequireApproval,
+		LeadNotificationEmails: req.LeadNotificationEmails,
+		FooterCopyrightText:    req.FooterCopyrightText,
+		TrustBadges:            badges,
+		SecondaryCTALabel:      req.SecondaryCTALabel,
+		SecondaryCTAURL:        req.SecondaryCTAURL,
+		NewsletterFormID:       req.NewsletterFormID,
+		AnalyticsHooks:         req.AnalyticsHooks,
 	}
 }
 

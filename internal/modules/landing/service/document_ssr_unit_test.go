@@ -75,7 +75,7 @@ func TestRenderGrapesDocumentFillsTenantSentinels(t *testing.T) {
 		t.Fatalf("sentinel placeholder not replaced: %s", doc)
 	}
 	// Header filled: brand + nav (sorted, disabled item dropped) + default action.
-	if !strings.Contains(doc, `class="zyad-tenant-header zyad-tenant-header--solid zyad-tenant-header--left zyad-tenant-header--sticky"`) {
+	if !strings.Contains(doc, `class="zyad-tenant-header zyad-tenant-header--solid zyad-tenant-header--grouped zyad-tenant-header--group-left zyad-tenant-header--sticky zyad-tenant-header--container"`) {
 		t.Fatalf("tenant-header not filled with default presentation: %s", doc)
 	}
 	if !strings.Contains(doc, `<nav class="zyad-tenant-header__nav"><a href="/">Beranda</a><a href="/pricing">Harga</a></nav>`) {
@@ -104,16 +104,32 @@ func TestRenderGrapesDocumentFillsTenantSentinels(t *testing.T) {
 func TestRenderGrapesDocumentAppliesHeaderPresentation(t *testing.T) {
 	page := grapesResolvedFixture()
 	// bluemonday-style entity-encoded attribute value.
-	page.HTML = `<div data-zyad-slot="tenant-nav" data-zyad-header="{&#34;sticky&#34;:false,&#34;variant&#34;:&#34;transparent&#34;,&#34;align&#34;:&#34;center&#34;,&#34;showAction&#34;:false,&#34;actionLabel&#34;:&#34;Masuk&#34;,&#34;actionUrl&#34;:&#34;/login&#34;}"></div><main>x</main>`
+	page.HTML = `<div data-zyad-slot="tenant-nav" data-zyad-header="{&#34;position&#34;:&#34;static&#34;,&#34;variant&#34;:&#34;transparent&#34;,&#34;layout&#34;:&#34;grouped&#34;,&#34;groupAlign&#34;:&#34;center&#34;,&#34;container&#34;:false,&#34;showAction&#34;:false,&#34;actionLabel&#34;:&#34;Masuk&#34;,&#34;actionUrl&#34;:&#34;/login&#34;}"></div><main>x</main>`
 
 	doc := RenderGrapesDocument(page)
 
 	// The class attribute (not the CSS block) reflects the presentation.
-	if !strings.Contains(doc, `class="zyad-tenant-header zyad-tenant-header--transparent zyad-tenant-header--center"`) {
-		t.Fatalf("presentation not applied (variant/align/no-sticky): %s", doc)
+	if !strings.Contains(doc, `class="zyad-tenant-header zyad-tenant-header--transparent zyad-tenant-header--grouped zyad-tenant-header--group-center"`) {
+		t.Fatalf("presentation not applied (variant/layout/groupAlign/no-position): %s", doc)
 	}
 	if strings.Contains(doc, `<a class="zyad-tenant-header__action"`) {
 		t.Fatalf("showAction:false must drop the action button: %s", doc)
+	}
+}
+
+func TestRenderGrapesDocumentMigratesLegacyHeaderPresentation(t *testing.T) {
+	// Presentations saved before position/layout/groupAlign/container existed
+	// only had sticky/align. Mirrors grapes.header-component.spec.ts's
+	// migration tests — must keep already-published pages visually
+	// unchanged (align -> groupAlign under layout:'grouped'), except
+	// container now defaulting to true.
+	page := grapesResolvedFixture()
+	page.HTML = `<div data-zyad-slot="tenant-nav" data-zyad-header="{&#34;sticky&#34;:false,&#34;variant&#34;:&#34;glass&#34;,&#34;align&#34;:&#34;right&#34;,&#34;showAction&#34;:true,&#34;actionLabel&#34;:&#34;Masuk&#34;,&#34;actionUrl&#34;:&#34;/login&#34;}"></div><main>x</main>`
+
+	doc := RenderGrapesDocument(page)
+
+	if !strings.Contains(doc, `class="zyad-tenant-header zyad-tenant-header--glass zyad-tenant-header--grouped zyad-tenant-header--group-right zyad-tenant-header--container"`) {
+		t.Fatalf("legacy sticky/align presentation not migrated correctly: %s", doc)
 	}
 }
 
@@ -147,7 +163,7 @@ func TestRenderGrapesDocumentPreservesCustomStyleOnSentinel(t *testing.T) {
 	// resolved.CSS) is reused as-is.
 	page := grapesResolvedFixture()
 	page.HTML = `<div data-zyad-slot="tenant-nav" class="hdr-x" id="ihq2" style="opacity:.9" ` +
-		`data-zyad-header="{&#34;sticky&#34;:true,&#34;variant&#34;:&#34;solid&#34;,&#34;align&#34;:&#34;left&#34;,` +
+		`data-zyad-header="{&#34;position&#34;:&#34;sticky&#34;,&#34;variant&#34;:&#34;solid&#34;,&#34;layout&#34;:&#34;grouped&#34;,&#34;groupAlign&#34;:&#34;left&#34;,` +
 		`&#34;showAction&#34;:true,&#34;actionLabel&#34;:&#34;Masuk&#34;,&#34;actionUrl&#34;:&#34;/login&#34;}">` +
 		`</div><main>x</main>` +
 		`<div data-zyad-slot="tenant-footer" class="ftr-x"></div>`
