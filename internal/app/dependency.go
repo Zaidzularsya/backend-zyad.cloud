@@ -68,6 +68,8 @@ type Dependencies struct {
 	CRMCompanyHandler                *crmhandler.CompanyHandler
 	CRMContactHandler                *crmhandler.ContactHandler
 	CRMLeadHandler                   *crmhandler.LeadHandler
+	CRMLeadAttachmentHandler         *crmhandler.LeadAttachmentHandler
+	CRMMemberHandler                 *crmhandler.MemberHandler
 	CRMPipelineHandler               *crmhandler.PipelineHandler
 	CRMDealHandler                   *crmhandler.DealHandler
 	CRMActivityHandler               *crmhandler.ActivityHandler

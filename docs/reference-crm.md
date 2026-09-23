@@ -227,6 +227,34 @@ sama sekali (di luar scope 5 fase ini, perlu iterasi terpisah):
   (`quotation_id`) — keduanya masih input ID manual.
 - Library desimal untuk perhitungan quotation/invoice (saat ini `float64` biasa).
 
+## Lead Detail (iterasi setelah Fase 5)
+
+Mendukung halaman detail lead 3-panel di FE (`LeadDetailPage.vue`).
+
+- **Migration `000120`**: kolom `crm_leads.job_title` (varchar 150), `annual_revenue` (numeric(18,2),
+  `CHECK >= 0`, representasi string di API seperti `crm_deals.value`), `address` (jsonb, default `{}`,
+  bentuk sama dengan `crm_contacts.address`). `job_title` dan `address` ikut dibawa ke contact saat
+  `LeadService.Convert`.
+- **Migration `000121`**: tabel `crm_lead_attachments` (link `lead_id` → `asset_objects.id`, RLS aktif).
+  File-nya disimpan lewat modul `asset` (`AssetService.UploadObject`, class `private`, label
+  `crm_lead:<lead_id>`), jadi batas MIME (JPG/PNG/WEBP/PDF), 10MB per file, kuota `storage.max_bytes`, dan
+  presigned download mengikuti modul asset. File lampiran juga muncul di `/admin/storage/objects`.
+  Hapus lampiran = hapus object storage dulu, baru link-nya (lihat komentar
+  `LeadAttachmentService.Delete`).
+- **Endpoint baru** (di bawah `/api/v1/app/crm`, permission yang sudah ada — tidak ada seed baru):
+  - `GET /leads/:id/attachments` (`lead.read`), `POST /leads/:id/attachments` multipart field `file`
+    (`lead.update`), `GET /leads/:id/attachments/:attachmentId/download` (`lead.read`),
+    `DELETE /leads/:id/attachments/:attachmentId` (`lead.update`).
+  - `GET /members` (`lead.read`) — anggota **aktif** organization (`user_id`, `name`, `email`) untuk
+    dropdown owner. Sengaja tidak memakai `/users` karena itu butuh `user.read` global.
+- **Perubahan kontrak lead** (aditif, backward compatible): request create/update menerima `job_title`,
+  `annual_revenue` (string desimal; `""` = kosongkan), `address`; response menambah `owner_name`,
+  `job_title`, `annual_revenue`, `address`.
+- **Validasi owner** (perubahan perilaku): `owner_user_id` pada create/update/assign lead sekarang harus
+  anggota aktif organization yang sama (`ErrLeadOwnerNotMember`, HTTP 422). Sebelumnya UUID user mana pun
+  diterima. `owner_name` di response juga hanya diisi untuk user yang punya membership di organization lead.
+- **Belum**: Tickets dan Playbook di panel kanan (belum ada modul/tabelnya — ditunda atas keputusan user).
+
 ## Non-Goals
 
 - Tidak menggantikan atau berinteraksi langsung dengan `billing_invoices`/`billing_payments` (modul

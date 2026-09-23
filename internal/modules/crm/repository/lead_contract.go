@@ -19,28 +19,35 @@ type LeadListFilter struct {
 // CreateLeadParams intentionally excludes OrganizationID. Implementations
 // must persist organization identity from Scope.
 type CreateLeadParams struct {
-	ContactName string
-	CompanyName string
-	Email       string
-	Phone       string
-	Source      string
-	Score       int
-	OwnerUserID string
-	Notes       string
-	CreatedBy   string
+	ContactName   string
+	CompanyName   string
+	Email         string
+	Phone         string
+	Source        string
+	Score         int
+	OwnerUserID   string
+	Notes         string
+	JobTitle      string
+	AnnualRevenue string
+	Address       map[string]any
+	CreatedBy     string
 }
 
 type UpdateLeadParams struct {
-	ContactName *string
-	CompanyName *string
-	Email       *string
-	Phone       *string
-	Source      *string
-	Status      *domain.LeadStatus
-	Score       *int
-	OwnerUserID *string
-	Notes       *string
-	UpdatedBy   string
+	ContactName   *string
+	CompanyName   *string
+	Email         *string
+	Phone         *string
+	Source        *string
+	Status        *domain.LeadStatus
+	Score         *int
+	OwnerUserID   *string
+	Notes         *string
+	JobTitle      *string
+	AnnualRevenue *string
+	// Address nil = tidak diubah; map kosong = kosongkan.
+	Address   map[string]any
+	UpdatedBy string
 }
 
 // MarkConvertedParams records the result of converting a lead into working

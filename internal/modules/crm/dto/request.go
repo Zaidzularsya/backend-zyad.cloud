@@ -98,6 +98,10 @@ type CreateLeadRequest struct {
 	Score       int    `json:"score" binding:"omitempty,min=0,max=100"`
 	OwnerUserID string `json:"owner_user_id"`
 	Notes       string `json:"notes"`
+	JobTitle    string `json:"job_title" binding:"omitempty,max=150"`
+	// AnnualRevenue string desimal (mis. "5000000.50"), divalidasi di service.
+	AnnualRevenue string         `json:"annual_revenue"`
+	Address       map[string]any `json:"address"`
 }
 
 // UpdateLeadRequest binds the payload for updating a lead.
@@ -111,6 +115,10 @@ type UpdateLeadRequest struct {
 	Score       *int    `json:"score"`
 	OwnerUserID *string `json:"owner_user_id"`
 	Notes       *string `json:"notes"`
+	JobTitle    *string `json:"job_title" binding:"omitempty,max=150"`
+	// AnnualRevenue "" = kosongkan (NULL).
+	AnnualRevenue *string        `json:"annual_revenue"`
+	Address       map[string]any `json:"address"`
 }
 
 // AssignLeadRequest binds the payload for assigning a lead to a user.

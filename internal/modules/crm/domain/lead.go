@@ -24,17 +24,24 @@ func (s LeadStatus) IsValid() bool {
 // Lead represents an unqualified prospect before it is converted into a
 // Contact/Company/Deal.
 type Lead struct {
-	ID                 string
-	OrganizationID     string
-	ContactName        string
-	CompanyName        string
-	Email              string
-	Phone              string
-	Source             string
-	Status             LeadStatus
-	Score              int
-	OwnerUserID        string
-	Notes              string
+	ID             string
+	OrganizationID string
+	ContactName    string
+	CompanyName    string
+	Email          string
+	Phone          string
+	Source         string
+	Status         LeadStatus
+	Score          int
+	OwnerUserID    string
+	// OwnerName diturunkan (subquery ke users), tidak disimpan di crm_leads.
+	OwnerName string
+	Notes     string
+	JobTitle  string
+	// AnnualRevenue disimpan numeric(18,2); dibawa sebagai string supaya
+	// presisi desimal tidak hilang (pola sama seperti Deal.Value).
+	AnnualRevenue      *string
+	Address            map[string]any
 	ConvertedContactID *string
 	ConvertedCompanyID *string
 	ConvertedDealID    *string
