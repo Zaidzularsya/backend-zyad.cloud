@@ -121,23 +121,27 @@ func ContactListFromDomain(contacts []domain.Contact) []ContactResponse {
 }
 
 type LeadResponse struct {
-	ID                 string     `json:"id"`
-	ContactName        string     `json:"contact_name"`
-	CompanyName        string     `json:"company_name,omitempty"`
-	Email              string     `json:"email,omitempty"`
-	Phone              string     `json:"phone,omitempty"`
-	Source             string     `json:"source,omitempty"`
-	Status             string     `json:"status"`
-	Score              int        `json:"score"`
-	OwnerUserID        string     `json:"owner_user_id,omitempty"`
-	Notes              string     `json:"notes,omitempty"`
-	ConvertedContactID *string    `json:"converted_contact_id,omitempty"`
-	ConvertedCompanyID *string    `json:"converted_company_id,omitempty"`
-	ConvertedDealID    *string    `json:"converted_deal_id,omitempty"`
-	ConvertedAt        *time.Time `json:"converted_at,omitempty"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
-	DeletedAt          *time.Time `json:"deleted_at,omitempty"`
+	ID                 string         `json:"id"`
+	ContactName        string         `json:"contact_name"`
+	CompanyName        string         `json:"company_name,omitempty"`
+	Email              string         `json:"email,omitempty"`
+	Phone              string         `json:"phone,omitempty"`
+	Source             string         `json:"source,omitempty"`
+	Status             string         `json:"status"`
+	Score              int            `json:"score"`
+	OwnerUserID        string         `json:"owner_user_id,omitempty"`
+	OwnerName          string         `json:"owner_name,omitempty"`
+	Notes              string         `json:"notes,omitempty"`
+	JobTitle           string         `json:"job_title,omitempty"`
+	AnnualRevenue      *string        `json:"annual_revenue,omitempty"`
+	Address            map[string]any `json:"address"`
+	ConvertedContactID *string        `json:"converted_contact_id,omitempty"`
+	ConvertedCompanyID *string        `json:"converted_company_id,omitempty"`
+	ConvertedDealID    *string        `json:"converted_deal_id,omitempty"`
+	ConvertedAt        *time.Time     `json:"converted_at,omitempty"`
+	CreatedAt          time.Time      `json:"created_at"`
+	UpdatedAt          time.Time      `json:"updated_at"`
+	DeletedAt          *time.Time     `json:"deleted_at,omitempty"`
 }
 
 func LeadFromDomain(l domain.Lead) LeadResponse {
@@ -151,7 +155,11 @@ func LeadFromDomain(l domain.Lead) LeadResponse {
 		Status:             string(l.Status),
 		Score:              l.Score,
 		OwnerUserID:        l.OwnerUserID,
+		OwnerName:          l.OwnerName,
 		Notes:              l.Notes,
+		JobTitle:           l.JobTitle,
+		AnnualRevenue:      l.AnnualRevenue,
+		Address:            l.Address,
 		ConvertedContactID: l.ConvertedContactID,
 		ConvertedCompanyID: l.ConvertedCompanyID,
 		ConvertedDealID:    l.ConvertedDealID,
@@ -531,4 +539,50 @@ func LeadConversionFromDomain(result domain.LeadConversionResult) LeadConversion
 		resp.Company = &companyResp
 	}
 	return resp
+}
+
+type MemberResponse struct {
+	UserID string `json:"user_id"`
+	Name   string `json:"name"`
+	Email  string `json:"email"`
+}
+
+func MemberListFromDomain(members []domain.OrganizationMember) []MemberResponse {
+	items := make([]MemberResponse, 0, len(members))
+	for _, m := range members {
+		items = append(items, MemberResponse{UserID: m.UserID, Name: m.Name, Email: m.Email})
+	}
+	return items
+}
+
+type LeadAttachmentResponse struct {
+	ID            string    `json:"id"`
+	LeadID        string    `json:"lead_id"`
+	AssetObjectID string    `json:"asset_object_id"`
+	Filename      string    `json:"filename"`
+	MimeType      string    `json:"mime_type"`
+	SizeBytes     int64     `json:"size_bytes"`
+	CreatedBy     string    `json:"created_by,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+func LeadAttachmentFromDomain(a domain.LeadAttachment) LeadAttachmentResponse {
+	return LeadAttachmentResponse{
+		ID:            a.ID,
+		LeadID:        a.LeadID,
+		AssetObjectID: a.AssetObjectID,
+		Filename:      a.Filename,
+		MimeType:      a.MimeType,
+		SizeBytes:     a.SizeBytes,
+		CreatedBy:     a.CreatedBy,
+		CreatedAt:     a.CreatedAt,
+	}
+}
+
+func LeadAttachmentListFromDomain(attachments []domain.LeadAttachment) []LeadAttachmentResponse {
+	items := make([]LeadAttachmentResponse, 0, len(attachments))
+	for _, a := range attachments {
+		items = append(items, LeadAttachmentFromDomain(a))
+	}
+	return items
 }

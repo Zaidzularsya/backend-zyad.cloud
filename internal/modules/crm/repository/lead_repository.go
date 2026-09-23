@@ -39,22 +39,35 @@ func (r *leadRepository) withTx(ctx context.Context, scope coretenant.Scope, fn 
 	return tx.Commit(ctx)
 }
 
+// owner_name dibatasi ke user yang (pernah) menjadi anggota organization lead
+// ini, supaya owner_user_id asing tidak bisa dipakai untuk membaca nama user
+// tenant lain. Dipakai juga di klausa RETURNING, jadi referensi tabel luar
+// ditulis eksplisit sebagai crm_leads.
 const leadColumns = `
 	id, organization_id, contact_name, company_name, email, phone, source, status, score,
 	owner_user_id, notes, converted_contact_id, converted_company_id, converted_deal_id, converted_at,
-	created_by, updated_by, created_at, updated_at, deleted_at
+	created_by, updated_by, created_at, updated_at, deleted_at,
+	job_title, annual_revenue::text, address,
+	(
+		SELECT u.name FROM users u
+		JOIN organization_memberships m
+			ON m.user_id = u.id AND m.organization_id = crm_leads.organization_id
+		WHERE u.id = crm_leads.owner_user_id
+	) AS owner_name
 `
 
 func scanLead(row pgx.Row) (domain.Lead, error) {
 	var l domain.Lead
 	var companyName, email, phone, source, notes *string
 	var ownerUserID, createdBy, updatedBy *string
+	var jobTitle, ownerName *string
 	var status string
 
 	err := row.Scan(
 		&l.ID, &l.OrganizationID, &l.ContactName, &companyName, &email, &phone, &source, &status, &l.Score,
 		&ownerUserID, &notes, &l.ConvertedContactID, &l.ConvertedCompanyID, &l.ConvertedDealID, &l.ConvertedAt,
 		&createdBy, &updatedBy, &l.CreatedAt, &l.UpdatedAt, &l.DeletedAt,
+		&jobTitle, &l.AnnualRevenue, &l.Address, &ownerName,
 	)
 	if err != nil {
 		return domain.Lead{}, err
@@ -79,6 +92,15 @@ func scanLead(row pgx.Row) (domain.Lead, error) {
 	if ownerUserID != nil {
 		l.OwnerUserID = *ownerUserID
 	}
+	if ownerName != nil {
+		l.OwnerName = *ownerName
+	}
+	if jobTitle != nil {
+		l.JobTitle = *jobTitle
+	}
+	if l.Address == nil {
+		l.Address = map[string]any{}
+	}
 	if createdBy != nil {
 		l.CreatedBy = *createdBy
 	}
@@ -94,12 +116,17 @@ func (r *leadRepository) Create(ctx context.Context, scope coretenant.Scope, par
 		return domain.Lead{}, coretenant.ErrInvalidScope
 	}
 
+	address := params.Address
+	if address == nil {
+		address = map[string]any{}
+	}
+
 	query := `
 		INSERT INTO crm_leads (
 			organization_id, contact_name, company_name, email, phone, source, status, score,
-			owner_user_id, notes, created_by
+			owner_user_id, notes, created_by, job_title, annual_revenue, address
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, 'new', $7, $8, $9, $10
+			$1, $2, $3, $4, $5, $6, 'new', $7, $8, $9, $10, $11, $12, $13
 		) RETURNING ` + leadColumns
 
 	var lead domain.Lead
@@ -116,6 +143,9 @@ func (r *leadRepository) Create(ctx context.Context, scope coretenant.Scope, par
 			nullableString(params.OwnerUserID),
 			nullableString(params.Notes),
 			nullableString(params.CreatedBy),
+			nullableString(params.JobTitle),
+			nullableString(params.AnnualRevenue),
+			address,
 		))
 		return scanErr
 	})
@@ -256,6 +286,16 @@ func (r *leadRepository) Update(ctx context.Context, scope coretenant.Scope, id 
 	}
 	if params.Notes != nil {
 		addSet("notes", *params.Notes)
+	}
+	if params.JobTitle != nil {
+		addSet("job_title", nullableString(*params.JobTitle))
+	}
+	if params.AnnualRevenue != nil {
+		// String kosong = hapus nilai (NULL), bukan 0.
+		addSet("annual_revenue", nullableString(*params.AnnualRevenue))
+	}
+	if params.Address != nil {
+		addSet("address", params.Address)
 	}
 	if params.UpdatedBy != "" {
 		addSet("updated_by", params.UpdatedBy)

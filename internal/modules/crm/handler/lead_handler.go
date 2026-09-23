@@ -91,18 +91,21 @@ func (h *LeadHandler) Create(c *gin.Context) {
 	}
 
 	lead, err := h.svc.Create(c.Request.Context(), scope, repository.CreateLeadParams{
-		ContactName: req.ContactName,
-		CompanyName: req.CompanyName,
-		Email:       req.Email,
-		Phone:       req.Phone,
-		Source:      req.Source,
-		Score:       req.Score,
-		OwnerUserID: req.OwnerUserID,
-		Notes:       req.Notes,
-		CreatedBy:   userID,
+		ContactName:   req.ContactName,
+		CompanyName:   req.CompanyName,
+		Email:         req.Email,
+		Phone:         req.Phone,
+		Source:        req.Source,
+		Score:         req.Score,
+		OwnerUserID:   req.OwnerUserID,
+		Notes:         req.Notes,
+		JobTitle:      req.JobTitle,
+		AnnualRevenue: req.AnnualRevenue,
+		Address:       req.Address,
+		CreatedBy:     userID,
 	})
 	if err != nil {
-		corehttp.Fail(c, err)
+		failLeadError(c, err)
 		return
 	}
 
@@ -150,19 +153,22 @@ func (h *LeadHandler) Update(c *gin.Context) {
 	}
 
 	lead, err := h.svc.Update(c.Request.Context(), scope, c.Param("id"), repository.UpdateLeadParams{
-		ContactName: req.ContactName,
-		CompanyName: req.CompanyName,
-		Email:       req.Email,
-		Phone:       req.Phone,
-		Source:      req.Source,
-		Status:      status,
-		Score:       req.Score,
-		OwnerUserID: req.OwnerUserID,
-		Notes:       req.Notes,
-		UpdatedBy:   userID,
+		ContactName:   req.ContactName,
+		CompanyName:   req.CompanyName,
+		Email:         req.Email,
+		Phone:         req.Phone,
+		Source:        req.Source,
+		Status:        status,
+		Score:         req.Score,
+		OwnerUserID:   req.OwnerUserID,
+		Notes:         req.Notes,
+		JobTitle:      req.JobTitle,
+		AnnualRevenue: req.AnnualRevenue,
+		Address:       req.Address,
+		UpdatedBy:     userID,
 	})
 	if err != nil {
-		corehttp.Fail(c, err)
+		failLeadError(c, err)
 		return
 	}
 
@@ -217,7 +223,7 @@ func (h *LeadHandler) Assign(c *gin.Context) {
 
 	lead, err := h.svc.Assign(c.Request.Context(), scope, c.Param("id"), req.OwnerUserID, userID)
 	if err != nil {
-		corehttp.Fail(c, err)
+		failLeadError(c, err)
 		return
 	}
 
@@ -258,4 +264,14 @@ func (h *LeadHandler) Convert(c *gin.Context) {
 	}
 
 	corehttp.OK(c, "success", dto.LeadConversionFromDomain(result))
+}
+
+// failLeadError memetakan error validasi service lead ke 422; error lain
+// diteruskan apa adanya (AppError dari MapNotFound, dsb).
+func failLeadError(c *gin.Context, err error) {
+	if errors.Is(err, service.ErrLeadOwnerNotMember) || errors.Is(err, service.ErrInvalidAnnualRevenue) {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		return
+	}
+	corehttp.Fail(c, err)
 }

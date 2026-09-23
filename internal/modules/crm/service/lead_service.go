@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"regexp"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	crmmodule "zyad.cloud/internal/modules/crm"
@@ -14,7 +15,12 @@ type leadService struct {
 	contactRepo repository.ContactRepository
 	companyRepo repository.CompanyRepository
 	quotaGuard  ContactQuotaGuard
+	ownerCheck  LeadOwnerValidator
 }
+
+// annualRevenuePattern mengikuti batas kolom numeric(18,2): maks 16 digit
+// bulat + 2 desimal, tanpa tanda minus.
+var annualRevenuePattern = regexp.MustCompile(`^\d{1,16}(\.\d{1,2})?$`)
 
 type LeadServiceOption func(*leadService)
 
@@ -23,6 +29,14 @@ type LeadServiceOption func(*leadService)
 func WithLeadContactQuotaGuard(guard ContactQuotaGuard) LeadServiceOption {
 	return func(service *leadService) {
 		service.quotaGuard = guard
+	}
+}
+
+// WithLeadOwnerValidator mewajibkan owner_user_id (create/update/assign)
+// menunjuk anggota aktif organization.
+func WithLeadOwnerValidator(validator LeadOwnerValidator) LeadServiceOption {
+	return func(service *leadService) {
+		service.ownerCheck = validator
 	}
 }
 
@@ -44,6 +58,12 @@ func NewLeadService(
 }
 
 func (s *leadService) Create(ctx context.Context, scope coretenant.Scope, params repository.CreateLeadParams) (domain.Lead, error) {
+	if err := validateAnnualRevenue(params.AnnualRevenue); err != nil {
+		return domain.Lead{}, err
+	}
+	if err := s.requireOwnerMember(ctx, scope, params.OwnerUserID); err != nil {
+		return domain.Lead{}, err
+	}
 	return s.repo.Create(ctx, scope, params)
 }
 
@@ -60,6 +80,16 @@ func (s *leadService) List(ctx context.Context, scope coretenant.Scope, filter r
 }
 
 func (s *leadService) Update(ctx context.Context, scope coretenant.Scope, id string, params repository.UpdateLeadParams) (domain.Lead, error) {
+	if params.AnnualRevenue != nil {
+		if err := validateAnnualRevenue(*params.AnnualRevenue); err != nil {
+			return domain.Lead{}, err
+		}
+	}
+	if params.OwnerUserID != nil {
+		if err := s.requireOwnerMember(ctx, scope, *params.OwnerUserID); err != nil {
+			return domain.Lead{}, err
+		}
+	}
 	lead, err := s.repo.Update(ctx, scope, id, params)
 	if err != nil {
 		return domain.Lead{}, crmmodule.MapNotFound(err, "LEAD_NOT_FOUND", "lead not found or already deleted")
@@ -76,6 +106,9 @@ func (s *leadService) Restore(ctx context.Context, scope coretenant.Scope, id st
 }
 
 func (s *leadService) Assign(ctx context.Context, scope coretenant.Scope, id string, ownerUserID string, updatedBy string) (domain.Lead, error) {
+	if err := s.requireOwnerMember(ctx, scope, ownerUserID); err != nil {
+		return domain.Lead{}, err
+	}
 	lead, err := s.repo.Assign(ctx, scope, id, ownerUserID, updatedBy)
 	if err != nil {
 		return domain.Lead{}, crmmodule.MapNotFound(err, "LEAD_NOT_FOUND", "lead not found or already deleted")
@@ -125,6 +158,8 @@ func (s *leadService) Convert(ctx context.Context, scope coretenant.Scope, id st
 		FirstName:      lead.ContactName,
 		Email:          lead.Email,
 		Phone:          lead.Phone,
+		JobTitle:       lead.JobTitle,
+		Address:        lead.Address,
 		Source:         lead.Source,
 		OwnerUserID:    params.OwnerUserID,
 		LifecycleStage: domain.ContactLifecycleContact,
@@ -148,6 +183,29 @@ func (s *leadService) Convert(ctx context.Context, scope coretenant.Scope, id st
 		Contact: contact,
 		Company: company,
 	}, nil
+}
+
+// requireOwnerMember: string kosong berarti "tanpa owner" dan selalu lolos.
+func (s *leadService) requireOwnerMember(ctx context.Context, scope coretenant.Scope, ownerUserID string) error {
+	if s.ownerCheck == nil || ownerUserID == "" {
+		return nil
+	}
+	ok, err := s.ownerCheck.IsActiveMember(ctx, scope, ownerUserID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrLeadOwnerNotMember
+	}
+	return nil
+}
+
+// validateAnnualRevenue: string kosong berarti "tidak diisi" (NULL).
+func validateAnnualRevenue(value string) error {
+	if value == "" || annualRevenuePattern.MatchString(value) {
+		return nil
+	}
+	return ErrInvalidAnnualRevenue
 }
 
 func (s *leadService) requireContactQuota(ctx context.Context, scope coretenant.Scope) error {

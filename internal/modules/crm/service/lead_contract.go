@@ -9,7 +9,20 @@ import (
 	"zyad.cloud/internal/modules/crm/repository"
 )
 
-var ErrLeadAlreadyConverted = errors.New("lead already converted")
+var (
+	ErrLeadAlreadyConverted = errors.New("lead already converted")
+	// ErrLeadOwnerNotMember: owner_user_id harus anggota aktif organization
+	// yang sama — mencegah lead di-assign ke (dan nama owner dibocorkan dari)
+	// user tenant lain.
+	ErrLeadOwnerNotMember   = errors.New("owner_user_id is not an active member of this organization")
+	ErrInvalidAnnualRevenue = errors.New("annual_revenue must be a non-negative number with at most 2 decimals")
+)
+
+// LeadOwnerValidator adalah subset repository.MemberRepository yang
+// dibutuhkan LeadService.
+type LeadOwnerValidator interface {
+	IsActiveMember(ctx context.Context, scope coretenant.Scope, userID string) (bool, error)
+}
 
 // ConvertLeadParams controls how a lead is converted into a Contact and
 // optionally a Company. Deal creation lands in Fase 2 once crm_deals exists.
