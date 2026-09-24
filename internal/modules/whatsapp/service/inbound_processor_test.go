@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -115,8 +116,9 @@ func (c *fakeConversations) SetMessageStatus(_ context.Context, _ coretenant.Sco
 }
 
 type fakeCRM struct {
-	matches map[string]CRMMatch
-	created []CreateLeadInput
+	matches    map[string]CRMMatch
+	created    []CreateLeadInput
+	activities []CRMActivityInput
 }
 
 func (m *fakeCRM) MatchPhone(_ context.Context, _ coretenant.Scope, phone string) (CRMMatch, bool, error) {
@@ -127,6 +129,11 @@ func (m *fakeCRM) MatchPhone(_ context.Context, _ coretenant.Scope, phone string
 func (m *fakeCRM) CreateLead(_ context.Context, _ coretenant.Scope, input CreateLeadInput) (CRMMatch, error) {
 	m.created = append(m.created, input)
 	return CRMMatch{EntityType: domain.RelatedEntityLead, EntityID: "lead-auto", Name: input.ContactName, OwnerUserID: input.OwnerUserID}, nil
+}
+
+func (m *fakeCRM) RecordActivity(_ context.Context, _ coretenant.Scope, input CRMActivityInput) error {
+	m.activities = append(m.activities, input)
+	return nil
 }
 
 type fakeLIDs map[string]string
@@ -508,5 +515,41 @@ func TestNormalizeJID(t *testing.T) {
 		if got := normalizeJID(input); got != want {
 			t.Errorf("normalizeJID(%q) = %q, want %q", input, got, want)
 		}
+	}
+}
+
+func TestInboundWritesOneDailyActivityRegardlessOfMessageCountOrDirection(t *testing.T) {
+	h := newInboundHarness(t, false,
+		webhookEvent("e1", "message.any", `{"id":"m1","from":"6281234567890@c.us","fromMe":false,"body":"halo"}`),
+		webhookEvent("e2", "message.any", `{"id":"m2","from":"6289999999999@c.us","to":"6281234567890@c.us","fromMe":true,"source":"app","body":"balas"}`),
+		webhookEvent("e3", "message.any", `{"id":"m3","from":"6281234567890@c.us","fromMe":false,"body":"lagi"}`),
+	)
+	h.crm.matches["6281234567890"] = CRMMatch{EntityType: domain.RelatedEntityLead, EntityID: "lead-1", Name: "Budi", OwnerUserID: "sales-1"}
+	h.run(t)
+
+	if len(h.crm.activities) != 1 {
+		t.Fatalf("activities = %+v, want exactly 1 for 3 messages the same day", h.crm.activities)
+	}
+	activity := h.crm.activities[0]
+	if activity.EntityID != "lead-1" || activity.UserID != "sales-1" || !strings.Contains(activity.Subject, "6281234567890") {
+		t.Fatalf("activity = %+v", activity)
+	}
+}
+
+func TestInboundNoActivityForUnlinkedConversation(t *testing.T) {
+	h := newInboundHarness(t, false, webhookEvent("e1", "message.any", `{"id":"m1","from":"6281234567890@c.us","fromMe":false,"body":"halo"}`))
+	h.run(t)
+	if len(h.crm.activities) != 0 {
+		t.Fatalf("activities = %+v, want none (no CRM match)", h.crm.activities)
+	}
+}
+
+func TestInboundDuplicateEventDoesNotReclaimActivity(t *testing.T) {
+	payload := `{"id":"m1","from":"6281234567890@c.us","fromMe":false,"body":"halo"}`
+	h := newInboundHarness(t, false, webhookEvent("e1", "message.any", payload), webhookEvent("e2", "message.any", payload))
+	h.crm.matches["6281234567890"] = CRMMatch{EntityType: domain.RelatedEntityLead, EntityID: "lead-1", OwnerUserID: "sales-1"}
+	h.run(t)
+	if len(h.crm.activities) != 1 {
+		t.Fatalf("activities = %+v, want 1 (second event is a duplicate message id)", h.crm.activities)
 	}
 }
