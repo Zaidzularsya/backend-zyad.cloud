@@ -81,26 +81,26 @@ Setiap fase dikerjakan di branch `feat/…` sendiri → verifikasi lokal → mer
 
 | ID | Task | Status |
 |---|---|---|
-| WA-BE-030 | `GET /conversations` (filter + scope own/read_all) | planned |
-| WA-BE-031 | `GET /conversations/:id/messages?before=&limit=` (cursor) | planned |
-| WA-BE-032 | `POST /conversations/:id/messages`, `POST /messages/:id/retry` | planned |
-| WA-BE-033 | `POST /conversations/start` (session default, validasi nomor & status WORKING) | planned |
-| WA-BE-034 | `POST /conversations/:id/read`, `PATCH /conversations/:id` (assignee, status) | planned |
-| WA-BE-035 | Rate limit Redis per session → 429 | planned |
-| WA-BE-036 | Activity CRM tipe `whatsapp` (satu per conversation per hari) | planned |
-| WA-TEST-030 | Unit test scope own vs read_all, rate limit, gagal kirim | planned |
+| WA-BE-030 | `GET /conversations` (filter + scope own/read_all) | done |
+| WA-BE-031 | `GET /conversations/:id/messages?before=&limit=` (cursor) | done |
+| WA-BE-032 | `POST /conversations/:id/messages`, `POST /messages/:id/retry` | done |
+| WA-BE-033 | `POST /conversations/start` (session default, validasi nomor & status WORKING) | done |
+| WA-BE-034 | `POST /conversations/:id/read`, `PATCH /conversations/:id` (assignee, status) | done |
+| WA-BE-035 | Rate limit Redis per session → 429 | done |
+| WA-BE-036 | Activity CRM tipe `whatsapp` (satu per conversation per hari, klaim via `wa_conversations.crm_activity_on`, migration `000130`) | done |
+| WA-TEST-030 | Unit test scope own vs read_all, rate limit, gagal kirim | done |
 
 ## Fase 7 — FE WhatsApp Connections (`feat/whatsapp-connections-ui`, repo frontend)
 
 | ID | Task | Status |
 |---|---|---|
-| WA-FE-001 | `ConfirmDialog.vue` + `useToast` + host di layout | planned |
-| WA-FE-002 | `src/features/whatsapp` api/queries/types; permission di union `src/types/auth.ts` | planned |
-| WA-FE-003 | Route tenant & platform + menu grup Integrations | planned |
-| WA-FE-004 | Daftar session + aksi (hubungkan ulang, logout, hapus, jadikan default) | planned |
-| WA-FE-005 | Modal hubungkan: tab QR (polling 3 dtk) + tab kode pairing | planned |
-| WA-FE-006 | State kosong/loading/error, pesan quota, peringatan risiko | planned |
-| WA-FE-007 | Catatan/link di IntegrationsPage untuk provider `whatsapp` | planned |
+| WA-FE-001 | `ConfirmDialog.vue` + `useToast`/`ToastHost` (di `App.vue`); `BaseModal` kini tutup dengan Escape + `role=dialog` | done |
+| WA-FE-002 | `src/features/whatsapp` api/queries/types; permission di union `src/types/auth.ts` | done |
+| WA-FE-003 | Route tenant & platform + menu grup Integrations | done |
+| WA-FE-004 | Daftar session + aksi (hubungkan ulang, logout, hapus, jadikan default) | done |
+| WA-FE-005 | Modal hubungkan: tab QR (polling 3 dtk) + tab kode pairing | done |
+| WA-FE-006 | State kosong/loading/error, pesan quota, peringatan risiko | done |
+| WA-FE-007 | Catatan/link di IntegrationsPage untuk provider `whatsapp` | done |
 
 ## Fase 8 — FE chat di Lead Detail (`feat/lead-whatsapp-chat-panel`, repo frontend)
 

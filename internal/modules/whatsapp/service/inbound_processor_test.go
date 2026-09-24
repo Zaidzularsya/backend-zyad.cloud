@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -42,9 +43,11 @@ func (s *fakeEventStore) MarkFailed(_ context.Context, id string, msg string, ne
 }
 
 type fakeConversations struct {
-	byChat   map[string]domain.Conversation
-	messages map[string]domain.Message // keyed by waha id
-	recorded []repository.RecordMessageParams
+	byChat       map[string]domain.Conversation
+	messages     map[string]domain.Message // keyed by waha id (or a local key while pending)
+	recorded     []repository.RecordMessageParams
+	activityDays map[string]string
+	seq          int
 }
 
 func newFakeConversations() *fakeConversations {
@@ -74,12 +77,21 @@ func (c *fakeConversations) Create(_ context.Context, scope coretenant.Scope, p 
 }
 
 func (c *fakeConversations) RecordMessage(_ context.Context, _ coretenant.Scope, conversationID string, p repository.RecordMessageParams) (domain.Message, bool, error) {
-	if _, exists := c.messages[p.WAHAMessageID]; exists {
-		return domain.Message{}, false, nil
+	key := p.WAHAMessageID
+	if key != "" {
+		if _, exists := c.messages[key]; exists {
+			return domain.Message{}, false, nil
+		}
+	} else {
+		c.seq++
+		key = fmt.Sprintf("pending-%d", c.seq)
 	}
 	c.recorded = append(c.recorded, p)
-	message := domain.Message{ID: "msg-" + p.WAHAMessageID, ConversationID: conversationID, WAHAMessageID: p.WAHAMessageID, Direction: p.Direction, Status: p.Status}
-	c.messages[p.WAHAMessageID] = message
+	message := domain.Message{
+		ID: "msg-" + key, ConversationID: conversationID, WAHAMessageID: p.WAHAMessageID, Direction: p.Direction,
+		Body: p.Body, Status: p.Status, SentByUserID: p.SentByUserID, SentAt: p.SentAt,
+	}
+	c.messages[key] = message
 	return message, true, nil
 }
 
@@ -410,5 +422,14 @@ func TestInboundFailureSchedulesRetryWithBackoff(t *testing.T) {
 	}
 	if retryBackoff(50) != maxRetryBackoff {
 		t.Fatal("backoff is not capped")
+	}
+}
+
+func TestInboundSkipsMessagesSentThroughAPI(t *testing.T) {
+	h := newInboundHarness(t, false, webhookEvent("e1", "message.any",
+		`{"id":"true_6281234567890@c.us_C1","from":"6289999999999@c.us","to":"6281234567890@c.us","fromMe":true,"source":"api","body":"dari API"}`))
+	h.run(t)
+	if len(h.conversations.recorded) != 0 {
+		t.Fatal("API-sent message recorded by the processor; ConversationService.Send stores it")
 	}
 }

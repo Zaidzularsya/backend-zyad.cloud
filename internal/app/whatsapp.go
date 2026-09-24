@@ -15,6 +15,7 @@ import (
 	whatsapprepo "zyad.cloud/internal/modules/whatsapp/repository"
 	whatsappservice "zyad.cloud/internal/modules/whatsapp/service"
 	"zyad.cloud/internal/platform/database"
+	redisplatform "zyad.cloud/internal/platform/redis"
 	platformwhatsapp "zyad.cloud/internal/platform/whatsapp"
 )
 
@@ -111,7 +112,35 @@ func NewWhatsAppInboundProcessor(cfg config.Config, db *database.Pool, log *slog
 		SessionSvc:    NewWhatsAppSessionService(cfg, db, nil, log),
 		Conversations: whatsapprepo.NewConversationRepository(db),
 		LIDs:          client,
-		CRM:           whatsappservice.NewCRMRepositoryMatcher(crmrepo.NewLeadRepository(db), crmrepo.NewContactRepository(db)),
+		CRM:           NewWhatsAppCRMGateway(db),
 		Logger:        log,
 	})
+}
+
+// NewWhatsAppCRMGateway gives the whatsapp module its CRM access.
+func NewWhatsAppCRMGateway(db *database.Pool) *whatsappservice.CRMGateway {
+	return whatsappservice.NewCRMGateway(
+		crmrepo.NewLeadRepository(db),
+		crmrepo.NewContactRepository(db),
+		crmrepo.NewActivityRepository(db),
+		crmrepo.NewMemberRepository(db),
+	)
+}
+
+// NewWhatsAppConversationService wires conversations and sending. Sending
+// is rate limited per session in Redis (WHATSAPP_SEND_RATE_PER_MINUTE).
+func NewWhatsAppConversationService(cfg config.Config, db *database.Pool, redis *redisplatform.Client, log *slog.Logger) *whatsappservice.ConversationService {
+	deps := whatsappservice.ConversationServiceDeps{
+		Conversations: whatsapprepo.NewConversationRepository(db),
+		Sessions:      whatsapprepo.NewSessionRepository(db),
+		CRM:           NewWhatsAppCRMGateway(db),
+		Logger:        log,
+	}
+	if client := NewWAHAProvider(cfg.WhatsApp); client != nil {
+		deps.Sender = client
+	}
+	if redis != nil {
+		deps.Limiter = whatsappservice.NewRedisSendRateLimiter(redis, cfg.WhatsApp.SendRatePerMinute, log)
+	}
+	return whatsappservice.NewConversationService(deps)
 }

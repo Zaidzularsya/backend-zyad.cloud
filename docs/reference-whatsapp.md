@@ -268,6 +268,29 @@ walau webhook & reconciler bersamaan. Email (event/template `whatsapp.session_di
 dikirim lewat outbox notifikasi ke setiap owner aktif (`organization_owner`/`super_admin`) organisasi.
 Catatan dev: SMTP dev memakai Gmail produksi.
 
+## Conversation & Messaging API (Fase 6)
+
+Di bawah `/api/v1/app/whatsapp` (grup yang sama dengan session).
+
+| Method | Path | Permission | Catatan |
+|---|---|---|---|
+| GET | `/conversations` | `whatsapp.conversation.read` | Filter `related_entity_type`, `related_entity_id`, `assignee`, `status`, `search` (nama/nomor); `page`/`per_page` + `meta`. Tanpa `read_all` → dipaksa `assignee = user` |
+| POST | `/conversations/start` | `whatsapp.message.send` | `{session_id?, related_entity_type, related_entity_id}`; session default yang WORKING (fallback session WORKING lain); percakapan lama dipakai ulang & di-link bila belum; assignee = owner entitas (atau pemanggil bila tanpa owner); 403 `WHATSAPP_CONVERSATION_FORBIDDEN` bila milik user lain dan pemanggil tanpa `read_all` |
+| GET | `/conversations/:id` | `whatsapp.conversation.read` | Percakapan milik orang lain (tanpa `read_all`) → 404 (tidak membocorkan keberadaan) |
+| PATCH | `/conversations/:id` | `whatsapp.conversation.read` | `status` open/closed; ganti `assignee_user_id` butuh `whatsapp.conversation.assign` + anggota aktif |
+| POST | `/conversations/:id/read` | `whatsapp.conversation.read` | reset `unread_count` |
+| GET | `/conversations/:id/messages?before=&limit=` | `whatsapp.conversation.read` | Keyset `(sent_at, id)`; hasil urut lama → baru; `next_before` untuk halaman lebih lama |
+| POST | `/conversations/:id/messages` | `whatsapp.message.send` | `{text}` ≤ 4096 karakter. Simpan `pending` → `sendSeen` (bila ada unread) → `sendText` → `sent` + `waha_message_id`. Gagal di WAHA **bukan** error API: pesan dikembalikan `failed` + alasan generik |
+| POST | `/messages/:id/retry` | `whatsapp.message.send` | Hanya pesan keluar `failed` |
+
+- Session harus `WORKING` (409 `WHATSAPP_SESSION_NOT_CONNECTED`); rate limit per session di Redis
+  (`WHATSAPP_SEND_RATE_PER_MINUTE`, fixed window per menit) → 429 `WHATSAPP_RATE_LIMITED`; Redis gagal → diizinkan.
+- Pesan yang dikirim lewat API juga datang lagi sebagai `message.any` (`fromMe`, `source: api`); processor
+  melewatinya dan `MarkMessageSent` menghapus salinan bila webhook sempat menyimpan lebih dulu.
+- Timeline CRM: satu activity `whatsapp` (status `completed`) per percakapan per hari (Asia/Jakarta), saat
+  percakapan dimulai atau pesan terkirim, hanya untuk percakapan yang terhubung ke lead/contact.
+- Response tidak memuat `chat_id` WAHA maupun nama session; klien memakai `phone` dan `session_id`.
+
 ## Fase Implementasi
 
 | Fase | Branch | Isi | Plan mode |

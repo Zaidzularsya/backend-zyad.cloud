@@ -80,6 +80,7 @@ type Dependencies struct {
 	WhatsAppEntitlementChecker       middleware.EntitlementChecker
 	WhatsAppSessionHandler           *whatsapphandler.SessionHandler
 	WhatsAppWebhookHandler           *whatsapphandler.WebhookHandler
+	WhatsAppConversationHandler      *whatsapphandler.ConversationHandler
 	AdminAssetHandler                *assethandler.AdminAssetHandler
 	PlatformAssetHandler             *assethandler.PlatformAssetHandler
 	PlatformFinanceCoAHandler        *financehandler.PlatformCoAHandler

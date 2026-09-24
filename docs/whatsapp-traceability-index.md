@@ -35,24 +35,24 @@ Status:
 
 | Req | Requirement | Migration | Endpoint | Permission | Test | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| WA-R01 | Tenant/platform membuat session (≤ `whatsapp.max_sessions`) | `wa_sessions`, `wa_session_directory`, seed feature | `POST /app/whatsapp/sessions` | `whatsapp.session.manage` | WA-TEST-010 | in_progress |
-| WA-R02 | Lihat daftar & detail session | `wa_sessions` | `GET /app/whatsapp/sessions`, `GET /sessions/:id`, `GET /sessions/:id/status` | `whatsapp.session.read` | WA-TEST-010 | in_progress |
-| WA-R03 | Pairing via QR | – | `GET /app/whatsapp/sessions/:id/qr` | `whatsapp.session.manage` | WA-TEST-010, WA-OPS-002 | in_progress |
-| WA-R04 | Pairing via kode | – | `POST /app/whatsapp/sessions/:id/pairing-code` | `whatsapp.session.manage` | WA-TEST-010, WA-OPS-002 | in_progress |
-| WA-R05 | Start/stop/logout/hapus/ubah session | `wa_sessions` | `POST /sessions/:id/{start,stop,logout}`, `PATCH`/`DELETE /sessions/:id` | `whatsapp.session.manage` | WA-TEST-010 | in_progress |
+| WA-R01 | Tenant/platform membuat session (≤ `whatsapp.max_sessions`) | `wa_sessions`, `wa_session_directory`, seed feature | `POST /app/whatsapp/sessions` | `whatsapp.session.manage` | WA-TEST-010 | done |
+| WA-R02 | Lihat daftar & detail session | `wa_sessions` | `GET /app/whatsapp/sessions`, `GET /sessions/:id`, `GET /sessions/:id/status` | `whatsapp.session.read` | WA-TEST-010 | done |
+| WA-R03 | Pairing via QR | – | `GET /app/whatsapp/sessions/:id/qr` | `whatsapp.session.manage` | WA-TEST-010, WA-OPS-002 | done |
+| WA-R04 | Pairing via kode | – | `POST /app/whatsapp/sessions/:id/pairing-code` | `whatsapp.session.manage` | WA-TEST-010, WA-OPS-002 | done |
+| WA-R05 | Start/stop/logout/hapus/ubah session | `wa_sessions` | `POST /sessions/:id/{start,stop,logout}`, `PATCH`/`DELETE /sessions/:id` | `whatsapp.session.manage` | WA-TEST-010 | done |
 | WA-R06 | Status session tersinkron | `wa_sessions` | webhook `session.status` + reconcile worker | – | WA-TEST-020 | done |
 | WA-R07 | Terima webhook aman & idempotent | `wa_webhook_events` | `POST /api/v1/webhooks/waha` | publik + HMAC | WA-TEST-020 | done |
 | WA-R08 | Pesan masuk tersimpan & di-match ke lead/contact | `wa_conversations`, `wa_messages`, `phone_normalized` | (worker) | – | WA-TEST-020 | done |
 | WA-R09 | Auto-create lead untuk nomor tak dikenal (opsional per session) | `wa_sessions.auto_create_lead` | (worker) | – | WA-TEST-020 | done |
-| WA-R10 | Daftar percakapan (own vs all) | `wa_conversations` | `GET /app/whatsapp/conversations` | `whatsapp.conversation.read` / `read_all` | WA-TEST-030 | planned |
-| WA-R11 | Riwayat pesan dengan cursor | `wa_messages` | `GET /conversations/:id/messages` | `whatsapp.conversation.read` | WA-TEST-030 | planned |
-| WA-R12 | Kirim pesan teks + retry | `wa_messages` | `POST /conversations/:id/messages`, `POST /messages/:id/retry` | `whatsapp.message.send` | WA-TEST-030 | planned |
-| WA-R13 | Mulai chat dari lead/contact | `wa_conversations` | `POST /conversations/start` | `whatsapp.message.send` | WA-TEST-030 | planned |
-| WA-R14 | Tandai dibaca, assign, tutup percakapan | `wa_conversations` | `POST /conversations/:id/read`, `PATCH /conversations/:id` | `whatsapp.conversation.read` / `assign` | WA-TEST-030 | planned |
+| WA-R10 | Daftar percakapan (own vs all) | `wa_conversations` | `GET /app/whatsapp/conversations` | `whatsapp.conversation.read` / `read_all` | WA-TEST-030 | done |
+| WA-R11 | Riwayat pesan dengan cursor | `wa_messages` | `GET /conversations/:id/messages` | `whatsapp.conversation.read` | WA-TEST-030 | done |
+| WA-R12 | Kirim pesan teks + retry | `wa_messages` | `POST /conversations/:id/messages`, `POST /messages/:id/retry` | `whatsapp.message.send` | WA-TEST-030 | done |
+| WA-R13 | Mulai chat dari lead/contact | `wa_conversations` | `POST /conversations/start` | `whatsapp.message.send` | WA-TEST-030 | done |
+| WA-R14 | Tandai dibaca, assign, tutup percakapan | `wa_conversations` | `POST /conversations/:id/read`, `PATCH /conversations/:id` | `whatsapp.conversation.read` / `assign` | WA-TEST-030 | done |
 | WA-R15 | Status centang pesan keluar | `wa_messages` | webhook `message.ack` | – | WA-TEST-020 | done |
-| WA-R16 | Rate limit kirim per session | – (Redis) | `POST /conversations/:id/messages` → 429 | – | WA-TEST-030 | planned |
-| WA-R17 | Jejak chat di timeline CRM | `crm_activities` type `whatsapp` | (service) | – | WA-TEST-030 | planned |
-| WA-R18 | Halaman WhatsApp Connections | – | FE | `whatsapp.session.read` | WA-FE-* | planned |
+| WA-R16 | Rate limit kirim per session | – (Redis) | `POST /conversations/:id/messages` → 429 | – | WA-TEST-030 | done |
+| WA-R17 | Jejak chat di timeline CRM | `crm_activities` type `whatsapp` | (service) | – | WA-TEST-030 | done |
+| WA-R18 | Halaman WhatsApp Connections | – | FE | `whatsapp.session.read` | WA-FE-* | done |
 | WA-R19 | Tab WhatsApp di Lead Detail | – | FE | `whatsapp.conversation.read`, `whatsapp.message.send` | WA-FE-014 | planned |
 | WA-R20 | Notifikasi platform via WAHA | – | (dispatcher) | – | WA-BE-040 | planned |
 | WA-R21 | Kuota pesan bulanan | `organization_usage_counters` (existing) | – | – | – | deferred |
@@ -69,6 +69,7 @@ Status:
 | `000127_seed_whatsapp_permissions` | Permission seed module `whatsapp` | WA-DB-008 |
 | `000128_seed_whatsapp_max_sessions_feature` | Feature seed `whatsapp.max_sessions` | WA-DB-009 |
 | `000129_seed_whatsapp_session_disconnected_template` | Template email `whatsapp.session_disconnected` | WA-BE-021 |
+| `000130_add_wa_conversations_crm_activity_on` | Kolom `crm_activity_on` (dedupe activity harian) | WA-BE-036 |
 
 ## Permission Traceability
 
@@ -101,6 +102,6 @@ Status:
 | `WHATSAPP_TIMEOUT_SECONDS` | WA-PLAT-003 | ada (reuse) |
 | `WHATSAPP_WEBHOOK_HMAC_KEY` | WA-PLAT-001, WA-BE-020 | done |
 | `WHATSAPP_ENGINE` | WA-PLAT-001 | done |
-| `WHATSAPP_SEND_RATE_PER_MINUTE` | WA-BE-035 | planned |
+| `WHATSAPP_SEND_RATE_PER_MINUTE` | WA-BE-035 | done |
 | `WHATSAPP_WORKER_INTERVAL_SECONDS` | WA-WRK-010 | done |
 | `WHATSAPP_RECONCILE_INTERVAL_SECONDS` | WA-WRK-001 | done |

@@ -314,6 +314,9 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.WhatsAppSessionHandler != nil {
 		deps.WhatsAppSessionHandler.RegisterRoutes(whatsappGroup, deps.PermissionChecker)
 	}
+	if deps.WhatsAppConversationHandler != nil {
+		deps.WhatsAppConversationHandler.RegisterRoutes(whatsappGroup, deps.PermissionChecker)
+	}
 
 	publicTenantMiddleware, err := middleware.ResolvePublicOrganization(
 		deps.PublicHostResolver,

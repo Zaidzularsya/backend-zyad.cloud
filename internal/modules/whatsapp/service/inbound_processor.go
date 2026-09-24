@@ -251,6 +251,11 @@ func (p *InboundProcessor) handleMessage(ctx context.Context, scope coretenant.S
 	if payload.ID == "" {
 		return permanentError{errors.New("message without id")}
 	}
+	// Messages sent through the API are stored by ConversationService.Send
+	// (MarkMessageSent also removes a copy if this event wins the race).
+	if payload.FromMe && payload.Source == "api" {
+		return nil
+	}
 
 	chatID := payload.From
 	if payload.FromMe {

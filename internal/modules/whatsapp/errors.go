@@ -26,6 +26,23 @@ var (
 	ErrSessionNotScanning   = coreerrors.New("WHATSAPP_SESSION_NOT_SCANNING", "WhatsApp session is not waiting for pairing; start it first", http.StatusConflict)
 	ErrInvalidPairingPhone  = coreerrors.New("VALIDATION_ERROR", "phone must be a valid WhatsApp number, e.g. 0812xxxxxxx or +62812xxxxxxx", http.StatusUnprocessableEntity)
 	ErrInvalidPurpose       = coreerrors.New("VALIDATION_ERROR", "purpose must be one of cs, sales, notification", http.StatusUnprocessableEntity)
+
+	// ErrConversationNotFound is also returned for conversations the viewer
+	// may not read, so their existence is not revealed.
+	ErrConversationNotFound  = coreerrors.New("WHATSAPP_CONVERSATION_NOT_FOUND", "WhatsApp conversation not found", http.StatusNotFound)
+	ErrConversationForbidden = coreerrors.New("WHATSAPP_CONVERSATION_FORBIDDEN", "this WhatsApp conversation is assigned to another user", http.StatusForbidden)
+	ErrMessageNotFound       = coreerrors.New("WHATSAPP_MESSAGE_NOT_FOUND", "WhatsApp message not found", http.StatusNotFound)
+	ErrMessageNotRetryable   = coreerrors.New("WHATSAPP_MESSAGE_NOT_RETRYABLE", "only failed outgoing messages can be retried", http.StatusConflict)
+	ErrSessionNotConnected   = coreerrors.New("WHATSAPP_SESSION_NOT_CONNECTED", "WhatsApp session is not connected; reconnect it first", http.StatusConflict)
+	ErrNoConnectedSession    = coreerrors.New("WHATSAPP_NO_CONNECTED_SESSION", "no connected WhatsApp session; connect a number first", http.StatusConflict)
+	ErrEntityNotFound        = coreerrors.New("WHATSAPP_ENTITY_NOT_FOUND", "lead or contact not found", http.StatusNotFound)
+	ErrEntityPhoneInvalid    = coreerrors.New("WHATSAPP_ENTITY_PHONE_INVALID", "the lead or contact has no valid phone number", http.StatusUnprocessableEntity)
+	ErrRateLimited           = coreerrors.New("WHATSAPP_RATE_LIMITED", "too many WhatsApp messages from this number; wait a minute and try again", http.StatusTooManyRequests)
+	ErrInvalidMessageText    = coreerrors.New("VALIDATION_ERROR", "text is required and must be at most 4096 characters", http.StatusUnprocessableEntity)
+	ErrInvalidEntityType     = coreerrors.New("VALIDATION_ERROR", "related_entity_type must be lead or contact", http.StatusUnprocessableEntity)
+	ErrInvalidAssignee       = coreerrors.New("VALIDATION_ERROR", "assignee must be an active member of the organization", http.StatusUnprocessableEntity)
+	ErrInvalidStatus         = coreerrors.New("VALIDATION_ERROR", "status must be open or closed", http.StatusUnprocessableEntity)
+	ErrAssignForbidden       = coreerrors.New("FORBIDDEN", "reassigning a conversation requires whatsapp.conversation.assign", http.StatusForbidden)
 )
 
 // MapSessionNotFound translates the pgx.ErrNoRows every whatsapp repository
