@@ -48,13 +48,13 @@ import (
 	userhandler "zyad.cloud/internal/modules/user/handler"
 	userrepo "zyad.cloud/internal/modules/user/repository"
 	userservice "zyad.cloud/internal/modules/user/service"
+	whatsapphandler "zyad.cloud/internal/modules/whatsapp/handler"
 	"zyad.cloud/internal/platform/database"
 	"zyad.cloud/internal/platform/doku"
 	"zyad.cloud/internal/platform/logger"
 	"zyad.cloud/internal/platform/mail"
 	redisplatform "zyad.cloud/internal/platform/redis"
 	"zyad.cloud/internal/platform/storage"
-	"zyad.cloud/internal/platform/whatsapp"
 )
 
 type App struct {
@@ -167,7 +167,7 @@ func New(ctx context.Context) (*App, error) {
 		preferenceRepo,
 		templateRenderer,
 		notificationdispatcher.NewEmailDispatcher(mail.NewMailerFromConfig(cfg.Mail)),
-		notificationdispatcher.NewWhatsAppDispatcher(whatsapp.NewNoopClient()),
+		notificationdispatcher.NewWhatsAppDispatcher(NewWhatsAppNotificationClient(cfg, db, log)),
 		notificationdispatcher.NewNoopDispatcher(domain.ChannelInApp),
 		notificationdispatcher.NewNoopDispatcher(domain.ChannelDiscord),
 	)
@@ -469,6 +469,13 @@ func New(ctx context.Context) (*App, error) {
 	crmInvoiceHandler := crmhandler.NewInvoiceHandler(crmInvoiceSvc)
 	crmIntegrationHandler := crmhandler.NewIntegrationHandler(crmIntegrationSvc)
 
+	whatsappSessionSvc := NewWhatsAppSessionService(cfg, db, subscriptionGuardService, log)
+	whatsappSessionHandler := whatsapphandler.NewSessionHandler(whatsappSessionSvc)
+	whatsappWebhookHandler := NewWhatsAppWebhookHandler(cfg, db, log)
+	whatsappConversationHandler := whatsapphandler.NewConversationHandler(
+		NewWhatsAppConversationService(cfg, db, redisClient, log),
+	)
+
 	router, err := newRouter(Dependencies{
 		Config:                           cfg,
 		Logger:                           log,
@@ -524,6 +531,10 @@ func New(ctx context.Context) (*App, error) {
 		CRMQuotationHandler:              crmQuotationHandler,
 		CRMInvoiceHandler:                crmInvoiceHandler,
 		CRMIntegrationHandler:            crmIntegrationHandler,
+		WhatsAppEntitlementChecker:       crmEntitlementChecker,
+		WhatsAppSessionHandler:           whatsappSessionHandler,
+		WhatsAppWebhookHandler:           whatsappWebhookHandler,
+		WhatsAppConversationHandler:      whatsappConversationHandler,
 		AdminAssetHandler:                adminAssetHandler,
 		PlatformAssetHandler:             platformAssetHandler,
 		PlatformFinanceCoAHandler:        platformFinanceCoAHandler,

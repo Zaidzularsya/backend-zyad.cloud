@@ -38,6 +38,7 @@
 | provisioning | `internal/modules/provisioning/` | Aktivasi/deaktivasi layanan teknis | — | — | — | **Stub** | — |
 | radius | `internal/modules/radius/` | RADIUS user/profile/session/AAA | — | — | — | **Stub** | — |
 | resource | `internal/modules/resource/` | IP pool, VLAN, bandwidth profile | — | — | — | **Stub** | — |
+| **whatsapp** | `internal/modules/whatsapp/` (rencana) + `internal/platform/whatsapp/` | WhatsApp channel berbasis WAHA self-hosted: session & pairing (QR/kode), terima/kirim teks, percakapan terhubung ke lead/contact CRM, notifikasi platform | `/api/v1/app/whatsapp/*` (rencana), `POST /api/v1/webhooks/waha` (rencana) | `wa_sessions`, `wa_session_directory`, `wa_conversations`, `wa_messages`, `wa_webhook_events` (rencana) | `organization` (tenant context, worker resolver), `subscription` (entitlement `whatsapp.*`), `crm` (matching lead/contact, activity `whatsapp`), `core/notification` (dispatcher) | **WIP** (dokumen saja, 2026-09-24) | Lihat `docs/reference-whatsapp.md`. WAHA bukan API resmi WhatsApp (risiko nomor diblokir); server WAHA dev dipakai bersama n8n — backend hanya boleh mengelola session di `wa_session_directory` (prefix `zc_`); `wa_session_directory` & `wa_webhook_events` sengaja non-RLS; `crm_integrations.provider='whatsapp'` adalah integrasi generik CRM, bukan modul ini |
 
 ## Detail Modul Aktif
 

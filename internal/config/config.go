@@ -175,9 +175,16 @@ type WhatsAppConfig struct {
 	Sender         string
 	CallbackURL    string
 	TimeoutSeconds int
-	TelegramBot    string
-	ForumChatID    string
-	TopikNews      string
+	// WebhookHMACKey is set as config.webhooks[].hmac.key on every WAHA session
+	// the app creates, and used to verify X-Webhook-Hmac on inbound webhooks.
+	WebhookHMACKey           string
+	Engine                   string
+	SendRatePerMinute        int
+	WorkerIntervalSeconds    int
+	ReconcileIntervalSeconds int
+	TelegramBot              string
+	ForumChatID              string
+	TopikNews                string
 }
 
 type DiscordConfig struct {

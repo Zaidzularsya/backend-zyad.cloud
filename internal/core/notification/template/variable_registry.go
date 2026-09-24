@@ -88,6 +88,14 @@ func defaultVariables() map[string][]domain.NotificationVariable {
 			{Key: "ip_address", Description: "Login IP address", Required: true, Example: "127.0.0.1"},
 			{Key: "device_name", Description: "Device or browser name", Required: false, Example: "Chrome on Linux"},
 		},
+		"whatsapp.session_disconnected": {
+			{Key: "app_name", Description: "Application name", Required: true, Example: "Zyad Cloud"},
+			{Key: "user_name", Description: "Recipient user name", Required: true, Example: "Admin"},
+			{Key: "session_name", Description: "WhatsApp session label (name and number)", Required: true, Example: "Sales +6281234567890"},
+			{Key: "status", Description: "Current session status", Required: true, Example: "gagal"},
+			{Key: "occurred_at", Description: "When the disconnect was observed", Required: true, Example: "2026-09-24 10:00 WIB"},
+			{Key: "connections_url", Description: "WhatsApp connections page URL", Required: true, Example: "https://app.example.test/app/whatsapp"},
+		},
 		"permission.updated": {
 			{Key: "app_name", Description: "Application name", Required: true, Example: "Zyad Cloud"},
 			{Key: "user_name", Description: "Affected user name", Required: true, Example: "Admin"},

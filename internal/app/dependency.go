@@ -17,6 +17,7 @@ import (
 	producthandler "zyad.cloud/internal/modules/product/handler"
 	subscriptionhandler "zyad.cloud/internal/modules/subscription/handler"
 	userhandler "zyad.cloud/internal/modules/user/handler"
+	whatsapphandler "zyad.cloud/internal/modules/whatsapp/handler"
 	pgdatabase "zyad.cloud/internal/platform/database"
 	"zyad.cloud/internal/platform/redis"
 	"zyad.cloud/internal/platform/storage"
@@ -76,6 +77,10 @@ type Dependencies struct {
 	CRMQuotationHandler              *crmhandler.QuotationHandler
 	CRMInvoiceHandler                *crmhandler.InvoiceHandler
 	CRMIntegrationHandler            *crmhandler.IntegrationHandler
+	WhatsAppEntitlementChecker       middleware.EntitlementChecker
+	WhatsAppSessionHandler           *whatsapphandler.SessionHandler
+	WhatsAppWebhookHandler           *whatsapphandler.WebhookHandler
+	WhatsAppConversationHandler      *whatsapphandler.ConversationHandler
 	AdminAssetHandler                *assethandler.AdminAssetHandler
 	PlatformAssetHandler             *assethandler.PlatformAssetHandler
 	PlatformFinanceCoAHandler        *financehandler.PlatformCoAHandler

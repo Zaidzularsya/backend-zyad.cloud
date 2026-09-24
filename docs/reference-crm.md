@@ -254,6 +254,11 @@ Mendukung halaman detail lead 3-panel di FE (`LeadDetailPage.vue`).
   anggota aktif organization yang sama (`ErrLeadOwnerNotMember`, HTTP 422). Sebelumnya UUID user mana pun
   diterima. `owner_name` di response juga hanya diisi untuk user yang punya membership di organization lead.
 - **Belum**: Tickets dan Playbook di panel kanan (belum ada modul/tabelnya — ditunda atas keputusan user).
+- **Rencana — chat WhatsApp**: tab `Timeline | WhatsApp` di kolom tengah `LeadDetailPage.vue` bergantung
+  pada modul `whatsapp` (lihat `docs/reference-whatsapp.md`). Dampak ke CRM: kolom `phone_normalized` di
+  `crm_leads`/`crm_contacts` (matching nomor masuk), tipe activity `whatsapp` di `crm_activities`, dan owner
+  lead/contact menjadi assignee default percakapan. `crm_integrations.provider = 'whatsapp'` tetap integrasi
+  generik CRM dan tidak dipakai modul `whatsapp`.
 
 ## Non-Goals
 

@@ -174,6 +174,28 @@ func (r *leadRepository) FindByID(ctx context.Context, scope coretenant.Scope, i
 	return lead, nil
 }
 
+func (r *leadRepository) FindActiveByPhone(ctx context.Context, scope coretenant.Scope, phoneNormalized string) (domain.Lead, error) {
+	if !scope.IsValid() {
+		return domain.Lead{}, coretenant.ErrInvalidScope
+	}
+
+	query := `SELECT ` + leadColumns + ` FROM crm_leads
+		WHERE organization_id = $1 AND phone_normalized = $2 AND deleted_at IS NULL AND status <> 'converted'
+		ORDER BY updated_at DESC
+		LIMIT 1`
+
+	var lead domain.Lead
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var scanErr error
+		lead, scanErr = scanLead(tx.QueryRow(ctx, query, scope.OrganizationID(), phoneNormalized))
+		return scanErr
+	})
+	if err != nil {
+		return domain.Lead{}, err
+	}
+	return lead, nil
+}
+
 func (r *leadRepository) List(ctx context.Context, scope coretenant.Scope, filter LeadListFilter) ([]domain.Lead, int64, error) {
 	if !scope.IsValid() {
 		return nil, 0, coretenant.ErrInvalidScope

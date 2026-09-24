@@ -163,6 +163,28 @@ func (r *contactRepository) FindByID(ctx context.Context, scope coretenant.Scope
 	return contact, nil
 }
 
+func (r *contactRepository) FindActiveByPhone(ctx context.Context, scope coretenant.Scope, phoneNormalized string) (domain.Contact, error) {
+	if !scope.IsValid() {
+		return domain.Contact{}, coretenant.ErrInvalidScope
+	}
+
+	query := `SELECT ` + contactColumns + ` FROM crm_contacts
+		WHERE organization_id = $1 AND phone_normalized = $2 AND deleted_at IS NULL
+		ORDER BY updated_at DESC
+		LIMIT 1`
+
+	var contact domain.Contact
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var scanErr error
+		contact, scanErr = scanContact(tx.QueryRow(ctx, query, scope.OrganizationID(), phoneNormalized))
+		return scanErr
+	})
+	if err != nil {
+		return domain.Contact{}, err
+	}
+	return contact, nil
+}
+
 func buildContactWhere(scope coretenant.Scope, filter ContactListFilter) (string, []interface{}) {
 	whereClauses := []string{"organization_id = $1"}
 	args := []interface{}{scope.OrganizationID()}

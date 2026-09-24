@@ -70,4 +70,8 @@ type LeadRepository interface {
 	Restore(context.Context, coretenant.Scope, string, string) error
 	Assign(context.Context, coretenant.Scope, string, string, string) (domain.Lead, error)
 	MarkConverted(context.Context, coretenant.Scope, string, MarkConvertedParams) (domain.Lead, error)
+	// FindActiveByPhone returns the most recently updated non-deleted,
+	// non-converted lead whose phone_normalized matches (WhatsApp matching),
+	// or pgx.ErrNoRows.
+	FindActiveByPhone(ctx context.Context, scope coretenant.Scope, phoneNormalized string) (domain.Lead, error)
 }

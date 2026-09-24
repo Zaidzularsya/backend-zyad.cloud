@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"zyad.cloud/internal/app"
 	"zyad.cloud/internal/config"
 	notificationconsumer "zyad.cloud/internal/core/notification/consumer"
 	notificationdispatcher "zyad.cloud/internal/core/notification/dispatcher"
@@ -18,6 +19,8 @@ import (
 	notificationtemplate "zyad.cloud/internal/core/notification/template"
 	organizationrepo "zyad.cloud/internal/modules/organization/repository"
 	organizationservice "zyad.cloud/internal/modules/organization/service"
+	whatsapprepo "zyad.cloud/internal/modules/whatsapp/repository"
+	whatsappservice "zyad.cloud/internal/modules/whatsapp/service"
 	"zyad.cloud/internal/platform/database"
 	"zyad.cloud/internal/platform/logger"
 	"zyad.cloud/internal/platform/mail"
@@ -40,7 +43,7 @@ func main() {
 	}
 	defer db.Close()
 
-	notificationService := buildNotificationService(db, cfg)
+	notificationService := buildNotificationService(db, cfg, log)
 	worker := buildNotificationWorker(db, notificationService)
 
 	batchSize := cfg.Notification.WorkerBatchSize
@@ -48,12 +51,39 @@ func main() {
 		batchSize = 20
 	}
 
+	reconciler := buildWhatsAppReconciler(db, cfg, log)
+	inbound := app.NewWhatsAppInboundProcessor(cfg, db, log)
+
 	if *once {
 		if err := runBatch(ctx, log, worker, notificationService, batchSize); err != nil && !errors.Is(err, context.Canceled) {
 			log.Error("worker batch failed", "error", err)
 			os.Exit(1)
 		}
+		if inbound != nil {
+			runWhatsAppInbound(ctx, log, inbound)
+		}
+		if reconciler != nil {
+			runWhatsAppReconcile(ctx, log, reconciler)
+		}
 		return
+	}
+
+	if inbound != nil {
+		inboundInterval := time.Duration(cfg.WhatsApp.WorkerIntervalSeconds) * time.Second
+		if inboundInterval <= 0 {
+			inboundInterval = 5 * time.Second
+		}
+		log.Info("starting whatsapp inbound processor", "interval", inboundInterval.String())
+		go runEvery(ctx, inboundInterval, func() { runWhatsAppInbound(ctx, log, inbound) })
+	}
+
+	if reconciler != nil {
+		reconcileInterval := time.Duration(cfg.WhatsApp.ReconcileIntervalSeconds) * time.Second
+		if reconcileInterval <= 0 {
+			reconcileInterval = 5 * time.Minute
+		}
+		log.Info("starting whatsapp session reconciler", "interval", reconcileInterval.String())
+		go runEvery(ctx, reconcileInterval, func() { runWhatsAppReconcile(ctx, log, reconciler) })
 	}
 
 	interval := time.Duration(cfg.Notification.WorkerIntervalSeconds) * time.Second
@@ -94,7 +124,7 @@ func buildNotificationWorker(db *database.Pool, notificationService *notificatio
 	return worker
 }
 
-func buildNotificationService(db *database.Pool, cfg config.Config) *notificationservice.NotificationService {
+func buildNotificationService(db *database.Pool, cfg config.Config, log *slog.Logger) *notificationservice.NotificationService {
 	templateRepo := notificationrepo.NewTemplateRepository(db)
 	logRepo := notificationrepo.NewNotificationLogRepository(db)
 	preferenceRepo := notificationrepo.NewPreferenceRepository(db)
@@ -106,6 +136,7 @@ func buildNotificationService(db *database.Pool, cfg config.Config) *notificatio
 		preferenceRepo,
 		renderer,
 		notificationdispatcher.NewEmailDispatcher(mail.NewMailerFromConfig(cfg.Mail)),
+		notificationdispatcher.NewWhatsAppDispatcher(app.NewWhatsAppNotificationClient(cfg, db, log)),
 	)
 }
 
@@ -133,4 +164,56 @@ func runBatch(
 	}
 
 	return nil
+}
+
+// buildWhatsAppReconciler returns nil when WAHA is not configured, so the
+// worker keeps running notification batches only.
+func buildWhatsAppReconciler(db *database.Pool, cfg config.Config, log *slog.Logger) *whatsappservice.StatusReconciler {
+	if app.NewWAHAProvider(cfg.WhatsApp) == nil {
+		return nil
+	}
+	return whatsappservice.NewStatusReconciler(
+		whatsapprepo.NewDirectoryRepository(db),
+		app.NewWhatsAppWorkerResolver(db),
+		app.NewWhatsAppSessionService(cfg, db, nil, log),
+		log,
+	)
+}
+
+func runWhatsAppReconcile(ctx context.Context, log *slog.Logger, reconciler *whatsappservice.StatusReconciler) {
+	result, err := reconciler.RunOnce(ctx)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		log.Error("whatsapp reconcile failed", "error", err)
+		return
+	}
+	if result.Checked > 0 {
+		log.Info("reconciled whatsapp sessions", "checked", result.Checked, "failed", result.Failed)
+	}
+}
+
+const whatsappInboundBatchSize = 50
+
+func runWhatsAppInbound(ctx context.Context, log *slog.Logger, processor *whatsappservice.InboundProcessor) {
+	result, err := processor.RunOnce(ctx, whatsappInboundBatchSize)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		log.Error("whatsapp inbound batch failed", "error", err)
+		return
+	}
+	if result.Claimed > 0 {
+		log.Info("processed whatsapp webhook events", "claimed", result.Claimed, "processed", result.Processed, "failed", result.Failed)
+	}
+}
+
+// runEvery calls fn immediately and then on every tick until ctx is done.
+func runEvery(ctx context.Context, interval time.Duration, fn func()) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		fn()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }

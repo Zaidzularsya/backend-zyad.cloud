@@ -6,6 +6,9 @@ import (
 )
 
 type Message struct {
+	// Session selects the sending session for providers that host several
+	// numbers (WAHA). Empty means the provider's default session.
+	Session  string
 	To       string
 	Text     string
 	Metadata map[string]any

@@ -108,6 +108,10 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.DokuWebhookHandler != nil {
 		deps.DokuWebhookHandler.RegisterRoutes(api)
 	}
+	// WAHA webhooks authenticate via X-Webhook-Hmac; same placement as DOKU.
+	if deps.WhatsAppWebhookHandler != nil {
+		deps.WhatsAppWebhookHandler.RegisterRoutes(api)
+	}
 
 	protected := api.Group("")
 	protected.Use(
@@ -296,6 +300,22 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	}
 	if deps.CRMIntegrationHandler != nil {
 		deps.CRMIntegrationHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	}
+
+	// WhatsApp channel (WAHA). Same tenant rules as CRM: customer or platform
+	// organizations, gated by whatsapp.enabled (platform bypasses entitlement).
+	// The WAHA webhook receiver is public and registered separately.
+	whatsappGroup := protected.Group("/app/whatsapp")
+	whatsappGroup.Use(
+		middleware.RequireActiveTenant(),
+		middleware.RequireCustomerOrPlatformTenant(),
+		middleware.RequireEntitlement(deps.WhatsAppEntitlementChecker, "whatsapp.enabled"),
+	)
+	if deps.WhatsAppSessionHandler != nil {
+		deps.WhatsAppSessionHandler.RegisterRoutes(whatsappGroup, deps.PermissionChecker)
+	}
+	if deps.WhatsAppConversationHandler != nil {
+		deps.WhatsAppConversationHandler.RegisterRoutes(whatsappGroup, deps.PermissionChecker)
 	}
 
 	publicTenantMiddleware, err := middleware.ResolvePublicOrganization(
