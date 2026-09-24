@@ -28,11 +28,14 @@ const (
 	ActivityTypeMeeting ActivityType = "meeting"
 	ActivityTypeTask    ActivityType = "task"
 	ActivityTypeNote    ActivityType = "note"
+	// ActivityTypeWhatsApp is written by the whatsapp module (one summary
+	// activity per conversation per day), not by the activity form.
+	ActivityTypeWhatsApp ActivityType = "whatsapp"
 )
 
 func (t ActivityType) IsValid() bool {
 	switch t {
-	case ActivityTypeCall, ActivityTypeEmail, ActivityTypeMeeting, ActivityTypeTask, ActivityTypeNote:
+	case ActivityTypeCall, ActivityTypeEmail, ActivityTypeMeeting, ActivityTypeTask, ActivityTypeNote, ActivityTypeWhatsApp:
 		return true
 	default:
 		return false

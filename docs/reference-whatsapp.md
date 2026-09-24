@@ -112,7 +112,9 @@ internal/shared/phone/             # NormalizeID — dipakai crm (lead/contact) 
 
   Tanpa `read_all`, list/detail conversation difilter `assignee_user_id = user`.
 - **Entitlement**: `whatsapp.enabled` (sudah ada; free/starter off, growth+ on), `whatsapp.max_sessions`
-  (baru, integer, dicek via `SubscriptionGuardService.RequireQuotaValue`).
+  (`000128`: growth=1, business=3, enterprise=10; dicek via `SubscriptionGuardService.RequireQuotaValue`).
+  Organisasi yang paketnya di-sync sebelum `000128` belum punya baris runtime `whatsapp.max_sessions` →
+  SessionService memakai fallback batas 1 (`domain.DefaultMaxSessionsFallback`) sampai sync paket berikutnya.
 - **Rate limit** kirim per session di Redis (`WHATSAPP_SEND_RATE_PER_MINUTE`), `429` bila terlampaui;
   fail-open (log warn) bila Redis tidak tersedia.
 - **Data pribadi** (UU PDP): isi chat adalah data pribadi pihak ketiga. `raw jsonb` di `wa_messages` hanya
@@ -137,7 +139,7 @@ internal/shared/phone/             # NormalizeID — dipakai crm (lead/contact) 
 | `wa_conversations` | ✓ | session_id, chat_id, phone_normalized, contact_name, related_entity_type/id, assignee_user_id, last_message_at, last_message_preview, unread_count, status (`open`/`closed`); `UNIQUE(session_id, chat_id)` |
 | `wa_messages` | ✓ | conversation_id, waha_message_id, direction (`in`/`out`), body, status (`pending`/`sent`/`delivered`/`read`/`failed`), error, sent_by_user_id, sent_at, raw |
 | `wa_webhook_events` | ✗ | event_id (unik, ULID dari WAHA), session_name, event_type, payload, attempts, error, processed_at, next_retry_at |
-| `crm_leads`/`crm_contacts` | (existing) | + `phone_normalized` + index `(organization_id, phone_normalized)` |
+| `crm_leads`/`crm_contacts` | (existing) | + `phone_normalized` (generated dari `phone`) + partial index `(organization_id, phone_normalized)` |
 | `crm_activities` | (existing) | type check + `'whatsapp'` |
 
 Pemetaan `ack` WAHA → status pesan: `-1 ERROR → failed`, `0 PENDING → pending`, `1 SERVER → sent`,
@@ -146,12 +148,15 @@ diabaikan).
 
 ## Phone Normalization
 
-Helper `internal/shared/phone.NormalizeID(raw) (string, bool)` → format `62xxxxxxxxxx` (digit saja):
+Satu aturan, dua implementasi yang diuji sama (`internal/shared/phone/phone_integration_test.go`):
 
-- Buang spasi, `-`, `.`, `(`, `)`; buang `+` di depan.
-- `0xxx` → `62xxx`; `62xxx` tetap; `8xxx` (tanpa awalan) → `628xxx`.
-- Valid bila hasil 10–15 digit dan diawali `62`. Nomor luar negeri (awalan selain 62 setelah `+`) disimpan
-  apa adanya (digit) bila 8–15 digit — cukup untuk matching; tidak dipaksa jadi 62.
+- SQL `normalize_phone_id(text)` (migration `000125`, IMMUTABLE) mengisi kolom **generated**
+  `crm_leads.phone_normalized` / `crm_contacts.phone_normalized` — otomatis benar untuk semua jalur tulis
+  (API, convert lead, import nanti) tanpa perubahan repository CRM.
+- Go `internal/shared/phone.NormalizeID(raw) (string, bool)` untuk validasi input & nomor inbound.
+
+Aturan: ambil digit saja; awalan `00` dibuang; `0…` → `62…`; `8…` (tanpa awalan) → `628…`; valid bila 8–15
+digit, selain itu NULL / `("", false)`. Nomor luar negeri (`+1…`) tetap digitnya — cukup untuk matching.
 - `chatId` WAHA untuk kirim: `<normalized>@c.us`.
 - Inbound `from` bisa berupa `@lid` (bukan nomor). Processor memetakan via
   `GET /api/{session}/lids/{lid}` → `pn`; bila `pn` null, conversation tetap dibuat dengan

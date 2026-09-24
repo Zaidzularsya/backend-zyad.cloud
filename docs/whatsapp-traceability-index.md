@@ -10,7 +10,6 @@ Status:
 - `done`: selesai dan sudah diverifikasi.
 - `deferred`: sengaja ditunda.
 
-Nomor migration di bawah adalah **rencana** (terakhir `000121` per 2026-09-24) — cek ulang saat Fase 3.
 
 ## Source Documents
 
@@ -58,17 +57,17 @@ Nomor migration di bawah adalah **rencana** (terakhir `000121` per 2026-09-24) �
 | WA-R20 | Notifikasi platform via WAHA | – | (dispatcher) | – | WA-BE-040 | planned |
 | WA-R21 | Kuota pesan bulanan | `organization_usage_counters` (existing) | – | – | – | deferred |
 
-## Migration Traceability (rencana)
+## Migration Traceability
 
-| Rencana | Isi | Task |
+| Migration | Isi | Task |
 | --- | --- | --- |
-| `000122` | `wa_sessions` + `wa_session_directory` | WA-DB-001, WA-DB-002 |
-| `000123` | `wa_conversations` + `wa_messages` | WA-DB-003, WA-DB-004 |
-| `000124` | `wa_webhook_events` | WA-DB-005 |
-| `000125` | `phone_normalized` lead/contact + backfill + index | WA-DB-006 |
-| `000126` | `crm_activities` type `whatsapp` | WA-DB-007 |
-| `000127` | Permission seed module `whatsapp` | WA-DB-008 |
-| `000128` | Feature seed `whatsapp.max_sessions` | WA-DB-009 |
+| `000122_create_wa_sessions` | `wa_sessions` + `wa_session_directory` | WA-DB-001, WA-DB-002 |
+| `000123_create_wa_conversations_messages` | `wa_conversations` + `wa_messages` | WA-DB-003, WA-DB-004 |
+| `000124_create_wa_webhook_events` | `wa_webhook_events` | WA-DB-005 |
+| `000125_add_crm_phone_normalized` | fungsi `normalize_phone_id` + generated column `phone_normalized` lead/contact + index | WA-DB-006 |
+| `000126_add_crm_activity_type_whatsapp` | `crm_activities` type `whatsapp` | WA-DB-007 |
+| `000127_seed_whatsapp_permissions` | Permission seed module `whatsapp` | WA-DB-008 |
+| `000128_seed_whatsapp_max_sessions_feature` | Feature seed `whatsapp.max_sessions` | WA-DB-009 |
 
 ## Permission Traceability
 
@@ -86,7 +85,7 @@ Nomor migration di bawah adalah **rencana** (terakhir `000121` per 2026-09-24) �
 | Feature key | Tipe | Status | Sumber |
 | --- | --- | --- | --- |
 | `whatsapp.enabled` | boolean | ada | `000061` (free/starter off, growth+ on) |
-| `whatsapp.max_sessions` | integer | planned | seed baru Fase 3 |
+| `whatsapp.max_sessions` | integer | ada (growth=1, business=3, enterprise=10; fallback 1 bila baris runtime belum ada) | `000128` |
 | `whatsapp.max_messages_per_month` | integer | ada, penegakan deferred | `000061` |
 
 ## Config Traceability

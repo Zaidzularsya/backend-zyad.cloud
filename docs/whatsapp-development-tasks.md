@@ -39,18 +39,18 @@ Setiap fase dikerjakan di branch `feat/…` sendiri → verifikasi lokal → mer
 
 | ID | Task | Status |
 |---|---|---|
-| WA-DB-001 | Migration `wa_sessions` (RLS) | planned |
-| WA-DB-002 | Migration `wa_session_directory` (non-RLS) | planned |
-| WA-DB-003 | Migration `wa_conversations` (RLS, `UNIQUE(session_id, chat_id)`) | planned |
-| WA-DB-004 | Migration `wa_messages` (RLS, index `(conversation_id, sent_at desc)`) | planned |
-| WA-DB-005 | Migration `wa_webhook_events` (non-RLS, `event_id` unik) | planned |
-| WA-DB-006 | `phone_normalized` di `crm_leads`/`crm_contacts` + backfill + index | planned |
-| WA-DB-007 | `crm_activities_type_check` + `'whatsapp'`; const Go di `crm/domain/activity.go` | planned |
-| WA-DB-008 | Permission seed module `whatsapp` (owner/member/super_admin) | planned |
-| WA-DB-009 | Feature seed `whatsapp.max_sessions` + nilai per plan | planned |
-| WA-BE-001 | `internal/shared/phone.NormalizeID` + unit test; set `phone_normalized` di repo lead & contact | planned |
-| WA-BE-002 | `internal/modules/whatsapp/{domain,repository,dto}` + repository contract | planned |
-| WA-TEST-001 | Migrate up → down → up bersih; integration test RLS menolak baris org lain | planned |
+| WA-DB-001 | Migration `wa_sessions` (RLS) | done |
+| WA-DB-002 | Migration `wa_session_directory` (non-RLS) | done |
+| WA-DB-003 | Migration `wa_conversations` (RLS, `UNIQUE(session_id, chat_id)`) | done |
+| WA-DB-004 | Migration `wa_messages` (RLS, index `(conversation_id, sent_at desc)`) | done |
+| WA-DB-005 | Migration `wa_webhook_events` (non-RLS, `event_id` unik) | done |
+| WA-DB-006 | `phone_normalized` (generated column) di `crm_leads`/`crm_contacts` + index | done |
+| WA-DB-007 | `crm_activities_type_check` + `'whatsapp'`; const Go di `crm/domain/activity.go` | done |
+| WA-DB-008 | Permission seed module `whatsapp` (owner/member/super_admin) | done |
+| WA-DB-009 | Feature seed `whatsapp.max_sessions` + nilai per plan | done |
+| WA-BE-001 | `internal/shared/phone.NormalizeID` + unit test; `phone_normalized` = generated column (fungsi SQL `normalize_phone_id`), Go & SQL diuji sama | done |
+| WA-BE-002 | `internal/modules/whatsapp/{domain,repository}`: domain + SessionRepository + DirectoryRepository (repo conversation/message/webhook di Fase 5–6; dto di Fase 4) | done |
+| WA-TEST-001 | Migrate up → down → up bersih; integration test RLS menolak baris org lain | done |
 
 ## Fase 4 — Session & pairing API (`feat/whatsapp-sessions`)
 
