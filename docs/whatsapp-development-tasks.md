@@ -106,11 +106,11 @@ Setiap fase dikerjakan di branch `feat/…` sendiri → verifikasi lokal → mer
 
 | ID | Task | Status |
 |---|---|---|
-| WA-FE-010 | `ConversationPanel.vue` reusable | planned |
-| WA-FE-011 | Tab `Timeline \| WhatsApp` di kolom tengah `LeadDetailPage.vue` + badge unread | planned |
-| WA-FE-012 | Polling 5 dtk saat tab aktif & `visibilityState === 'visible'`; mark read | planned |
-| WA-FE-013 | Composer (Enter/Shift+Enter, optimistic, retry), read-only tanpa `whatsapp.message.send` | planned |
-| WA-FE-014 | Vitest: empty state, bubble, kirim | planned |
+| WA-FE-010 | `ConversationPanel.vue` reusable | done |
+| WA-FE-011 | Tab `Timeline \| WhatsApp` di kolom tengah `LeadDetailPage.vue` + badge unread | done |
+| WA-FE-012 | Polling 5 dtk saat tab aktif & `visibilityState === 'visible'`; mark read | done |
+| WA-FE-013 | Composer (Enter/Shift+Enter, optimistic, retry), read-only tanpa `whatsapp.message.send` | done |
+| WA-FE-014 | Vitest: empty state, bubble, kirim | done |
 
 ## Fase 9 — Hardening & deploy dev (`feat/whatsapp-hardening`)
 
