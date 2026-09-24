@@ -43,7 +43,7 @@ func main() {
 	}
 	defer db.Close()
 
-	notificationService := buildNotificationService(db, cfg)
+	notificationService := buildNotificationService(db, cfg, log)
 	worker := buildNotificationWorker(db, notificationService)
 
 	batchSize := cfg.Notification.WorkerBatchSize
@@ -124,7 +124,7 @@ func buildNotificationWorker(db *database.Pool, notificationService *notificatio
 	return worker
 }
 
-func buildNotificationService(db *database.Pool, cfg config.Config) *notificationservice.NotificationService {
+func buildNotificationService(db *database.Pool, cfg config.Config, log *slog.Logger) *notificationservice.NotificationService {
 	templateRepo := notificationrepo.NewTemplateRepository(db)
 	logRepo := notificationrepo.NewNotificationLogRepository(db)
 	preferenceRepo := notificationrepo.NewPreferenceRepository(db)
@@ -136,6 +136,7 @@ func buildNotificationService(db *database.Pool, cfg config.Config) *notificatio
 		preferenceRepo,
 		renderer,
 		notificationdispatcher.NewEmailDispatcher(mail.NewMailerFromConfig(cfg.Mail)),
+		notificationdispatcher.NewWhatsAppDispatcher(app.NewWhatsAppNotificationClient(cfg, db, log)),
 	)
 }
 

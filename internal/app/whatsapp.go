@@ -144,3 +144,21 @@ func NewWhatsAppConversationService(cfg config.Config, db *database.Pool, redis 
 	}
 	return whatsappservice.NewConversationService(deps)
 }
+
+// NewWhatsAppNotificationClient is the client behind the notification
+// WhatsAppDispatcher: WAHA via the platform organization's "notification"
+// session when WAHA is configured, otherwise the NoopClient.
+func NewWhatsAppNotificationClient(cfg config.Config, db *database.Pool, log *slog.Logger) platformwhatsapp.Client {
+	client := NewWAHAProvider(cfg.WhatsApp)
+	if client == nil {
+		return platformwhatsapp.NewNoopClient()
+	}
+	return whatsappservice.NewNotificationClient(
+		client,
+		whatsapprepo.NewSessionRepository(db),
+		NewWhatsAppWorkerResolver(db),
+		cfg.MultiTenant.PlatformOrganizationID,
+		cfg.WhatsApp.Session,
+		log,
+	)
+}

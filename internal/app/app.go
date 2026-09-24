@@ -55,7 +55,6 @@ import (
 	"zyad.cloud/internal/platform/mail"
 	redisplatform "zyad.cloud/internal/platform/redis"
 	"zyad.cloud/internal/platform/storage"
-	"zyad.cloud/internal/platform/whatsapp"
 )
 
 type App struct {
@@ -168,7 +167,7 @@ func New(ctx context.Context) (*App, error) {
 		preferenceRepo,
 		templateRenderer,
 		notificationdispatcher.NewEmailDispatcher(mail.NewMailerFromConfig(cfg.Mail)),
-		notificationdispatcher.NewWhatsAppDispatcher(whatsapp.NewNoopClient()),
+		notificationdispatcher.NewWhatsAppDispatcher(NewWhatsAppNotificationClient(cfg, db, log)),
 		notificationdispatcher.NewNoopDispatcher(domain.ChannelInApp),
 		notificationdispatcher.NewNoopDispatcher(domain.ChannelDiscord),
 	)

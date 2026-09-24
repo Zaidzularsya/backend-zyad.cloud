@@ -291,6 +291,30 @@ Di bawah `/api/v1/app/whatsapp` (grup yang sama dengan session).
   percakapan dimulai atau pesan terkirim, hanya untuk percakapan yang terhubung ke lead/contact.
 - Response tidak memuat `chat_id` WAHA maupun nama session; klien memakai `phone` dan `session_id`.
 
+## Notifikasi Platform & Audit Keamanan (Fase 9)
+
+**WhatsAppDispatcher** (notification core) memakai `service.NotificationClient`: kirim dari session milik
+organisasi platform (`PLATFORM_ORGANIZATION_ID`) dengan `purpose = notification` yang `WORKING` (default dulu),
+fallback ke `WHATSAPP_API_SESSION`, error `ErrNoNotificationSession` bila keduanya tidak ada. Session tenant
+tidak pernah dipakai untuk notifikasi platform. Bila `WHATSAPP_PROVIDER` bukan `waha` → `NoopClient` (perilaku
+lama). Dipasang di API (`internal/app/app.go`) dan worker (`cmd/worker`). Saat ini belum ada aturan notifikasi
+berkanal WhatsApp; dispatcher siap dipakai ketika aturan/template WhatsApp ditambahkan.
+
+**Audit (2026-09-24)**:
+
+| Cek | Hasil |
+|---|---|
+| API key WAHA di response/log | Hanya dipakai sebagai header `X-Api-Key` (`platform/whatsapp/waha.go`); tidak ada di DTO, error message ke klien (`MapProviderError` membungkus detail), maupun log |
+| HMAC webhook wajib | 503 bila `WHATSAPP_WEBHOOK_HMAC_KEY` kosong; 401 bila signature salah; session tidak bisa dibuat tanpa key (`WHATSAPP_NOT_CONFIGURED`) |
+| Replay webhook | Event id unik (`wa_webhook_events.event_id`) → pemrosesan idempotent |
+| RLS | `wa_sessions`, `wa_conversations`, `wa_messages` ENABLE + FORCE (integration test `TestWhatsAppTablesRLSFlagsIntegration`, `TestConversationRLSIntegration`); `wa_session_directory` & `wa_webhook_events` sengaja non-RLS dan tidak diekspos |
+| Nama session mentah dari klien | Tidak ada: semua endpoint memakai UUID (`:id`, `session_id` binding `uuid`); response tidak memuat nama session maupun `chat_id` |
+| Isi pesan di log | Tidak ada; webhook yang ditolak hanya log request id |
+| XSS | FE merender isi pesan sebagai teks (interpolasi Vue), QR dari data-URL backend |
+
+**Tindak lanjut ops (di luar kode)**: rotasi API key WAHA dev & password dashboard; blokir
+`/api/server/environment` WAHA di nginx; kebijakan retensi `wa_webhook_events`/`wa_messages`.
+
 ## Fase Implementasi
 
 | Fase | Branch | Isi | Plan mode |

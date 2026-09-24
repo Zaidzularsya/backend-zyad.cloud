@@ -116,10 +116,10 @@ Setiap fase dikerjakan di branch `feat/…` sendiri → verifikasi lokal → mer
 
 | ID | Task | Status |
 |---|---|---|
-| WA-BE-040 | `WhatsAppDispatcher` pakai `NewClientFromConfig` di `app.go` dan `cmd/worker` | planned |
-| WA-SEC-001 | Audit: API key tidak bocor, HMAC wajib, RLS semua tabel tenant, tidak ada nama session mentah dari klien | planned |
-| WA-DOC-010 | Path `/app/whatsapp/*` + `/webhooks/waha` di `api/openapi.yaml` | planned |
-| WA-DOC-011 | Update status traceability & tasks | planned |
+| WA-BE-040 | `WhatsAppDispatcher` pakai `NotificationClient` (session platform purpose `notification`, fallback `WHATSAPP_API_SESSION`, Noop bila WAHA tidak dikonfigurasi) di `app.go` dan `cmd/worker` | done |
+| WA-SEC-001 | Audit: API key tidak bocor, HMAC wajib, RLS semua tabel tenant, tidak ada nama session mentah dari klien | done |
+| WA-DOC-010 | Path `/app/whatsapp/*` + `/webhooks/waha` di `api/openapi.yaml` | done |
+| WA-DOC-011 | Update status traceability & tasks | done |
 | WA-OPS-001 | Env WAHA di `shared/.env` dev, deploy BE (migrate+api+worker) & FE | planned |
 | WA-OPS-002 | Checklist uji manual dev (pairing QR/kode, kirim/terima, ack, auto-lead, restart container, scope member, quota) | planned |
 

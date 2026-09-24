@@ -6066,6 +6066,1258 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/app/whatsapp/sessions:
+    get:
+      summary: List WhatsApp sessions
+      operationId: listWhatsAppSessions
+      tags:
+      - WhatsApp
+      security:
+      - BearerAuth: []
+      description: 'Permission: `whatsapp.session.read`. Tenant: customer or platform organization; requires
+        entitlement `whatsapp.enabled`.'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WhatsAppSession'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement whatsapp.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Create and start a WhatsApp session (WAHA)
+      operationId: createWhatsAppSession
+      tags:
+      - WhatsApp
+      security:
+      - BearerAuth: []
+      description: 'Enforces `whatsapp.max_sessions` (409 QUOTA_EXCEEDED; limit 1 when the runtime entitlement
+        row is missing). The first session becomes the default. Permission: `whatsapp.session.manage`. Tenant:
+        customer or platform organization; requires entitlement `whatsapp.enabled`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WhatsAppCreateSessionRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/WhatsAppSession'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement whatsapp.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (see error code)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: WhatsApp provider error (WHATSAPP_PROVIDER_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: WhatsApp not configured (WHATSAPP_NOT_CONFIGURED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/whatsapp/sessions/{id}:
+    get:
+      summary: Get a WhatsApp session
+      operationId: getWhatsAppSession
+      tags:
+      - WhatsApp
+      security:
+      - BearerAuth: []
+      description: 'Permission: `whatsapp.session.read`. Tenant: customer or platform organization; requires
+        entitlement `whatsapp.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/WhatsAppSession'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement whatsapp.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (or not visible to the caller)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Update a WhatsApp session
+      operationId: updateWhatsAppSession
+      tags:
+      - WhatsApp
+      security:
+      - BearerAuth: []
+      description: 'Permission: `whatsapp.session.manage`. Tenant: customer or platform organization; requires
+        entitlement `whatsapp.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WhatsAppUpdateSessionRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/WhatsAppSession'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement whatsapp.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (or not visible to the caller)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Log out and delete a WhatsApp session
+      operationId: deleteWhatsAppSession
+      tags:
+      - WhatsApp
+      security:
+      - BearerAuth: []
+      description: 'Deletes the session on WAHA first; if that fails the local session is kept so the call
+        can be retried. Permission: `whatsapp.session.manage`. Tenant: customer or platform organization;
+        requires entitlement `whatsapp.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    nullable: true
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement whatsapp.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (or not visible to the caller)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: WhatsApp provider error (WHATSAPP_PROVIDER_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: WhatsApp not configured (WHATSAPP_NOT_CONFIGURED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/whatsapp/sessions/{id}/status:
+    get:
+      summary: Get the session status (re-read from WAHA when older than 15s)
+      operationId: getWhatsAppSessionStatus
+      tags:
+      - WhatsApp
+      security:
+      - BearerAuth: []
+      description: 'Permission: `whatsapp.session.read`. Tenant: customer or platform organization; requires
+        entitlement `whatsapp.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/WhatsAppSession'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement whatsapp.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (or not visible to the caller)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/whatsapp/sessions/{id}/start:
+    post:
+      summary: Start a session
+      operationId: startWhatsAppSession
+      tags:
+      - WhatsApp
+      security:
+      - BearerAuth: []
+      description: 'Permission: `whatsapp.session.manage`. Tenant: customer or platform organization; requires
+        entitlement `whatsapp.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/WhatsAppSession'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement whatsapp.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (or not visible to the caller)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (see error code)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: WhatsApp provider error (WHATSAPP_PROVIDER_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: WhatsApp not configured (WHATSAPP_NOT_CONFIGURED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/whatsapp/sessions/{id}/stop:
+    post:
+      summary: Stop a session
+      operationId: stopWhatsAppSession
+      tags:
+      - WhatsApp
+      security:
+      - BearerAuth: []
+      description: 'Permission: `whatsapp.session.manage`. Tenant: customer or platform organization; requires
+        entitlement `whatsapp.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/WhatsAppSession'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement whatsapp.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (or not visible to the caller)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (see error code)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: WhatsApp provider error (WHATSAPP_PROVIDER_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: WhatsApp not configured (WHATSAPP_NOT_CONFIGURED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/whatsapp/sessions/{id}/logout:
+    post:
+      summary: Unlink the phone from a session
+      operationId: logoutWhatsAppSession
+      tags:
+      - WhatsApp
+      security:
+      - BearerAuth: []
+      description: 'Permission: `whatsapp.session.manage`. Tenant: customer or platform organization; requires
+        entitlement `whatsapp.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/WhatsAppSession'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement whatsapp.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (or not visible to the caller)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (see error code)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: WhatsApp provider error (WHATSAPP_PROVIDER_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: WhatsApp not configured (WHATSAPP_NOT_CONFIGURED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/whatsapp/sessions/{id}/qr:
+    get:
+      summary: Get the pairing QR as a data URL
+      operationId: getWhatsAppSessionQR
+      tags:
+      - WhatsApp
+      security:
+      - BearerAuth: []
+      description: '409 WHATSAPP_SESSION_NOT_SCANNING unless the session status is SCAN_QR_CODE. Permission:
+        `whatsapp.session.manage`. Tenant: customer or platform organization; requires entitlement `whatsapp.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/WhatsAppSessionQR'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement whatsapp.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (or not visible to the caller)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (see error code)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: WhatsApp provider error (WHATSAPP_PROVIDER_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: WhatsApp not configured (WHATSAPP_NOT_CONFIGURED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/whatsapp/sessions/{id}/pairing-code:
+    post:
+      summary: Request a phone pairing code
+      operationId: requestWhatsAppPairingCode
+      tags:
+      - WhatsApp
+      security:
+      - BearerAuth: []
+      description: 'Permission: `whatsapp.session.manage`. Tenant: customer or platform organization; requires
+        entitlement `whatsapp.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WhatsAppPairingCodeRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/WhatsAppPairingCode'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement whatsapp.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (or not visible to the caller)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (see error code)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: WhatsApp provider error (WHATSAPP_PROVIDER_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: WhatsApp not configured (WHATSAPP_NOT_CONFIGURED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/whatsapp/conversations:
+    get:
+      summary: List conversations
+      operationId: listWhatsAppConversations
+      tags:
+      - WhatsApp
+      security:
+      - BearerAuth: []
+      description: 'Without `whatsapp.conversation.read_all` only conversations assigned to the caller are
+        returned. Permission: `whatsapp.conversation.read`. Tenant: customer or platform organization; requires
+        entitlement `whatsapp.enabled`.'
+      parameters:
+      - name: related_entity_type
+        in: query
+        schema:
+          type: string
+          enum:
+          - lead
+          - contact
+      - name: related_entity_id
+        in: query
+        schema:
+          type: string
+          format: uuid
+      - name: assignee
+        in: query
+        schema:
+          type: string
+          format: uuid
+      - name: status
+        in: query
+        schema:
+          type: string
+          enum:
+          - open
+          - closed
+      - name: search
+        in: query
+        schema:
+          type: string
+        description: Contact name or phone
+      - name: page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+      - name: per_page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WhatsAppConversation'
+                  meta:
+                    $ref: '#/components/schemas/WhatsAppPaginationMeta'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement whatsapp.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/whatsapp/conversations/start:
+    post:
+      summary: Start (or reuse) a conversation with a lead or contact
+      operationId: startWhatsAppConversation
+      tags:
+      - WhatsApp
+      security:
+      - BearerAuth: []
+      description: 'Uses session_id or the default connected session. Assigned to the entity owner (or the
+        caller when unowned); 403 WHATSAPP_CONVERSATION_FORBIDDEN when it belongs to another user and the
+        caller lacks read_all. Permission: `whatsapp.message.send`. Tenant: customer or platform organization;
+        requires entitlement `whatsapp.enabled`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WhatsAppStartConversationRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/WhatsAppConversation'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement whatsapp.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (or not visible to the caller)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (see error code)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/whatsapp/conversations/{id}:
+    get:
+      summary: Get a conversation
+      operationId: getWhatsAppConversation
+      tags:
+      - WhatsApp
+      security:
+      - BearerAuth: []
+      description: 'Permission: `whatsapp.conversation.read`. Tenant: customer or platform organization;
+        requires entitlement `whatsapp.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/WhatsAppConversation'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement whatsapp.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (or not visible to the caller)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Update conversation status or assignee
+      operationId: updateWhatsAppConversation
+      tags:
+      - WhatsApp
+      security:
+      - BearerAuth: []
+      description: 'Changing assignee_user_id also requires `whatsapp.conversation.assign` and an active
+        member. Permission: `whatsapp.conversation.read`. Tenant: customer or platform organization; requires
+        entitlement `whatsapp.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WhatsAppUpdateConversationRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/WhatsAppConversation'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement whatsapp.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (or not visible to the caller)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/whatsapp/conversations/{id}/read:
+    post:
+      summary: Reset the unread count
+      operationId: markWhatsAppConversationRead
+      tags:
+      - WhatsApp
+      security:
+      - BearerAuth: []
+      description: 'Permission: `whatsapp.conversation.read`. Tenant: customer or platform organization;
+        requires entitlement `whatsapp.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    nullable: true
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement whatsapp.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (or not visible to the caller)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/whatsapp/conversations/{id}/messages:
+    get:
+      summary: List messages (keyset pagination)
+      operationId: listWhatsAppMessages
+      tags:
+      - WhatsApp
+      security:
+      - BearerAuth: []
+      description: 'Permission: `whatsapp.conversation.read`. Tenant: customer or platform organization;
+        requires entitlement `whatsapp.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: before
+        in: query
+        schema:
+          type: string
+          format: uuid
+        description: Message id cursor (next_before)
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/WhatsAppMessagePage'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement whatsapp.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (or not visible to the caller)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Send a text message
+      operationId: sendWhatsAppMessage
+      tags:
+      - WhatsApp
+      security:
+      - BearerAuth: []
+      description: 'A provider failure is not an API error: the message is returned with status failed and
+        can be retried. Permission: `whatsapp.message.send`. Tenant: customer or platform organization;
+        requires entitlement `whatsapp.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WhatsAppSendMessageRequest'
+      responses:
+        '201':
+          description: Created (status sent, or failed when the provider rejected it)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/WhatsAppMessage'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement whatsapp.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (or not visible to the caller)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (see error code)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limited (WHATSAPP_RATE_LIMITED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: WhatsApp not configured (WHATSAPP_NOT_CONFIGURED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/whatsapp/messages/{id}/retry:
+    post:
+      summary: Retry a failed outgoing message
+      operationId: retryWhatsAppMessage
+      tags:
+      - WhatsApp
+      security:
+      - BearerAuth: []
+      description: 'Permission: `whatsapp.message.send`. Tenant: customer or platform organization; requires
+        entitlement `whatsapp.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/WhatsAppMessage'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement whatsapp.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (or not visible to the caller)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Conflict (see error code)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limited (WHATSAPP_RATE_LIMITED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: WhatsApp not configured (WHATSAPP_NOT_CONFIGURED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/webhooks/waha:
+    post:
+      summary: Receive WAHA webhooks (HMAC-signed)
+      operationId: handleWahaWebhook
+      tags:
+      - WhatsApp
+      description: Public endpoint (no bearer token). X-Webhook-Hmac must be the hex HMAC-SHA512 of the
+        raw body with WHATSAPP_WEBHOOK_HMAC_KEY. Events of sessions not created by the app are acknowledged
+        and ignored. Events are stored idempotently by id and processed asynchronously by the worker.
+      parameters:
+      - name: X-Webhook-Hmac
+        in: header
+        required: true
+        schema:
+          type: string
+      - name: X-Webhook-Hmac-Algorithm
+        in: header
+        required: false
+        schema:
+          type: string
+          enum:
+          - sha512
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WahaWebhookEvent'
+      responses:
+        '200':
+          description: Accepted, duplicate, or ignored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    nullable: true
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: WhatsApp not configured (WHATSAPP_NOT_CONFIGURED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   parameters:
     OrganizationID:
@@ -6137,6 +7389,269 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    WhatsAppSession:
+      type: object
+      description: The WAHA session name is internal and never returned.
+      properties:
+        id:
+          type: string
+          format: uuid
+        display_name:
+          type: string
+        phone:
+          type: string
+          description: Normalized number, e.g. 6281234567890
+        push_name:
+          type: string
+        status:
+          type: string
+          enum:
+          - STOPPED
+          - STARTING
+          - SCAN_QR_CODE
+          - PASSKEY_REQUIRED
+          - PASSKEY_CONFIRMATION_REQUIRED
+          - WORKING
+          - FAILED
+        engine:
+          type: string
+        is_default:
+          type: boolean
+        purpose:
+          type: string
+          enum:
+          - cs
+          - sales
+          - notification
+        auto_create_lead:
+          type: boolean
+        last_status_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    WhatsAppCreateSessionRequest:
+      type: object
+      properties:
+        display_name:
+          type: string
+          maxLength: 120
+        purpose:
+          type: string
+          enum:
+          - cs
+          - sales
+          - notification
+          default: sales
+        is_default:
+          type: boolean
+        auto_create_lead:
+          type: boolean
+    WhatsAppUpdateSessionRequest:
+      type: object
+      properties:
+        display_name:
+          type: string
+          maxLength: 120
+        purpose:
+          type: string
+          enum:
+          - cs
+          - sales
+          - notification
+        is_default:
+          type: boolean
+        auto_create_lead:
+          type: boolean
+    WhatsAppSessionQR:
+      type: object
+      properties:
+        qr:
+          type: string
+          description: data:image/png;base64,...
+        status:
+          type: string
+          enum:
+          - STOPPED
+          - STARTING
+          - SCAN_QR_CODE
+          - PASSKEY_REQUIRED
+          - PASSKEY_CONFIRMATION_REQUIRED
+          - WORKING
+          - FAILED
+    WhatsAppPairingCodeRequest:
+      type: object
+      required:
+      - phone
+      properties:
+        phone:
+          type: string
+          example: 0812 3456 7890
+    WhatsAppPairingCode:
+      type: object
+      properties:
+        code:
+          type: string
+          example: ABCD-EFGH
+    WhatsAppConversation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        session_id:
+          type: string
+          format: uuid
+        phone:
+          type: string
+        contact_name:
+          type: string
+        related_entity_type:
+          type: string
+          enum:
+          - lead
+          - contact
+        related_entity_id:
+          type: string
+          format: uuid
+        assignee_user_id:
+          type: string
+          format: uuid
+        last_message_at:
+          type: string
+          format: date-time
+        last_message_preview:
+          type: string
+        unread_count:
+          type: integer
+        status:
+          type: string
+          enum:
+          - open
+          - closed
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    WhatsAppStartConversationRequest:
+      type: object
+      required:
+      - related_entity_type
+      - related_entity_id
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        related_entity_type:
+          type: string
+          enum:
+          - lead
+          - contact
+        related_entity_id:
+          type: string
+          format: uuid
+    WhatsAppUpdateConversationRequest:
+      type: object
+      properties:
+        assignee_user_id:
+          type: string
+          description: Empty string unassigns
+        status:
+          type: string
+          enum:
+          - open
+          - closed
+    WhatsAppMessage:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversation_id:
+          type: string
+          format: uuid
+        direction:
+          type: string
+          enum:
+          - in
+          - out
+        body:
+          type: string
+        has_media:
+          type: boolean
+        status:
+          type: string
+          enum:
+          - pending
+          - sent
+          - delivered
+          - read
+          - failed
+        error:
+          type: string
+        sent_by_user_id:
+          type: string
+          format: uuid
+        sent_at:
+          type: string
+          format: date-time
+    WhatsAppMessagePage:
+      type: object
+      properties:
+        messages:
+          type: array
+          description: Oldest first
+          items:
+            $ref: '#/components/schemas/WhatsAppMessage'
+        next_before:
+          type: string
+          format: uuid
+    WhatsAppSendMessageRequest:
+      type: object
+      required:
+      - text
+      properties:
+        text:
+          type: string
+          maxLength: 4096
+    WhatsAppPaginationMeta:
+      type: object
+      properties:
+        page:
+          type: integer
+        per_page:
+          type: integer
+        total:
+          type: integer
+        total_pages:
+          type: integer
+    WahaWebhookEvent:
+      type: object
+      required:
+      - id
+      - event
+      - session
+      description: 'WAHA event envelope; handled events: session.status, message.any, message.ack.'
+      properties:
+        id:
+          type: string
+          description: ULID, used for idempotency
+        timestamp:
+          type: integer
+        event:
+          type: string
+        session:
+          type: string
+        me:
+          type: object
+        payload:
+          type: object
     SwitchOrganizationRequest:
       type: object
       required:

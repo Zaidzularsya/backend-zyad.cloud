@@ -54,7 +54,7 @@ Status:
 | WA-R17 | Jejak chat di timeline CRM | `crm_activities` type `whatsapp` | (service) | – | WA-TEST-030 | done |
 | WA-R18 | Halaman WhatsApp Connections | – | FE | `whatsapp.session.read` | WA-FE-* | done |
 | WA-R19 | Tab WhatsApp di Lead Detail | – | FE | `whatsapp.conversation.read`, `whatsapp.message.send` | WA-FE-014 | done |
-| WA-R20 | Notifikasi platform via WAHA | – | (dispatcher) | – | WA-BE-040 | planned |
+| WA-R20 | Notifikasi platform via WAHA | – | (dispatcher) | – | WA-BE-040 | done |
 | WA-R21 | Kuota pesan bulanan | `organization_usage_counters` (existing) | – | – | – | deferred |
 
 ## Migration Traceability
