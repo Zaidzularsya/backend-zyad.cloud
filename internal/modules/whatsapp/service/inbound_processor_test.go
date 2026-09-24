@@ -433,3 +433,80 @@ func TestInboundSkipsMessagesSentThroughAPI(t *testing.T) {
 		t.Fatal("API-sent message recorded by the processor; ConversationService.Send stores it")
 	}
 }
+
+// gowsEvent builds a message.any event shaped like the GOWS engine sends it:
+// "me" carries both the phone id and the Linked ID of the connected account.
+func gowsEvent(id, payload string) domain.WebhookEvent {
+	return domain.WebhookEvent{
+		ID: "row-" + id, EventID: id, SessionName: "zc_test_abc123", EventType: "message.any", Attempts: 1,
+		Payload: []byte(`{"id":"` + id + `","event":"message.any","session":"zc_test_abc123",` +
+			`"me":{"id":"6289999999999@c.us","lid":"999000@lid","pushName":"CS"},"payload":` + payload + `}`),
+	}
+}
+
+// Regression (dev, 2026-09-24): our own message in a group arrived with
+// from=<group>, to=<our LID>, participant=<our LID>; the old code took "to",
+// resolved our LID to our own number, and auto-created a lead for the CS
+// number itself.
+func TestInboundIgnoresOwnGroupMessageFromGOWS(t *testing.T) {
+	h := newInboundHarness(t, true, gowsEvent("e1",
+		`{"id":"g1","from":"120363237896492216@g.us","to":"999000@lid","participant":"999000@lid","fromMe":true,"source":"app","body":"di grup"}`))
+	h.processor.lids = fakeLIDs{"999000@lid": "6289999999999@c.us"}
+	h.run(t)
+
+	if len(h.conversations.byChat) != 0 || len(h.crm.created) != 0 {
+		t.Fatalf("conversations = %d, leads = %d; want none", len(h.conversations.byChat), len(h.crm.created))
+	}
+}
+
+// Regression: GOWS sends our own direct message from the phone with the
+// chat in "from" and "to" empty; it must be stored as outbound to the peer.
+func TestInboundOwnDirectMessageFromGOWSUsesFromAsChat(t *testing.T) {
+	h := newInboundHarness(t, false, gowsEvent("e1",
+		`{"id":"d1","from":"116368@lid","to":"","fromMe":true,"source":"app","body":"halo kak"}`))
+	h.processor.lids = fakeLIDs{"116368@lid": "6281234567890@c.us"}
+	h.run(t)
+
+	conversation, ok := h.conversations.byChat[h.session.ID+"|6281234567890@c.us"]
+	if !ok {
+		t.Fatalf("conversation with the peer not created: %v", h.conversations.byChat)
+	}
+	if len(h.conversations.recorded) != 1 || h.conversations.recorded[0].Direction != domain.MessageDirectionOut {
+		t.Fatalf("recorded = %+v", h.conversations.recorded)
+	}
+	if conversation.PhoneNormalized != "6281234567890" {
+		t.Fatalf("conversation = %+v", conversation)
+	}
+}
+
+func TestInboundNeverChatsWithOwnNumber(t *testing.T) {
+	h := newInboundHarness(t, true,
+		// note to self
+		gowsEvent("e1", `{"id":"s1","from":"6289999999999@c.us","to":"6289999999999@c.us","fromMe":true,"source":"app","body":"catatan"}`),
+		// own number with a device suffix
+		gowsEvent("e2", `{"id":"s2","from":"6289999999999:12@s.whatsapp.net","to":"","fromMe":true,"source":"app","body":"x"}`),
+		// peer LID that resolves to our own number
+		gowsEvent("e3", `{"id":"s3","from":"555@lid","fromMe":false,"body":"x"}`),
+	)
+	h.processor.lids = fakeLIDs{"555@lid": "6289999999999@c.us"}
+	h.run(t)
+
+	if len(h.conversations.byChat) != 0 || len(h.crm.created) != 0 {
+		t.Fatalf("conversations = %v, leads = %d; want none", h.conversations.byChat, len(h.crm.created))
+	}
+}
+
+func TestNormalizeJID(t *testing.T) {
+	tests := map[string]string{
+		"6281234567890@s.whatsapp.net":    "6281234567890@c.us",
+		"6281234567890:12@s.whatsapp.net": "6281234567890@c.us",
+		"168624744620063@lid":             "168624744620063@lid",
+		" 628@c.us ":                      "628@c.us",
+		"":                                "",
+	}
+	for input, want := range tests {
+		if got := normalizeJID(input); got != want {
+			t.Errorf("normalizeJID(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
