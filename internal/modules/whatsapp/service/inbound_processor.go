@@ -41,6 +41,15 @@ type LIDResolver interface {
 	ResolveLID(ctx context.Context, session, lid string) (string, error)
 }
 
+// InboundCRM is what InboundProcessor needs from CRM: phone matching/lead
+// creation (CRMMatcher) plus the same per-conversation-per-day activity write
+// ConversationService uses, so an inbound message (or one sent from the
+// phone) also lands on the lead's timeline instead of only app-sent ones.
+type InboundCRM interface {
+	CRMMatcher
+	RecordActivity(ctx context.Context, scope coretenant.Scope, input CRMActivityInput) error
+}
+
 type ProcessResult struct {
 	Claimed   int
 	Processed int
@@ -58,9 +67,10 @@ type InboundProcessor struct {
 	sessionSvc    *SessionService
 	conversations repository.ConversationRepository
 	lids          LIDResolver
-	crm           CRMMatcher
+	crm           InboundCRM
 	log           *slog.Logger
 	now           func() time.Time
+	location      *time.Location
 }
 
 type InboundProcessorDeps struct {
@@ -72,7 +82,7 @@ type InboundProcessorDeps struct {
 	Conversations repository.ConversationRepository
 	// LIDs may be nil; @lid chats then stay unresolved (no CRM match).
 	LIDs   LIDResolver
-	CRM    CRMMatcher
+	CRM    InboundCRM
 	Logger *slog.Logger
 }
 
@@ -80,6 +90,10 @@ func NewInboundProcessor(deps InboundProcessorDeps) *InboundProcessor {
 	log := deps.Logger
 	if log == nil {
 		log = slog.Default()
+	}
+	location, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+		location = time.FixedZone("WIB", 7*60*60)
 	}
 	return &InboundProcessor{
 		events:        deps.Events,
@@ -92,6 +106,7 @@ func NewInboundProcessor(deps InboundProcessorDeps) *InboundProcessor {
 		crm:           deps.CRM,
 		log:           log,
 		now:           func() time.Time { return time.Now().UTC() },
+		location:      location,
 	}
 }
 
@@ -324,7 +339,7 @@ func (p *InboundProcessor) handleMessage(ctx context.Context, scope coretenant.S
 		raw["ack"] = *payload.Ack
 	}
 
-	_, _, err = p.conversations.RecordMessage(ctx, scope, conversation.ID, repository.RecordMessageParams{
+	_, inserted, err := p.conversations.RecordMessage(ctx, scope, conversation.ID, repository.RecordMessageParams{
 		WAHAMessageID: payload.ID,
 		Direction:     direction,
 		Body:          payload.Body,
@@ -333,7 +348,15 @@ func (p *InboundProcessor) handleMessage(ctx context.Context, scope coretenant.S
 		SentAt:        sentAt,
 		Raw:           raw,
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	// A replayed/duplicate event (already claimed a day, or nothing new to
+	// log) must not re-touch the timeline.
+	if inserted {
+		claimAndRecordDailyActivity(ctx, scope, p.conversations, p.crm, p.now().In(p.location), conversation, session, conversation.AssigneeUserID, p.log)
+	}
+	return nil
 }
 
 // conversationFor returns the chat's conversation, creating it on the first

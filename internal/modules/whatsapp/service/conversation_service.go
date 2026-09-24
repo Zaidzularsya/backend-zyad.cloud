@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -408,34 +407,7 @@ func (s *ConversationService) deliver(ctx context.Context, scope coretenant.Scop
 // conversation per day (Asia/Jakarta). Failures are logged only: the chat
 // itself already succeeded.
 func (s *ConversationService) recordDailyActivity(ctx context.Context, scope coretenant.Scope, conversation domain.Conversation, session domain.Session, userID string) {
-	if conversation.RelatedEntityID == "" || s.crm == nil {
-		return
-	}
-	claimed, err := s.conversations.ClaimActivityDay(ctx, scope, conversation.ID, s.now().In(s.location))
-	if err != nil || !claimed {
-		if err != nil {
-			s.log.Warn("whatsapp: claim activity day failed", "conversation_id", conversation.ID, "error", err)
-		}
-		return
-	}
-	number := "+" + conversation.PhoneNormalized
-	via := session.DisplayName
-	if via == "" && session.Phone != "" {
-		via = "+" + session.Phone
-	}
-	description := fmt.Sprintf("Percakapan WhatsApp dengan %s", number)
-	if via != "" {
-		description += " melalui " + via
-	}
-	if err := s.crm.RecordActivity(ctx, scope, CRMActivityInput{
-		EntityType:  conversation.RelatedEntityType,
-		EntityID:    conversation.RelatedEntityID,
-		Subject:     "Chat WhatsApp " + number,
-		Description: description,
-		UserID:      userID,
-	}); err != nil {
-		s.log.Warn("whatsapp: record crm activity failed", "conversation_id", conversation.ID, "error", err)
-	}
+	claimAndRecordDailyActivity(ctx, scope, s.conversations, s.crm, s.now().In(s.location), conversation, session, userID, s.log)
 }
 
 // sendFailureReason is stored on the message and shown to users, so it

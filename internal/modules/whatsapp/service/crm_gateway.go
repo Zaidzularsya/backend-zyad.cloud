@@ -3,7 +3,10 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -11,6 +14,7 @@ import (
 	crmdomain "zyad.cloud/internal/modules/crm/domain"
 	crmrepo "zyad.cloud/internal/modules/crm/repository"
 	"zyad.cloud/internal/modules/whatsapp/domain"
+	"zyad.cloud/internal/modules/whatsapp/repository"
 )
 
 // LeadSourceWhatsApp is the crm_leads.source of leads auto-created from an
@@ -182,4 +186,61 @@ func (m *CRMGateway) RecordActivity(ctx context.Context, scope coretenant.Scope,
 
 func (m *CRMGateway) IsActiveMember(ctx context.Context, scope coretenant.Scope, userID string) (bool, error) {
 	return m.members.IsActiveMember(ctx, scope, userID)
+}
+
+// ActivityRecorder is the narrow part of CRMEntities/InboundCRM
+// claimAndRecordDailyActivity needs.
+type ActivityRecorder interface {
+	RecordActivity(ctx context.Context, scope coretenant.Scope, input CRMActivityInput) error
+}
+
+// claimAndRecordDailyActivity writes at most one 'whatsapp' CRM activity per
+// conversation per calendar day (the actual boundary/dedupe is
+// repository.ConversationRepository.ClaimActivityDay, keyed on
+// wa_conversations.crm_activity_on), regardless of how many messages were
+// exchanged that day or which direction they went. Both ConversationService
+// (chat started or sent from the app) and InboundProcessor (message arrived
+// via webhook, inbound or sent from the phone) call this, so a busy
+// back-and-forth never spams the lead's timeline. now must already be in the
+// timezone the day boundary is measured in (Asia/Jakarta).
+func claimAndRecordDailyActivity(
+	ctx context.Context,
+	scope coretenant.Scope,
+	conversations repository.ConversationRepository,
+	crm ActivityRecorder,
+	now time.Time,
+	conversation domain.Conversation,
+	session domain.Session,
+	userID string,
+	log *slog.Logger,
+) {
+	if conversation.RelatedEntityID == "" || crm == nil {
+		return
+	}
+	claimed, err := conversations.ClaimActivityDay(ctx, scope, conversation.ID, now)
+	if err != nil || !claimed {
+		if err != nil {
+			log.Warn("whatsapp: claim activity day failed", "conversation_id", conversation.ID, "error", err)
+		}
+		return
+	}
+
+	number := "+" + conversation.PhoneNormalized
+	via := session.DisplayName
+	if via == "" && session.Phone != "" {
+		via = "+" + session.Phone
+	}
+	description := fmt.Sprintf("Percakapan WhatsApp dengan %s", number)
+	if via != "" {
+		description += " melalui " + via
+	}
+	if err := crm.RecordActivity(ctx, scope, CRMActivityInput{
+		EntityType:  conversation.RelatedEntityType,
+		EntityID:    conversation.RelatedEntityID,
+		Subject:     "Chat WhatsApp " + number,
+		Description: description,
+		UserID:      userID,
+	}); err != nil {
+		log.Warn("whatsapp: record crm activity failed", "conversation_id", conversation.ID, "error", err)
+	}
 }
