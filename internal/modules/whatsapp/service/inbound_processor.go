@@ -159,6 +159,7 @@ type webhookEnvelope struct {
 
 type webhookMe struct {
 	ID       string `json:"id"`
+	LID      string `json:"lid"`
 	PushName string `json:"pushName"`
 }
 
@@ -173,9 +174,11 @@ type messagePayload struct {
 	To        string  `json:"to"`
 	FromMe    bool    `json:"fromMe"`
 	Source    string  `json:"source"`
-	Body      string  `json:"body"`
-	HasMedia  bool    `json:"hasMedia"`
-	Ack       *int    `json:"ack"`
+	// Participant is set for group messages (the sender inside the group).
+	Participant string `json:"participant"`
+	Body        string `json:"body"`
+	HasMedia    bool   `json:"hasMedia"`
+	Ack         *int   `json:"ack"`
 }
 
 type ackPayload struct {
@@ -257,12 +260,16 @@ func (p *InboundProcessor) handleMessage(ctx context.Context, scope coretenant.S
 		return nil
 	}
 
-	chatID := payload.From
-	if payload.FromMe {
-		chatID = payload.To
+	// Groups, status updates, broadcasts, and channels are not CRM chats.
+	// Engines differ on which field holds the group (GOWS puts it in "from"
+	// even for our own messages), so both fields are checked.
+	if payload.Participant != "" || isIgnoredChat(payload.From) || isIgnoredChat(payload.To) {
+		return nil
 	}
-	chatID = strings.Replace(strings.TrimSpace(chatID), "@s.whatsapp.net", "@c.us", 1)
-	if chatID == "" || isIgnoredChat(chatID) {
+
+	self := selfIDs(envelope.Me, session.Phone)
+	chatID := counterpart(payload, self)
+	if chatID == "" {
 		return nil
 	}
 	if strings.HasSuffix(chatID, "@lid") && p.lids != nil {
@@ -271,8 +278,13 @@ func (p *InboundProcessor) handleMessage(ctx context.Context, scope coretenant.S
 			return fmt.Errorf("resolve lid: %w", err)
 		}
 		if pn != "" {
-			chatID = strings.Replace(pn, "@s.whatsapp.net", "@c.us", 1)
+			chatID = normalizeJID(pn)
 		}
+	}
+	// Never open a conversation with the connected number itself (notes to
+	// self, or our own LID resolving to our number).
+	if self[chatID] {
+		return nil
 	}
 
 	conversation, err := p.conversationFor(ctx, scope, session, chatID)
@@ -403,4 +415,53 @@ func isIgnoredChat(chatID string) bool {
 	return strings.HasSuffix(chatID, "@g.us") ||
 		strings.HasSuffix(chatID, "@broadcast") ||
 		strings.HasSuffix(chatID, "@newsletter")
+}
+
+// normalizeJID maps WhatsApp ids to the form WAHA accepts for chats:
+// "@s.whatsapp.net" becomes "@c.us" and a device suffix ("628…:12@…") is
+// dropped.
+func normalizeJID(id string) string {
+	id = strings.TrimSpace(id)
+	id = strings.Replace(id, "@s.whatsapp.net", "@c.us", 1)
+	if at := strings.Index(id, "@"); at > 0 {
+		if colon := strings.Index(id[:at], ":"); colon >= 0 {
+			id = id[:colon] + id[at:]
+		}
+	}
+	return id
+}
+
+// selfIDs are the ids of the connected account: its phone chat id and its
+// Linked ID from the webhook "me", plus the number stored on the session.
+func selfIDs(me *webhookMe, sessionPhone string) map[string]bool {
+	self := map[string]bool{}
+	if me != nil {
+		for _, id := range []string{me.ID, me.LID} {
+			if id = normalizeJID(id); id != "" {
+				self[id] = true
+			}
+		}
+	}
+	if sessionPhone != "" {
+		self[sessionPhone+"@c.us"] = true
+	}
+	return self
+}
+
+// counterpart returns the other party of a direct chat. Engines disagree on
+// the fields: WEBJS puts the recipient of our own messages in "to", while
+// GOWS keeps the chat in "from" and may leave "to" empty or set it to our
+// own LID. So the first id that is not ours wins, preferring "to" for our
+// own messages and "from" for inbound ones.
+func counterpart(payload messagePayload, self map[string]bool) string {
+	candidates := []string{payload.From, payload.To}
+	if payload.FromMe {
+		candidates = []string{payload.To, payload.From}
+	}
+	for _, candidate := range candidates {
+		if id := normalizeJID(candidate); id != "" && !self[id] {
+			return id
+		}
+	}
+	return ""
 }
