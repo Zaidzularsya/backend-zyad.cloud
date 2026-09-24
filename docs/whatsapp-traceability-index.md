@@ -99,8 +99,8 @@ Nomor migration di bawah adalah **rencana** (terakhir `000121` per 2026-09-24) â
 | `WHATSAPP_API_SESSION` | WA-BE-040 | ada (reuse) |
 | `WHATSAPP_API_URL_CALLBACK` | WA-BE-015 | ada (reuse) |
 | `WHATSAPP_TIMEOUT_SECONDS` | WA-PLAT-003 | ada (reuse) |
-| `WHATSAPP_WEBHOOK_HMAC_KEY` | WA-PLAT-001, WA-BE-020 | planned |
-| `WHATSAPP_ENGINE` | WA-PLAT-001 | planned |
+| `WHATSAPP_WEBHOOK_HMAC_KEY` | WA-PLAT-001, WA-BE-020 | done |
+| `WHATSAPP_ENGINE` | WA-PLAT-001 | done |
 | `WHATSAPP_SEND_RATE_PER_MINUTE` | WA-BE-035 | planned |
 | `WHATSAPP_WORKER_INTERVAL_SECONDS` | WA-WRK-010 | planned |
 | `WHATSAPP_RECONCILE_INTERVAL_SECONDS` | WA-WRK-001 | planned |

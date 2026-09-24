@@ -28,12 +28,12 @@ Setiap fase dikerjakan di branch `feat/…` sendiri → verifikasi lokal → mer
 
 | ID | Task | Status |
 |---|---|---|
-| WA-PLAT-001 | `WhatsAppConfig` + `LoadWhatsApp`: `WebhookHMACKey`, `Engine`, `SendRatePerMinute`, interval worker; `.env.example` | planned |
-| WA-PLAT-002 | `WAHAClient`: CreateSession, Start/Stop/Logout/DeleteSession, GetSession, GetQR (Base64File), RequestPairingCode, GetMe, SendText, SendSeen, ResolveLID | planned |
-| WA-PLAT-003 | Error sentinel `ErrSessionNotFound`, `ErrUnauthorized`, `ErrUpstream`; timeout; `io.LimitReader` | planned |
-| WA-PLAT-004 | `VerifyWebhookSignature(body, headers, key)` HMAC-SHA512 + `hmac.Equal` | planned |
-| WA-PLAT-005 | `NewClientFromConfig`: `waha` → WAHAClient, lainnya → NoopClient | planned |
-| WA-PLAT-006 | Unit test `httptest.Server` untuk semua method + HMAC | planned |
+| WA-PLAT-001 | `WhatsAppConfig` + `LoadWhatsApp`: `WebhookHMACKey`, `Engine`, `SendRatePerMinute`, interval worker; `.env.example` | done |
+| WA-PLAT-002 | `WAHAClient`: CreateSession, Start/Stop/Logout/DeleteSession, GetSession, GetQR (Base64File), RequestPairingCode, GetMe, SendText, SendSeen, ResolveLID | done |
+| WA-PLAT-003 | Error sentinel `ErrSessionNotFound`, `ErrUnauthorized`, `ErrUpstream`; timeout; `io.LimitReader` | done |
+| WA-PLAT-004 | `VerifyWebhookSignature(body, headers, key)` HMAC-SHA512 + `hmac.Equal` | done |
+| WA-PLAT-005 | `NewClientFromConfig`: `waha` → WAHAClient, lainnya → NoopClient | done |
+| WA-PLAT-006 | Unit test `httptest.Server` untuk semua method + HMAC | done |
 
 ## Fase 3 — Schema, domain, permission (`feat/whatsapp-schema`, Plan mode)
 
