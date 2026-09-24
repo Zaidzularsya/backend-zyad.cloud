@@ -298,6 +298,19 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		deps.CRMIntegrationHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
 	}
 
+	// WhatsApp channel (WAHA). Same tenant rules as CRM: customer or platform
+	// organizations, gated by whatsapp.enabled (platform bypasses entitlement).
+	// The WAHA webhook receiver is public and registered separately.
+	whatsappGroup := protected.Group("/app/whatsapp")
+	whatsappGroup.Use(
+		middleware.RequireActiveTenant(),
+		middleware.RequireCustomerOrPlatformTenant(),
+		middleware.RequireEntitlement(deps.WhatsAppEntitlementChecker, "whatsapp.enabled"),
+	)
+	if deps.WhatsAppSessionHandler != nil {
+		deps.WhatsAppSessionHandler.RegisterRoutes(whatsappGroup, deps.PermissionChecker)
+	}
+
 	publicTenantMiddleware, err := middleware.ResolvePublicOrganization(
 		deps.PublicHostResolver,
 		middleware.PublicHostOptions{

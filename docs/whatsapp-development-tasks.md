@@ -56,14 +56,14 @@ Setiap fase dikerjakan di branch `feat/…` sendiri → verifikasi lokal → mer
 
 | ID | Task | Status |
 |---|---|---|
-| WA-BE-010 | Grup `/api/v1/app/whatsapp` + middleware tenant/entitlement; wiring `app.go`/`dependency.go`/`router.go` | planned |
-| WA-BE-011 | `GET/POST /sessions`, `GET/PATCH/DELETE /sessions/:id` (quota `whatsapp.max_sessions`) | planned |
-| WA-BE-012 | `POST /sessions/:id/{start,stop,logout}` | planned |
-| WA-BE-013 | `GET /sessions/:id/qr` (data-URL, hanya saat `SCAN_QR_CODE`), `POST /sessions/:id/pairing-code` | planned |
-| WA-BE-014 | `GET /sessions/:id/status` (sinkron ke WAHA bila basi) | planned |
-| WA-BE-015 | Pembangkitan nama session `zc_<12hex>_<rand6>` + directory ditulis sebelum create di WAHA | planned |
-| WA-WRK-001 | Loop reconcile di `cmd/worker` (identity `whatsapp-worker`) | planned |
-| WA-TEST-010 | Unit test SessionService dengan fake client (quota, status, tenant) | planned |
+| WA-BE-010 | Grup `/api/v1/app/whatsapp` + middleware tenant/entitlement; wiring `app.go`/`dependency.go`/`router.go` | done |
+| WA-BE-011 | `GET/POST /sessions`, `GET/PATCH/DELETE /sessions/:id` (quota `whatsapp.max_sessions`) | done |
+| WA-BE-012 | `POST /sessions/:id/{start,stop,logout}` | done |
+| WA-BE-013 | `GET /sessions/:id/qr` (data-URL, hanya saat `SCAN_QR_CODE`), `POST /sessions/:id/pairing-code` | done |
+| WA-BE-014 | `GET /sessions/:id/status` (sinkron ke WAHA bila basi) | done |
+| WA-BE-015 | Pembangkitan nama session `zc_<12hex>_<rand6>` + directory ditulis sebelum create di WAHA | done |
+| WA-WRK-001 | Loop reconcile di `cmd/worker` (identity `whatsapp-worker`) | done |
+| WA-TEST-010 | Unit test SessionService dengan fake client (quota, status, tenant) | done |
 
 ## Fase 5 — Webhook & inbound (`feat/whatsapp-webhook`, Plan mode)
 

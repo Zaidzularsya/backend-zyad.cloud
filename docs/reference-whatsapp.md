@@ -217,6 +217,31 @@ Reuse `WhatsAppConfig` (`internal/config/load.go`):
 | `WHATSAPP_SEND_RATE_PER_MINUTE` | **baru** | default 20 |
 | `WHATSAPP_WORKER_INTERVAL_SECONDS` / `WHATSAPP_RECONCILE_INTERVAL_SECONDS` | **baru** | worker webhook (default 5) / reconcile (default 300) |
 
+## Session API (Fase 4)
+
+Semua di bawah `/api/v1/app/whatsapp` (grup: `RequireActiveTenant`, `RequireCustomerOrPlatformTenant`,
+`RequireEntitlement("whatsapp.enabled")`). Session selalu dialamatkan dengan `id`; nama session WAHA tidak
+pernah diterima dari atau dikembalikan ke klien.
+
+| Method | Path | Permission | Catatan |
+|---|---|---|---|
+| GET | `/sessions` | `whatsapp.session.read` | default dulu |
+| POST | `/sessions` | `whatsapp.session.manage` | `{display_name, purpose, is_default, auto_create_lead}`; kuota `whatsapp.max_sessions` (409 `QUOTA_EXCEEDED`); session pertama otomatis default; dibuat + di-start di WAHA dengan webhook ber-HMAC |
+| GET | `/sessions/:id` | `whatsapp.session.read` | |
+| PATCH | `/sessions/:id` | `whatsapp.session.manage` | `display_name`, `is_default`, `purpose`, `auto_create_lead` |
+| DELETE | `/sessions/:id` | `whatsapp.session.manage` | logout + delete di WAHA dulu; gagal di WAHA → baris lokal dipertahankan (bisa di-retry) |
+| GET | `/sessions/:id/status` | `whatsapp.session.read` | sinkron ke WAHA bila status tersimpan > 15 dtk; WAHA gagal → status tersimpan |
+| POST | `/sessions/:id/start` \| `/stop` \| `/logout` | `whatsapp.session.manage` | logout = lepas perangkat, session tetap ada |
+| GET | `/sessions/:id/qr` | `whatsapp.session.manage` | `{qr: "data:image/png;base64,...", status}`; 409 `WHATSAPP_SESSION_NOT_SCANNING` bila bukan `SCAN_QR_CODE` |
+| POST | `/sessions/:id/pairing-code` | `whatsapp.session.manage` | `{phone}` dinormalisasi `phone.NormalizeID` → `{code}` |
+
+Error provider: `WHATSAPP_NOT_CONFIGURED` (503, provider/webhook URL/HMAC key belum diset),
+`WHATSAPP_PROVIDER_ERROR` (502, detail WAHA hanya di log), `WHATSAPP_REMOTE_SESSION_MISSING` (409, session
+hilang di WAHA → hapus & buat ulang).
+
+Worker: `StatusReconciler` (identity `whatsapp-worker`) tiap `WHATSAPP_RECONCILE_INTERVAL_SECONDS` membaca
+ulang semua session di `wa_session_directory` — hanya aktif bila `WHATSAPP_PROVIDER=waha` + kredensial ada.
+
 ## Fase Implementasi
 
 | Fase | Branch | Isi | Plan mode |

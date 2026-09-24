@@ -48,6 +48,7 @@ import (
 	userhandler "zyad.cloud/internal/modules/user/handler"
 	userrepo "zyad.cloud/internal/modules/user/repository"
 	userservice "zyad.cloud/internal/modules/user/service"
+	whatsapphandler "zyad.cloud/internal/modules/whatsapp/handler"
 	"zyad.cloud/internal/platform/database"
 	"zyad.cloud/internal/platform/doku"
 	"zyad.cloud/internal/platform/logger"
@@ -469,6 +470,9 @@ func New(ctx context.Context) (*App, error) {
 	crmInvoiceHandler := crmhandler.NewInvoiceHandler(crmInvoiceSvc)
 	crmIntegrationHandler := crmhandler.NewIntegrationHandler(crmIntegrationSvc)
 
+	whatsappSessionSvc := NewWhatsAppSessionService(cfg, db, subscriptionGuardService, log)
+	whatsappSessionHandler := whatsapphandler.NewSessionHandler(whatsappSessionSvc)
+
 	router, err := newRouter(Dependencies{
 		Config:                           cfg,
 		Logger:                           log,
@@ -524,6 +528,8 @@ func New(ctx context.Context) (*App, error) {
 		CRMQuotationHandler:              crmQuotationHandler,
 		CRMInvoiceHandler:                crmInvoiceHandler,
 		CRMIntegrationHandler:            crmIntegrationHandler,
+		WhatsAppEntitlementChecker:       crmEntitlementChecker,
+		WhatsAppSessionHandler:           whatsappSessionHandler,
 		AdminAssetHandler:                adminAssetHandler,
 		PlatformAssetHandler:             platformAssetHandler,
 		PlatformFinanceCoAHandler:        platformFinanceCoAHandler,
