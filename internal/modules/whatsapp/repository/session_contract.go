@@ -49,7 +49,10 @@ type SessionRepository interface {
 	// CountActive counts non-deleted sessions, for the whatsapp.max_sessions quota.
 	CountActive(ctx context.Context, scope coretenant.Scope) (int64, error)
 	Update(ctx context.Context, scope coretenant.Scope, id string, params UpdateSessionParams) (domain.Session, error)
-	UpdateStatus(ctx context.Context, scope coretenant.Scope, id string, params UpdateSessionStatusParams) (domain.Session, error)
+	// UpdateStatus also returns the status before the update. The row is
+	// locked while reading it, so concurrent writers (webhook processor and
+	// reconciler) each observe a distinct previous status.
+	UpdateStatus(ctx context.Context, scope coretenant.Scope, id string, params UpdateSessionStatusParams) (domain.Session, domain.SessionStatus, error)
 	// SoftDelete marks the session and its directory entry deleted and clears is_default.
 	SoftDelete(ctx context.Context, scope coretenant.Scope, id string, deletedBy string) error
 }

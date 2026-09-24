@@ -46,6 +46,7 @@ func TestVariableRegistryCodes(t *testing.T) {
 		"permission.updated",
 		"security.new_login",
 		"user.invitation",
+		"whatsapp.session_disconnected",
 	}
 	if len(codes) != len(want) {
 		t.Fatalf("Codes() length = %d, want %d", len(codes), len(want))

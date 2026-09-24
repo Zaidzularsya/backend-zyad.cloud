@@ -69,13 +69,13 @@ Setiap fase dikerjakan di branch `feat/…` sendiri → verifikasi lokal → mer
 
 | ID | Task | Status |
 |---|---|---|
-| WA-BE-020 | `POST /api/v1/webhooks/waha`: HMAC → 401, simpan `wa_webhook_events` idempotent, 200 | planned |
-| WA-WRK-010 | Processor: claim `FOR UPDATE SKIP LOCKED`, resolve org via directory, tenant context, retry/attempts | planned |
-| WA-BE-021 | `session.status` → update `wa_sessions` (+ phone/push_name saat WORKING); notifikasi FAILED/logout | planned |
-| WA-BE-022 | `message` inbound (skip grup/status/newsletter), LID → pn, upsert conversation, insert message | planned |
-| WA-BE-023 | Matching `phone_normalized` lead → contact; assignee = owner; auto-create lead bila `auto_create_lead` | planned |
-| WA-BE-024 | `message.ack` → status pesan outbound (tidak mundur) | planned |
-| WA-TEST-020 | Integration test payload contoh, duplikat, signature salah | planned |
+| WA-BE-020 | `POST /api/v1/webhooks/waha`: HMAC → 401, simpan `wa_webhook_events` idempotent, 200 | done |
+| WA-WRK-010 | Processor: claim `FOR UPDATE SKIP LOCKED`, resolve org via directory, tenant context, retry/attempts | done |
+| WA-BE-021 | `session.status` → update `wa_sessions` (+ phone/push_name saat WORKING); email ke owner saat WORKING → FAILED/STOPPED/SCAN_QR_CODE (migration `000129`) | done |
+| WA-BE-022 | `message` inbound (skip grup/status/newsletter), LID → pn, upsert conversation, insert message | done |
+| WA-BE-023 | Matching `phone_normalized` lead → contact; assignee = owner; auto-create lead bila `auto_create_lead` (owner = pembuat session) | done |
+| WA-BE-024 | `message.ack` → status pesan outbound (tidak mundur) | done |
+| WA-TEST-020 | Integration test payload contoh, duplikat, signature salah | done |
 
 ## Fase 6 — Conversation & send API (`feat/whatsapp-messaging`)
 

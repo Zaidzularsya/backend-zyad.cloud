@@ -52,16 +52,29 @@ func main() {
 	}
 
 	reconciler := buildWhatsAppReconciler(db, cfg, log)
+	inbound := app.NewWhatsAppInboundProcessor(cfg, db, log)
 
 	if *once {
 		if err := runBatch(ctx, log, worker, notificationService, batchSize); err != nil && !errors.Is(err, context.Canceled) {
 			log.Error("worker batch failed", "error", err)
 			os.Exit(1)
 		}
+		if inbound != nil {
+			runWhatsAppInbound(ctx, log, inbound)
+		}
 		if reconciler != nil {
 			runWhatsAppReconcile(ctx, log, reconciler)
 		}
 		return
+	}
+
+	if inbound != nil {
+		inboundInterval := time.Duration(cfg.WhatsApp.WorkerIntervalSeconds) * time.Second
+		if inboundInterval <= 0 {
+			inboundInterval = 5 * time.Second
+		}
+		log.Info("starting whatsapp inbound processor", "interval", inboundInterval.String())
+		go runEvery(ctx, inboundInterval, func() { runWhatsAppInbound(ctx, log, inbound) })
 	}
 
 	if reconciler != nil {
@@ -160,10 +173,7 @@ func buildWhatsAppReconciler(db *database.Pool, cfg config.Config, log *slog.Log
 	}
 	return whatsappservice.NewStatusReconciler(
 		whatsapprepo.NewDirectoryRepository(db),
-		organizationservice.NewWorkerResolver(
-			organizationrepo.NewOrganizationRepository(db),
-			whatsappservice.WorkerIdentity,
-		),
+		app.NewWhatsAppWorkerResolver(db),
 		app.NewWhatsAppSessionService(cfg, db, nil, log),
 		log,
 	)
@@ -177,6 +187,19 @@ func runWhatsAppReconcile(ctx context.Context, log *slog.Logger, reconciler *wha
 	}
 	if result.Checked > 0 {
 		log.Info("reconciled whatsapp sessions", "checked", result.Checked, "failed", result.Failed)
+	}
+}
+
+const whatsappInboundBatchSize = 50
+
+func runWhatsAppInbound(ctx context.Context, log *slog.Logger, processor *whatsappservice.InboundProcessor) {
+	result, err := processor.RunOnce(ctx, whatsappInboundBatchSize)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		log.Error("whatsapp inbound batch failed", "error", err)
+		return
+	}
+	if result.Claimed > 0 {
+		log.Info("processed whatsapp webhook events", "claimed", result.Claimed, "processed", result.Processed, "failed", result.Failed)
 	}
 }
 

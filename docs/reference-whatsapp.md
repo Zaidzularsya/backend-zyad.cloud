@@ -242,6 +242,32 @@ hilang di WAHA → hapus & buat ulang).
 Worker: `StatusReconciler` (identity `whatsapp-worker`) tiap `WHATSAPP_RECONCILE_INTERVAL_SECONDS` membaca
 ulang semua session di `wa_session_directory` — hanya aktif bila `WHATSAPP_PROVIDER=waha` + kredensial ada.
 
+## Webhook & Inbound (Fase 5)
+
+**Receiver** `POST /api/v1/webhooks/waha` (publik, di luar auth — sama seperti DOKU):
+503 bila `WHATSAPP_WEBHOOK_HMAC_KEY` kosong → 401 bila `X-Webhook-Hmac` salah (body tidak di-log) → 400 bila
+envelope tanpa `id`/`event`/`session` → 200 tanpa simpan bila session tidak ada di `wa_session_directory` →
+simpan ke `wa_webhook_events` (duplikat `event_id` tetap 200). Tidak ada pemrosesan di request.
+
+**Processor** (worker, `InboundProcessor`, tiap `WHATSAPP_WORKER_INTERVAL_SECONDS`, batch 50): klaim dengan
+lease 2 menit (`attempts + 1`, `FOR UPDATE SKIP LOCKED`), organisasi dari directory + `WorkerResolver`
+(`whatsapp-worker`). Gagal → retry `attempts² × 10 dtk` (maks 10 menit, maks 10 attempt); payload rusak → processed
+tanpa retry.
+
+| Event | Aksi |
+|---|---|
+| `session.status` | `SessionService.ApplyObservedStatus` (+ nomor/push name dari `me` saat WORKING) |
+| `message.any` | Pesan masuk & pesan dari HP (`fromMe` → `out`, `sent_by` kosong). Skip `@g.us`, `@broadcast`, `@newsletter`. `@lid` → `ResolveLID`. Percakapan baru → match lead (bukan converted) → contact; assignee = owner; tanpa match + `auto_create_lead` → lead baru (`source = whatsapp`, owner & assignee = pembuat session). Dedupe via unique `(conversation_id, waha_message_id)`; unread +1 hanya pesan masuk |
+| `message.ack` | Status pesan hanya maju (`CanTransitionTo`); ack untuk pesan yang tidak tersimpan diabaikan |
+| `message` & lainnya | Disimpan, di-mark processed tanpa aksi (`message` duplikat `message.any`) |
+
+**Notifikasi session terputus**: hanya jalur *observed* (webhook, reconciler, sinkron endpoint status) —
+aksi user (start/stop/logout/delete) tidak memicu. Transisi `WORKING → FAILED | STOPPED | SCAN_QR_CODE`
+dideteksi dari status sebelumnya yang dibaca dengan row lock (`SessionRepository.UpdateStatus`), jadi sekali saja
+walau webhook & reconciler bersamaan. Email (event/template `whatsapp.session_disconnected`, migration `000129`)
+dikirim lewat outbox notifikasi ke setiap owner aktif (`organization_owner`/`super_admin`) organisasi.
+Catatan dev: SMTP dev memakai Gmail produksi.
+
 ## Fase Implementasi
 
 | Fase | Branch | Isi | Plan mode |

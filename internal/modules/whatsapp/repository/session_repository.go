@@ -226,13 +226,22 @@ func (r *sessionRepository) Update(ctx context.Context, scope coretenant.Scope, 
 	return session, nil
 }
 
-func (r *sessionRepository) UpdateStatus(ctx context.Context, scope coretenant.Scope, id string, params UpdateSessionStatusParams) (domain.Session, error) {
+func (r *sessionRepository) UpdateStatus(ctx context.Context, scope coretenant.Scope, id string, params UpdateSessionStatusParams) (domain.Session, domain.SessionStatus, error) {
 	if !scope.IsValid() {
-		return domain.Session{}, coretenant.ErrInvalidScope
+		return domain.Session{}, "", coretenant.ErrInvalidScope
 	}
 
 	var session domain.Session
+	var previous string
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `
+			SELECT status FROM wa_sessions
+			WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL
+			FOR UPDATE
+		`, id, scope.OrganizationID()).Scan(&previous); err != nil {
+			return err
+		}
+
 		var scanErr error
 		session, scanErr = scanSession(tx.QueryRow(ctx, `
 			UPDATE wa_sessions
@@ -251,9 +260,9 @@ func (r *sessionRepository) UpdateStatus(ctx context.Context, scope coretenant.S
 		return scanErr
 	})
 	if err != nil {
-		return domain.Session{}, err
+		return domain.Session{}, "", err
 	}
-	return session, nil
+	return session, domain.SessionStatus(previous), nil
 }
 
 func (r *sessionRepository) SoftDelete(ctx context.Context, scope coretenant.Scope, id string, deletedBy string) error {

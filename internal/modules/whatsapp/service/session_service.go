@@ -86,10 +86,17 @@ type SessionQR struct {
 	Status  domain.SessionStatus
 }
 
+// DisconnectNotifier is told when a session the app observed as WORKING
+// drops (failed, stopped, or logged out from the phone).
+type DisconnectNotifier interface {
+	NotifyDisconnected(ctx context.Context, session domain.Session, previous domain.SessionStatus) error
+}
+
 type SessionService struct {
 	repo     repository.SessionRepository
 	provider SessionProvider
 	quota    SessionQuotaGuard
+	notifier DisconnectNotifier
 	config   SessionServiceConfig
 	log      *slog.Logger
 	now      func() time.Time
@@ -99,6 +106,10 @@ type SessionServiceOption func(*SessionService)
 
 func WithSessionQuotaGuard(guard SessionQuotaGuard) SessionServiceOption {
 	return func(s *SessionService) { s.quota = guard }
+}
+
+func WithDisconnectNotifier(notifier DisconnectNotifier) SessionServiceOption {
+	return func(s *SessionService) { s.notifier = notifier }
 }
 
 func WithSessionLogger(log *slog.Logger) SessionServiceOption {
@@ -382,21 +393,48 @@ func (s *SessionService) refresh(ctx context.Context, scope coretenant.Scope, id
 	return synced, nil
 }
 
+// sync re-reads WAHA and applies the result as an observed status (the
+// change was not requested by the user), which may notify owners.
 func (s *SessionService) sync(ctx context.Context, scope coretenant.Scope, session domain.Session) (domain.Session, error) {
 	info, err := s.provider.GetSession(ctx, session.Name)
 	if err != nil {
 		return domain.Session{}, err
 	}
-	return s.applyProviderInfo(ctx, scope, session, info)
+	return s.ApplyObservedStatus(ctx, scope, session, info)
 }
 
-// applyProviderInfo stores the status (and the linked number once WAHA
-// reports it) returned by WAHA.
+// ApplyObservedStatus stores a status reported by WAHA on its own (webhook
+// session.status, reconcile, status polling) and notifies owners when a
+// WORKING session disconnects. User actions use applyProviderInfo directly
+// so they never trigger the notification.
+func (s *SessionService) ApplyObservedStatus(ctx context.Context, scope coretenant.Scope, session domain.Session, info platformwhatsapp.SessionInfo) (domain.Session, error) {
+	updated, previous, err := s.updateStatus(ctx, scope, session, info)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	if s.notifier != nil && isDisconnect(previous, updated.Status) {
+		if err := s.notifier.NotifyDisconnected(ctx, updated, previous); err != nil {
+			// The status is already stored; a missed email must not make the
+			// webhook retry and re-apply it.
+			s.log.Error("whatsapp: notify session disconnected failed", "session_id", updated.ID, "error", err)
+		}
+	}
+	return updated, nil
+}
+
+// applyProviderInfo stores the status returned by WAHA for a user action.
 func (s *SessionService) applyProviderInfo(ctx context.Context, scope coretenant.Scope, session domain.Session, info platformwhatsapp.SessionInfo) (domain.Session, error) {
+	updated, _, err := s.updateStatus(ctx, scope, session, info)
+	return updated, err
+}
+
+// updateStatus stores the status (and the linked number once WAHA reports
+// it) and returns the status that was stored before.
+func (s *SessionService) updateStatus(ctx context.Context, scope coretenant.Scope, session domain.Session, info platformwhatsapp.SessionInfo) (domain.Session, domain.SessionStatus, error) {
 	status := domain.SessionStatus(info.Status)
 	if !status.IsValid() {
 		s.log.Warn("whatsapp: unknown session status from provider", "session_id", session.ID, "status", info.Status)
-		return session, nil
+		return session, session.Status, nil
 	}
 	params := repository.UpdateSessionStatusParams{Status: status, At: s.now()}
 	if info.Me != nil {
@@ -406,11 +444,28 @@ func (s *SessionService) applyProviderInfo(ctx context.Context, scope coretenant
 		pushName := info.Me.PushName
 		params.PushName = &pushName
 	}
-	if status != session.Status {
-		s.log.Info("whatsapp: session status changed", "session_id", session.ID, "from", session.Status, "to", status)
+	updated, previous, err := s.repo.UpdateStatus(ctx, scope, session.ID, params)
+	if err != nil {
+		return domain.Session{}, "", whatsappmodule.MapSessionNotFound(err)
 	}
-	updated, err := s.repo.UpdateStatus(ctx, scope, session.ID, params)
-	return updated, whatsappmodule.MapSessionNotFound(err)
+	if previous != status {
+		s.log.Info("whatsapp: session status changed", "session_id", session.ID, "from", previous, "to", status)
+	}
+	return updated, previous, nil
+}
+
+// isDisconnect reports a WORKING session that stopped working: FAILED,
+// STOPPED, or back to SCAN_QR_CODE (device logged out from the phone).
+func isDisconnect(previous, current domain.SessionStatus) bool {
+	if previous != domain.SessionStatusWorking {
+		return false
+	}
+	switch current {
+	case domain.SessionStatusFailed, domain.SessionStatusStopped, domain.SessionStatusScanQRCode:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *SessionService) isStale(session domain.Session) bool {

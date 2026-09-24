@@ -119,6 +119,12 @@ func defaultNotificationRules() map[string]NotificationRule {
 			Channel:      domain.ChannelEmail,
 			Locale:       defaultRuleLocale,
 		},
+		"whatsapp.session_disconnected": {
+			EventType:    "whatsapp.session_disconnected",
+			TemplateCode: "whatsapp.session_disconnected",
+			Channel:      domain.ChannelEmail,
+			Locale:       defaultRuleLocale,
+		},
 	}
 }
 

@@ -472,6 +472,7 @@ func New(ctx context.Context) (*App, error) {
 
 	whatsappSessionSvc := NewWhatsAppSessionService(cfg, db, subscriptionGuardService, log)
 	whatsappSessionHandler := whatsapphandler.NewSessionHandler(whatsappSessionSvc)
+	whatsappWebhookHandler := NewWhatsAppWebhookHandler(cfg, db, log)
 
 	router, err := newRouter(Dependencies{
 		Config:                           cfg,
@@ -530,6 +531,7 @@ func New(ctx context.Context) (*App, error) {
 		CRMIntegrationHandler:            crmIntegrationHandler,
 		WhatsAppEntitlementChecker:       crmEntitlementChecker,
 		WhatsAppSessionHandler:           whatsappSessionHandler,
+		WhatsAppWebhookHandler:           whatsappWebhookHandler,
 		AdminAssetHandler:                adminAssetHandler,
 		PlatformAssetHandler:             platformAssetHandler,
 		PlatformFinanceCoAHandler:        platformFinanceCoAHandler,

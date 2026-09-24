@@ -115,11 +115,12 @@ func (r *fakeSessionRepo) Update(_ context.Context, scope coretenant.Scope, id s
 	return s, nil
 }
 
-func (r *fakeSessionRepo) UpdateStatus(_ context.Context, scope coretenant.Scope, id string, p repository.UpdateSessionStatusParams) (domain.Session, error) {
+func (r *fakeSessionRepo) UpdateStatus(_ context.Context, scope coretenant.Scope, id string, p repository.UpdateSessionStatusParams) (domain.Session, domain.SessionStatus, error) {
 	s, ok := r.visible(scope, id)
 	if !ok {
-		return domain.Session{}, pgx.ErrNoRows
+		return domain.Session{}, "", pgx.ErrNoRows
 	}
+	previous := s.Status
 	s.Status = p.Status
 	at := p.At
 	s.LastStatusAt = &at
@@ -130,7 +131,7 @@ func (r *fakeSessionRepo) UpdateStatus(_ context.Context, scope coretenant.Scope
 		s.PushName = *p.PushName
 	}
 	r.sessions[id] = s
-	return s, nil
+	return s, previous, nil
 }
 
 func (r *fakeSessionRepo) SoftDelete(_ context.Context, scope coretenant.Scope, id string, _ string) error {

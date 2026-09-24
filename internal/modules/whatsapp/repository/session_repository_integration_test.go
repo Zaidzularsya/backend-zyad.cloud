@@ -115,17 +115,20 @@ func TestSessionRepositoryLifecycleAndIsolationIntegration(t *testing.T) {
 
 	// Status update keeps phone unless provided.
 	phone, push := "6281234567890", "Sales"
-	updated, err := sessions.UpdateStatus(ctx, tenants.A.Scope, a1.ID, repository.UpdateSessionStatusParams{
+	updated, previous, err := sessions.UpdateStatus(ctx, tenants.A.Scope, a1.ID, repository.UpdateSessionStatusParams{
 		Status: domain.SessionStatusWorking, Phone: &phone, PushName: &push, At: time.Now().UTC(),
 	})
 	if err != nil || updated.Status != domain.SessionStatusWorking || updated.Phone != phone || updated.LastStatusAt == nil {
 		t.Fatalf("UpdateStatus WORKING = %+v, %v", updated, err)
 	}
-	updated, err = sessions.UpdateStatus(ctx, tenants.A.Scope, a1.ID, repository.UpdateSessionStatusParams{
+	if previous != domain.SessionStatusStopped {
+		t.Fatalf("previous status = %q, want STOPPED", previous)
+	}
+	updated, previous, err = sessions.UpdateStatus(ctx, tenants.A.Scope, a1.ID, repository.UpdateSessionStatusParams{
 		Status: domain.SessionStatusFailed, At: time.Now().UTC(),
 	})
-	if err != nil || updated.Phone != phone || updated.PushName != push {
-		t.Fatalf("UpdateStatus FAILED cleared phone: %+v, %v", updated, err)
+	if err != nil || updated.Phone != phone || updated.PushName != push || previous != domain.SessionStatusWorking {
+		t.Fatalf("UpdateStatus FAILED = %+v, previous %q, %v", updated, previous, err)
 	}
 
 	// Directory resolves without tenant context, across organizations.

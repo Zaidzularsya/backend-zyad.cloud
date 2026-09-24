@@ -108,6 +108,10 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.DokuWebhookHandler != nil {
 		deps.DokuWebhookHandler.RegisterRoutes(api)
 	}
+	// WAHA webhooks authenticate via X-Webhook-Hmac; same placement as DOKU.
+	if deps.WhatsAppWebhookHandler != nil {
+		deps.WhatsAppWebhookHandler.RegisterRoutes(api)
+	}
 
 	protected := api.Group("")
 	protected.Use(
