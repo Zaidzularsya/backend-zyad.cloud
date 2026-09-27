@@ -12,6 +12,7 @@ import (
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/whatsapp/domain"
+	"zyad.cloud/internal/modules/whatsapp/realtime"
 	"zyad.cloud/internal/modules/whatsapp/repository"
 )
 
@@ -551,5 +552,54 @@ func TestInboundDuplicateEventDoesNotReclaimActivity(t *testing.T) {
 	h.run(t)
 	if len(h.crm.activities) != 1 {
 		t.Fatalf("activities = %+v, want 1 (second event is a duplicate message id)", h.crm.activities)
+	}
+}
+
+type fakeRealtimePublisher struct {
+	events []realtime.Event
+	orgs   []string
+}
+
+func (p *fakeRealtimePublisher) Publish(_ context.Context, organizationID string, event realtime.Event) {
+	p.orgs = append(p.orgs, organizationID)
+	p.events = append(p.events, event)
+}
+
+func TestInboundPublishesRealtimeEventOnlyForNewMessages(t *testing.T) {
+	payload := `{"id":"m1","from":"6281234567890@c.us","body":"hi"}`
+	h := newInboundHarness(t, false, webhookEvent("e1", "message.any", payload), webhookEvent("e2", "message.any", payload))
+	h.crm.matches["6281234567890"] = CRMMatch{EntityType: domain.RelatedEntityLead, EntityID: "lead-1", OwnerUserID: "sales-1"}
+	publisher := &fakeRealtimePublisher{}
+	h.processor.realtime = publisher
+
+	h.run(t)
+
+	if len(publisher.events) != 1 {
+		t.Fatalf("events = %+v, want exactly one (duplicate must not publish)", publisher.events)
+	}
+	event := publisher.events[0]
+	if event.Type != realtime.EventMessage || event.AssigneeUserID != "sales-1" ||
+		event.RelatedEntityType != "lead" || event.RelatedEntityID != "lead-1" || event.MessageID == "" {
+		t.Fatalf("event = %+v", event)
+	}
+	if publisher.orgs[0] != testOrgID {
+		t.Fatalf("org = %q, want %q", publisher.orgs[0], testOrgID)
+	}
+}
+
+func TestInboundPublishesRealtimeEventOnAckStatusChange(t *testing.T) {
+	h := newInboundHarness(t, false,
+		webhookEvent("e1", "message.ack", `{"id":"out-1","ack":3}`),
+		webhookEvent("e2", "message.ack", `{"id":"out-1","ack":2}`), // downgrade: ignored
+	)
+	h.conversations.messages["out-1"] = domain.Message{ID: "msg-out-1", ConversationID: "conv-1", WAHAMessageID: "out-1", Direction: domain.MessageDirectionOut, Status: domain.MessageStatusSent}
+	h.conversations.put(domain.Conversation{ID: "conv-1", SessionID: h.session.ID, ChatID: "6281234567890@c.us", AssigneeUserID: "sales-1"})
+	publisher := &fakeRealtimePublisher{}
+	h.processor.realtime = publisher
+
+	h.run(t)
+
+	if len(publisher.events) != 1 || publisher.events[0].Type != realtime.EventAck || publisher.events[0].ConversationID != "conv-1" {
+		t.Fatalf("events = %+v, want a single ack for conv-1", publisher.events)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	coretenant "zyad.cloud/internal/core/tenant"
 	whatsappmodule "zyad.cloud/internal/modules/whatsapp"
 	"zyad.cloud/internal/modules/whatsapp/domain"
+	"zyad.cloud/internal/modules/whatsapp/realtime"
 	"zyad.cloud/internal/modules/whatsapp/repository"
 	platformwhatsapp "zyad.cloud/internal/platform/whatsapp"
 	"zyad.cloud/internal/shared/phone"
@@ -72,6 +73,7 @@ type ConversationService struct {
 	sender        MessageSender
 	crm           CRMEntities
 	limiter       SendRateLimiter
+	realtime      realtime.Publisher
 	log           *slog.Logger
 	now           func() time.Time
 	location      *time.Location
@@ -85,7 +87,10 @@ type ConversationServiceDeps struct {
 	Sender  MessageSender
 	CRM     CRMEntities
 	Limiter SendRateLimiter
-	Logger  *slog.Logger
+	// Realtime may be nil; open streams then miss API-side changes until
+	// their polling fallback runs.
+	Realtime realtime.Publisher
+	Logger   *slog.Logger
 }
 
 func NewConversationService(deps ConversationServiceDeps) *ConversationService {
@@ -103,6 +108,7 @@ func NewConversationService(deps ConversationServiceDeps) *ConversationService {
 		sender:        deps.Sender,
 		crm:           deps.CRM,
 		limiter:       deps.Limiter,
+		realtime:      deps.Realtime,
 		log:           log,
 		now:           func() time.Time { return time.Now().UTC() },
 		location:      location,
@@ -155,10 +161,15 @@ func (s *ConversationService) Messages(ctx context.Context, scope coretenant.Sco
 }
 
 func (s *ConversationService) MarkRead(ctx context.Context, scope coretenant.Scope, viewer Viewer, id string) error {
-	if _, err := s.Get(ctx, scope, viewer, id); err != nil {
+	conversation, err := s.Get(ctx, scope, viewer, id)
+	if err != nil {
 		return err
 	}
-	return s.conversations.MarkRead(ctx, scope, id)
+	if err := s.conversations.MarkRead(ctx, scope, id); err != nil {
+		return err
+	}
+	publishChange(ctx, s.realtime, scope, realtime.EventRead, conversation, "")
+	return nil
 }
 
 // Update changes the assignee (needs CanAssign; the new assignee must be an
@@ -185,10 +196,19 @@ func (s *ConversationService) Update(ctx context.Context, scope coretenant.Scope
 			}
 		}
 	}
-	return s.conversations.Update(ctx, scope, id, repository.UpdateConversationParams{
+	updated, err := s.conversations.Update(ctx, scope, id, repository.UpdateConversationParams{
 		AssigneeUserID: input.AssigneeUserID,
 		Status:         input.Status,
 	})
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	publishChange(ctx, s.realtime, scope, realtime.EventConversation, updated, "")
+	// The previous assignee lost visibility; tell them too.
+	if updated.AssigneeUserID != conversation.AssigneeUserID {
+		publishChange(ctx, s.realtime, scope, realtime.EventConversation, conversation, "")
+	}
+	return updated, nil
 }
 
 // Start opens (or reuses) the conversation with a lead's or contact's
@@ -392,6 +412,7 @@ func (s *ConversationService) deliver(ctx context.Context, scope coretenant.Scop
 		if markErr != nil {
 			return domain.Message{}, markErr
 		}
+		publishChange(ctx, s.realtime, scope, realtime.EventMessage, conversation, failed.ID)
 		return failed, nil
 	}
 
@@ -400,6 +421,7 @@ func (s *ConversationService) deliver(ctx context.Context, scope coretenant.Scop
 		return domain.Message{}, err
 	}
 	s.recordDailyActivity(ctx, scope, conversation, session, userID)
+	publishChange(ctx, s.realtime, scope, realtime.EventMessage, conversation, sent.ID)
 	return sent, nil
 }
 

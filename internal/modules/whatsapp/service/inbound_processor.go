@@ -13,6 +13,7 @@ import (
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/whatsapp/domain"
+	"zyad.cloud/internal/modules/whatsapp/realtime"
 	"zyad.cloud/internal/modules/whatsapp/repository"
 	platformwhatsapp "zyad.cloud/internal/platform/whatsapp"
 	"zyad.cloud/internal/shared/phone"
@@ -68,6 +69,7 @@ type InboundProcessor struct {
 	conversations repository.ConversationRepository
 	lids          LIDResolver
 	crm           InboundCRM
+	realtime      realtime.Publisher
 	log           *slog.Logger
 	now           func() time.Time
 	location      *time.Location
@@ -81,9 +83,11 @@ type InboundProcessorDeps struct {
 	SessionSvc    *SessionService
 	Conversations repository.ConversationRepository
 	// LIDs may be nil; @lid chats then stay unresolved (no CRM match).
-	LIDs   LIDResolver
-	CRM    InboundCRM
-	Logger *slog.Logger
+	LIDs LIDResolver
+	CRM  InboundCRM
+	// Realtime may be nil; clients then rely on their polling fallback.
+	Realtime realtime.Publisher
+	Logger   *slog.Logger
 }
 
 func NewInboundProcessor(deps InboundProcessorDeps) *InboundProcessor {
@@ -104,6 +108,7 @@ func NewInboundProcessor(deps InboundProcessorDeps) *InboundProcessor {
 		conversations: deps.Conversations,
 		lids:          deps.LIDs,
 		crm:           deps.CRM,
+		realtime:      deps.Realtime,
 		log:           log,
 		now:           func() time.Time { return time.Now().UTC() },
 		location:      location,
@@ -339,7 +344,7 @@ func (p *InboundProcessor) handleMessage(ctx context.Context, scope coretenant.S
 		raw["ack"] = *payload.Ack
 	}
 
-	_, inserted, err := p.conversations.RecordMessage(ctx, scope, conversation.ID, repository.RecordMessageParams{
+	recorded, inserted, err := p.conversations.RecordMessage(ctx, scope, conversation.ID, repository.RecordMessageParams{
 		WAHAMessageID: payload.ID,
 		Direction:     direction,
 		Body:          payload.Body,
@@ -355,6 +360,7 @@ func (p *InboundProcessor) handleMessage(ctx context.Context, scope coretenant.S
 	// log) must not re-touch the timeline.
 	if inserted {
 		claimAndRecordDailyActivity(ctx, scope, p.conversations, p.crm, p.now().In(p.location), conversation, session, conversation.AssigneeUserID, p.log)
+		publishChange(ctx, p.realtime, scope, realtime.EventMessage, conversation, recorded.ID)
 	}
 	return nil
 }
@@ -429,8 +435,17 @@ func (p *InboundProcessor) handleAck(ctx context.Context, scope coretenant.Scope
 	if !message.Status.CanTransitionTo(next) {
 		return nil
 	}
-	_, err = p.conversations.SetMessageStatus(ctx, scope, message.ID, message.Status, next)
-	return err
+	if _, err = p.conversations.SetMessageStatus(ctx, scope, message.ID, message.Status, next); err != nil {
+		return err
+	}
+	if p.realtime != nil {
+		// Best effort: a failed lookup only means clients see the new status
+		// on their next fallback poll.
+		if conversation, getErr := p.conversations.GetByID(ctx, scope, message.ConversationID); getErr == nil {
+			publishChange(ctx, p.realtime, scope, realtime.EventAck, conversation, message.ID)
+		}
+	}
+	return nil
 }
 
 // isIgnoredChat skips groups, status updates, broadcast lists, and channels.

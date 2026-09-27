@@ -35,7 +35,7 @@ Platform dan setiap tenant (organization tipe `customer`, plus organisasi platfo
 | D3 | MVP: pairing (QR + kode) → terima & kirim teks → panel chat Lead Detail → pencocokan nomor ke lead |
 | D4 | Satu instance WAHA bersama; backend satu-satunya klien; API key WAHA tidak pernah keluar ke FE |
 | D5 | Modul baru `internal/modules/whatsapp` (bukan di dalam `crm`) |
-| D6 | MVP polling di FE; SSE ditunda |
+| D6 | MVP polling di FE; **realtime via SSE** (`GET /app/whatsapp/stream`, lihat "Realtime Stream") menggantikan polling, polling tersisa hanya sebagai fallback saat stream putus |
 | D7 | Engine GOWS/NOWEB (bukan WEBJS) + storage session persisten |
 
 ## Architecture Decision
@@ -215,7 +215,7 @@ Reuse `WhatsAppConfig` (`internal/config/load.go`):
 | `WHATSAPP_WEBHOOK_HMAC_KEY` | **baru** | key HMAC per session |
 | `WHATSAPP_ENGINE` | **baru** | informatif, default `GOWS` |
 | `WHATSAPP_SEND_RATE_PER_MINUTE` | **baru** | default 20 |
-| `WHATSAPP_WORKER_INTERVAL_SECONDS` / `WHATSAPP_RECONCILE_INTERVAL_SECONDS` | **baru** | worker webhook (default 5) / reconcile (default 300) |
+| `WHATSAPP_WORKER_INTERVAL_SECONDS` / `WHATSAPP_RECONCILE_INTERVAL_SECONDS` | **baru** | worker webhook (default 1; makin kecil makin realtime) / reconcile (default 300) |
 
 ## Session API (Fase 4)
 
@@ -291,6 +291,28 @@ Di bawah `/api/v1/app/whatsapp` (grup yang sama dengan session).
   percakapan dimulai atau pesan terkirim, hanya untuk percakapan yang terhubung ke lead/contact.
 - Response tidak memuat `chat_id` WAHA maupun nama session; klien memakai `phone` dan `session_id`.
 
+## Realtime Stream (SSE)
+
+`GET /api/v1/app/whatsapp/stream` (permission `whatsapp.conversation.read`, grup + tenant rule sama dengan
+endpoint lain). Server-Sent Events untuk seluruh organisasi pemanggil; tidak dimount bila Redis tidak ada.
+
+- **Event = petunjuk, bukan data.** Frame `event: wa` + `data: {"type","conversation_id","message_id?",
+  "assignee_user_id?","related_entity_type?","related_entity_id?"}`. `type`: `message` (pesan tersimpan/terkirim/
+  gagal), `ack` (status berubah), `read` (unread_count berubah), `conversation` (assignee/status berubah).
+  Isi pesan **tidak** ikut; klien membaca ulang lewat endpoint biasa.
+- **Visibilitas** sama dengan REST: tanpa `whatsapp.conversation.read_all` hanya event percakapan yang
+  `assignee_user_id`-nya = pemanggil. Izin dicek sekali saat connect; stream ditutup server setelah 30 menit
+  agar klien reconnect (token/izin diperiksa ulang).
+- **Jalur event**: worker (`InboundProcessor`, setelah pesan tersimpan / ack) dan API (`ConversationService`:
+  send/retry/read/update) → Redis pub/sub channel `wa:events:<organization_id>` → subscriber per koneksi
+  di API. Publish fail-open (error hanya di-log). Pub/sub **at-most-once**: klien wajib refetch setiap
+  (re)connect.
+- Heartbeat komentar `: ping` tiap 20 dtk. Header `X-Accel-Buffering: no`; nginx perlu
+  `proxy_buffering off` + `proxy_read_timeout` panjang + `proxy_http_version 1.1` untuk location ini.
+  `WriteTimeout` server dinonaktifkan per koneksi (`http.ResponseController`).
+- Auth memakai header seperti endpoint lain (`Authorization`, `X-Tenant-ID`), jadi FE memakai `fetch` stream,
+  bukan `EventSource`. Reload pm2 memutus stream; klien reconnect otomatis.
+
 ## Notifikasi Platform & Audit Keamanan (Fase 9)
 
 **WhatsAppDispatcher** (notification core) memakai `service.NotificationClient`: kirim dari session milik
@@ -352,7 +374,7 @@ Detail task: `docs/whatsapp-development-tasks.md`. Traceability: `docs/whatsapp-
 
 - Broadcast / kirim massal.
 - Media (gambar, dokumen, voice) in/out.
-- SSE/WebSocket realtime (MVP polling).
+- WebSocket (dipilih SSE; alur chat server→klien, kirim tetap `POST`).
 - Penegakan `whatsapp.max_messages_per_month`.
 - Pesan grup, status, channel/newsletter (diabaikan saat inbound).
 - Multi server WAHA (`waha_server_id` disiapkan, selalu `default`).

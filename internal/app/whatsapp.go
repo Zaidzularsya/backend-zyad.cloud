@@ -12,6 +12,7 @@ import (
 	organizationrepo "zyad.cloud/internal/modules/organization/repository"
 	organizationservice "zyad.cloud/internal/modules/organization/service"
 	whatsapphandler "zyad.cloud/internal/modules/whatsapp/handler"
+	whatsapprealtime "zyad.cloud/internal/modules/whatsapp/realtime"
 	whatsapprepo "zyad.cloud/internal/modules/whatsapp/repository"
 	whatsappservice "zyad.cloud/internal/modules/whatsapp/service"
 	"zyad.cloud/internal/platform/database"
@@ -97,14 +98,25 @@ func NewWhatsAppWorkerResolver(db *database.Pool) *organizationservice.WorkerRes
 	)
 }
 
+// NewWhatsAppRealtimeBus returns the Redis pub/sub bus behind the WhatsApp SSE
+// stream, or nil without Redis (the stream endpoint is then not mounted and
+// clients keep polling). The nil check matters: a typed-nil *Bus stored in a
+// realtime.Publisher would not be a nil interface.
+func NewWhatsAppRealtimeBus(redis *redisplatform.Client, log *slog.Logger) *whatsapprealtime.Bus {
+	if redis == nil {
+		return nil
+	}
+	return whatsapprealtime.NewBus(redis, log)
+}
+
 // NewWhatsAppInboundProcessor builds the worker-side webhook processor, or
-// nil when WAHA is not configured.
-func NewWhatsAppInboundProcessor(cfg config.Config, db *database.Pool, log *slog.Logger) *whatsappservice.InboundProcessor {
+// nil when WAHA is not configured. bus may be nil.
+func NewWhatsAppInboundProcessor(cfg config.Config, db *database.Pool, bus *whatsapprealtime.Bus, log *slog.Logger) *whatsappservice.InboundProcessor {
 	client := NewWAHAProvider(cfg.WhatsApp)
 	if client == nil {
 		return nil
 	}
-	return whatsappservice.NewInboundProcessor(whatsappservice.InboundProcessorDeps{
+	deps := whatsappservice.InboundProcessorDeps{
 		Events:        whatsapprepo.NewWebhookEventRepository(db),
 		Directory:     whatsapprepo.NewDirectoryRepository(db),
 		Resolver:      NewWhatsAppWorkerResolver(db),
@@ -114,7 +126,11 @@ func NewWhatsAppInboundProcessor(cfg config.Config, db *database.Pool, log *slog
 		LIDs:          client,
 		CRM:           NewWhatsAppCRMGateway(db),
 		Logger:        log,
-	})
+	}
+	if bus != nil {
+		deps.Realtime = bus
+	}
+	return whatsappservice.NewInboundProcessor(deps)
 }
 
 // NewWhatsAppCRMGateway gives the whatsapp module its CRM access.
@@ -129,7 +145,7 @@ func NewWhatsAppCRMGateway(db *database.Pool) *whatsappservice.CRMGateway {
 
 // NewWhatsAppConversationService wires conversations and sending. Sending
 // is rate limited per session in Redis (WHATSAPP_SEND_RATE_PER_MINUTE).
-func NewWhatsAppConversationService(cfg config.Config, db *database.Pool, redis *redisplatform.Client, log *slog.Logger) *whatsappservice.ConversationService {
+func NewWhatsAppConversationService(cfg config.Config, db *database.Pool, redis *redisplatform.Client, bus *whatsapprealtime.Bus, log *slog.Logger) *whatsappservice.ConversationService {
 	deps := whatsappservice.ConversationServiceDeps{
 		Conversations: whatsapprepo.NewConversationRepository(db),
 		Sessions:      whatsapprepo.NewSessionRepository(db),
@@ -141,6 +157,9 @@ func NewWhatsAppConversationService(cfg config.Config, db *database.Pool, redis 
 	}
 	if redis != nil {
 		deps.Limiter = whatsappservice.NewRedisSendRateLimiter(redis, cfg.WhatsApp.SendRatePerMinute, log)
+	}
+	if bus != nil {
+		deps.Realtime = bus
 	}
 	return whatsappservice.NewConversationService(deps)
 }

@@ -472,9 +472,13 @@ func New(ctx context.Context) (*App, error) {
 	whatsappSessionSvc := NewWhatsAppSessionService(cfg, db, subscriptionGuardService, log)
 	whatsappSessionHandler := whatsapphandler.NewSessionHandler(whatsappSessionSvc)
 	whatsappWebhookHandler := NewWhatsAppWebhookHandler(cfg, db, log)
+	whatsappBus := NewWhatsAppRealtimeBus(redisClient, log)
 	whatsappConversationHandler := whatsapphandler.NewConversationHandler(
-		NewWhatsAppConversationService(cfg, db, redisClient, log),
+		NewWhatsAppConversationService(cfg, db, redisClient, whatsappBus, log),
 	)
+	if whatsappBus != nil {
+		whatsappConversationHandler.WithStream(whatsappBus)
+	}
 
 	router, err := newRouter(Dependencies{
 		Config:                           cfg,

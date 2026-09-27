@@ -132,7 +132,7 @@ Setiap fase dikerjakan di branch `feat/…` sendiri → verifikasi lokal → mer
 | WA-NEXT-012 | Template / quick reply + variabel |
 | WA-NEXT-013 | Otomatisasi (sambutan lead landing, pengingat activity) |
 | WA-NEXT-014 | Kirim quotation/invoice CRM (PDF) |
-| WA-NEXT-015 | SSE realtime |
+| WA-NEXT-015 | SSE realtime — **selesai** (`GET /app/whatsapp/stream`, Redis pub/sub; lihat reference-whatsapp.md "Realtime Stream") |
 | WA-NEXT-016 | Multi server WAHA + dashboard kesehatan session |
 | WA-NEXT-017 | Penegakan `whatsapp.max_messages_per_month` via `organization_usage_counters` |
 | WA-NEXT-018 | Kebijakan retensi isi chat (UU PDP) |
