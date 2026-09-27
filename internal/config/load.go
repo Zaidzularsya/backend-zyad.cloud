@@ -191,7 +191,7 @@ func LoadWhatsApp() WhatsAppConfig {
 		WebhookHMACKey:           getEnv("WHATSAPP_WEBHOOK_HMAC_KEY", ""),
 		Engine:                   getEnv("WHATSAPP_ENGINE", "GOWS"),
 		SendRatePerMinute:        getEnvInt("WHATSAPP_SEND_RATE_PER_MINUTE", 20),
-		WorkerIntervalSeconds:    getEnvInt("WHATSAPP_WORKER_INTERVAL_SECONDS", 5),
+		WorkerIntervalSeconds:    getEnvInt("WHATSAPP_WORKER_INTERVAL_SECONDS", 1),
 		ReconcileIntervalSeconds: getEnvInt("WHATSAPP_RECONCILE_INTERVAL_SECONDS", 300),
 		TelegramBot:              getEnv("TELEGRAM_BOT_TOKEN", ""),
 		ForumChatID:              getEnv("LUNADESK_FORUM_CHATID", ""),

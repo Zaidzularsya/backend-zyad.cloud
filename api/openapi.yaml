@@ -6736,6 +6736,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/whatsapp/stream:
+    get:
+      summary: Realtime change stream (SSE)
+      operationId: streamWhatsAppEvents
+      tags:
+      - WhatsApp
+      security:
+      - BearerAuth: []
+      description: 'Server-Sent Events for the caller''s organization. Each `event: wa` frame carries a JSON change
+        hint (`type` message|ack|read|conversation, `conversation_id`, optional `message_id`, `assignee_user_id`,
+        `related_entity_type`, `related_entity_id`); message bodies are never included, clients re-read state
+        through the conversation endpoints. Without `whatsapp.conversation.read_all` only events for conversations
+        assigned to the caller are delivered. Delivery is at-most-once: refetch after every (re)connect. Comment
+        heartbeats (`: ping`) every 20s; the server closes the stream after 30 minutes. Send `Authorization` and the
+        tenant header (use fetch streaming, not EventSource). Permission: `whatsapp.conversation.read`. Returns 503
+        `REALTIME_UNAVAILABLE` when Redis pub/sub is unreachable.'
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Realtime unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/app/whatsapp/conversations:
     get:
       summary: List conversations

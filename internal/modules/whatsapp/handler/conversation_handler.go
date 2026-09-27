@@ -11,6 +11,7 @@ import (
 	whatsappmodule "zyad.cloud/internal/modules/whatsapp"
 	"zyad.cloud/internal/modules/whatsapp/domain"
 	"zyad.cloud/internal/modules/whatsapp/dto"
+	"zyad.cloud/internal/modules/whatsapp/realtime"
 	"zyad.cloud/internal/modules/whatsapp/service"
 	"zyad.cloud/internal/shared/response"
 )
@@ -18,6 +19,7 @@ import (
 type ConversationHandler struct {
 	svc         *service.ConversationService
 	permissions permissionmiddleware.CombinedPermissionChecker
+	stream      realtime.Subscriber
 }
 
 func NewConversationHandler(svc *service.ConversationService) *ConversationHandler {
@@ -31,6 +33,10 @@ func (h *ConversationHandler) RegisterRoutes(router *gin.RouterGroup, p permissi
 	h.permissions = p
 	read := permissionmiddleware.RequireOrganizationOrGlobal(p, domain.PermissionConversationRead)
 	send := permissionmiddleware.RequireOrganizationOrGlobal(p, domain.PermissionMessageSend)
+
+	if h.stream != nil {
+		router.GET("/stream", read, h.Stream)
+	}
 
 	group := router.Group("/conversations")
 	group.GET("", read, h.List)

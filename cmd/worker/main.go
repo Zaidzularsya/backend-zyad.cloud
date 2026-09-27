@@ -19,11 +19,13 @@ import (
 	notificationtemplate "zyad.cloud/internal/core/notification/template"
 	organizationrepo "zyad.cloud/internal/modules/organization/repository"
 	organizationservice "zyad.cloud/internal/modules/organization/service"
+	whatsapprealtime "zyad.cloud/internal/modules/whatsapp/realtime"
 	whatsapprepo "zyad.cloud/internal/modules/whatsapp/repository"
 	whatsappservice "zyad.cloud/internal/modules/whatsapp/service"
 	"zyad.cloud/internal/platform/database"
 	"zyad.cloud/internal/platform/logger"
 	"zyad.cloud/internal/platform/mail"
+	redisplatform "zyad.cloud/internal/platform/redis"
 )
 
 func main() {
@@ -52,7 +54,16 @@ func main() {
 	}
 
 	reconciler := buildWhatsAppReconciler(db, cfg, log)
-	inbound := app.NewWhatsAppInboundProcessor(cfg, db, log)
+	// Redis only carries realtime hints to the API's SSE streams; the worker
+	// works without it (clients fall back to polling).
+	var whatsappBus *whatsapprealtime.Bus
+	if redisClient, redisErr := redisplatform.Connect(ctx, cfg.Redis, log); redisErr != nil {
+		log.Warn("redis unavailable, whatsapp realtime disabled", "error", redisErr)
+	} else {
+		defer redisClient.Close()
+		whatsappBus = app.NewWhatsAppRealtimeBus(redisClient, log)
+	}
+	inbound := app.NewWhatsAppInboundProcessor(cfg, db, whatsappBus, log)
 
 	if *once {
 		if err := runBatch(ctx, log, worker, notificationService, batchSize); err != nil && !errors.Is(err, context.Canceled) {
