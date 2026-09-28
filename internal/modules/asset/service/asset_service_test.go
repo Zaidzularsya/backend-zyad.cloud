@@ -183,6 +183,27 @@ func TestAssetServiceUploadObjectRejectsInvalidMimeType(t *testing.T) {
 	}
 }
 
+func TestAssetServiceUploadObjectHonorsAllowedMimeTypesOverride(t *testing.T) {
+	docx := "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	allowed := map[string]bool{docx: true}
+
+	repo := &assetRepoStub{createResult: domain.AssetObject{ID: "asset-1"}}
+	svc := NewAssetService(repo, &landingMediaSumStub{}, WithAssetObjectStorage(&objectStoragePutStub{}))
+	if _, err := svc.UploadObject(context.Background(), mustAssetScope(t), UploadObjectParams{
+		Filename: "offer.docx", MimeType: docx, SizeBytes: 10, AllowedMimeTypes: allowed,
+	}, bytes.NewReader(make([]byte, 10))); err != nil {
+		t.Fatalf("UploadObject(docx, override) error = %v, want nil", err)
+	}
+
+	// The override replaces the default list rather than extending it.
+	_, err := svc.UploadObject(context.Background(), mustAssetScope(t), UploadObjectParams{
+		Filename: "photo.png", MimeType: "image/png", SizeBytes: 10, AllowedMimeTypes: allowed,
+	}, bytes.NewReader(make([]byte, 10)))
+	if !errors.Is(err, ErrInvalidMimeType) {
+		t.Fatalf("UploadObject(png, override) error = %v, want %v", err, ErrInvalidMimeType)
+	}
+}
+
 func TestAssetServiceUploadObjectRejectsFileTooLarge(t *testing.T) {
 	repo := &assetRepoStub{}
 	store := &objectStoragePutStub{}

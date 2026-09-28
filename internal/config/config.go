@@ -139,6 +139,10 @@ type MailConfig struct {
 	From     string
 	Secure   bool
 	TLS      bool
+	// MailboxAllowPrivateHosts lets user-connected mailboxes (CRM email)
+	// use private/loopback mail servers. Development only: in production it
+	// would let users reach internal services through the SMTP client.
+	MailboxAllowPrivateHosts bool
 }
 
 type NotificationConfig struct {

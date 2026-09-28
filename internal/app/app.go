@@ -36,6 +36,9 @@ import (
 	landinghandler "zyad.cloud/internal/modules/landing/handler"
 	landingrepo "zyad.cloud/internal/modules/landing/repository"
 	landingservice "zyad.cloud/internal/modules/landing/service"
+	mailboxhandler "zyad.cloud/internal/modules/mailbox/handler"
+	mailboxrepo "zyad.cloud/internal/modules/mailbox/repository"
+	mailboxservice "zyad.cloud/internal/modules/mailbox/service"
 	organizationhandler "zyad.cloud/internal/modules/organization/handler"
 	organizationrepo "zyad.cloud/internal/modules/organization/repository"
 	organizationservice "zyad.cloud/internal/modules/organization/service"
@@ -470,6 +473,23 @@ func New(ctx context.Context) (*App, error) {
 	crmLeadHandler := crmhandler.NewLeadHandler(crmLeadSvc)
 	crmLeadAttachmentHandler := crmhandler.NewLeadAttachmentHandler(crmLeadAttachmentSvc)
 	crmContactAttachmentHandler := crmhandler.NewContactAttachmentHandler(crmContactAttachmentSvc)
+	mailboxRepo := mailboxrepo.NewMailboxRepository(db)
+	mailMessageRepo := mailboxrepo.NewMessageRepository(db)
+	mailboxHandler := mailboxhandler.NewHandler(
+		mailboxservice.NewMailboxService(mailboxRepo, mailMessageRepo, assetSvc, mailboxservice.MailboxServiceOptions{
+			SecretKey:         cfg.App.Secret,
+			AllowPrivateHosts: cfg.Mail.MailboxAllowPrivateHosts,
+		}),
+		mailboxservice.NewMessageService(
+			mailboxRepo, mailMessageRepo, assetSvc,
+			mailboxservice.NewCRMGateway(crmLeadRepo, crmContactRepo, crmActivityRepo),
+			mailboxservice.MessageServiceOptions{
+				SecretKey:         cfg.App.Secret,
+				AllowPrivateHosts: cfg.Mail.MailboxAllowPrivateHosts,
+				Log:               log,
+			},
+		),
+	)
 	crmLeadDashboardHandler := crmhandler.NewLeadDashboardHandler(crmservice.NewLeadDashboardService(crmrepo.NewLeadDashboardRepository(db)))
 	crmMemberHandler := crmhandler.NewMemberHandler(crmMemberSvc)
 	crmPipelineHandler := crmhandler.NewPipelineHandler(crmPipelineSvc)
@@ -539,6 +559,7 @@ func New(ctx context.Context) (*App, error) {
 		CRMLeadHandler:                   crmLeadHandler,
 		CRMLeadAttachmentHandler:         crmLeadAttachmentHandler,
 		CRMContactAttachmentHandler:      crmContactAttachmentHandler,
+		MailboxHandler:                   mailboxHandler,
 		CRMLeadDashboardHandler:          crmLeadDashboardHandler,
 		CRMMemberHandler:                 crmMemberHandler,
 		CRMPipelineHandler:               crmPipelineHandler,
