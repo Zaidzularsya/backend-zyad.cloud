@@ -24,6 +24,13 @@ type LeadOwnerValidator interface {
 	IsActiveMember(ctx context.Context, scope coretenant.Scope, userID string) (bool, error)
 }
 
+// LeadConvertedHook dipanggil setelah konversi lead tersimpan. Didefinisikan
+// di sini supaya modul lain (whatsapp) bisa bereaksi tanpa CRM meng-import
+// modul tersebut.
+type LeadConvertedHook interface {
+	LeadConverted(ctx context.Context, scope coretenant.Scope, leadID, contactID string) error
+}
+
 // ConvertLeadParams controls how a lead is converted into a Contact and
 // optionally a Company. Deal creation lands in Fase 2 once crm_deals exists.
 type ConvertLeadParams struct {
