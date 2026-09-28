@@ -249,6 +249,10 @@ func (r *leadRepository) List(ctx context.Context, scope coretenant.Scope, filte
 		args = append(args, filter.OwnerUserID)
 		whereClauses = append(whereClauses, fmt.Sprintf("owner_user_id = $%d", len(args)))
 	}
+	if filter.ConvertedContactID != "" {
+		args = append(args, filter.ConvertedContactID)
+		whereClauses = append(whereClauses, fmt.Sprintf("converted_contact_id = $%d", len(args)))
+	}
 	if filter.Source != "" {
 		args = append(args, strings.ToLower(strings.TrimSpace(filter.Source)))
 		whereClauses = append(whereClauses, fmt.Sprintf("lower(btrim(source)) = $%d", len(args)))
