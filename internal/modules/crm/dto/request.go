@@ -86,6 +86,12 @@ type LeadListQuery struct {
 	Search      string `form:"search"`
 	Status      string `form:"status"`
 	OwnerUserID string `form:"owner_user_id"`
+	Source      string `form:"source"`
+	// CreatedFrom/CreatedTo: YYYY-MM-DD, inclusive (Asia/Jakarta days).
+	CreatedFrom string `form:"created_from"`
+	CreatedTo   string `form:"created_to"`
+	// Sort: field name, "-" prefix = descending. Default "-created_at".
+	Sort string `form:"sort"`
 }
 
 // CreateLeadRequest binds the payload for creating a lead.

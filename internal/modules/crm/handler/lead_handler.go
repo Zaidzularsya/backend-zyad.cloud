@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -61,12 +62,29 @@ func (h *LeadHandler) List(c *gin.Context) {
 		perPage = 20
 	}
 
+	if perPage > maxLeadPerPage {
+		perPage = maxLeadPerPage
+	}
+	if !repository.IsValidLeadSort(query.Sort) {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "invalid sort", http.StatusUnprocessableEntity))
+		return
+	}
+	createdFrom, createdToExcl, err := parseLeadCreatedRange(query.CreatedFrom, query.CreatedTo)
+	if err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		return
+	}
+
 	leads, total, err := h.svc.List(c.Request.Context(), scope, repository.LeadListFilter{
-		Search:      query.Search,
-		Status:      domain.LeadStatus(query.Status),
-		OwnerUserID: query.OwnerUserID,
-		Limit:       perPage,
-		Offset:      (page - 1) * perPage,
+		Search:             query.Search,
+		Status:             domain.LeadStatus(query.Status),
+		OwnerUserID:        query.OwnerUserID,
+		Source:             query.Source,
+		CreatedFrom:        createdFrom,
+		CreatedToExclusive: createdToExcl,
+		Sort:               query.Sort,
+		Limit:              perPage,
+		Offset:             (page - 1) * perPage,
 	})
 	if err != nil {
 		corehttp.Fail(c, err)
@@ -274,4 +292,30 @@ func failLeadError(c *gin.Context, err error) {
 		return
 	}
 	corehttp.Fail(c, err)
+}
+
+const maxLeadPerPage = 100
+
+// parseLeadCreatedRange parses optional YYYY-MM-DD bounds. The upper bound
+// is returned as the start of the following day so the range is inclusive.
+func parseLeadCreatedRange(from, to string) (time.Time, time.Time, error) {
+	var fromDate, toExcl time.Time
+	if from != "" {
+		d, err := time.Parse("2006-01-02", from)
+		if err != nil {
+			return time.Time{}, time.Time{}, errors.New("created_from must be a date in YYYY-MM-DD format")
+		}
+		fromDate = d
+	}
+	if to != "" {
+		d, err := time.Parse("2006-01-02", to)
+		if err != nil {
+			return time.Time{}, time.Time{}, errors.New("created_to must be a date in YYYY-MM-DD format")
+		}
+		toExcl = d.AddDate(0, 0, 1)
+	}
+	if !fromDate.IsZero() && !toExcl.IsZero() && !fromDate.Before(toExcl) {
+		return time.Time{}, time.Time{}, errors.New("created_from must not be after created_to")
+	}
+	return fromDate, toExcl, nil
 }

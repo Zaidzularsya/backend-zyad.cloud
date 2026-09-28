@@ -2,18 +2,66 @@ package repository
 
 import (
 	"context"
+	"strings"
+	"time"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/crm/domain"
 )
 
 type LeadListFilter struct {
-	Search         string
-	Status         domain.LeadStatus
-	OwnerUserID    string
+	Search      string
+	Status      domain.LeadStatus
+	OwnerUserID string
+	// Source matches case-insensitively.
+	Source string
+	// CreatedFrom (inclusive) / CreatedToExclusive bound created_at; zero
+	// value = unbounded.
+	CreatedFrom        time.Time
+	CreatedToExclusive time.Time
+	// Sort is one of LeadSortFields, optionally prefixed with "-" for
+	// descending. Empty = "-created_at".
+	Sort           string
 	IncludeDeleted bool
 	Limit          int
 	Offset         int
+}
+
+// LeadSortFields maps the public sort keys to SQL expressions. Status sorts
+// in pipeline order rather than alphabetically.
+var LeadSortFields = map[string]string{
+	"created_at":   "created_at",
+	"updated_at":   "updated_at",
+	"contact_name": "lower(contact_name)",
+	"score":        "score",
+	"status":       "CASE status WHEN 'new' THEN 1 WHEN 'contacted' THEN 2 WHEN 'qualified' THEN 3 WHEN 'unqualified' THEN 4 ELSE 5 END",
+}
+
+// IsValidLeadSort reports whether sort is empty or a known (optionally
+// "-"-prefixed) sort key.
+func IsValidLeadSort(sort string) bool {
+	if sort == "" {
+		return true
+	}
+	_, ok := LeadSortFields[strings.TrimPrefix(sort, "-")]
+	return ok
+}
+
+func leadOrderBy(sort string) string {
+	if sort == "" {
+		sort = "-created_at"
+	}
+	direction := "ASC"
+	if strings.HasPrefix(sort, "-") {
+		direction = "DESC"
+		sort = strings.TrimPrefix(sort, "-")
+	}
+	expr, ok := LeadSortFields[sort]
+	if !ok {
+		expr, direction = "created_at", "DESC"
+	}
+	// id keeps pagination stable when the sort key has ties.
+	return expr + " " + direction + ", id " + direction
 }
 
 // CreateLeadParams intentionally excludes OrganizationID. Implementations
