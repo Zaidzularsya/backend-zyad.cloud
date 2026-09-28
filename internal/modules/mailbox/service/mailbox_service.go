@@ -196,6 +196,13 @@ func (s *MailboxService) Delete(ctx context.Context, scope coretenant.Scope, use
 	return nil
 }
 
+// Get returns a mailbox the caller owns, or ErrMailboxNotFound. Used by the
+// handler to validate a mailbox id before starting a background action
+// (sync now) that has no other way to report "not found" to the request.
+func (s *MailboxService) Get(ctx context.Context, scope coretenant.Scope, userID, id string) (domain.Mailbox, error) {
+	return s.get(ctx, scope, userID, id)
+}
+
 func (s *MailboxService) get(ctx context.Context, scope coretenant.Scope, userID, id string) (domain.Mailbox, error) {
 	mailbox, err := s.mailboxes.GetForUser(ctx, scope, userID, id)
 	if errors.Is(err, pgx.ErrNoRows) {

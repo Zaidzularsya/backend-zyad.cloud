@@ -124,6 +124,49 @@ func (r *messageRepository) CreateOutbound(ctx context.Context, scope coretenant
 	return message, created, nil
 }
 
+func (r *messageRepository) CreateInbound(ctx context.Context, scope coretenant.Scope, p CreateInboundParams) (domain.Message, bool, error) {
+	var message domain.Message
+	created := true
+	err := withTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		var err error
+		message, err = scanMessage(tx.QueryRow(ctx, `
+			WITH inserted AS (
+				INSERT INTO mail_messages AS m (
+					organization_id, mailbox_id, direction, status, message_id, in_reply_to, references_header,
+					from_address, from_name, to_addresses, cc_addresses, bcc_addresses, participants,
+					subject, snippet, body_html, body_text, sent_at
+				) VALUES (
+					$1, $2, 'inbound', 'received', $3, $4, $5,
+					$6, $7, $8, $9, $10, $11,
+					$12, $13, $14, $15, $16
+				)
+				ON CONFLICT (mailbox_id, message_id) DO NOTHING
+				RETURNING *
+			)
+			SELECT `+messageColumns+` FROM inserted m`,
+			scope.OrganizationID(), p.MailboxID, p.MessageID, nullableString(p.InReplyTo), nullableString(p.References),
+			p.FromAddress, nullableString(p.FromName), emptyIfNil(p.To), emptyIfNil(p.Cc), emptyIfNil(p.Bcc),
+			participants(p.FromAddress, p.To, p.Cc, p.Bcc),
+			p.Subject, p.Snippet, p.BodyHTML, p.BodyText, p.SentAt,
+		))
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		// Already synced (cursor moved back, or present in two synced
+		// folders): hand back the existing row.
+		created = false
+		message, err = scanMessage(tx.QueryRow(ctx, `
+			SELECT `+messageColumns+` FROM mail_messages m
+			WHERE m.organization_id = $1 AND m.mailbox_id = $2 AND m.message_id = $3
+		`, scope.OrganizationID(), p.MailboxID, p.MessageID))
+		return err
+	})
+	if err != nil {
+		return domain.Message{}, false, err
+	}
+	return message, created, nil
+}
+
 func (r *messageRepository) AddAttachment(ctx context.Context, scope coretenant.Scope, messageID, assetObjectID string) error {
 	return withTx(ctx, r.db, scope, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `

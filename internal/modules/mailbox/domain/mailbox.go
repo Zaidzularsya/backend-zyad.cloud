@@ -41,6 +41,13 @@ type Mailbox struct {
 	IMAPSecurity    Security
 	Status          MailboxStatus
 	LastError       string
+	SyncCursor      SyncCursor
+	LastSyncedAt    *time.Time
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+// HasIMAP reports whether inbox sync can run for this mailbox.
+func (m Mailbox) HasIMAP() bool {
+	return m.IMAPHost != "" && m.IMAPPort != 0 && m.IMAPSecurity.IsValid()
 }

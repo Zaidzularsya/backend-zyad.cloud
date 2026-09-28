@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"mime/multipart"
 	"net/http"
@@ -28,10 +29,14 @@ const maxFormMemory = 8 << 20
 type Handler struct {
 	mailboxes *service.MailboxService
 	messages  *service.MessageService
+	// sync is nil when tenant storage isn't configured (see
+	// app.NewMailSyncService) — "Sync now" is then hidden by omitting the
+	// route rather than the button always failing.
+	sync *service.SyncService
 }
 
-func NewHandler(mailboxes *service.MailboxService, messages *service.MessageService) *Handler {
-	return &Handler{mailboxes: mailboxes, messages: messages}
+func NewHandler(mailboxes *service.MailboxService, messages *service.MessageService, sync *service.SyncService) *Handler {
+	return &Handler{mailboxes: mailboxes, messages: messages, sync: sync}
 }
 
 // RegisterRoutes: every route acts on the caller's own mailboxes only, so
@@ -46,6 +51,9 @@ func (h *Handler) RegisterRoutes(mailboxes, emails *gin.RouterGroup, p permissio
 	mailboxes.DELETE("/:id", send, h.DeleteMailbox)
 	mailboxes.POST("/:id/test", send, h.TestMailbox)
 	mailboxes.POST("/:id/messages", send, h.Send)
+	if h.sync != nil {
+		mailboxes.POST("/:id/sync", send, h.SyncMailboxNow)
+	}
 
 	emails.GET("", read, h.ListMessages)
 	emails.GET("/:id", read, h.GetMessage)
@@ -158,6 +166,29 @@ func (h *Handler) TestMailbox(c *gin.Context) {
 // body_html, in_reply_to, related_entity_type, related_entity_id, files
 // (repeatable). The Idempotency-Key header makes a retried submit return
 // the first message. Responds 202: delivery happens in the background.
+// SyncMailboxNow checks INBOX over IMAP outside the worker's regular
+// interval. It can take a while (one IMAP round trip per batch), so it runs
+// in the background like Send: 202 immediately, poll GET .../mailboxes for
+// status/last_synced_at and GET /app/emails for new messages.
+func (h *Handler) SyncMailboxNow(c *gin.Context) {
+	scope, userID, ok := requireCaller(c)
+	if !ok {
+		return
+	}
+	if _, err := h.mailboxes.Get(c.Request.Context(), scope, userID, c.Param("id")); err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	go func(ctx context.Context, mailboxID string) {
+		if _, err := h.sync.SyncMailbox(ctx, scope, userID, mailboxID); err != nil {
+			// The mailbox's status/last_error already carries the detail;
+			// this is just so it shows up in server logs too.
+			_ = err
+		}
+	}(context.WithoutCancel(c.Request.Context()), c.Param("id"))
+	response.JSON(c, http.StatusAccepted, "sync started", nil, nil)
+}
+
 func (h *Handler) Send(c *gin.Context) {
 	scope, userID, ok := requireCaller(c)
 	if !ok {

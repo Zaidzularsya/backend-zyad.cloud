@@ -17,6 +17,7 @@ import (
 	notificationrepo "zyad.cloud/internal/core/notification/repository"
 	notificationservice "zyad.cloud/internal/core/notification/service"
 	notificationtemplate "zyad.cloud/internal/core/notification/template"
+	mailboxservice "zyad.cloud/internal/modules/mailbox/service"
 	organizationrepo "zyad.cloud/internal/modules/organization/repository"
 	organizationservice "zyad.cloud/internal/modules/organization/service"
 	whatsapprealtime "zyad.cloud/internal/modules/whatsapp/realtime"
@@ -64,6 +65,7 @@ func main() {
 		whatsappBus = app.NewWhatsAppRealtimeBus(redisClient, log)
 	}
 	inbound := app.NewWhatsAppInboundProcessor(cfg, db, whatsappBus, log)
+	mailSync := app.NewMailSyncService(cfg, db, log)
 
 	if *once {
 		if err := runBatch(ctx, log, worker, notificationService, batchSize); err != nil && !errors.Is(err, context.Canceled) {
@@ -75,6 +77,9 @@ func main() {
 		}
 		if reconciler != nil {
 			runWhatsAppReconcile(ctx, log, reconciler)
+		}
+		if mailSync != nil {
+			runMailSync(ctx, log, mailSync)
 		}
 		return
 	}
@@ -95,6 +100,15 @@ func main() {
 		}
 		log.Info("starting whatsapp session reconciler", "interval", reconcileInterval.String())
 		go runEvery(ctx, reconcileInterval, func() { runWhatsAppReconcile(ctx, log, reconciler) })
+	}
+
+	if mailSync != nil {
+		syncInterval := time.Duration(cfg.Mail.MailSyncIntervalSeconds) * time.Second
+		if syncInterval <= 0 {
+			syncInterval = 5 * time.Minute
+		}
+		log.Info("starting mail sync", "interval", syncInterval.String())
+		go runEvery(ctx, syncInterval, func() { runMailSync(ctx, log, mailSync) })
 	}
 
 	interval := time.Duration(cfg.Notification.WorkerIntervalSeconds) * time.Second
@@ -212,6 +226,17 @@ func runWhatsAppInbound(ctx context.Context, log *slog.Logger, processor *whatsa
 	}
 	if result.Claimed > 0 {
 		log.Info("processed whatsapp webhook events", "claimed", result.Claimed, "processed", result.Processed, "failed", result.Failed)
+	}
+}
+
+func runMailSync(ctx context.Context, log *slog.Logger, sync *mailboxservice.SyncService) {
+	result, err := sync.RunOnce(ctx)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		log.Error("mail sync failed", "error", err)
+		return
+	}
+	if result.Checked > 0 {
+		log.Info("synced mailboxes", "checked", result.Checked, "synced", result.Synced, "failed", result.Failed)
 	}
 }
 
