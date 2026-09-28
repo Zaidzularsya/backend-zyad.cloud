@@ -311,18 +311,43 @@ func TestInboundMessageFromPhoneIsOutbound(t *testing.T) {
 	}
 }
 
-func TestInboundIgnoresGroupsBroadcastsAndPlainMessageEvent(t *testing.T) {
+func TestInboundIgnoresGroupsBroadcastsAndNewsletters(t *testing.T) {
 	h := newInboundHarness(t, false,
 		webhookEvent("e1", "message.any", `{"id":"m1","from":"120363@g.us","body":"grup"}`),
 		webhookEvent("e2", "message.any", `{"id":"m2","from":"status@broadcast","body":"status"}`),
 		webhookEvent("e3", "message.any", `{"id":"m3","from":"1203@newsletter","body":"channel"}`),
-		webhookEvent("e4", "message", `{"id":"m4","from":"6281234567890@c.us","body":"dup of message.any"}`),
 	)
-	if result := h.run(t); result.Processed != 4 {
+	if result := h.run(t); result.Processed != 3 {
 		t.Fatalf("result = %+v", result)
 	}
 	if len(h.conversations.byChat) != 0 || len(h.conversations.recorded) != 0 {
 		t.Fatalf("stored %d conversations / %d messages, want none", len(h.conversations.byChat), len(h.conversations.recorded))
+	}
+}
+
+// Some engines (GOWS observed in dev) only fire "message" for an inbound
+// message, never the "message.any" duplicate. It must be handled the same
+// way instead of being dropped as an assumed duplicate.
+func TestInboundHandlesPlainMessageEventWhenMessageAnyNeverArrives(t *testing.T) {
+	h := newInboundHarness(t, false, webhookEvent("e1", "message", `{"id":"m1","from":"6281234567890@c.us","body":"halo"}`))
+	if result := h.run(t); result.Processed != 1 {
+		t.Fatalf("result = %+v", result)
+	}
+	if len(h.conversations.recorded) != 1 || h.conversations.recorded[0].Body != "halo" {
+		t.Fatalf("recorded = %+v, want the message stored", h.conversations.recorded)
+	}
+}
+
+// When the engine does send both "message" and "message.any" for the same
+// message, the second must be a no-op, not a duplicate message/activity.
+func TestInboundMessageAndMessageAnyForSameIDIsIdempotent(t *testing.T) {
+	payload := `{"id":"m1","from":"6281234567890@c.us","body":"halo"}`
+	h := newInboundHarness(t, false, webhookEvent("e1", "message.any", payload), webhookEvent("e2", "message", payload))
+	if result := h.run(t); result.Processed != 2 {
+		t.Fatalf("result = %+v", result)
+	}
+	if len(h.conversations.recorded) != 1 {
+		t.Fatalf("recorded = %+v, want exactly one message stored", h.conversations.recorded)
 	}
 }
 

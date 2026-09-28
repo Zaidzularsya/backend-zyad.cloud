@@ -212,9 +212,8 @@ func (p *InboundProcessor) process(ctx context.Context, event domain.WebhookEven
 		return permanentError{fmt.Errorf("decode envelope: %w", err)}
 	}
 	switch envelope.Event {
-	case domain.EventSessionStatus, domain.EventMessageAny, domain.EventMessageAck:
+	case domain.EventSessionStatus, domain.EventMessage, domain.EventMessageAny, domain.EventMessageAck:
 	default:
-		// "message" duplicates "message.any"; other events are not used yet.
 		return nil
 	}
 
@@ -246,7 +245,12 @@ func (p *InboundProcessor) process(ctx context.Context, event domain.WebhookEven
 	switch envelope.Event {
 	case domain.EventSessionStatus:
 		return p.handleSessionStatus(ctx, scope, session, envelope)
-	case domain.EventMessageAny:
+	case domain.EventMessage, domain.EventMessageAny:
+		// The engine does not reliably send both for a given message (GOWS
+		// has been observed emitting only "message" for some inbound
+		// messages), so both are handled the same way. RecordMessage dedups
+		// on (conversation_id, waha_message_id), so if the engine does send
+		// both, the second is a no-op.
 		return p.handleMessage(ctx, scope, session, envelope)
 	default:
 		return p.handleAck(ctx, scope, session, envelope)
