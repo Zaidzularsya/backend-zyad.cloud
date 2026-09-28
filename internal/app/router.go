@@ -308,6 +308,18 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		deps.CRMIntegrationHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
 	}
 
+	// CRM email: each user's own mailboxes. Same tenant rules as CRM.
+	if deps.MailboxHandler != nil {
+		emailMiddleware := []gin.HandlerFunc{
+			middleware.RequireActiveTenant(),
+			middleware.RequireCustomerOrPlatformTenant(),
+			middleware.RequireEntitlement(deps.CRMEntitlementChecker, "crm.enabled"),
+		}
+		mailboxGroup := protected.Group("/app/mailboxes", emailMiddleware...)
+		emailGroup := protected.Group("/app/emails", emailMiddleware...)
+		deps.MailboxHandler.RegisterRoutes(mailboxGroup, emailGroup, deps.PermissionChecker)
+	}
+
 	// WhatsApp channel (WAHA). Same tenant rules as CRM: customer or platform
 	// organizations, gated by whatsapp.enabled (platform bypasses entitlement).
 	// The WAHA webhook receiver is public and registered separately.

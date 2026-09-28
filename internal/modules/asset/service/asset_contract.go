@@ -17,6 +17,10 @@ type UploadObjectParams struct {
 	Class     domain.ObjectClass
 	Label     string
 	CreatedBy string
+	// AllowedMimeTypes menggantikan daftar default (JPG/PNG/WEBP/PDF) untuk
+	// pemanggil yang butuh tipe lain, mis. lampiran email. Key lowercase;
+	// nil = daftar default.
+	AllowedMimeTypes map[string]bool
 }
 
 type DownloadResult struct {

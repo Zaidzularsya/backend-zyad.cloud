@@ -132,6 +132,8 @@ func LoadMail() MailConfig {
 		From:     getEnv("MAIL_FROM", ""),
 		Secure:   getEnvBool("MAIL_SECURE", false),
 		TLS:      getEnvBool("MAIL_TLS", true),
+
+		MailboxAllowPrivateHosts: getEnvBool("MAILBOX_ALLOW_PRIVATE_HOSTS", false),
 	}
 }
 

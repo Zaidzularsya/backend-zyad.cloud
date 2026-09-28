@@ -13,6 +13,7 @@ import (
 	crmhandler "zyad.cloud/internal/modules/crm/handler"
 	financehandler "zyad.cloud/internal/modules/finance/handler"
 	landinghandler "zyad.cloud/internal/modules/landing/handler"
+	mailboxhandler "zyad.cloud/internal/modules/mailbox/handler"
 	organizationhandler "zyad.cloud/internal/modules/organization/handler"
 	producthandler "zyad.cloud/internal/modules/product/handler"
 	subscriptionhandler "zyad.cloud/internal/modules/subscription/handler"
@@ -71,6 +72,7 @@ type Dependencies struct {
 	CRMLeadHandler                   *crmhandler.LeadHandler
 	CRMLeadAttachmentHandler         *crmhandler.LeadAttachmentHandler
 	CRMContactAttachmentHandler      *crmhandler.ContactAttachmentHandler
+	MailboxHandler                   *mailboxhandler.Handler
 	CRMLeadDashboardHandler          *crmhandler.LeadDashboardHandler
 	CRMMemberHandler                 *crmhandler.MemberHandler
 	CRMPipelineHandler               *crmhandler.PipelineHandler

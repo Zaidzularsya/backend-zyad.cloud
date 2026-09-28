@@ -98,7 +98,11 @@ func (s *assetService) UploadObject(
 		return domain.AssetObject{}, ErrFileTooLarge
 	}
 	mimeLower := strings.ToLower(params.MimeType)
-	if !allowedObjectMimeTypes[mimeLower] {
+	allowed := allowedObjectMimeTypes
+	if params.AllowedMimeTypes != nil {
+		allowed = params.AllowedMimeTypes
+	}
+	if !allowed[mimeLower] {
 		return domain.AssetObject{}, ErrInvalidMimeType
 	}
 	if s.objectStorage == nil {
