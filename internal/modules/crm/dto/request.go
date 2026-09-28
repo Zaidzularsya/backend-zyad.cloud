@@ -87,6 +87,8 @@ type LeadListQuery struct {
 	Status      string `form:"status"`
 	OwnerUserID string `form:"owner_user_id"`
 	Source      string `form:"source"`
+	// ConvertedContactID: lead asal dari sebuah contact.
+	ConvertedContactID string `form:"converted_contact_id"`
 	// CreatedFrom/CreatedTo: YYYY-MM-DD, inclusive (Asia/Jakarta days).
 	CreatedFrom string `form:"created_from"`
 	CreatedTo   string `form:"created_to"`
@@ -183,6 +185,7 @@ type DealListQuery struct {
 	StageID     string `form:"stage_id"`
 	Status      string `form:"status"`
 	OwnerUserID string `form:"owner_user_id"`
+	ContactID   string `form:"contact_id"`
 }
 
 // CreateDealRequest binds the payload for creating a deal.

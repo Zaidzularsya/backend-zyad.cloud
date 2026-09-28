@@ -80,6 +80,7 @@ func (h *LeadHandler) List(c *gin.Context) {
 		Status:             domain.LeadStatus(query.Status),
 		OwnerUserID:        query.OwnerUserID,
 		Source:             query.Source,
+		ConvertedContactID: query.ConvertedContactID,
 		CreatedFrom:        createdFrom,
 		CreatedToExclusive: createdToExcl,
 		Sort:               query.Sort,

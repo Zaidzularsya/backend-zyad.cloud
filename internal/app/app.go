@@ -437,6 +437,11 @@ func New(ctx context.Context) (*App, error) {
 		crmLeadRepo,
 		assetSvc,
 	)
+	crmContactAttachmentSvc := crmservice.NewContactAttachmentService(
+		crmrepo.NewContactAttachmentRepository(db),
+		crmContactRepo,
+		assetSvc,
+	)
 	crmPipelineRepo := crmrepo.NewPipelineRepository(db)
 	crmDealRepo := crmrepo.NewDealRepository(db)
 	crmPipelineSvc := crmservice.NewPipelineService(
@@ -461,6 +466,7 @@ func New(ctx context.Context) (*App, error) {
 	crmContactHandler := crmhandler.NewContactHandler(crmContactSvc)
 	crmLeadHandler := crmhandler.NewLeadHandler(crmLeadSvc)
 	crmLeadAttachmentHandler := crmhandler.NewLeadAttachmentHandler(crmLeadAttachmentSvc)
+	crmContactAttachmentHandler := crmhandler.NewContactAttachmentHandler(crmContactAttachmentSvc)
 	crmLeadDashboardHandler := crmhandler.NewLeadDashboardHandler(crmservice.NewLeadDashboardService(crmrepo.NewLeadDashboardRepository(db)))
 	crmMemberHandler := crmhandler.NewMemberHandler(crmMemberSvc)
 	crmPipelineHandler := crmhandler.NewPipelineHandler(crmPipelineSvc)
@@ -529,6 +535,7 @@ func New(ctx context.Context) (*App, error) {
 		CRMContactHandler:                crmContactHandler,
 		CRMLeadHandler:                   crmLeadHandler,
 		CRMLeadAttachmentHandler:         crmLeadAttachmentHandler,
+		CRMContactAttachmentHandler:      crmContactAttachmentHandler,
 		CRMLeadDashboardHandler:          crmLeadDashboardHandler,
 		CRMMemberHandler:                 crmMemberHandler,
 		CRMPipelineHandler:               crmPipelineHandler,

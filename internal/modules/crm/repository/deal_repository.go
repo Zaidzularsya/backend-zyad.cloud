@@ -183,6 +183,10 @@ func (r *dealRepository) List(ctx context.Context, scope coretenant.Scope, filte
 		args = append(args, filter.OwnerUserID)
 		whereClauses = append(whereClauses, fmt.Sprintf("owner_user_id = $%d", len(args)))
 	}
+	if filter.ContactID != "" {
+		args = append(args, filter.ContactID)
+		whereClauses = append(whereClauses, fmt.Sprintf("contact_id = $%d", len(args)))
+	}
 
 	where := strings.Join(whereClauses, " AND ")
 	countQuery := "SELECT COUNT(*) FROM crm_deals WHERE " + where

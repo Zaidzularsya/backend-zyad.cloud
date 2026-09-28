@@ -14,6 +14,7 @@ type DealListFilter struct {
 	StageID        string
 	Status         domain.DealStatus
 	OwnerUserID    string
+	ContactID      string
 	IncludeDeleted bool
 	Limit          int
 	Offset         int

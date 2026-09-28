@@ -81,6 +81,7 @@ func (h *DealHandler) List(c *gin.Context) {
 		StageID:     query.StageID,
 		Status:      domain.DealStatus(query.Status),
 		OwnerUserID: query.OwnerUserID,
+		ContactID:   query.ContactID,
 		Limit:       perPage,
 		Offset:      (page - 1) * perPage,
 	})

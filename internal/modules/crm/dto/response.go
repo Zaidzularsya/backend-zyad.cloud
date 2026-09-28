@@ -586,3 +586,35 @@ func LeadAttachmentListFromDomain(attachments []domain.LeadAttachment) []LeadAtt
 	}
 	return items
 }
+
+type ContactAttachmentResponse struct {
+	ID            string    `json:"id"`
+	ContactID     string    `json:"contact_id"`
+	AssetObjectID string    `json:"asset_object_id"`
+	Filename      string    `json:"filename"`
+	MimeType      string    `json:"mime_type"`
+	SizeBytes     int64     `json:"size_bytes"`
+	CreatedBy     string    `json:"created_by,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+func ContactAttachmentFromDomain(a domain.ContactAttachment) ContactAttachmentResponse {
+	return ContactAttachmentResponse{
+		ID:            a.ID,
+		ContactID:     a.ContactID,
+		AssetObjectID: a.AssetObjectID,
+		Filename:      a.Filename,
+		MimeType:      a.MimeType,
+		SizeBytes:     a.SizeBytes,
+		CreatedBy:     a.CreatedBy,
+		CreatedAt:     a.CreatedAt,
+	}
+}
+
+func ContactAttachmentListFromDomain(attachments []domain.ContactAttachment) []ContactAttachmentResponse {
+	items := make([]ContactAttachmentResponse, 0, len(attachments))
+	for _, a := range attachments {
+		items = append(items, ContactAttachmentFromDomain(a))
+	}
+	return items
+}

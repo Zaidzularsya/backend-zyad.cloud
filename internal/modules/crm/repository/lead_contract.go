@@ -13,6 +13,8 @@ type LeadListFilter struct {
 	Search      string
 	Status      domain.LeadStatus
 	OwnerUserID string
+	// ConvertedContactID: lead yang di-convert menjadi contact ini.
+	ConvertedContactID string
 	// Source matches case-insensitively.
 	Source string
 	// CreatedFrom (inclusive) / CreatedToExclusive bound created_at; zero
