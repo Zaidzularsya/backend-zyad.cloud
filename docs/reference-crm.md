@@ -260,6 +260,42 @@ Mendukung halaman detail lead 3-panel di FE (`LeadDetailPage.vue`).
   lead/contact menjadi assignee default percakapan. `crm_integrations.provider = 'whatsapp'` tetap integrasi
   generik CRM dan tidak dipakai modul `whatsapp`.
 
+## Lead Dashboard & Riwayat Lead
+
+Mendukung tab "Ringkasan" di halaman Leads (grafik pertumbuhan, kartu status + tren, follow-up, aktivitas
+terbaru).
+
+- **Migration `000131`**: tabel `crm_lead_events` (RLS aktif). Isinya `event_type` (`created`,
+  `status_changed`, `assigned`, `converted`, `deleted`, `restored`), `from_value`/`to_value` (status, atau
+  user id owner untuk `assigned`), `actor_user_id`, `created_at`. Migration ini juga menambah index
+  `crm_leads(organization_id, created_at)` dan `(organization_id, converted_at)`.
+  - Event ditulis `leadRepository` **di transaksi yang sama** dengan perubahan `crm_leads` (row dikunci
+    `SELECT ... FOR UPDATE` dulu untuk membaca status/owner lama). Jadi riwayat tidak pernah berbeda dari
+    state lead. Update yang tidak mengubah status/owner tidak mencatat event.
+  - Backfill: event `created` untuk semua lead lama, dan `converted` untuk lead yang punya `converted_at`.
+    Perubahan status sebelum migration ini memang tidak tercatat, jadi tren "masuk ke status X" untuk
+    contacted/qualified/unqualified baru terisi setelah deploy.
+- **Endpoint** `GET /leads/dashboard` (`lead.read`), query `from`, `to` (`YYYY-MM-DD`, inklusif,
+  hari kalender Asia/Jakarta), dan `granularity` (`day`|`month`).
+  - Default rentang 30 hari terakhir. Tanpa `granularity`: `day` untuk rentang ≤92 hari, di atas itu `month`.
+  - Rentang maksimal 366 hari untuk `day` dan 731 hari untuk `month`. Input tidak valid → 422 `VALIDATION_ERROR`.
+  - Periode pembanding = rentang dengan panjang sama tepat sebelum `from`.
+  - Response:
+    - `status_counts`: status semua lead aktif saat ini.
+    - `status_entered`: jumlah lead yang masuk ke tiap status di periode ini vs periode sebelumnya.
+    - `created` dan `converted` (`{current, previous}`).
+    - `series`: satu entri per bucket, termasuk yang kosong.
+    - `by_source`.
+    - `follow_up_summary`: pending/overdue/hari ini/7 hari ke depan.
+    - `upcoming_follow_ups`: maks 8. Isinya activity + `lead_name`, `company_name`, `assignee_name`.
+    - `recent_activity`: maks 10. Gabungan `crm_lead_events` dan `crm_activities` pada lead.
+  - Semua hitungan mengabaikan lead yang di-soft-delete. Pengecualiannya event `deleted` yang tetap
+    muncul di feed.
+  - Nama user (actor/assignee/owner) hanya di-resolve lewat membership organization yang sama, seperti
+    aturan `owner_name`.
+- Timestamp `crm_*` bertipe `timestamp without time zone` dan diisi `now()` di timezone DB (Asia/Jakarta).
+  Karena itu bucket memakai `date_trunc` langsung tanpa konversi zona.
+
 ## Non-Goals
 
 - Tidak menggantikan atau berinteraksi langsung dengan `billing_invoices`/`billing_payments` (modul

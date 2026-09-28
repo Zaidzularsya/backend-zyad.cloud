@@ -461,6 +461,7 @@ func New(ctx context.Context) (*App, error) {
 	crmContactHandler := crmhandler.NewContactHandler(crmContactSvc)
 	crmLeadHandler := crmhandler.NewLeadHandler(crmLeadSvc)
 	crmLeadAttachmentHandler := crmhandler.NewLeadAttachmentHandler(crmLeadAttachmentSvc)
+	crmLeadDashboardHandler := crmhandler.NewLeadDashboardHandler(crmservice.NewLeadDashboardService(crmrepo.NewLeadDashboardRepository(db)))
 	crmMemberHandler := crmhandler.NewMemberHandler(crmMemberSvc)
 	crmPipelineHandler := crmhandler.NewPipelineHandler(crmPipelineSvc)
 	crmDealHandler := crmhandler.NewDealHandler(crmDealSvc)
@@ -528,6 +529,7 @@ func New(ctx context.Context) (*App, error) {
 		CRMContactHandler:                crmContactHandler,
 		CRMLeadHandler:                   crmLeadHandler,
 		CRMLeadAttachmentHandler:         crmLeadAttachmentHandler,
+		CRMLeadDashboardHandler:          crmLeadDashboardHandler,
 		CRMMemberHandler:                 crmMemberHandler,
 		CRMPipelineHandler:               crmPipelineHandler,
 		CRMDealHandler:                   crmDealHandler,

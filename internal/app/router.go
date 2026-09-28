@@ -280,6 +280,9 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.CRMLeadAttachmentHandler != nil {
 		deps.CRMLeadAttachmentHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
 	}
+	if deps.CRMLeadDashboardHandler != nil {
+		deps.CRMLeadDashboardHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	}
 	if deps.CRMMemberHandler != nil {
 		deps.CRMMemberHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
 	}
