@@ -293,6 +293,11 @@ terbaru).
     muncul di feed.
   - Nama user (actor/assignee/owner) hanya di-resolve lewat membership organization yang sama, seperti
     aturan `owner_name`.
+- **List lead** `GET /leads` (aditif, backward compatible):
+  - Query baru `source` (case-insensitive), `created_from`/`created_to` (`YYYY-MM-DD`, inklusif), dan `sort`.
+  - Nilai `sort`: `created_at`, `updated_at`, `contact_name`, `score`, `status` (urutan pipeline). Prefix
+    `-` untuk descending. Default `-created_at`, sama dengan perilaku lama. Sort tidak dikenal → 422.
+  - `per_page` sekarang dibatasi maksimal 100.
 - Timestamp `crm_*` bertipe `timestamp without time zone` dan diisi `now()` di timezone DB (Asia/Jakarta).
   Karena itu bucket memakai `date_trunc` langsung tanpa konversi zona.
 

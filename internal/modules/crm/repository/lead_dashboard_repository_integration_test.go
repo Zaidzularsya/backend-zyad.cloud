@@ -148,6 +148,25 @@ func TestLeadEventsAndDashboardIntegration(t *testing.T) {
 		}
 	}
 
+	// List filters (Fase 2): source is case-insensitive, created range is
+	// inclusive, sort keys map to whitelisted expressions.
+	extra, err := leads.Create(ctx, tenants.A.Scope, repository.CreateLeadParams{ContactName: "Citra", Source: "website"})
+	if err != nil {
+		t.Fatalf("Create extra: %v", err)
+	}
+	listed, total, err := leads.List(ctx, tenants.A.Scope, repository.LeadListFilter{
+		Source: "WEBSITE", CreatedFrom: today, CreatedToExclusive: today.AddDate(0, 0, 1), Sort: "contact_name",
+	})
+	if err != nil {
+		t.Fatalf("List filtered: %v", err)
+	}
+	if total != 2 || len(listed) != 2 || listed[0].ContactName != "Andi" || listed[1].ID != extra.ID {
+		t.Errorf("filtered list = %d %+v, want [Andi, Citra]", total, listed)
+	}
+	if _, total, err := leads.List(ctx, tenants.A.Scope, repository.LeadListFilter{CreatedToExclusive: today}); err != nil || total != 0 {
+		t.Errorf("list before today = %d, %v; want 0", total, err)
+	}
+
 	other, err := dashboards.Dashboard(ctx, tenants.B.Scope, rng, limits)
 	if err != nil {
 		t.Fatalf("Dashboard B: %v", err)

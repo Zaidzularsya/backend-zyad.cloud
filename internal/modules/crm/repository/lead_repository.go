@@ -249,6 +249,18 @@ func (r *leadRepository) List(ctx context.Context, scope coretenant.Scope, filte
 		args = append(args, filter.OwnerUserID)
 		whereClauses = append(whereClauses, fmt.Sprintf("owner_user_id = $%d", len(args)))
 	}
+	if filter.Source != "" {
+		args = append(args, strings.ToLower(strings.TrimSpace(filter.Source)))
+		whereClauses = append(whereClauses, fmt.Sprintf("lower(btrim(source)) = $%d", len(args)))
+	}
+	if !filter.CreatedFrom.IsZero() {
+		args = append(args, filter.CreatedFrom)
+		whereClauses = append(whereClauses, fmt.Sprintf("created_at >= $%d", len(args)))
+	}
+	if !filter.CreatedToExclusive.IsZero() {
+		args = append(args, filter.CreatedToExclusive)
+		whereClauses = append(whereClauses, fmt.Sprintf("created_at < $%d", len(args)))
+	}
 
 	where := strings.Join(whereClauses, " AND ")
 	countQuery := "SELECT COUNT(*) FROM crm_leads WHERE " + where
@@ -265,7 +277,7 @@ func (r *leadRepository) List(ctx context.Context, scope coretenant.Scope, filte
 			return nil
 		}
 
-		query := "SELECT " + leadColumns + " FROM crm_leads WHERE " + where + " ORDER BY created_at DESC"
+		query := "SELECT " + leadColumns + " FROM crm_leads WHERE " + where + " ORDER BY " + leadOrderBy(filter.Sort)
 		queryArgs := append([]interface{}{}, args...)
 		if filter.Limit > 0 {
 			queryArgs = append(queryArgs, filter.Limit)
