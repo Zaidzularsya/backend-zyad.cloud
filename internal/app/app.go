@@ -489,6 +489,9 @@ func New(ctx context.Context) (*App, error) {
 				Log:               log,
 			},
 		),
+		// "Sync now" from the API, independent of the worker's own interval
+		// (cmd/worker runs the same service on a timer).
+		NewMailSyncServiceWithStorage(cfg, db, assetSvc, log),
 	)
 	crmLeadDashboardHandler := crmhandler.NewLeadDashboardHandler(crmservice.NewLeadDashboardService(crmrepo.NewLeadDashboardRepository(db)))
 	crmMemberHandler := crmhandler.NewMemberHandler(crmMemberSvc)
@@ -626,6 +629,24 @@ func buildMediaStorage(cfg config.StorageConfig) (storage.MediaStorage, error) {
 	default:
 		return nil, fmt.Errorf("unknown storage driver %q", cfg.Driver)
 	}
+}
+
+// NewAssetService builds a standalone asset service from just config/db/log
+// — everything internal/app's own big constructor needs to wire it inline,
+// factored out so cmd/worker (mail sync's attachment storage) can build the
+// same thing without duplicating it.
+func NewAssetService(cfg config.Config, db *database.Pool, log *slog.Logger) (assetservice.AssetService, error) {
+	mediaStorage, err := buildMediaStorage(cfg.Storage)
+	if err != nil {
+		return nil, err
+	}
+	return assetservice.NewAssetService(
+		assetrepo.NewAssetRepository(db),
+		landingrepo.NewMediaRepository(db),
+		assetservice.WithAssetObjectStorage(mediaStorage),
+		assetservice.WithAssetEntitlementFinder(organizationrepo.NewEntitlementRepository(db)),
+		assetservice.WithAssetLogger(log),
+	), nil
 }
 
 func Run(ctx context.Context) error {

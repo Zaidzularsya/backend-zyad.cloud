@@ -20,6 +20,11 @@ var (
 	ErrHostNotAllowed      = coreerrors.New("MAILBOX_HOST_NOT_ALLOWED", "mail server must be a public host", http.StatusUnprocessableEntity)
 	ErrAttachmentsTooLarge = coreerrors.New("VALIDATION_ERROR", "total attachment size must be at most 18MB", http.StatusUnprocessableEntity)
 	ErrAttachmentType      = coreerrors.New("VALIDATION_ERROR", "attachment type is not allowed (PDF, images, Office, CSV, TXT, ZIP)", http.StatusUnprocessableEntity)
+	ErrIMAPNotConfigured   = coreerrors.New("MAILBOX_IMAP_NOT_CONFIGURED", "IMAP settings are not set for this mailbox", http.StatusUnprocessableEntity)
+	// ErrSyncFailed hides the raw IMAP error from the request (it may name
+	// internal hosts); the mailbox's status/last_error carries the detail
+	// for the account owner to read once it's saved.
+	ErrSyncFailed = coreerrors.New("MAILBOX_SYNC_FAILED", "inbox sync failed, check the mailbox's connection status", http.StatusUnprocessableEntity)
 )
 
 // ConnectionError reports why SMTP verification failed. The provider

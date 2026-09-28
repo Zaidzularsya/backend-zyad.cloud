@@ -143,6 +143,67 @@ func TestMailboxRepositoriesIntegration(t *testing.T) {
 		t.Fatalf("stale queued message = %+v, want failed", list)
 	}
 
+	// GetByID (worker path, no user filter) sees the mailbox regardless of
+	// which user connected it.
+	if got, err := mailboxes.GetByID(ctx, scope, mailbox.ID); err != nil || got.ID != mailbox.ID {
+		t.Fatalf("GetByID = %+v, %v", got, err)
+	}
+
+	// Directory: every mailbox gets a row on Create (Fase 3 worker
+	// enumeration), across organizations.
+	directory := repository.NewDirectoryRepository(db)
+	entries, err := directory.ListAll(ctx)
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	found := false
+	for _, entry := range entries {
+		if entry.MailboxID == mailbox.ID {
+			found = true
+			if entry.OrganizationID != tenants.A.OrganizationID {
+				t.Fatalf("directory organization = %s, want %s", entry.OrganizationID, tenants.A.OrganizationID)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("mailbox missing from mailbox_directory")
+	}
+
+	// UpdateSyncCursor persists the cursor and clears an error status.
+	if err := mailboxes.SetStatus(ctx, scope, mailbox.ID, domain.MailboxStatusError, "boom"); err != nil {
+		t.Fatalf("SetStatus: %v", err)
+	}
+	syncedAt := time.Now().UTC().Truncate(time.Second)
+	cursor := domain.SyncCursor{"INBOX": {UIDValidity: 7, LastUID: 99}}
+	if err := mailboxes.UpdateSyncCursor(ctx, scope, mailbox.ID, cursor, syncedAt); err != nil {
+		t.Fatalf("UpdateSyncCursor: %v", err)
+	}
+	afterCursor, err := mailboxes.GetByID(ctx, scope, mailbox.ID)
+	if err != nil || afterCursor.Status != domain.MailboxStatusActive || afterCursor.SyncCursor["INBOX"].LastUID != 99 {
+		t.Fatalf("after UpdateSyncCursor = %+v, %v", afterCursor, err)
+	}
+	if afterCursor.LastSyncedAt == nil || !afterCursor.LastSyncedAt.Equal(syncedAt) {
+		t.Fatalf("last_synced_at = %v, want %v", afterCursor.LastSyncedAt, syncedAt)
+	}
+
+	// CreateInbound: dedupes by (mailbox, message_id) like CreateOutbound
+	// dedupes by client_request_id, and is visible to attachment/list flows.
+	inbound, createdInbound, err := messages.CreateInbound(ctx, scope, repository.CreateInboundParams{
+		MailboxID: mailbox.ID, MessageID: "<inbound-1@sender.test>", FromAddress: "lisa@example.com",
+		To: []string{"sales@zyad.test"}, Subject: "Halo", BodyText: "Halo", SentAt: time.Now(),
+	})
+	if err != nil || !createdInbound || inbound.Direction != domain.DirectionInbound || inbound.Status != domain.MessageStatusReceived {
+		t.Fatalf("CreateInbound = %+v %v, %v", inbound, createdInbound, err)
+	}
+	if _, createdAgain, err := messages.CreateInbound(ctx, scope, repository.CreateInboundParams{
+		MailboxID: mailbox.ID, MessageID: "<inbound-1@sender.test>", FromAddress: "lisa@example.com", Subject: "Halo lagi",
+	}); err != nil || createdAgain {
+		t.Fatalf("duplicate CreateInbound created=%v, %v; want deduped", createdAgain, err)
+	}
+	if _, total, _ := messages.List(ctx, scope, repository.MessageListFilter{UserID: userA, Direction: domain.DirectionInbound, Limit: 10}); total != 1 {
+		t.Fatalf("inbound list total = %d, want 1", total)
+	}
+
 	if err := mailboxes.Delete(ctx, scope, userB, mailbox.ID); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("other user's Delete error = %v, want ErrNoRows", err)
 	}
@@ -152,4 +213,18 @@ func TestMailboxRepositoriesIntegration(t *testing.T) {
 	if _, total, _ := messages.List(ctx, scope, repository.MessageListFilter{UserID: userA, Limit: 10}); total != 0 {
 		t.Fatalf("messages left after mailbox delete: %d", total)
 	}
+	for _, entry := range mustListAll(t, directory, ctx) {
+		if entry.MailboxID == mailbox.ID {
+			t.Fatal("mailbox_directory row survived the mailbox delete (ON DELETE CASCADE)")
+		}
+	}
+}
+
+func mustListAll(t *testing.T, directory repository.DirectoryRepository, ctx context.Context) []repository.DirectoryEntry {
+	t.Helper()
+	entries, err := directory.ListAll(ctx)
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	return entries
 }

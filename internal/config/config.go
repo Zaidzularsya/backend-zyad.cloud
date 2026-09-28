@@ -143,6 +143,17 @@ type MailConfig struct {
 	// use private/loopback mail servers. Development only: in production it
 	// would let users reach internal services through the SMTP client.
 	MailboxAllowPrivateHosts bool
+	// MailSyncIntervalSeconds: how often the worker polls every connected
+	// mailbox's INBOX over IMAP (Fase 3). Not realtime — IMAP IDLE would be,
+	// but needs one held connection per mailbox; polling is simpler to run
+	// for many tenants.
+	MailSyncIntervalSeconds int
+	// MailSyncInitialDays bounds how far back the first sync of a mailbox
+	// reaches (INBOX only; Sent is tracked from emails this app sends).
+	MailSyncInitialDays int
+	// MailSyncBatchLimit caps messages fetched per mailbox per sync pass, so
+	// one slow/huge mailbox cannot starve the others.
+	MailSyncBatchLimit int
 }
 
 type NotificationConfig struct {

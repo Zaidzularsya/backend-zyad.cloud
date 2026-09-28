@@ -27,15 +27,36 @@ type MailboxParams struct {
 }
 
 // MailboxRepository always filters by user_id: a mailbox is only visible to
-// the user who connected it.
+// the user who connected it. GetByID is the one exception, for the sync
+// worker, which has no viewer to scope by.
 type MailboxRepository interface {
 	ListByUser(ctx context.Context, scope coretenant.Scope, userID string) ([]domain.Mailbox, error)
 	// GetForUser returns pgx.ErrNoRows for another user's mailbox.
 	GetForUser(ctx context.Context, scope coretenant.Scope, userID, id string) (domain.Mailbox, error)
+	// GetByID is for internal/worker use only (see SyncService) — never
+	// call it from a handler.
+	GetByID(ctx context.Context, scope coretenant.Scope, id string) (domain.Mailbox, error)
 	Create(ctx context.Context, scope coretenant.Scope, userID string, params MailboxParams) (domain.Mailbox, error)
 	Update(ctx context.Context, scope coretenant.Scope, userID, id string, params MailboxParams) (domain.Mailbox, error)
 	SetStatus(ctx context.Context, scope coretenant.Scope, id string, status domain.MailboxStatus, lastError string) error
+	// UpdateSyncCursor also clears an error status left by a previous failed
+	// sync, mirroring SetStatus(active) on a successful pass.
+	UpdateSyncCursor(ctx context.Context, scope coretenant.Scope, id string, cursor domain.SyncCursor, syncedAt time.Time) error
 	Delete(ctx context.Context, scope coretenant.Scope, userID, id string) error
+}
+
+// DirectoryEntry is one row of mailbox_directory.
+type DirectoryEntry struct {
+	MailboxID      string
+	OrganizationID string
+}
+
+// DirectoryRepository reads mailbox_directory, which is intentionally not
+// under RLS (see the 000135 migration comment). Only the sync worker uses
+// it, to find a mailbox's organization before opening a tenant-scoped
+// transaction. Never expose it through tenant endpoints.
+type DirectoryRepository interface {
+	ListAll(ctx context.Context) ([]DirectoryEntry, error)
 }
 
 type CreateOutboundParams struct {
@@ -71,10 +92,31 @@ type MessageListFilter struct {
 	Offset            int
 }
 
+type CreateInboundParams struct {
+	MailboxID   string
+	MessageID   string
+	InReplyTo   string
+	References  string
+	FromAddress string
+	FromName    string
+	To          []string
+	Cc          []string
+	Bcc         []string
+	Subject     string
+	Snippet     string
+	BodyHTML    string
+	BodyText    string
+	SentAt      time.Time
+}
+
 type MessageRepository interface {
 	// CreateOutbound inserts a queued message. A second call with the same
 	// (mailbox, client request id) returns the existing row and created=false.
 	CreateOutbound(ctx context.Context, scope coretenant.Scope, params CreateOutboundParams) (message domain.Message, created bool, err error)
+	// CreateInbound inserts a message synced from IMAP. A second call for the
+	// same (mailbox, message_id) — the sync cursor moved back, or the same
+	// message exists in two synced folders — is a no-op (created=false).
+	CreateInbound(ctx context.Context, scope coretenant.Scope, params CreateInboundParams) (message domain.Message, created bool, err error)
 	AddAttachment(ctx context.Context, scope coretenant.Scope, messageID, assetObjectID string) error
 	MarkSent(ctx context.Context, scope coretenant.Scope, id string, sentAt time.Time) error
 	MarkFailed(ctx context.Context, scope coretenant.Scope, id, errorMessage string) error

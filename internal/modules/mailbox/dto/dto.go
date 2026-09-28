@@ -32,20 +32,23 @@ type MessageListQuery struct {
 
 // MailboxResponse never includes the password.
 type MailboxResponse struct {
-	ID           string    `json:"id"`
-	EmailAddress string    `json:"email_address"`
-	DisplayName  string    `json:"display_name"`
-	Username     string    `json:"username"`
-	SMTPHost     string    `json:"smtp_host"`
-	SMTPPort     int       `json:"smtp_port"`
-	SMTPSecurity string    `json:"smtp_security"`
-	IMAPHost     string    `json:"imap_host"`
-	IMAPPort     int       `json:"imap_port"`
-	IMAPSecurity string    `json:"imap_security"`
-	Status       string    `json:"status"`
-	LastError    string    `json:"last_error"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID           string `json:"id"`
+	EmailAddress string `json:"email_address"`
+	DisplayName  string `json:"display_name"`
+	Username     string `json:"username"`
+	SMTPHost     string `json:"smtp_host"`
+	SMTPPort     int    `json:"smtp_port"`
+	SMTPSecurity string `json:"smtp_security"`
+	IMAPHost     string `json:"imap_host"`
+	IMAPPort     int    `json:"imap_port"`
+	IMAPSecurity string `json:"imap_security"`
+	Status       string `json:"status"`
+	LastError    string `json:"last_error"`
+	// HasInboxSync: IMAP is configured, so the sync worker checks INBOX.
+	HasInboxSync bool       `json:"has_inbox_sync"`
+	LastSyncedAt *time.Time `json:"last_synced_at"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 func MailboxFromDomain(m domain.Mailbox) MailboxResponse {
@@ -53,6 +56,7 @@ func MailboxFromDomain(m domain.Mailbox) MailboxResponse {
 		ID: m.ID, EmailAddress: m.EmailAddress, DisplayName: m.DisplayName, Username: m.Username,
 		SMTPHost: m.SMTPHost, SMTPPort: m.SMTPPort, SMTPSecurity: string(m.SMTPSecurity),
 		IMAPHost: m.IMAPHost, IMAPPort: m.IMAPPort, IMAPSecurity: string(m.IMAPSecurity),
+		HasInboxSync: m.HasIMAP(), LastSyncedAt: m.LastSyncedAt,
 		Status: string(m.Status), LastError: m.LastError, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
 	}
 }

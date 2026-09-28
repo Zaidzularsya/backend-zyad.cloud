@@ -134,6 +134,9 @@ func LoadMail() MailConfig {
 		TLS:      getEnvBool("MAIL_TLS", true),
 
 		MailboxAllowPrivateHosts: getEnvBool("MAILBOX_ALLOW_PRIVATE_HOSTS", false),
+		MailSyncIntervalSeconds:  getEnvInt("MAIL_SYNC_INTERVAL_SECONDS", 300),
+		MailSyncInitialDays:      getEnvInt("MAIL_SYNC_INITIAL_DAYS", 30),
+		MailSyncBatchLimit:       getEnvInt("MAIL_SYNC_BATCH_LIMIT", 200),
 	}
 }
 

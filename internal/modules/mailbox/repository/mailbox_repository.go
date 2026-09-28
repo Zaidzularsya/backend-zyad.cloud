@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -22,17 +24,18 @@ const mailboxColumns = `
 	id, user_id, email_address, COALESCE(display_name, ''), username, secret_encrypted,
 	smtp_host, smtp_port, smtp_security,
 	COALESCE(imap_host, ''), COALESCE(imap_port, 0), COALESCE(imap_security, ''),
-	status, COALESCE(last_error, ''), created_at, updated_at
+	status, COALESCE(last_error, ''), sync_cursor, last_synced_at, created_at, updated_at
 `
 
 func scanMailbox(row pgx.Row) (domain.Mailbox, error) {
 	var m domain.Mailbox
 	var smtpSecurity, imapSecurity, status string
+	var cursor []byte
 	err := row.Scan(
 		&m.ID, &m.UserID, &m.EmailAddress, &m.DisplayName, &m.Username, &m.SecretEncrypted,
 		&m.SMTPHost, &m.SMTPPort, &smtpSecurity,
 		&m.IMAPHost, &m.IMAPPort, &imapSecurity,
-		&status, &m.LastError, &m.CreatedAt, &m.UpdatedAt,
+		&status, &m.LastError, &cursor, &m.LastSyncedAt, &m.CreatedAt, &m.UpdatedAt,
 	)
 	if err != nil {
 		return domain.Mailbox{}, err
@@ -40,6 +43,12 @@ func scanMailbox(row pgx.Row) (domain.Mailbox, error) {
 	m.SMTPSecurity = domain.Security(smtpSecurity)
 	m.IMAPSecurity = domain.Security(imapSecurity)
 	m.Status = domain.MailboxStatus(status)
+	m.SyncCursor = domain.SyncCursor{}
+	if len(cursor) > 0 {
+		if err := json.Unmarshal(cursor, &m.SyncCursor); err != nil {
+			return domain.Mailbox{}, err
+		}
+	}
 	return m, nil
 }
 
@@ -94,6 +103,12 @@ func (r *mailboxRepository) Create(ctx context.Context, scope coretenant.Scope, 
 			p.SMTPHost, p.SMTPPort, string(p.SMTPSecurity),
 			nullableString(p.IMAPHost), nullableInt(p.IMAPPort), nullableString(string(p.IMAPSecurity)),
 		))
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO mailbox_directory (mailbox_id, organization_id) VALUES ($1, $2)
+		`, mailbox.ID, scope.OrganizationID())
 		return err
 	})
 	if isUniqueViolation(err) {
@@ -128,6 +143,34 @@ func (r *mailboxRepository) Update(ctx context.Context, scope coretenant.Scope, 
 		return domain.Mailbox{}, ErrDuplicateMailbox
 	}
 	return mailbox, err
+}
+
+func (r *mailboxRepository) GetByID(ctx context.Context, scope coretenant.Scope, id string) (domain.Mailbox, error) {
+	var mailbox domain.Mailbox
+	err := withTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		var err error
+		mailbox, err = scanMailbox(tx.QueryRow(ctx, `
+			SELECT `+mailboxColumns+` FROM user_mailboxes
+			WHERE organization_id = $1 AND id = $2
+		`, scope.OrganizationID(), id))
+		return err
+	})
+	return mailbox, err
+}
+
+func (r *mailboxRepository) UpdateSyncCursor(ctx context.Context, scope coretenant.Scope, id string, cursor domain.SyncCursor, syncedAt time.Time) error {
+	encoded, err := json.Marshal(cursor)
+	if err != nil {
+		return err
+	}
+	return withTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			UPDATE user_mailboxes
+			SET sync_cursor = $3, last_synced_at = $4, status = 'active', last_error = NULL, updated_at = now()
+			WHERE organization_id = $1 AND id = $2
+		`, scope.OrganizationID(), id, encoded, syncedAt)
+		return err
+	})
 }
 
 func (r *mailboxRepository) SetStatus(ctx context.Context, scope coretenant.Scope, id string, status domain.MailboxStatus, lastError string) error {
