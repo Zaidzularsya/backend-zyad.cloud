@@ -50,6 +50,8 @@ type CRMEntity struct {
 	Name        string
 	Phone       string
 	OwnerUserID string
+	// ConvertedContactID is set for a lead that was converted to a contact.
+	ConvertedContactID string
 }
 
 type CRMActivityInput struct {
@@ -151,7 +153,11 @@ func (m *CRMGateway) FindEntity(ctx context.Context, scope coretenant.Scope, ent
 		if err != nil {
 			return CRMEntity{}, err
 		}
-		return CRMEntity{Type: entityType, ID: lead.ID, Name: lead.ContactName, Phone: lead.Phone, OwnerUserID: lead.OwnerUserID}, nil
+		entity := CRMEntity{Type: entityType, ID: lead.ID, Name: lead.ContactName, Phone: lead.Phone, OwnerUserID: lead.OwnerUserID}
+		if lead.ConvertedContactID != nil {
+			entity.ConvertedContactID = *lead.ConvertedContactID
+		}
+		return entity, nil
 	case domain.RelatedEntityContact:
 		contact, err := m.contacts.FindByID(ctx, scope, id)
 		if err != nil {

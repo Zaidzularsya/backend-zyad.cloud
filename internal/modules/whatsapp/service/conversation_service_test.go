@@ -69,6 +69,18 @@ func (c *fakeConversations) LinkEntity(ctx context.Context, scope coretenant.Sco
 	return conversation, nil
 }
 
+func (c *fakeConversations) RelinkEntity(_ context.Context, _ coretenant.Scope, fromType domain.RelatedEntityType, fromID string, toType domain.RelatedEntityType, toID string) (int64, error) {
+	var moved int64
+	for key, conversation := range c.byChat {
+		if conversation.RelatedEntityType == fromType && conversation.RelatedEntityID == fromID {
+			conversation.RelatedEntityType, conversation.RelatedEntityID = toType, toID
+			c.byChat[key] = conversation
+			moved++
+		}
+	}
+	return moved, nil
+}
+
 func (c *fakeConversations) MarkRead(ctx context.Context, scope coretenant.Scope, id string) error {
 	conversation, err := c.GetByID(ctx, scope, id)
 	if err != nil {
@@ -340,6 +352,59 @@ func TestStartLinksExistingUnlinkedConversation(t *testing.T) {
 	conversation := h.start(t, owner, "lead-1")
 	if conversation.ID != "conv-x" || conversation.RelatedEntityID != "lead-1" || conversation.AssigneeUserID != "sales-1" {
 		t.Fatalf("conversation = %+v", conversation)
+	}
+}
+
+// Lead yang sudah di-convert sebelum ada relink otomatis: membuka chat dari
+// contact harus memindahkan percakapan lead, bukan mengembalikannya apa
+// adanya (halaman contact tidak akan pernah menemukannya).
+func TestStartMovesChatOfLeadConvertedIntoContact(t *testing.T) {
+	h := newConversationHarness(t)
+	h.crm.entities["lead-old"] = CRMEntity{Type: domain.RelatedEntityLead, ID: "lead-old", Name: "Sari", Phone: "+6281277770000", ConvertedContactID: "contact"}
+	h.conversations.put(domain.Conversation{
+		ID: "conv-lead", SessionID: h.session.ID, ChatID: "6281277770000@c.us", PhoneNormalized: "6281277770000",
+		RelatedEntityType: domain.RelatedEntityLead, RelatedEntityID: "lead-old", AssigneeUserID: "sales-2",
+	})
+
+	conversation := h.start(t, owner, "contact")
+	if conversation.ID != "conv-lead" || conversation.RelatedEntityType != domain.RelatedEntityContact || conversation.RelatedEntityID != "contact" {
+		t.Fatalf("conversation = %+v, want conv-lead linked to contact", conversation)
+	}
+	stored, _ := h.conversations.GetByID(ctxTest, h.scope, "conv-lead")
+	if stored.RelatedEntityID != "contact" {
+		t.Fatalf("stored link = %s/%s, want contact", stored.RelatedEntityType, stored.RelatedEntityID)
+	}
+}
+
+func TestStartKeepsChatOfUnrelatedLead(t *testing.T) {
+	h := newConversationHarness(t)
+	h.crm.entities["lead-other"] = CRMEntity{Type: domain.RelatedEntityLead, ID: "lead-other", Phone: "+6281277770000"}
+	h.conversations.put(domain.Conversation{
+		ID: "conv-lead", SessionID: h.session.ID, ChatID: "6281277770000@c.us", PhoneNormalized: "6281277770000",
+		RelatedEntityType: domain.RelatedEntityLead, RelatedEntityID: "lead-other", AssigneeUserID: "sales-2",
+	})
+
+	h.start(t, owner, "contact")
+	stored, _ := h.conversations.GetByID(ctxTest, h.scope, "conv-lead")
+	if stored.RelatedEntityID != "lead-other" {
+		t.Fatalf("stored link = %s, want lead-other untouched", stored.RelatedEntityID)
+	}
+}
+
+func TestLeadConversionRelinkerMovesLeadChats(t *testing.T) {
+	h := newConversationHarness(t)
+	h.conversations.put(domain.Conversation{ID: "c1", SessionID: "s1", ChatID: "a", RelatedEntityType: domain.RelatedEntityLead, RelatedEntityID: "lead-1"})
+	h.conversations.put(domain.Conversation{ID: "c2", SessionID: "s2", ChatID: "a", RelatedEntityType: domain.RelatedEntityLead, RelatedEntityID: "lead-1"})
+	h.conversations.put(domain.Conversation{ID: "c3", SessionID: "s1", ChatID: "b", RelatedEntityType: domain.RelatedEntityLead, RelatedEntityID: "lead-3"})
+
+	if err := NewLeadConversionRelinker(h.conversations).LeadConverted(ctxTest, h.scope, "lead-1", "contact-9"); err != nil {
+		t.Fatalf("LeadConverted() error = %v", err)
+	}
+	for id, want := range map[string]string{"c1": "contact-9", "c2": "contact-9", "c3": "lead-3"} {
+		got, _ := h.conversations.GetByID(ctxTest, h.scope, id)
+		if got.RelatedEntityID != want {
+			t.Errorf("%s linked to %s, want %s", id, got.RelatedEntityID, want)
+		}
 	}
 }
 

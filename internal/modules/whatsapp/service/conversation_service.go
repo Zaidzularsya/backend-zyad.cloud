@@ -263,6 +263,15 @@ func (s *ConversationService) Start(ctx context.Context, scope coretenant.Scope,
 			return domain.Conversation{}, err
 		}
 	}
+	if !created && s.convertedFrom(ctx, scope, conversation, entity) {
+		// The chat still belongs to the lead this contact was converted from
+		// (converted before conversions moved chats). Move it now instead of
+		// returning a conversation the contact page can never find.
+		if _, err := s.conversations.RelinkEntity(ctx, scope, domain.RelatedEntityLead, conversation.RelatedEntityID, entity.Type, entity.ID); err != nil {
+			return domain.Conversation{}, err
+		}
+		conversation.RelatedEntityType, conversation.RelatedEntityID = entity.Type, entity.ID
+	}
 	if !viewer.canSee(conversation) {
 		return domain.Conversation{}, whatsappmodule.ErrConversationForbidden
 	}
@@ -270,6 +279,16 @@ func (s *ConversationService) Start(ctx context.Context, scope coretenant.Scope,
 		s.recordDailyActivity(ctx, scope, conversation, session, viewer.UserID)
 	}
 	return conversation, nil
+}
+
+// convertedFrom reports whether conversation is linked to the lead that was
+// converted into the contact entity.
+func (s *ConversationService) convertedFrom(ctx context.Context, scope coretenant.Scope, conversation domain.Conversation, entity CRMEntity) bool {
+	if entity.Type != domain.RelatedEntityContact || conversation.RelatedEntityType != domain.RelatedEntityLead {
+		return false
+	}
+	lead, err := s.crm.FindEntity(ctx, scope, domain.RelatedEntityLead, conversation.RelatedEntityID)
+	return err == nil && lead.ConvertedContactID == entity.ID
 }
 
 // sendingSession returns the requested session or, when empty, the

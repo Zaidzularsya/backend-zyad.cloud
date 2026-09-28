@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"regexp"
 
 	coretenant "zyad.cloud/internal/core/tenant"
@@ -16,6 +17,7 @@ type leadService struct {
 	companyRepo repository.CompanyRepository
 	quotaGuard  ContactQuotaGuard
 	ownerCheck  LeadOwnerValidator
+	onConvert   LeadConvertedHook
 }
 
 // annualRevenuePattern mengikuti batas kolom numeric(18,2): maks 16 digit
@@ -37,6 +39,14 @@ func WithLeadContactQuotaGuard(guard ContactQuotaGuard) LeadServiceOption {
 func WithLeadOwnerValidator(validator LeadOwnerValidator) LeadServiceOption {
 	return func(service *leadService) {
 		service.ownerCheck = validator
+	}
+}
+
+// WithLeadConvertedHook dipanggil setelah lead berhasil di-convert, mis.
+// untuk memindahkan percakapan WhatsApp lead ke contact barunya.
+func WithLeadConvertedHook(hook LeadConvertedHook) LeadServiceOption {
+	return func(service *leadService) {
+		service.onConvert = hook
 	}
 }
 
@@ -176,6 +186,15 @@ func (s *leadService) Convert(ctx context.Context, scope coretenant.Scope, id st
 	})
 	if err != nil {
 		return domain.LeadConversionResult{}, err
+	}
+
+	if s.onConvert != nil {
+		// Konversi sudah tersimpan; kegagalan hook tidak membatalkannya.
+		// Percakapan yang tertinggal di lead masih dipindah saat chat dibuka
+		// dari contact (lihat whatsapp ConversationService.Start).
+		if err := s.onConvert.LeadConverted(ctx, scope, id, contact.ID); err != nil {
+			slog.WarnContext(ctx, "lead converted hook failed", "lead_id", id, "contact_id", contact.ID, "error", err)
+		}
 	}
 
 	return domain.LeadConversionResult{

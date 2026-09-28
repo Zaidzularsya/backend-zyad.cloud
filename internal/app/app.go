@@ -49,6 +49,8 @@ import (
 	userrepo "zyad.cloud/internal/modules/user/repository"
 	userservice "zyad.cloud/internal/modules/user/service"
 	whatsapphandler "zyad.cloud/internal/modules/whatsapp/handler"
+	whatsapprepo "zyad.cloud/internal/modules/whatsapp/repository"
+	whatsappservice "zyad.cloud/internal/modules/whatsapp/service"
 	"zyad.cloud/internal/platform/database"
 	"zyad.cloud/internal/platform/doku"
 	"zyad.cloud/internal/platform/logger"
@@ -430,6 +432,7 @@ func New(ctx context.Context) (*App, error) {
 		crmCompanyRepo,
 		crmservice.WithLeadContactQuotaGuard(subscriptionGuardService),
 		crmservice.WithLeadOwnerValidator(crmMemberRepo),
+		crmservice.WithLeadConvertedHook(whatsappservice.NewLeadConversionRelinker(whatsapprepo.NewConversationRepository(db))),
 	)
 	crmMemberSvc := crmservice.NewMemberService(crmMemberRepo)
 	crmLeadAttachmentSvc := crmservice.NewLeadAttachmentService(

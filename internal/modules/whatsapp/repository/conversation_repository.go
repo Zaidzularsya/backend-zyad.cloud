@@ -61,6 +61,9 @@ type ConversationRepository interface {
 	// assignee). It never overwrites an existing link; the current row is
 	// returned either way.
 	LinkEntity(ctx context.Context, scope coretenant.Scope, id string, entityType domain.RelatedEntityType, entityID, assigneeUserID string) (domain.Conversation, error)
+	// RelinkEntity moves every conversation linked to one CRM entity to
+	// another (lead -> contact on conversion) and returns how many moved.
+	RelinkEntity(ctx context.Context, scope coretenant.Scope, fromType domain.RelatedEntityType, fromID string, toType domain.RelatedEntityType, toID string) (int64, error)
 	MarkRead(ctx context.Context, scope coretenant.Scope, id string) error
 	Update(ctx context.Context, scope coretenant.Scope, id string, params UpdateConversationParams) (domain.Conversation, error)
 	// ClaimActivityDay sets crm_activity_on to day unless it already is;
@@ -461,6 +464,27 @@ func (r *conversationRepository) LinkEntity(ctx context.Context, scope coretenan
 		return domain.Conversation{}, err
 	}
 	return conversation, nil
+}
+
+func (r *conversationRepository) RelinkEntity(ctx context.Context, scope coretenant.Scope, fromType domain.RelatedEntityType, fromID string, toType domain.RelatedEntityType, toID string) (int64, error) {
+	if !scope.IsValid() {
+		return 0, coretenant.ErrInvalidScope
+	}
+
+	var moved int64
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
+			UPDATE wa_conversations
+			SET related_entity_type = $4, related_entity_id = $5, updated_at = now()
+			WHERE organization_id = $1 AND related_entity_type = $2 AND related_entity_id = $3
+		`, scope.OrganizationID(), string(fromType), fromID, string(toType), toID)
+		if err != nil {
+			return err
+		}
+		moved = tag.RowsAffected()
+		return nil
+	})
+	return moved, err
 }
 
 func (r *conversationRepository) MarkRead(ctx context.Context, scope coretenant.Scope, id string) error {
