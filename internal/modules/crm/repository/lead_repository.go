@@ -39,6 +39,32 @@ func (r *leadRepository) withTx(ctx context.Context, scope coretenant.Scope, fn 
 	return tx.Commit(ctx)
 }
 
+// insertLeadEvent writes a crm_lead_events row inside the caller's
+// transaction, so the history can never disagree with crm_leads.
+func insertLeadEvent(ctx context.Context, tx pgx.Tx, scope coretenant.Scope, leadID string, eventType domain.LeadEventType, from, to, actorUserID string) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO crm_lead_events (organization_id, lead_id, event_type, from_value, to_value, actor_user_id)
+		VALUES ($1, $2, $3, $4, $5, $6)`,
+		scope.OrganizationID(), leadID, string(eventType),
+		nullableString(from), nullableString(to), nullableString(actorUserID),
+	)
+	return err
+}
+
+// lockLeadState reads the fields whose changes are recorded as events and
+// locks the row for the rest of the transaction.
+func lockLeadState(ctx context.Context, tx pgx.Tx, scope coretenant.Scope, id string) (status string, ownerUserID string, err error) {
+	var owner *string
+	err = tx.QueryRow(ctx, `
+		SELECT status, owner_user_id FROM crm_leads
+		WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL
+		FOR UPDATE`, id, scope.OrganizationID()).Scan(&status, &owner)
+	if owner != nil {
+		ownerUserID = *owner
+	}
+	return status, ownerUserID, err
+}
+
 // owner_name dibatasi ke user yang (pernah) menjadi anggota organization lead
 // ini, supaya owner_user_id asing tidak bisa dipakai untuk membaca nama user
 // tenant lain. Dipakai juga di klausa RETURNING, jadi referensi tabel luar
@@ -147,7 +173,10 @@ func (r *leadRepository) Create(ctx context.Context, scope coretenant.Scope, par
 			nullableString(params.AnnualRevenue),
 			address,
 		))
-		return scanErr
+		if scanErr != nil {
+			return scanErr
+		}
+		return insertLeadEvent(ctx, tx, scope, lead.ID, domain.LeadEventCreated, "", string(lead.Status), params.CreatedBy)
 	})
 	if err != nil {
 		return domain.Lead{}, err
@@ -330,9 +359,23 @@ func (r *leadRepository) Update(ctx context.Context, scope coretenant.Scope, id 
 
 	var lead domain.Lead
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
-		var scanErr error
-		lead, scanErr = scanLead(tx.QueryRow(ctx, query, args...))
-		return scanErr
+		oldStatus, oldOwner, err := lockLeadState(ctx, tx, scope, id)
+		if err != nil {
+			return err
+		}
+		lead, err = scanLead(tx.QueryRow(ctx, query, args...))
+		if err != nil {
+			return err
+		}
+		if string(lead.Status) != oldStatus {
+			if err := insertLeadEvent(ctx, tx, scope, lead.ID, domain.LeadEventStatusChanged, oldStatus, string(lead.Status), params.UpdatedBy); err != nil {
+				return err
+			}
+		}
+		if lead.OwnerUserID != oldOwner {
+			return insertLeadEvent(ctx, tx, scope, lead.ID, domain.LeadEventAssigned, oldOwner, lead.OwnerUserID, params.UpdatedBy)
+		}
+		return nil
 	})
 	if err != nil {
 		return domain.Lead{}, err
@@ -359,7 +402,7 @@ func (r *leadRepository) Delete(ctx context.Context, scope coretenant.Scope, id 
 		if cmdTag.RowsAffected() == 0 {
 			return pgx.ErrNoRows
 		}
-		return nil
+		return insertLeadEvent(ctx, tx, scope, id, domain.LeadEventDeleted, "", "", deletedBy)
 	})
 }
 
@@ -382,7 +425,7 @@ func (r *leadRepository) Restore(ctx context.Context, scope coretenant.Scope, id
 		if cmdTag.RowsAffected() == 0 {
 			return pgx.ErrNoRows
 		}
-		return nil
+		return insertLeadEvent(ctx, tx, scope, id, domain.LeadEventRestored, "", "", restoredBy)
 	})
 }
 
@@ -399,9 +442,18 @@ func (r *leadRepository) Assign(ctx context.Context, scope coretenant.Scope, id 
 
 	var lead domain.Lead
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
-		var scanErr error
-		lead, scanErr = scanLead(tx.QueryRow(ctx, query, ownerUserID, nullableString(updatedBy), id, scope.OrganizationID()))
-		return scanErr
+		_, oldOwner, err := lockLeadState(ctx, tx, scope, id)
+		if err != nil {
+			return err
+		}
+		lead, err = scanLead(tx.QueryRow(ctx, query, ownerUserID, nullableString(updatedBy), id, scope.OrganizationID()))
+		if err != nil {
+			return err
+		}
+		if lead.OwnerUserID == oldOwner {
+			return nil
+		}
+		return insertLeadEvent(ctx, tx, scope, lead.ID, domain.LeadEventAssigned, oldOwner, lead.OwnerUserID, updatedBy)
 	})
 	if err != nil {
 		return domain.Lead{}, err
@@ -427,15 +479,21 @@ func (r *leadRepository) MarkConverted(ctx context.Context, scope coretenant.Sco
 
 	var lead domain.Lead
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
-		var scanErr error
-		lead, scanErr = scanLead(tx.QueryRow(ctx, query,
+		oldStatus, _, err := lockLeadState(ctx, tx, scope, id)
+		if err != nil {
+			return err
+		}
+		lead, err = scanLead(tx.QueryRow(ctx, query,
 			params.ConvertedContactID,
 			nullableString(params.ConvertedCompanyID),
 			nullableString(params.UpdatedBy),
 			id,
 			scope.OrganizationID(),
 		))
-		return scanErr
+		if err != nil {
+			return err
+		}
+		return insertLeadEvent(ctx, tx, scope, lead.ID, domain.LeadEventConverted, oldStatus, string(lead.Status), params.UpdatedBy)
 	})
 	if err != nil {
 		return domain.Lead{}, err

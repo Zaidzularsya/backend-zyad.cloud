@@ -75,3 +75,14 @@ type LeadRepository interface {
 	// or pgx.ErrNoRows.
 	FindActiveByPhone(ctx context.Context, scope coretenant.Scope, phoneNormalized string) (domain.Lead, error)
 }
+
+// LeadDashboardRepository reads the aggregates behind the Leads overview
+// page. Read-only; every query is scoped to the organization.
+type LeadDashboardRepository interface {
+	Dashboard(context.Context, coretenant.Scope, domain.LeadDashboardRange, LeadDashboardLimits) (domain.LeadDashboard, error)
+}
+
+type LeadDashboardLimits struct {
+	FollowUps      int
+	RecentActivity int
+}

@@ -45,17 +45,33 @@ const activityColumns = `
 	created_at, updated_at, deleted_at
 `
 
+// prefixedActivityColumns returns activityColumns qualified with a table
+// alias, for queries that join crm_activities with other tables.
+func prefixedActivityColumns(alias string) string {
+	fields := strings.Split(activityColumns, ",")
+	for i, f := range fields {
+		fields[i] = alias + "." + strings.TrimSpace(f)
+	}
+	return strings.Join(fields, ", ")
+}
+
 func scanActivity(row pgx.Row) (domain.Activity, error) {
+	return scanActivityWith(row)
+}
+
+// scanActivityWith scans activityColumns followed by extra joined columns.
+func scanActivityWith(row pgx.Row, extra ...any) (domain.Activity, error) {
 	var a domain.Activity
 	var description *string
 	var assigneeUserID, createdBy, updatedBy *string
 	var relatedEntityType, activityType, status string
 
-	err := row.Scan(
+	dest := []any{
 		&a.ID, &a.OrganizationID, &relatedEntityType, &a.RelatedEntityID, &activityType, &a.Subject, &description,
 		&a.DueAt, &a.CompletedAt, &status, &assigneeUserID, &createdBy, &updatedBy,
 		&a.CreatedAt, &a.UpdatedAt, &a.DeletedAt,
-	)
+	}
+	err := row.Scan(append(dest, extra...)...)
 	if err != nil {
 		return domain.Activity{}, err
 	}
