@@ -299,7 +299,7 @@ func (s *MessageService) storeAttachment(ctx context.Context, scope coretenant.S
 }
 
 func (s *MessageService) List(ctx context.Context, scope coretenant.Scope, userID string, input MessageListInput) ([]domain.Message, int64, error) {
-	if err := s.messages.FailStaleQueued(ctx, scope, userID, s.now().Add(-staleQueuedAfter)); err != nil {
+	if err := s.messages.FailStaleQueued(ctx, scope, userID, s.now().UTC().Add(-staleQueuedAfter)); err != nil {
 		return nil, 0, err
 	}
 	perPage := input.PerPage

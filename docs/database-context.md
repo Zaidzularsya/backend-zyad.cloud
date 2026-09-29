@@ -198,3 +198,7 @@ terisi lewat migration 000061 (bukan lewat `cmd/seed`).
   koneksi database terpisah per tenant. Ini menjadikan audit filter manual/RLS di tabel `organization_*`
   dan `billing_*` (bagian 3 dan bagian 6 baris pertama) lebih prioritas, karena shared database adalah
   arsitektur yang benar-benar dipakai saat ini.
+
+## Timezone
+
+Sesi koneksi dikunci ke UTC dan semua `timestamp without time zone` berisi wall-clock UTC. Aturan lengkap, insiden, dan tech debt `timestamptz`: [`timezone-handling.md`](timezone-handling.md).

@@ -10,7 +10,9 @@ func TestParseLeadCreatedRange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !from.Equal(time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)) || !toExcl.Equal(time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)) {
+	// Bounds are Asia/Jakarta day starts expressed in UTC (00:00 WIB = 17:00Z
+	// the day before), matching created_at stored as UTC.
+	if !from.Equal(time.Date(2026, 8, 31, 17, 0, 0, 0, time.UTC)) || !toExcl.Equal(time.Date(2026, 9, 28, 17, 0, 0, 0, time.UTC)) {
 		t.Errorf("range = %v..%v", from, toExcl)
 	}
 

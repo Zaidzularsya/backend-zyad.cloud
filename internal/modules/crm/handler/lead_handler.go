@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"zyad.cloud/internal/core/businesstime"
 	coreerrors "zyad.cloud/internal/core/errors"
 	corehttp "zyad.cloud/internal/core/http"
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
@@ -299,6 +300,8 @@ const maxLeadPerPage = 100
 
 // parseLeadCreatedRange parses optional YYYY-MM-DD bounds. The upper bound
 // is returned as the start of the following day so the range is inclusive.
+// Days are Asia/Jakarta days, returned as UTC instants to compare with
+// created_at (stored as UTC).
 func parseLeadCreatedRange(from, to string) (time.Time, time.Time, error) {
 	var fromDate, toExcl time.Time
 	if from != "" {
@@ -306,14 +309,14 @@ func parseLeadCreatedRange(from, to string) (time.Time, time.Time, error) {
 		if err != nil {
 			return time.Time{}, time.Time{}, errors.New("created_from must be a date in YYYY-MM-DD format")
 		}
-		fromDate = d
+		fromDate = businesstime.DayStartUTC(d)
 	}
 	if to != "" {
 		d, err := time.Parse("2006-01-02", to)
 		if err != nil {
 			return time.Time{}, time.Time{}, errors.New("created_to must be a date in YYYY-MM-DD format")
 		}
-		toExcl = d.AddDate(0, 0, 1)
+		toExcl = businesstime.DayStartUTC(d.AddDate(0, 0, 1))
 	}
 	if !fromDate.IsZero() && !toExcl.IsZero() && !fromDate.Before(toExcl) {
 		return time.Time{}, time.Time{}, errors.New("created_from must not be after created_to")

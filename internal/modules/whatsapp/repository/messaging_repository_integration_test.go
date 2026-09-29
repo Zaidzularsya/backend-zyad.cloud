@@ -181,3 +181,41 @@ func TestCRMGatewayRecordsWhatsAppActivityIntegration(t *testing.T) {
 	}
 	t.Cleanup(func() { deleteScoped(t, db, tenants.A.OrganizationID, "crm_activities", activities[0].ID) })
 }
+
+// The CRM activity of a conversation is deduped per Asia/Jakarta day, no
+// matter which zone the caller's time.Time carries: 23:30 WIB and 00:30 WIB
+// are different days, 00:30 and 06:00 WIB are the same one.
+func TestClaimActivityDayUsesBusinessDayIntegration(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	tenants := testutil.NewTenantPair(t)
+	setupOrganizations(t, db, tenants)
+	ctx := context.Background()
+	scope := tenants.A.Scope
+
+	session, err := repository.NewSessionRepository(db).Create(ctx, scope, repository.CreateSessionParams{
+		Name: "zc_test_day_a", Purpose: domain.SessionPurposeSales,
+	})
+	if err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
+	conversations := repository.NewConversationRepository(db)
+	conv, _, err := conversations.Create(ctx, scope, repository.CreateConversationParams{
+		SessionID: session.ID, ChatID: "6281230000001@c.us", PhoneNormalized: "6281230000001", ContactName: "Malam",
+	})
+	if err != nil {
+		t.Fatalf("Create conversation: %v", err)
+	}
+
+	claim := func(label string, at time.Time, want bool) {
+		t.Helper()
+		got, err := conversations.ClaimActivityDay(ctx, scope, conv.ID, at)
+		if err != nil || got != want {
+			t.Fatalf("%s: claimed = %v, %v; want %v", label, got, err, want)
+		}
+	}
+	// Callers pass UTC here on purpose: the repository must not depend on it.
+	claim("23:30 WIB 10 Jan", time.Date(2026, 1, 10, 16, 30, 0, 0, time.UTC), true)
+	claim("23:45 WIB 10 Jan again", time.Date(2026, 1, 10, 16, 45, 0, 0, time.UTC), false)
+	claim("00:30 WIB 11 Jan", time.Date(2026, 1, 10, 17, 30, 0, 0, time.UTC), true)
+	claim("06:00 WIB 11 Jan (WIB-zone time)", time.Date(2026, 1, 11, 6, 0, 0, 0, time.FixedZone("WIB", 7*3600)), false)
+}
