@@ -63,7 +63,7 @@ func TestWebhookEventRepositoryIntegration(t *testing.T) {
 	}
 
 	// Failed with an immediate retry: claimable again, attempt counted.
-	if err := events.MarkFailed(ctx, mine.ID, "boom", time.Now().Add(-time.Second)); err != nil {
+	if err := events.MarkFailed(ctx, mine.ID, "boom", time.Now().UTC().Add(-time.Second)); err != nil {
 		t.Fatalf("MarkFailed: %v", err)
 	}
 	retried, _ := events.ClaimDue(ctx, 200, time.Minute)

@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"zyad.cloud/internal/core/businesstime"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/whatsapp/domain"
 	"zyad.cloud/internal/platform/database"
@@ -66,7 +67,8 @@ type ConversationRepository interface {
 	RelinkEntity(ctx context.Context, scope coretenant.Scope, fromType domain.RelatedEntityType, fromID string, toType domain.RelatedEntityType, toID string) (int64, error)
 	MarkRead(ctx context.Context, scope coretenant.Scope, id string) error
 	Update(ctx context.Context, scope coretenant.Scope, id string, params UpdateConversationParams) (domain.Conversation, error)
-	// ClaimActivityDay sets crm_activity_on to day unless it already is;
+	// ClaimActivityDay sets crm_activity_on to the business (Asia/Jakarta) day
+	// of the given instant unless it already is;
 	// claimed is true for exactly one caller per conversation and day.
 	ClaimActivityDay(ctx context.Context, scope coretenant.Scope, id string, day time.Time) (claimed bool, err error)
 
@@ -546,7 +548,7 @@ func (r *conversationRepository) ClaimActivityDay(ctx context.Context, scope cor
 		tag, err := tx.Exec(ctx, `
 			UPDATE wa_conversations SET crm_activity_on = $3::date
 			WHERE id = $1 AND organization_id = $2 AND crm_activity_on IS DISTINCT FROM $3::date
-		`, id, scope.OrganizationID(), day.Format("2006-01-02"))
+		`, id, scope.OrganizationID(), businesstime.DayOf(day).Format("2006-01-02"))
 		if err != nil {
 			return err
 		}

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"zyad.cloud/internal/core/businesstime"
 	"zyad.cloud/internal/modules/crm/domain"
 	"zyad.cloud/internal/modules/crm/repository"
 	"zyad.cloud/internal/platform/database"
@@ -88,9 +89,7 @@ func TestLeadEventsAndDashboardIntegration(t *testing.T) {
 		t.Fatalf("Create activity on deleted lead: %v", err)
 	}
 
-	loc := time.FixedZone("WIB", 7*60*60)
-	now := time.Now().In(loc)
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	today := businesstime.DayOf(time.Now())
 	rng := domain.LeadDashboardRange{
 		From: today.AddDate(0, 0, -6), To: today,
 		PreviousFrom: today.AddDate(0, 0, -13), PreviousTo: today.AddDate(0, 0, -7),
@@ -155,7 +154,7 @@ func TestLeadEventsAndDashboardIntegration(t *testing.T) {
 		t.Fatalf("Create extra: %v", err)
 	}
 	listed, total, err := leads.List(ctx, tenants.A.Scope, repository.LeadListFilter{
-		Source: "WEBSITE", CreatedFrom: today, CreatedToExclusive: today.AddDate(0, 0, 1), Sort: "contact_name",
+		Source: "WEBSITE", CreatedFrom: businesstime.DayStartUTC(today), CreatedToExclusive: businesstime.DayStartUTC(today.AddDate(0, 0, 1)), Sort: "contact_name",
 	})
 	if err != nil {
 		t.Fatalf("List filtered: %v", err)
@@ -163,7 +162,7 @@ func TestLeadEventsAndDashboardIntegration(t *testing.T) {
 	if total != 2 || len(listed) != 2 || listed[0].ContactName != "Andi" || listed[1].ID != extra.ID {
 		t.Errorf("filtered list = %d %+v, want [Andi, Citra]", total, listed)
 	}
-	if _, total, err := leads.List(ctx, tenants.A.Scope, repository.LeadListFilter{CreatedToExclusive: today}); err != nil || total != 0 {
+	if _, total, err := leads.List(ctx, tenants.A.Scope, repository.LeadListFilter{CreatedToExclusive: businesstime.DayStartUTC(today)}); err != nil || total != 0 {
 		t.Errorf("list before today = %d, %v; want 0", total, err)
 	}
 
@@ -173,5 +172,101 @@ func TestLeadEventsAndDashboardIntegration(t *testing.T) {
 	}
 	if other.Created != 0 || len(other.RecentActivity) != 0 || other.FollowUps.Pending != 0 {
 		t.Errorf("tenant B sees tenant A data: %+v", other)
+	}
+}
+
+// Timestamps are stored as UTC wall-clock, but days are Asia/Jakarta days:
+// a lead created at 23:30 WIB and one at 00:30 WIB belong to different
+// buckets, and "today" for follow-ups flips at 00:00 WIB (17:00Z), not at UTC
+// midnight.
+func TestLeadDashboardUsesBusinessDaysIntegration(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+	setupCRMOrganizations(t, db, tenants)
+	orgID := tenants.A.OrganizationID
+
+	leads := repository.NewLeadRepository(db)
+	activities := repository.NewActivityRepository(db)
+
+	setUTC := func(table, column, id string, at time.Time) {
+		t.Helper()
+		tx, err := db.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer tx.Rollback(ctx)
+		if _, err := tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", orgID); err != nil {
+			t.Fatalf("set org: %v", err)
+		}
+		if _, err := tx.Exec(ctx, "UPDATE "+table+" SET "+column+" = $2 WHERE id = $1", id, at); err != nil {
+			t.Fatalf("set %s.%s: %v", table, column, err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+	}
+
+	late, err := leads.Create(ctx, tenants.A.Scope, repository.CreateLeadParams{ContactName: "Malam", Source: "web"})
+	if err != nil {
+		t.Fatalf("Create late: %v", err)
+	}
+	early, err := leads.Create(ctx, tenants.A.Scope, repository.CreateLeadParams{ContactName: "Dini", Source: "web"})
+	if err != nil {
+		t.Fatalf("Create early: %v", err)
+	}
+	setUTC("crm_leads", "created_at", late.ID, time.Date(2026, 1, 10, 16, 30, 0, 0, time.UTC))  // 23:30 WIB, 10 Jan
+	setUTC("crm_leads", "created_at", early.ID, time.Date(2026, 1, 10, 17, 30, 0, 0, time.UTC)) // 00:30 WIB, 11 Jan
+
+	mkActivity := func(subject string, due time.Time) {
+		t.Helper()
+		if _, err := activities.Create(ctx, tenants.A.Scope, repository.CreateActivityParams{
+			RelatedEntityType: domain.ActivityEntityLead, RelatedEntityID: late.ID,
+			Type: domain.ActivityTypeCall, Subject: subject, DueAt: &due,
+		}); err != nil {
+			t.Fatalf("Create activity %s: %v", subject, err)
+		}
+	}
+	mkActivity("kemarin", time.Date(2026, 1, 9, 16, 59, 0, 0, time.UTC))     // 23:59 WIB, 9 Jan  -> overdue
+	mkActivity("hari ini", time.Date(2026, 1, 10, 16, 0, 0, 0, time.UTC))    // 23:00 WIB, 10 Jan -> today
+	mkActivity("besok dini", time.Date(2026, 1, 10, 17, 30, 0, 0, time.UTC)) // 00:30 WIB, 11 Jan -> next 7 days
+
+	day := func(d int) time.Time { return time.Date(2026, 1, d, 0, 0, 0, 0, time.UTC) }
+	rng := domain.LeadDashboardRange{
+		From: day(10), To: day(11), PreviousFrom: day(8), PreviousTo: day(9),
+		Granularity: domain.LeadDashboardDaily,
+	}
+	nowWIB := time.Date(2026, 1, 10, 16, 30, 0, 0, time.UTC) // 23:30 WIB, 10 Jan
+	dashboards := repository.NewLeadDashboardRepositoryWithClock(db, func() time.Time { return nowWIB })
+
+	d, err := dashboards.Dashboard(ctx, tenants.A.Scope, rng, repository.LeadDashboardLimits{FollowUps: 8, RecentActivity: 10})
+	if err != nil {
+		t.Fatalf("Dashboard: %v", err)
+	}
+
+	if len(d.Series) != 2 {
+		t.Fatalf("series = %+v, want 2 daily buckets", d.Series)
+	}
+	for i, wantDay := range []time.Time{day(10), day(11)} {
+		if !d.Series[i].Bucket.Equal(wantDay) || d.Series[i].Created != 1 {
+			t.Errorf("bucket[%d] = %+v, want %s created=1", i, d.Series[i], wantDay.Format("2006-01-02"))
+		}
+	}
+	if d.Created != 2 || d.PreviousCreated != 0 {
+		t.Errorf("created = %d (prev %d), want 2 (prev 0)", d.Created, d.PreviousCreated)
+	}
+	if f := d.FollowUps; f.Pending != 3 || f.Overdue != 1 || f.DueToday != 1 || f.DueNext7Days != 1 {
+		t.Errorf("follow-ups = %+v, want pending=3 overdue=1 today=1 next7=1", f)
+	}
+
+	// A lead created 00:30 WIB on 11 Jan is out of a "10 Jan only" range.
+	one := rng
+	one.To = day(10)
+	d, err = dashboards.Dashboard(ctx, tenants.A.Scope, one, repository.LeadDashboardLimits{FollowUps: 8, RecentActivity: 10})
+	if err != nil {
+		t.Fatalf("Dashboard single day: %v", err)
+	}
+	if d.Created != 1 {
+		t.Errorf("created on 10 Jan only = %d, want 1", d.Created)
 	}
 }

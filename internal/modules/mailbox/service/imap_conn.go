@@ -156,7 +156,7 @@ func parseFetchedMessage(buf *imapclient.FetchMessageBuffer, uidValidity uint32)
 	message := FetchedMessage{UID: uint32(buf.UID)}
 	if env := buf.Envelope; env != nil {
 		message.Subject = env.Subject
-		message.Date = env.Date
+		message.Date = env.Date.UTC()
 		message.MessageID = messageIDHeader(env.MessageID, uidValidity, message.UID)
 		if len(env.InReplyTo) > 0 {
 			message.InReplyTo = "<" + strings.Join(env.InReplyTo, "> <") + ">"

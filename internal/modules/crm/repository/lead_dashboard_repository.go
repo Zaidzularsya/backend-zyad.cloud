@@ -3,25 +3,36 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"zyad.cloud/internal/core/businesstime"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/crm/domain"
 	"zyad.cloud/internal/platform/database"
 )
 
 type leadDashboardRepository struct {
-	db *database.Pool
+	db  *database.Pool
+	now func() time.Time
 }
 
 func NewLeadDashboardRepository(db *database.Pool) LeadDashboardRepository {
-	return &leadDashboardRepository{db: db}
+	return NewLeadDashboardRepositoryWithClock(db, time.Now)
 }
 
-// Timestamps in crm_* are "timestamp without time zone" written with now()
-// in the database timezone (Asia/Jakarta), so ranges and buckets compare
-// against plain dates without timezone conversion.
+// NewLeadDashboardRepositoryWithClock lets tests pin "now" for the
+// follow-up windows, which are relative to the current business day.
+func NewLeadDashboardRepositoryWithClock(db *database.Pool, now func() time.Time) LeadDashboardRepository {
+	return &leadDashboardRepository{db: db, now: now}
+}
+
+// Timestamps in crm_* are "timestamp without time zone" holding UTC
+// wall-clock (the pool pins the session timezone to UTC). Dashboard days are
+// business days (Asia/Jakarta): Go converts every day boundary to a UTC
+// instant, and daily/monthly buckets shift by the business UTC offset, so
+// nothing here depends on the database session timezone.
 //
 // Names of users (owner, assignee, actor) are resolved only through
 // organization_memberships of the same organization — same rule as
@@ -61,9 +72,19 @@ func (r *leadDashboardRepository) Dashboard(ctx context.Context, scope coretenan
 	}
 
 	orgID := scope.OrganizationID()
-	// Exclusive upper bounds: the day after To.
-	from, toExcl := rng.From, rng.To.AddDate(0, 0, 1)
-	prevFrom, prevToExcl := rng.PreviousFrom, rng.PreviousTo.AddDate(0, 0, 1)
+	// Exclusive upper bounds: the day after To. rng holds calendar dates; the
+	// queries filter on the UTC instants where those business days start.
+	calFrom, calToExcl := rng.From, rng.To.AddDate(0, 0, 1)
+	from, toExcl := businesstime.DayStartUTC(calFrom), businesstime.DayStartUTC(calToExcl)
+	prevFrom, prevToExcl := businesstime.DayStartUTC(rng.PreviousFrom), businesstime.DayStartUTC(rng.PreviousTo.AddDate(0, 0, 1))
+	// Business UTC offset used to bucket stored UTC timestamps into local days.
+	_, offsetSecs := from.In(businesstime.Location()).Zone()
+
+	// Follow-up windows relative to "today" in business time.
+	today := businesstime.DayOf(r.now())
+	todayStart := businesstime.DayStartUTC(today)
+	tomorrowStart := businesstime.DayStartUTC(today.AddDate(0, 0, 1))
+	weekEnd := businesstime.DayStartUTC(today.AddDate(0, 0, 8))
 
 	d := domain.LeadDashboard{
 		StatusCounts:          map[domain.LeadStatus]int64{},
@@ -149,15 +170,15 @@ func (r *leadDashboardRepository) Dashboard(ctx context.Context, scope coretenan
 		unit := string(rng.Granularity)
 		rows, err = tx.Query(ctx, `
 			WITH buckets AS (
-				SELECT generate_series(date_trunc($4, $2::timestamp), date_trunc($4, $3::timestamp - interval '1 day'), ('1 ' || $4)::interval) AS bucket
+				SELECT generate_series(date_trunc($4, $6::timestamp), date_trunc($4, $7::timestamp - interval '1 day'), ('1 ' || $4)::interval) AS bucket
 			),
 			created AS (
-				SELECT date_trunc($4, created_at) AS bucket, COUNT(*) AS n FROM crm_leads
+				SELECT date_trunc($4, created_at + make_interval(secs => $5)) AS bucket, COUNT(*) AS n FROM crm_leads
 				WHERE organization_id = $1 AND deleted_at IS NULL AND created_at >= $2 AND created_at < $3
 				GROUP BY 1
 			),
 			converted AS (
-				SELECT date_trunc($4, converted_at) AS bucket, COUNT(*) AS n FROM crm_leads
+				SELECT date_trunc($4, converted_at + make_interval(secs => $5)) AS bucket, COUNT(*) AS n FROM crm_leads
 				WHERE organization_id = $1 AND deleted_at IS NULL AND converted_at >= $2 AND converted_at < $3
 				GROUP BY 1
 			)
@@ -166,7 +187,7 @@ func (r *leadDashboardRepository) Dashboard(ctx context.Context, scope coretenan
 			LEFT JOIN created c ON c.bucket = b.bucket
 			LEFT JOIN converted v ON v.bucket = b.bucket
 			ORDER BY b.bucket`,
-			orgID, from, toExcl, unit)
+			orgID, from, toExcl, unit, float64(offsetSecs), calFrom, calToExcl)
 		if err != nil {
 			return err
 		}
@@ -208,18 +229,19 @@ func (r *leadDashboardRepository) Dashboard(ctx context.Context, scope coretenan
 		}
 
 		// 6. Follow-up summary: pending activities on live leads, relative
-		// to "today" in the database timezone.
+		// to "today" in business time.
 		err = tx.QueryRow(ctx, `
 			SELECT
 				COUNT(*),
-				COUNT(*) FILTER (WHERE a.due_at < CURRENT_DATE),
-				COUNT(*) FILTER (WHERE a.due_at >= CURRENT_DATE AND a.due_at < CURRENT_DATE + 1),
-				COUNT(*) FILTER (WHERE a.due_at >= CURRENT_DATE + 1 AND a.due_at < CURRENT_DATE + 8)
+				COUNT(*) FILTER (WHERE a.due_at < $2),
+				COUNT(*) FILTER (WHERE a.due_at >= $2 AND a.due_at < $3),
+				COUNT(*) FILTER (WHERE a.due_at >= $3 AND a.due_at < $4)
 			FROM crm_activities a
 			JOIN crm_leads l ON l.organization_id = a.organization_id AND l.id = a.related_entity_id AND l.deleted_at IS NULL
 			WHERE a.organization_id = $1 AND a.related_entity_type = 'lead'
 				AND a.status = 'pending' AND a.deleted_at IS NULL`,
 			orgID,
+			todayStart, tomorrowStart, weekEnd,
 		).Scan(&d.FollowUps.Pending, &d.FollowUps.Overdue, &d.FollowUps.DueToday, &d.FollowUps.DueNext7Days)
 		if err != nil {
 			return err
