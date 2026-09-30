@@ -36,7 +36,7 @@ var LeadSortFields = map[string]string{
 	"updated_at":   "updated_at",
 	"contact_name": "lower(contact_name)",
 	"score":        "score",
-	"status":       "CASE status WHEN 'new' THEN 1 WHEN 'contacted' THEN 2 WHEN 'qualified' THEN 3 WHEN 'unqualified' THEN 4 ELSE 5 END",
+	"status":       "CASE status WHEN 'new' THEN 1 WHEN 'attempting' THEN 2 WHEN 'contacted' THEN 3 WHEN 'qualified' THEN 4 WHEN 'unqualified' THEN 5 ELSE 6 END",
 }
 
 // IsValidLeadSort reports whether sort is empty or a known (optionally

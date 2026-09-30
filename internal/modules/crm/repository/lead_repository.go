@@ -74,6 +74,7 @@ const leadColumns = `
 	owner_user_id, notes, converted_contact_id, converted_company_id, converted_deal_id, converted_at,
 	created_by, updated_by, created_at, updated_at, deleted_at,
 	job_title, annual_revenue::text, address,
+	requirement_summary, budget_estimate::text, target_date, decision_maker, disqualify_reason, disqualify_note,
 	(
 		SELECT u.name FROM users u
 		JOIN organization_memberships m
@@ -87,13 +88,16 @@ func scanLead(row pgx.Row) (domain.Lead, error) {
 	var companyName, email, phone, source, notes *string
 	var ownerUserID, createdBy, updatedBy *string
 	var jobTitle, ownerName *string
+	var requirementSummary, decisionMaker, disqualifyReason, disqualifyNote *string
 	var status string
 
 	err := row.Scan(
 		&l.ID, &l.OrganizationID, &l.ContactName, &companyName, &email, &phone, &source, &status, &l.Score,
 		&ownerUserID, &notes, &l.ConvertedContactID, &l.ConvertedCompanyID, &l.ConvertedDealID, &l.ConvertedAt,
 		&createdBy, &updatedBy, &l.CreatedAt, &l.UpdatedAt, &l.DeletedAt,
-		&jobTitle, &l.AnnualRevenue, &l.Address, &ownerName,
+		&jobTitle, &l.AnnualRevenue, &l.Address,
+		&requirementSummary, &l.BudgetEstimate, &l.TargetDate, &decisionMaker, &disqualifyReason, &disqualifyNote,
+		&ownerName,
 	)
 	if err != nil {
 		return domain.Lead{}, err
@@ -123,6 +127,18 @@ func scanLead(row pgx.Row) (domain.Lead, error) {
 	}
 	if jobTitle != nil {
 		l.JobTitle = *jobTitle
+	}
+	if requirementSummary != nil {
+		l.RequirementSummary = *requirementSummary
+	}
+	if decisionMaker != nil {
+		l.DecisionMaker = *decisionMaker
+	}
+	if disqualifyReason != nil {
+		l.DisqualifyReason = *disqualifyReason
+	}
+	if disqualifyNote != nil {
+		l.DisqualifyNote = *disqualifyNote
 	}
 	if l.Address == nil {
 		l.Address = map[string]any{}

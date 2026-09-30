@@ -37,8 +37,10 @@ func setupCRMOrganizations(t *testing.T, db *database.Pool, tenants testutil.Ten
 				return
 			}
 			_, _ = tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", orgID)
+			_, _ = tx.Exec(ctx, "DELETE FROM crm_playbook_runs WHERE organization_id = $1", orgID)
 			_, _ = tx.Exec(ctx, "DELETE FROM crm_activities WHERE organization_id = $1", orgID)
 			_, _ = tx.Exec(ctx, "DELETE FROM crm_leads WHERE organization_id = $1", orgID)
+			_, _ = tx.Exec(ctx, "DELETE FROM crm_settings WHERE organization_id = $1", orgID)
 			_ = tx.Commit(ctx)
 		}
 	})

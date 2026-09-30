@@ -42,7 +42,8 @@ func (r *activityRepository) withTx(ctx context.Context, scope coretenant.Scope,
 const activityColumns = `
 	id, organization_id, related_entity_type, related_entity_id, type, subject, description,
 	due_at, completed_at, status, assignee_user_id, created_by, updated_by,
-	created_at, updated_at, deleted_at
+	created_at, updated_at, deleted_at,
+	playbook_run_id, playbook_step_id, outcome_key, attempt_no, final_review
 `
 
 // prefixedActivityColumns returns activityColumns qualified with a table
@@ -63,13 +64,14 @@ func scanActivity(row pgx.Row) (domain.Activity, error) {
 func scanActivityWith(row pgx.Row, extra ...any) (domain.Activity, error) {
 	var a domain.Activity
 	var description *string
-	var assigneeUserID, createdBy, updatedBy *string
+	var assigneeUserID, createdBy, updatedBy, outcomeKey *string
 	var relatedEntityType, activityType, status string
 
 	dest := []any{
 		&a.ID, &a.OrganizationID, &relatedEntityType, &a.RelatedEntityID, &activityType, &a.Subject, &description,
 		&a.DueAt, &a.CompletedAt, &status, &assigneeUserID, &createdBy, &updatedBy,
 		&a.CreatedAt, &a.UpdatedAt, &a.DeletedAt,
+		&a.PlaybookRunID, &a.PlaybookStepID, &outcomeKey, &a.AttemptNo, &a.FinalReview,
 	}
 	err := row.Scan(append(dest, extra...)...)
 	if err != nil {
@@ -91,6 +93,9 @@ func scanActivityWith(row pgx.Row, extra ...any) (domain.Activity, error) {
 	if updatedBy != nil {
 		a.UpdatedBy = *updatedBy
 	}
+	if outcomeKey != nil {
+		a.OutcomeKey = *outcomeKey
+	}
 
 	return a, nil
 }
@@ -100,13 +105,18 @@ func (r *activityRepository) Create(ctx context.Context, scope coretenant.Scope,
 		return domain.Activity{}, coretenant.ErrInvalidScope
 	}
 
+	status := params.Status
+	if status == "" {
+		status = domain.ActivityStatusPending
+	}
 	query := `
 		INSERT INTO crm_activities (
 			organization_id, related_entity_type, related_entity_id, type, subject, description,
-			due_at, assignee_user_id, created_by
+			due_at, assignee_user_id, created_by, status, completed_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9
-		) RETURNING ` + activityColumns
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text, CASE WHEN $10::text = 'completed' THEN NOW() END
+		) RETURNING ` + activityColumns + `
+	`
 
 	var activity domain.Activity
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
@@ -121,6 +131,7 @@ func (r *activityRepository) Create(ctx context.Context, scope coretenant.Scope,
 			params.DueAt,
 			nullableString(params.AssigneeUserID),
 			nullableString(params.CreatedBy),
+			string(status),
 		))
 		return scanErr
 	})
@@ -141,7 +152,15 @@ func (r *activityRepository) FindByID(ctx context.Context, scope coretenant.Scop
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
 		var scanErr error
 		activity, scanErr = scanActivity(tx.QueryRow(ctx, query, id, scope.OrganizationID()))
-		return scanErr
+		if scanErr != nil {
+			return scanErr
+		}
+		one := []domain.Activity{activity}
+		if scanErr = attachPlaybookInfo(ctx, tx, one); scanErr != nil {
+			return scanErr
+		}
+		activity = one[0]
+		return nil
 	})
 	if err != nil {
 		return domain.Activity{}, err
@@ -216,7 +235,11 @@ func (r *activityRepository) List(ctx context.Context, scope coretenant.Scope, f
 			}
 			activities = append(activities, activity)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+		return attachPlaybookInfo(ctx, tx, activities)
 	})
 	if err != nil {
 		return nil, 0, err

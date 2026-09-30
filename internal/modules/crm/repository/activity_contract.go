@@ -29,6 +29,8 @@ type CreateActivityParams struct {
 	DueAt             *time.Time
 	AssigneeUserID    string
 	CreatedBy         string
+	// "" = pending. completed sets completed_at = NOW().
+	Status domain.ActivityStatus
 }
 
 type UpdateActivityParams struct {
