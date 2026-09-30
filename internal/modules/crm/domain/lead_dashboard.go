@@ -103,3 +103,17 @@ type LeadActivityItem struct {
 	ActivityType ActivityType
 	Subject      string
 }
+
+// LeadEvent is one crm_lead_events row for the lead detail history.
+type LeadEvent struct {
+	ID          string
+	LeadID      string
+	EventType   LeadEventType
+	FromValue   string
+	ToValue     string
+	ActorUserID string
+	ActorName   string
+	FromName    string // owner name for 'assigned'
+	ToName      string
+	CreatedAt   time.Time
+}

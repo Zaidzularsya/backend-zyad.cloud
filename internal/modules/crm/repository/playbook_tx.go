@@ -295,3 +295,19 @@ func attachPlaybookInfo(ctx context.Context, tx pgx.Tx, activities []domain.Acti
 	}
 	return nil
 }
+func endRunIfStatusLeavesStep(ctx context.Context, tx pgx.Tx, scope coretenant.Scope, lead domain.Lead, actor string) error {
+	run, ok, err := findActiveRun(ctx, tx, scope, lead.ID)
+	if err != nil || !ok || run.CurrentStepID == nil {
+		return err
+	}
+	var entry []string
+	if err := tx.QueryRow(ctx, `SELECT entry_statuses FROM crm_playbook_steps WHERE id = $1`, *run.CurrentStepID).Scan(&entry); err != nil {
+		return err
+	}
+	for _, s := range entry {
+		if s == string(lead.Status) {
+			return nil
+		}
+	}
+	return endLeadRunTx(ctx, tx, scope, lead.ID, domain.PlaybookResultCancelled, actor)
+}

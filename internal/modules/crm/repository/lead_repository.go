@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -192,7 +193,11 @@ func (r *leadRepository) Create(ctx context.Context, scope coretenant.Scope, par
 		if scanErr != nil {
 			return scanErr
 		}
-		return insertLeadEvent(ctx, tx, scope, lead.ID, domain.LeadEventCreated, "", string(lead.Status), params.CreatedBy)
+		if err := insertLeadEvent(ctx, tx, scope, lead.ID, domain.LeadEventCreated, "", string(lead.Status), params.CreatedBy); err != nil {
+			return err
+		}
+		_, err := startLeadRunTx(ctx, tx, scope, lead, params.CreatedBy, time.Now())
+		return err
 	})
 	if err != nil {
 		return domain.Lead{}, err
@@ -380,6 +385,18 @@ func (r *leadRepository) Update(ctx context.Context, scope coretenant.Scope, id 
 	if params.Address != nil {
 		addSet("address", params.Address)
 	}
+	if params.RequirementSummary != nil {
+		addSet("requirement_summary", nullableString(strings.TrimSpace(*params.RequirementSummary)))
+	}
+	if params.BudgetEstimate != nil {
+		addSet("budget_estimate", nullableString(*params.BudgetEstimate))
+	}
+	if params.TargetDate != nil {
+		addSet("target_date", nullableString(*params.TargetDate))
+	}
+	if params.DecisionMaker != nil {
+		addSet("decision_maker", nullableString(strings.TrimSpace(*params.DecisionMaker)))
+	}
 	if params.UpdatedBy != "" {
 		addSet("updated_by", params.UpdatedBy)
 	}
@@ -403,9 +420,15 @@ func (r *leadRepository) Update(ctx context.Context, scope coretenant.Scope, id 
 			if err := insertLeadEvent(ctx, tx, scope, lead.ID, domain.LeadEventStatusChanged, oldStatus, string(lead.Status), params.UpdatedBy); err != nil {
 				return err
 			}
+			if err := endRunIfStatusLeavesStep(ctx, tx, scope, lead, params.UpdatedBy); err != nil {
+				return err
+			}
 		}
 		if lead.OwnerUserID != oldOwner {
-			return insertLeadEvent(ctx, tx, scope, lead.ID, domain.LeadEventAssigned, oldOwner, lead.OwnerUserID, params.UpdatedBy)
+			if err := insertLeadEvent(ctx, tx, scope, lead.ID, domain.LeadEventAssigned, oldOwner, lead.OwnerUserID, params.UpdatedBy); err != nil {
+				return err
+			}
+			return reassignLeadRunTx(ctx, tx, scope, lead.ID, leadPIC(lead), params.UpdatedBy)
 		}
 		return nil
 	})
@@ -434,7 +457,10 @@ func (r *leadRepository) Delete(ctx context.Context, scope coretenant.Scope, id 
 		if cmdTag.RowsAffected() == 0 {
 			return pgx.ErrNoRows
 		}
-		return insertLeadEvent(ctx, tx, scope, id, domain.LeadEventDeleted, "", "", deletedBy)
+		if err := insertLeadEvent(ctx, tx, scope, id, domain.LeadEventDeleted, "", "", deletedBy); err != nil {
+			return err
+		}
+		return endLeadRunTx(ctx, tx, scope, id, domain.PlaybookResultCancelled, deletedBy)
 	})
 }
 
@@ -485,7 +511,10 @@ func (r *leadRepository) Assign(ctx context.Context, scope coretenant.Scope, id 
 		if lead.OwnerUserID == oldOwner {
 			return nil
 		}
-		return insertLeadEvent(ctx, tx, scope, lead.ID, domain.LeadEventAssigned, oldOwner, lead.OwnerUserID, updatedBy)
+		if err := insertLeadEvent(ctx, tx, scope, lead.ID, domain.LeadEventAssigned, oldOwner, lead.OwnerUserID, updatedBy); err != nil {
+			return err
+		}
+		return reassignLeadRunTx(ctx, tx, scope, lead.ID, leadPIC(lead), updatedBy)
 	})
 	if err != nil {
 		return domain.Lead{}, err
@@ -525,10 +554,168 @@ func (r *leadRepository) MarkConverted(ctx context.Context, scope coretenant.Sco
 		if err != nil {
 			return err
 		}
-		return insertLeadEvent(ctx, tx, scope, lead.ID, domain.LeadEventConverted, oldStatus, string(lead.Status), params.UpdatedBy)
+		if err := insertLeadEvent(ctx, tx, scope, lead.ID, domain.LeadEventConverted, oldStatus, string(lead.Status), params.UpdatedBy); err != nil {
+			return err
+		}
+		return endLeadRunTx(ctx, tx, scope, lead.ID, domain.PlaybookResultConverted, params.UpdatedBy)
 	})
 	if err != nil {
 		return domain.Lead{}, err
 	}
 	return lead, nil
+}
+
+func (r *leadRepository) Disqualify(ctx context.Context, scope coretenant.Scope, id string, params DisqualifyLeadParams) (domain.Lead, error) {
+	if !scope.IsValid() {
+		return domain.Lead{}, coretenant.ErrInvalidScope
+	}
+	var lead domain.Lead
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		oldStatus, _, err := lockLeadState(ctx, tx, scope, id)
+		if err != nil {
+			return err
+		}
+		lead, err = scanLead(tx.QueryRow(ctx, `
+			UPDATE crm_leads SET status = 'unqualified', disqualify_reason = $1, disqualify_note = $2,
+				updated_by = $3, updated_at = NOW()
+			WHERE id = $4 AND organization_id = $5 AND deleted_at IS NULL AND status <> 'converted'
+			RETURNING `+leadColumns,
+			string(params.Reason), nullableString(strings.TrimSpace(params.Note)), nullableString(params.UpdatedBy), id, scope.OrganizationID()))
+		if err != nil {
+			return err
+		}
+		if oldStatus != string(lead.Status) {
+			if err := insertLeadEvent(ctx, tx, scope, lead.ID, domain.LeadEventStatusChanged, oldStatus, string(lead.Status), params.UpdatedBy); err != nil {
+				return err
+			}
+		}
+		return endLeadRunTx(ctx, tx, scope, lead.ID, domain.PlaybookResultDisqualified, params.UpdatedBy)
+	})
+	return lead, err
+}
+
+func (r *leadRepository) StartPlaybook(ctx context.Context, scope coretenant.Scope, id string, startedBy string) (domain.PlaybookRun, error) {
+	if !scope.IsValid() {
+		return domain.PlaybookRun{}, coretenant.ErrInvalidScope
+	}
+	var run domain.PlaybookRun
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		if _, _, err := lockLeadState(ctx, tx, scope, id); err != nil {
+			return err
+		}
+		lead, err := scanLead(tx.QueryRow(ctx, `SELECT `+leadColumns+` FROM crm_leads WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`, id, scope.OrganizationID()))
+		if err != nil {
+			return err
+		}
+		if _, active, err := findActiveRun(ctx, tx, scope, id); err != nil {
+			return err
+		} else if active {
+			return ErrPlaybookAlreadyActive
+		}
+		enabled, err := leadPlaybookEnabled(ctx, tx, scope.OrganizationID())
+		if err != nil {
+			return err
+		}
+		if !enabled {
+			return ErrPlaybookDisabled
+		}
+		started, err := startLeadRunTx(ctx, tx, scope, lead, startedBy, time.Now())
+		if err != nil {
+			return err
+		}
+		if started == nil {
+			return ErrPlaybookNotApplicable
+		}
+		run = *started
+		return nil
+	})
+	return run, err
+}
+
+func (r *leadRepository) FindPlaybookSummaries(ctx context.Context, scope coretenant.Scope, leadIDs []string) (map[string]domain.LeadPlaybookSummary, error) {
+	out := map[string]domain.LeadPlaybookSummary{}
+	if !scope.IsValid() {
+		return nil, coretenant.ErrInvalidScope
+	}
+	if len(leadIDs) == 0 {
+		return out, nil
+	}
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT DISTINCT ON (r.entity_id)
+				r.entity_id, r.id, r.status, r.result, COALESCE(s.key, ''), COALESCE(s.name, ''),
+				a.due_at, COALESCE(a.attempt_no, 0), COALESCE(a.final_review, false)
+			FROM crm_playbook_runs r
+			LEFT JOIN crm_playbook_steps s ON s.id = r.current_step_id
+			LEFT JOIN crm_activities a ON a.organization_id = r.organization_id AND a.playbook_run_id = r.id
+				AND a.status = 'pending' AND a.deleted_at IS NULL
+			WHERE r.organization_id = $1 AND r.entity_type = 'lead' AND r.entity_id = ANY($2::uuid[])
+			ORDER BY r.entity_id, (r.status = 'active') DESC, r.started_at DESC`,
+			scope.OrganizationID(), leadIDs)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var leadID, status string
+			var result *string
+			var s domain.LeadPlaybookSummary
+			if err := rows.Scan(&leadID, &s.RunID, &status, &result, &s.StepKey, &s.StepName, &s.DueAt, &s.AttemptNo, &s.FinalReview); err != nil {
+				return err
+			}
+			s.Status = domain.PlaybookRunStatus(status)
+			if result != nil {
+				rr := domain.PlaybookRunResult(*result)
+				s.Result = &rr
+			}
+			out[leadID] = s
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+func (r *leadRepository) ListEvents(ctx context.Context, scope coretenant.Scope, leadID string, limit, offset int) ([]domain.LeadEvent, int64, error) {
+	if !scope.IsValid() {
+		return nil, 0, coretenant.ErrInvalidScope
+	}
+	events := []domain.LeadEvent{}
+	var total int64
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM crm_leads WHERE id = $1 AND organization_id = $2)`, leadID, scope.OrganizationID()).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return pgx.ErrNoRows
+		}
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM crm_lead_events WHERE organization_id = $1 AND lead_id = $2`, scope.OrganizationID(), leadID).Scan(&total); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `
+			SELECT e.id, e.lead_id, e.event_type, COALESCE(e.from_value, ''), COALESCE(e.to_value, ''),
+				COALESCE(e.actor_user_id::text, ''), COALESCE(`+memberName("e.actor_user_id")+`, ''),
+				CASE WHEN e.event_type = 'assigned' AND COALESCE(e.from_value, '') <> '' THEN COALESCE(`+memberName("e.from_value::uuid")+`, '') ELSE '' END,
+				CASE WHEN e.event_type = 'assigned' AND COALESCE(e.to_value, '') <> '' THEN COALESCE(`+memberName("e.to_value::uuid")+`, '') ELSE '' END,
+				e.created_at
+			FROM crm_lead_events e
+			WHERE e.organization_id = $1 AND e.lead_id = $2
+			ORDER BY e.created_at DESC, e.id DESC
+			LIMIT $3 OFFSET $4`, scope.OrganizationID(), leadID, limit, offset)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var ev domain.LeadEvent
+			var eventType string
+			if err := rows.Scan(&ev.ID, &ev.LeadID, &eventType, &ev.FromValue, &ev.ToValue, &ev.ActorUserID, &ev.ActorName, &ev.FromName, &ev.ToName, &ev.CreatedAt); err != nil {
+				return err
+			}
+			ev.EventType = domain.LeadEventType(eventType)
+			events = append(events, ev)
+		}
+		return rows.Err()
+	})
+	return events, total, err
 }

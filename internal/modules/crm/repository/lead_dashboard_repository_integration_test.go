@@ -51,6 +51,7 @@ func TestLeadEventsAndDashboardIntegration(t *testing.T) {
 	ctx := context.Background()
 	tenants := testutil.NewTenantPair(t)
 	setupCRMOrganizations(t, db, tenants)
+	disablePlaybook(t, db, tenants.A.Scope)
 
 	leads := repository.NewLeadRepository(db)
 	activities := repository.NewActivityRepository(db)
@@ -186,6 +187,7 @@ func TestLeadDashboardUsesBusinessDaysIntegration(t *testing.T) {
 	ctx := context.Background()
 	tenants := testutil.NewTenantPair(t)
 	setupCRMOrganizations(t, db, tenants)
+	disablePlaybook(t, db, tenants.A.Scope)
 	orgID := tenants.A.OrganizationID
 
 	leads := repository.NewLeadRepository(db)
