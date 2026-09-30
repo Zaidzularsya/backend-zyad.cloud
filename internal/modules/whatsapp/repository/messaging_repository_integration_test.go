@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	crmdomain "zyad.cloud/internal/modules/crm/domain"
 	crmrepo "zyad.cloud/internal/modules/crm/repository"
 	"zyad.cloud/internal/modules/whatsapp/domain"
 	"zyad.cloud/internal/modules/whatsapp/repository"
@@ -173,9 +174,21 @@ func TestCRMGatewayRecordsWhatsAppActivityIntegration(t *testing.T) {
 	activities, _, err := crmrepo.NewActivityRepository(db).List(ctx, tenants.A.Scope, crmrepo.ActivityListFilter{
 		RelatedEntityType: "lead", RelatedEntityID: lead.ID,
 	})
-	if err != nil || len(activities) != 1 {
-		t.Fatalf("activities = %+v, %v", activities, err)
+	if err != nil {
+		t.Fatalf("List activities: %v", err)
 	}
+	// A new lead also gets its SOP "Kontak pertama" step (lead playbook), so
+	// pick out the WhatsApp log.
+	var waActivities []crmdomain.Activity
+	for _, a := range activities {
+		if a.Type == "whatsapp" {
+			waActivities = append(waActivities, a)
+		}
+	}
+	if len(waActivities) != 1 {
+		t.Fatalf("whatsapp activities = %+v (all: %+v)", waActivities, activities)
+	}
+	activities = waActivities
 	if activities[0].Type != "whatsapp" || activities[0].Status != "completed" {
 		t.Fatalf("activity = %+v", activities[0])
 	}

@@ -81,4 +81,12 @@ type Activity struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	DeletedAt         *time.Time
+
+	PlaybookRunID  *string
+	PlaybookStepID *string
+	OutcomeKey     string
+	AttemptNo      *int
+	FinalReview    bool
+	// Playbook diisi repository (attachPlaybookInfo) untuk activity playbook.
+	Playbook *ActivityPlaybookInfo
 }

@@ -127,6 +127,16 @@ type UpdateLeadRequest struct {
 	// AnnualRevenue "" = kosongkan (NULL).
 	AnnualRevenue *string        `json:"annual_revenue"`
 	Address       map[string]any `json:"address"`
+
+	// Form kebutuhan; "" mengosongkan nilai.
+	RequirementSummary *string `json:"requirement_summary"`
+	BudgetEstimate     *string `json:"budget_estimate"`
+	TargetDate         *string `json:"target_date"` // YYYY-MM-DD
+	DecisionMaker      *string `json:"decision_maker"`
+}
+
+type UpdateCRMSettingsRequest struct {
+	LeadPlaybookEnabled *bool `json:"lead_playbook_enabled" binding:"required"`
 }
 
 // AssignLeadRequest binds the payload for assigning a lead to a user.
@@ -247,6 +257,28 @@ type CreateActivityRequest struct {
 	Description       string  `json:"description"`
 	DueAt             *string `json:"due_at"`
 	AssigneeUserID    string  `json:"assignee_user_id"`
+	Status            string  `json:"status"` // "" | pending | completed
+}
+
+// CompleteActivityRequest is optional for plain activities; playbook steps
+// require OutcomeKey (+ the input its outcome asks for).
+type CompleteActivityRequest struct {
+	OutcomeKey   string                   `json:"outcome_key"`
+	RescheduleAt *string                  `json:"reschedule_at"`
+	Requirements *LeadRequirementsRequest `json:"requirements"`
+	Disqualify   *DisqualifyRequest       `json:"disqualify"`
+}
+
+type LeadRequirementsRequest struct {
+	Summary        string  `json:"summary"`
+	BudgetEstimate *string `json:"budget_estimate"`
+	TargetDate     *string `json:"target_date"` // YYYY-MM-DD
+	DecisionMaker  string  `json:"decision_maker"`
+}
+
+type DisqualifyRequest struct {
+	Reason string `json:"reason"`
+	Note   string `json:"note"`
 }
 
 // UpdateActivityRequest binds the payload for updating an activity.

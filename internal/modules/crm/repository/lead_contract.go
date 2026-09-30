@@ -36,7 +36,7 @@ var LeadSortFields = map[string]string{
 	"updated_at":   "updated_at",
 	"contact_name": "lower(contact_name)",
 	"score":        "score",
-	"status":       "CASE status WHEN 'new' THEN 1 WHEN 'contacted' THEN 2 WHEN 'qualified' THEN 3 WHEN 'unqualified' THEN 4 ELSE 5 END",
+	"status":       "CASE status WHEN 'new' THEN 1 WHEN 'attempting' THEN 2 WHEN 'contacted' THEN 3 WHEN 'qualified' THEN 4 WHEN 'unqualified' THEN 5 ELSE 6 END",
 }
 
 // IsValidLeadSort reports whether sort is empty or a known (optionally
@@ -83,7 +83,18 @@ type CreateLeadParams struct {
 	CreatedBy     string
 }
 
+type DisqualifyLeadParams struct {
+	Reason    domain.DisqualifyReason
+	Note      string
+	UpdatedBy string
+}
+
 type UpdateLeadParams struct {
+	RequirementSummary *string
+	BudgetEstimate     *string // "" = NULL
+	TargetDate         *string // "YYYY-MM-DD", "" = NULL
+	DecisionMaker      *string
+
 	ContactName   *string
 	CompanyName   *string
 	Email         *string
@@ -112,6 +123,10 @@ type MarkConvertedParams struct {
 // LeadRepository is the tenant-owned data contract. Every method requires a
 // verified immutable scope and row lookups include both scope and resource ID.
 type LeadRepository interface {
+	Disqualify(ctx context.Context, scope coretenant.Scope, id string, params DisqualifyLeadParams) (domain.Lead, error)
+	StartPlaybook(ctx context.Context, scope coretenant.Scope, id string, startedBy string) (domain.PlaybookRun, error)
+	FindPlaybookSummaries(ctx context.Context, scope coretenant.Scope, leadIDs []string) (map[string]domain.LeadPlaybookSummary, error)
+	ListEvents(ctx context.Context, scope coretenant.Scope, leadID string, limit, offset int) ([]domain.LeadEvent, int64, error)
 	Create(context.Context, coretenant.Scope, CreateLeadParams) (domain.Lead, error)
 	FindByID(context.Context, coretenant.Scope, string) (domain.Lead, error)
 	List(context.Context, coretenant.Scope, LeadListFilter) ([]domain.Lead, int64, error)

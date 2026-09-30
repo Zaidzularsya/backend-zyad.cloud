@@ -142,10 +142,30 @@ type LeadResponse struct {
 	CreatedAt          time.Time      `json:"created_at"`
 	UpdatedAt          time.Time      `json:"updated_at"`
 	DeletedAt          *time.Time     `json:"deleted_at,omitempty"`
+
+	RequirementSummary string                `json:"requirement_summary,omitempty"`
+	BudgetEstimate     *string               `json:"budget_estimate,omitempty"`
+	TargetDate         *string               `json:"target_date,omitempty"` // YYYY-MM-DD
+	DecisionMaker      string                `json:"decision_maker,omitempty"`
+	DisqualifyReason   string                `json:"disqualify_reason,omitempty"`
+	DisqualifyNote     string                `json:"disqualify_note,omitempty"`
+	PlaybookRun        *LeadPlaybookResponse `json:"playbook_run,omitempty"`
 }
 
 func LeadFromDomain(l domain.Lead) LeadResponse {
+	var targetDate *string
+	if l.TargetDate != nil {
+		d := l.TargetDate.Format("2006-01-02")
+		targetDate = &d
+	}
 	return LeadResponse{
+		RequirementSummary: l.RequirementSummary,
+		BudgetEstimate:     l.BudgetEstimate,
+		TargetDate:         targetDate,
+		DecisionMaker:      l.DecisionMaker,
+		DisqualifyReason:   l.DisqualifyReason,
+		DisqualifyNote:     l.DisqualifyNote,
+		PlaybookRun:        leadPlaybookFromDomain(l.Playbook),
 		ID:                 l.ID,
 		ContactName:        l.ContactName,
 		CompanyName:        l.CompanyName,
@@ -283,19 +303,21 @@ func DealListFromDomain(deals []domain.Deal) []DealResponse {
 }
 
 type ActivityResponse struct {
-	ID                string     `json:"id"`
-	RelatedEntityType string     `json:"related_entity_type"`
-	RelatedEntityID   string     `json:"related_entity_id"`
-	Type              string     `json:"type"`
-	Subject           string     `json:"subject"`
-	Description       string     `json:"description,omitempty"`
-	DueAt             *time.Time `json:"due_at,omitempty"`
-	CompletedAt       *time.Time `json:"completed_at,omitempty"`
-	Status            string     `json:"status"`
-	AssigneeUserID    string     `json:"assignee_user_id,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	DeletedAt         *time.Time `json:"deleted_at,omitempty"`
+	ID                string                    `json:"id"`
+	RelatedEntityType string                    `json:"related_entity_type"`
+	RelatedEntityID   string                    `json:"related_entity_id"`
+	Type              string                    `json:"type"`
+	Subject           string                    `json:"subject"`
+	Description       string                    `json:"description,omitempty"`
+	DueAt             *time.Time                `json:"due_at,omitempty"`
+	CompletedAt       *time.Time                `json:"completed_at,omitempty"`
+	Status            string                    `json:"status"`
+	AssigneeUserID    string                    `json:"assignee_user_id,omitempty"`
+	OutcomeKey        string                    `json:"outcome_key,omitempty"`
+	Playbook          *ActivityPlaybookResponse `json:"playbook,omitempty"`
+	CreatedAt         time.Time                 `json:"created_at"`
+	UpdatedAt         time.Time                 `json:"updated_at"`
+	DeletedAt         *time.Time                `json:"deleted_at,omitempty"`
 }
 
 func ActivityFromDomain(a domain.Activity) ActivityResponse {
@@ -310,6 +332,8 @@ func ActivityFromDomain(a domain.Activity) ActivityResponse {
 		CompletedAt:       a.CompletedAt,
 		Status:            string(a.Status),
 		AssigneeUserID:    a.AssigneeUserID,
+		OutcomeKey:        a.OutcomeKey,
+		Playbook:          activityPlaybookFromDomain(a.Playbook),
 		CreatedAt:         a.CreatedAt,
 		UpdatedAt:         a.UpdatedAt,
 		DeletedAt:         a.DeletedAt,
@@ -617,4 +641,105 @@ func ContactAttachmentListFromDomain(attachments []domain.ContactAttachment) []C
 		items = append(items, ContactAttachmentFromDomain(a))
 	}
 	return items
+}
+
+type PlaybookOutcomeResponse struct {
+	Key           string `json:"key"`
+	Label         string `json:"label"`
+	RequiredInput string `json:"required_input"`
+}
+
+type ActivityPlaybookResponse struct {
+	RunID          string                    `json:"run_id"`
+	StepKey        string                    `json:"step_key"`
+	StepName       string                    `json:"step_name"`
+	AttemptNo      int                       `json:"attempt_no"`
+	MaxAttempts    *int                      `json:"max_attempts,omitempty"`
+	FinalReview    bool                      `json:"final_review"`
+	ChannelActions []string                  `json:"channel_actions"`
+	Outcomes       []PlaybookOutcomeResponse `json:"outcomes"`
+}
+
+type PlaybookRunResponse struct {
+	ID     string  `json:"id"`
+	Status string  `json:"status"`
+	Result *string `json:"result,omitempty"`
+}
+
+type CompleteActivityResponse struct {
+	Activity     ActivityResponse     `json:"activity"`
+	Lead         *LeadResponse        `json:"lead,omitempty"`
+	NextActivity *ActivityResponse    `json:"next_activity,omitempty"`
+	Run          *PlaybookRunResponse `json:"run,omitempty"`
+}
+
+func activityPlaybookFromDomain(p *domain.ActivityPlaybookInfo) *ActivityPlaybookResponse {
+	if p == nil {
+		return nil
+	}
+	out := &ActivityPlaybookResponse{RunID: p.RunID, StepKey: p.StepKey, StepName: p.StepName, AttemptNo: p.AttemptNo,
+		MaxAttempts: p.MaxAttempts, FinalReview: p.FinalReview, ChannelActions: p.ChannelActions, Outcomes: []PlaybookOutcomeResponse{}}
+	for _, o := range p.Outcomes {
+		out.Outcomes = append(out.Outcomes, PlaybookOutcomeResponse{Key: o.Key, Label: o.Label, RequiredInput: string(o.RequiredInput)})
+	}
+	return out
+}
+
+func PlaybookRunFromDomain(r *domain.PlaybookRun) *PlaybookRunResponse {
+	if r == nil {
+		return nil
+	}
+	resp := &PlaybookRunResponse{ID: r.ID, Status: string(r.Status)}
+	if r.Result != nil {
+		s := string(*r.Result)
+		resp.Result = &s
+	}
+	return resp
+}
+
+type LeadPlaybookResponse struct {
+	RunID       string     `json:"run_id"`
+	Status      string     `json:"status"`
+	Result      *string    `json:"result,omitempty"`
+	StepKey     string     `json:"step_key,omitempty"`
+	StepName    string     `json:"step_name,omitempty"`
+	DueAt       *time.Time `json:"due_at,omitempty"`
+	AttemptNo   int        `json:"attempt_no,omitempty"`
+	FinalReview bool       `json:"final_review"`
+}
+
+func leadPlaybookFromDomain(p *domain.LeadPlaybookSummary) *LeadPlaybookResponse {
+	if p == nil {
+		return nil
+	}
+	out := &LeadPlaybookResponse{RunID: p.RunID, Status: string(p.Status), StepKey: p.StepKey, StepName: p.StepName,
+		DueAt: p.DueAt, AttemptNo: p.AttemptNo, FinalReview: p.FinalReview}
+	if p.Result != nil {
+		r := string(*p.Result)
+		out.Result = &r
+	}
+	return out
+}
+
+type LeadEventResponse struct {
+	ID          string    `json:"id"`
+	LeadID      string    `json:"lead_id"`
+	EventType   string    `json:"event_type"`
+	FromValue   string    `json:"from_value,omitempty"`
+	ToValue     string    `json:"to_value,omitempty"`
+	ActorUserID string    `json:"actor_user_id,omitempty"`
+	ActorName   string    `json:"actor_name,omitempty"`
+	FromName    string    `json:"from_name,omitempty"`
+	ToName      string    `json:"to_name,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+func LeadEventFromDomain(e domain.LeadEvent) LeadEventResponse {
+	return LeadEventResponse{ID: e.ID, LeadID: e.LeadID, EventType: string(e.EventType), FromValue: e.FromValue, ToValue: e.ToValue,
+		ActorUserID: e.ActorUserID, ActorName: e.ActorName, FromName: e.FromName, ToName: e.ToName, CreatedAt: e.CreatedAt}
+}
+
+type CRMSettingsResponse struct {
+	LeadPlaybookEnabled bool       `json:"lead_playbook_enabled"`
+	UpdatedAt           *time.Time `json:"updated_at,omitempty"`
 }

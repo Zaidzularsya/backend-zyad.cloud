@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"regexp"
+	"time"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	crmmodule "zyad.cloud/internal/modules/crm"
@@ -82,14 +83,45 @@ func (s *leadService) Get(ctx context.Context, scope coretenant.Scope, id string
 	if err != nil {
 		return domain.Lead{}, crmmodule.MapNotFound(err, "LEAD_NOT_FOUND", "lead not found or already deleted")
 	}
-	return lead, nil
+	return s.withPlaybook(ctx, scope, lead)
 }
 
 func (s *leadService) List(ctx context.Context, scope coretenant.Scope, filter repository.LeadListFilter) ([]domain.Lead, int64, error) {
-	return s.repo.List(ctx, scope, filter)
+	leads, total, err := s.repo.List(ctx, scope, filter)
+	if err != nil {
+		return nil, 0, err
+	}
+	ids := make([]string, 0, len(leads))
+	for _, l := range leads {
+		ids = append(ids, l.ID)
+	}
+	sums, err := s.repo.FindPlaybookSummaries(ctx, scope, ids)
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range leads {
+		if sum, ok := sums[leads[i].ID]; ok {
+			sum := sum
+			leads[i].Playbook = &sum
+		}
+	}
+	return leads, total, nil
 }
 
 func (s *leadService) Update(ctx context.Context, scope coretenant.Scope, id string, params repository.UpdateLeadParams) (domain.Lead, error) {
+	// Terminal statuses carry side effects (reason, contact creation, run end)
+	// that only their dedicated endpoints perform.
+	if params.Status != nil && (*params.Status == domain.LeadStatusUnqualified || *params.Status == domain.LeadStatusConverted) {
+		return domain.Lead{}, ErrUseDisqualifyEndpoint
+	}
+	if params.BudgetEstimate != nil && *params.BudgetEstimate != "" && !annualRevenuePattern.MatchString(*params.BudgetEstimate) {
+		return domain.Lead{}, ErrInvalidBudgetEstimate
+	}
+	if params.TargetDate != nil && *params.TargetDate != "" {
+		if _, err := time.Parse("2006-01-02", *params.TargetDate); err != nil {
+			return domain.Lead{}, ErrInvalidTargetDate
+		}
+	}
 	if params.AnnualRevenue != nil {
 		if err := validateAnnualRevenue(*params.AnnualRevenue); err != nil {
 			return domain.Lead{}, err
@@ -104,7 +136,7 @@ func (s *leadService) Update(ctx context.Context, scope coretenant.Scope, id str
 	if err != nil {
 		return domain.Lead{}, crmmodule.MapNotFound(err, "LEAD_NOT_FOUND", "lead not found or already deleted")
 	}
-	return lead, nil
+	return s.withPlaybook(ctx, scope, lead)
 }
 
 func (s *leadService) Delete(ctx context.Context, scope coretenant.Scope, id string, deletedBy string) error {
@@ -243,4 +275,49 @@ func (s *leadService) requireContactQuota(ctx context.Context, scope coretenant.
 		total,
 		1,
 	)
+}
+
+func (s *leadService) Disqualify(ctx context.Context, scope coretenant.Scope, id string, params repository.DisqualifyLeadParams) (domain.Lead, error) {
+	if !params.Reason.IsValid() {
+		return domain.Lead{}, ErrInvalidDisqualifyReason
+	}
+	lead, err := s.repo.FindByID(ctx, scope, id)
+	if err != nil {
+		return domain.Lead{}, crmmodule.MapNotFound(err, "LEAD_NOT_FOUND", "lead not found or already deleted")
+	}
+	if lead.Status == domain.LeadStatusConverted {
+		return domain.Lead{}, ErrLeadAlreadyConverted
+	}
+	updated, err := s.repo.Disqualify(ctx, scope, id, params)
+	if err != nil {
+		return domain.Lead{}, crmmodule.MapNotFound(err, "LEAD_NOT_FOUND", "lead not found or already deleted")
+	}
+	return s.withPlaybook(ctx, scope, updated)
+}
+
+func (s *leadService) StartPlaybook(ctx context.Context, scope coretenant.Scope, id string, startedBy string) (domain.PlaybookRun, error) {
+	run, err := s.repo.StartPlaybook(ctx, scope, id, startedBy)
+	return run, crmmodule.MapNotFound(err, "LEAD_NOT_FOUND", "lead not found or already deleted")
+}
+
+func (s *leadService) ListEvents(ctx context.Context, scope coretenant.Scope, id string, page, perPage int) ([]domain.LeadEvent, int64, error) {
+	if perPage <= 0 || perPage > 100 {
+		perPage = 50
+	}
+	if page <= 0 {
+		page = 1
+	}
+	events, total, err := s.repo.ListEvents(ctx, scope, id, perPage, (page-1)*perPage)
+	return events, total, crmmodule.MapNotFound(err, "LEAD_NOT_FOUND", "lead not found")
+}
+
+func (s *leadService) withPlaybook(ctx context.Context, scope coretenant.Scope, lead domain.Lead) (domain.Lead, error) {
+	sums, err := s.repo.FindPlaybookSummaries(ctx, scope, []string{lead.ID})
+	if err != nil {
+		return domain.Lead{}, err
+	}
+	if sum, ok := sums[lead.ID]; ok {
+		lead.Playbook = &sum
+	}
+	return lead, nil
 }

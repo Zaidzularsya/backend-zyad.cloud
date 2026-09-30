@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	coretenant "zyad.cloud/internal/core/tenant"
+	"zyad.cloud/internal/modules/crm/domain"
 	"zyad.cloud/internal/modules/crm/repository"
 )
 
@@ -92,5 +93,39 @@ func TestLeadUpdateValidatesAnnualRevenue(t *testing.T) {
 		if gotErr := errors.Is(err, ErrInvalidAnnualRevenue); gotErr != tc.wantErr {
 			t.Errorf("Update(annual_revenue=%q) error = %v, wantErr %v", tc.value, err, tc.wantErr)
 		}
+	}
+}
+
+func TestLeadUpdateRejectsTerminalStatuses(t *testing.T) {
+	svc, _, _ := newLeadServiceFixture()
+	for _, st := range []domain.LeadStatus{domain.LeadStatusUnqualified, domain.LeadStatusConverted} {
+		st := st
+		_, err := svc.Update(context.Background(), testScope(t), "l1", repository.UpdateLeadParams{Status: &st})
+		if !errors.Is(err, ErrUseDisqualifyEndpoint) {
+			t.Fatalf("%s: %v", st, err)
+		}
+	}
+}
+
+func TestLeadUpdateValidatesRequirementFields(t *testing.T) {
+	svc, _, _ := newLeadServiceFixture()
+	bad, ok := "5000.555", "2026-12-01"
+	if _, err := svc.Update(context.Background(), testScope(t), "l1", repository.UpdateLeadParams{BudgetEstimate: &bad}); !errors.Is(err, ErrInvalidBudgetEstimate) {
+		t.Fatalf("budget: %v", err)
+	}
+	badDate := "01/12/2026"
+	if _, err := svc.Update(context.Background(), testScope(t), "l1", repository.UpdateLeadParams{TargetDate: &badDate}); !errors.Is(err, ErrInvalidTargetDate) {
+		t.Fatalf("target date: %v", err)
+	}
+	if _, err := svc.Update(context.Background(), testScope(t), "l1", repository.UpdateLeadParams{TargetDate: &ok}); err != nil {
+		t.Fatalf("valid date: %v", err)
+	}
+}
+
+func TestLeadDisqualifyValidatesReason(t *testing.T) {
+	svc, _, _ := newLeadServiceFixture()
+	_, err := svc.Disqualify(context.Background(), testScope(t), "l1", repository.DisqualifyLeadParams{Reason: "nope"})
+	if !errors.Is(err, ErrInvalidDisqualifyReason) {
+		t.Fatalf("err=%v", err)
 	}
 }

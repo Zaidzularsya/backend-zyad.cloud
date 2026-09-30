@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +14,7 @@ import (
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/crm/domain"
 	"zyad.cloud/internal/modules/crm/dto"
+	"zyad.cloud/internal/modules/crm/playbook"
 	"zyad.cloud/internal/modules/crm/repository"
 	"zyad.cloud/internal/modules/crm/service"
 	"zyad.cloud/internal/shared/response"
@@ -118,13 +120,14 @@ func (h *ActivityHandler) Create(c *gin.Context) {
 		DueAt:             dueAt,
 		AssigneeUserID:    req.AssigneeUserID,
 		CreatedBy:         userID,
+		Status:            domain.ActivityStatus(req.Status),
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidActivityEntityType) || errors.Is(err, service.ErrInvalidActivityType) {
 			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
 			return
 		}
-		corehttp.Fail(c, err)
+		corehttp.Fail(c, mapPlaybookError(err))
 		return
 	}
 
@@ -221,13 +224,35 @@ func (h *ActivityHandler) Complete(c *gin.Context) {
 	}
 	userID := permissionmiddleware.UserID(c)
 
-	activity, err := h.svc.Complete(c.Request.Context(), scope, c.Param("id"), userID)
+	var req dto.CompleteActivityRequest
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+			return
+		}
+	}
+	input, err := completeInputFromRequest(req)
 	if err != nil {
-		corehttp.Fail(c, err)
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
 		return
 	}
-
-	corehttp.OK(c, "success", dto.ActivityFromDomain(activity))
+	res, err := h.svc.CompleteWithOutcome(c.Request.Context(), scope, c.Param("id"), repository.CompleteActivityParams{
+		OutcomeKey: req.OutcomeKey, Input: input, UpdatedBy: userID, Now: time.Now(),
+	})
+	if err != nil {
+		corehttp.Fail(c, mapPlaybookError(err))
+		return
+	}
+	resp := dto.CompleteActivityResponse{Activity: dto.ActivityFromDomain(res.Activity), Run: dto.PlaybookRunFromDomain(res.Run)}
+	if res.Lead != nil {
+		lead := dto.LeadFromDomain(*res.Lead)
+		resp.Lead = &lead
+	}
+	if res.NextActivity != nil {
+		next := dto.ActivityFromDomain(*res.NextActivity)
+		resp.NextActivity = &next
+	}
+	corehttp.OK(c, "success", resp)
 }
 
 func (h *ActivityHandler) Cancel(c *gin.Context) {
@@ -240,7 +265,7 @@ func (h *ActivityHandler) Cancel(c *gin.Context) {
 
 	activity, err := h.svc.Cancel(c.Request.Context(), scope, c.Param("id"), userID)
 	if err != nil {
-		corehttp.Fail(c, err)
+		corehttp.Fail(c, mapPlaybookError(err))
 		return
 	}
 
@@ -269,3 +294,39 @@ func (h *ActivityHandler) Assign(c *gin.Context) {
 
 	corehttp.OK(c, "success", dto.ActivityFromDomain(activity))
 }
+
+func completeInputFromRequest(req dto.CompleteActivityRequest) (playbook.OutcomeInput, error) {
+	var in playbook.OutcomeInput
+	if req.RescheduleAt != nil && *req.RescheduleAt != "" {
+		at, err := time.Parse(time.RFC3339, *req.RescheduleAt)
+		if err != nil {
+			return in, errors.New("invalid reschedule_at, expected RFC3339")
+		}
+		in.RescheduleAt = &at
+	}
+	if r := req.Requirements; r != nil {
+		lr := domain.LeadRequirements{Summary: r.Summary, DecisionMaker: r.DecisionMaker}
+		if r.BudgetEstimate != nil && *r.BudgetEstimate != "" {
+			if !isValidMoney(*r.BudgetEstimate) {
+				return in, errors.New("budget_estimate must be a non-negative number with at most 2 decimals")
+			}
+			lr.BudgetEstimate = r.BudgetEstimate
+		}
+		if r.TargetDate != nil && *r.TargetDate != "" {
+			d, err := time.Parse("2006-01-02", *r.TargetDate)
+			if err != nil {
+				return in, errors.New("invalid target_date, expected YYYY-MM-DD")
+			}
+			lr.TargetDate = &d
+		}
+		in.Requirements = &lr
+	}
+	if d := req.Disqualify; d != nil {
+		in.Disqualify = &playbook.DisqualifyInput{Reason: domain.DisqualifyReason(d.Reason), Note: d.Note}
+	}
+	return in, nil
+}
+
+var moneyPattern = regexp.MustCompile(`^\d{1,16}(\.\d{1,2})?$`)
+
+func isValidMoney(s string) bool { return moneyPattern.MatchString(s) }

@@ -6,12 +6,14 @@ import "time"
 type LeadEventType string
 
 const (
-	LeadEventCreated       LeadEventType = "created"
-	LeadEventStatusChanged LeadEventType = "status_changed"
-	LeadEventAssigned      LeadEventType = "assigned"
-	LeadEventConverted     LeadEventType = "converted"
-	LeadEventDeleted       LeadEventType = "deleted"
-	LeadEventRestored      LeadEventType = "restored"
+	LeadEventCreated         LeadEventType = "created"
+	LeadEventStatusChanged   LeadEventType = "status_changed"
+	LeadEventAssigned        LeadEventType = "assigned"
+	LeadEventConverted       LeadEventType = "converted"
+	LeadEventDeleted         LeadEventType = "deleted"
+	LeadEventRestored        LeadEventType = "restored"
+	LeadEventPlaybookStarted LeadEventType = "playbook_started"
+	LeadEventPlaybookEnded   LeadEventType = "playbook_ended"
 )
 
 type LeadDashboardGranularity string
@@ -80,6 +82,9 @@ type LeadFollowUp struct {
 	LeadName     string
 	CompanyName  string
 	AssigneeName string
+	// StepName is the playbook step ("Kontak pertama"); empty for follow-ups
+	// added by hand.
+	StepName string
 }
 
 // LeadActivityItem is one entry of the merged recent-activity feed: either a
@@ -100,4 +105,18 @@ type LeadActivityItem struct {
 	ActivityID   string
 	ActivityType ActivityType
 	Subject      string
+}
+
+// LeadEvent is one crm_lead_events row for the lead detail history.
+type LeadEvent struct {
+	ID          string
+	LeadID      string
+	EventType   LeadEventType
+	FromValue   string
+	ToValue     string
+	ActorUserID string
+	ActorName   string
+	FromName    string // owner name for 'assigned'
+	ToName      string
+	CreatedAt   time.Time
 }

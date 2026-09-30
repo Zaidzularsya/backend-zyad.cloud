@@ -37,8 +37,10 @@ func setupCRMOrganizations(t *testing.T, db *database.Pool, tenants testutil.Ten
 				return
 			}
 			_, _ = tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", orgID)
+			_, _ = tx.Exec(ctx, "DELETE FROM crm_playbook_runs WHERE organization_id = $1", orgID)
 			_, _ = tx.Exec(ctx, "DELETE FROM crm_activities WHERE organization_id = $1", orgID)
 			_, _ = tx.Exec(ctx, "DELETE FROM crm_leads WHERE organization_id = $1", orgID)
+			_, _ = tx.Exec(ctx, "DELETE FROM crm_settings WHERE organization_id = $1", orgID)
 			_ = tx.Commit(ctx)
 		}
 	})
@@ -49,6 +51,7 @@ func TestLeadEventsAndDashboardIntegration(t *testing.T) {
 	ctx := context.Background()
 	tenants := testutil.NewTenantPair(t)
 	setupCRMOrganizations(t, db, tenants)
+	disablePlaybook(t, db, tenants.A.Scope)
 
 	leads := repository.NewLeadRepository(db)
 	activities := repository.NewActivityRepository(db)
@@ -89,6 +92,18 @@ func TestLeadEventsAndDashboardIntegration(t *testing.T) {
 		t.Fatalf("Create activity on deleted lead: %v", err)
 	}
 
+	// Legacy data: a note stored as pending must never count as a follow-up.
+	if _, err := activities.Create(ctx, tenants.A.Scope, repository.CreateActivityParams{
+		RelatedEntityType: domain.ActivityEntityLead, RelatedEntityID: kept.ID,
+		Type: domain.ActivityTypeNote, Subject: "Catatan lama pending",
+	}); err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	fixTx, _ := db.Begin(ctx)
+	_, _ = fixTx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", tenants.A.OrganizationID)
+	_, _ = fixTx.Exec(ctx, "UPDATE crm_activities SET status = 'pending', completed_at = NULL WHERE type = 'note' AND organization_id = $1", tenants.A.OrganizationID)
+	_ = fixTx.Commit(ctx)
+
 	today := businesstime.DayOf(time.Now())
 	rng := domain.LeadDashboardRange{
 		From: today.AddDate(0, 0, -6), To: today,
@@ -124,7 +139,7 @@ func TestLeadEventsAndDashboardIntegration(t *testing.T) {
 	if d.FollowUps.Pending != 1 || d.FollowUps.Overdue != 1 {
 		t.Errorf("follow-up summary = %+v, want pending=1 overdue=1", d.FollowUps)
 	}
-	if len(d.UpcomingFollowUps) != 1 || d.UpcomingFollowUps[0].LeadName != "Andi" {
+	if len(d.UpcomingFollowUps) != 1 || d.UpcomingFollowUps[0].LeadName != "Andi" || d.FollowUps.Pending != 1 {
 		t.Errorf("upcoming = %+v, want one follow-up on Andi", d.UpcomingFollowUps)
 	}
 
@@ -134,7 +149,8 @@ func TestLeadEventsAndDashboardIntegration(t *testing.T) {
 	}
 	// Budi's created event is hidden once the lead is deleted but
 	// its deleted event stays.
-	want := map[string]int{"created": 1, "status_changed": 1, "deleted": 1, "activity_created": 1}
+	// activity_created:2 = the follow-up call + the legacy note (notes are history, just not follow-ups).
+	want := map[string]int{"created": 1, "status_changed": 1, "deleted": 1, "activity_created": 2}
 	for k, n := range want {
 		if kinds[k] != n {
 			t.Errorf("recent activity kinds = %v, want %v", kinds, want)
@@ -184,6 +200,7 @@ func TestLeadDashboardUsesBusinessDaysIntegration(t *testing.T) {
 	ctx := context.Background()
 	tenants := testutil.NewTenantPair(t)
 	setupCRMOrganizations(t, db, tenants)
+	disablePlaybook(t, db, tenants.A.Scope)
 	orgID := tenants.A.OrganizationID
 
 	leads := repository.NewLeadRepository(db)
@@ -268,5 +285,35 @@ func TestLeadDashboardUsesBusinessDaysIntegration(t *testing.T) {
 	}
 	if d.Created != 1 {
 		t.Errorf("created on 10 Jan only = %d, want 1", d.Created)
+	}
+}
+
+func TestDashboardShowsPlaybookStepName(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+	setupCRMOrganizations(t, db, tenants)
+	leads := repository.NewLeadRepository(db)
+	lead, _ := leads.Create(ctx, tenants.A.Scope, repository.CreateLeadParams{ContactName: "Dash"})
+	attempting := domain.LeadStatusAttempting
+	_, _ = leads.Update(ctx, tenants.A.Scope, lead.ID, repository.UpdateLeadParams{Status: &attempting})
+
+	today := businesstime.DayOf(time.Now())
+	d, err := repository.NewLeadDashboardRepository(db).Dashboard(ctx, tenants.A.Scope, domain.LeadDashboardRange{
+		From: today.AddDate(0, 0, -6), To: today,
+		PreviousFrom: today.AddDate(0, 0, -13), PreviousTo: today.AddDate(0, 0, -7),
+		Granularity: domain.LeadDashboardDaily,
+	}, repository.LeadDashboardLimits{FollowUps: 8, RecentActivity: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.UpcomingFollowUps) != 1 || d.UpcomingFollowUps[0].StepName != "Kontak pertama" {
+		t.Fatalf("follow-ups %+v", d.UpcomingFollowUps)
+	}
+	if pb := d.UpcomingFollowUps[0].Activity.Playbook; pb == nil || len(pb.Outcomes) == 0 {
+		t.Fatalf("follow-up must carry playbook outcomes, got %+v", pb)
+	}
+	if d.StatusCounts[domain.LeadStatusAttempting] != 1 {
+		t.Fatalf("status counts %+v", d.StatusCounts)
 	}
 }

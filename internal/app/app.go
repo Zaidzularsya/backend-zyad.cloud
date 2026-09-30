@@ -494,6 +494,7 @@ func New(ctx context.Context) (*App, error) {
 		NewMailSyncServiceWithStorage(cfg, db, assetSvc, log),
 	)
 	crmLeadDashboardHandler := crmhandler.NewLeadDashboardHandler(crmservice.NewLeadDashboardService(crmrepo.NewLeadDashboardRepository(db)))
+	crmSettingsHandler := crmhandler.NewCRMSettingsHandler(crmservice.NewCRMSettingsService(crmrepo.NewCRMSettingsRepository(db)))
 	crmMemberHandler := crmhandler.NewMemberHandler(crmMemberSvc)
 	crmPipelineHandler := crmhandler.NewPipelineHandler(crmPipelineSvc)
 	crmDealHandler := crmhandler.NewDealHandler(crmDealSvc)
@@ -564,6 +565,7 @@ func New(ctx context.Context) (*App, error) {
 		CRMContactAttachmentHandler:      crmContactAttachmentHandler,
 		MailboxHandler:                   mailboxHandler,
 		CRMLeadDashboardHandler:          crmLeadDashboardHandler,
+		CRMSettingsHandler:               crmSettingsHandler,
 		CRMMemberHandler:                 crmMemberHandler,
 		CRMPipelineHandler:               crmPipelineHandler,
 		CRMDealHandler:                   crmDealHandler,

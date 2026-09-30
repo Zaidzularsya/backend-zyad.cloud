@@ -6,6 +6,7 @@ import (
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/crm/domain"
+	"zyad.cloud/internal/modules/crm/playbook"
 )
 
 type ActivityListFilter struct {
@@ -29,6 +30,22 @@ type CreateActivityParams struct {
 	DueAt             *time.Time
 	AssigneeUserID    string
 	CreatedBy         string
+	// "" = pending. completed sets completed_at = NOW().
+	Status domain.ActivityStatus
+}
+
+type CompleteActivityParams struct {
+	OutcomeKey string
+	Input      playbook.OutcomeInput
+	UpdatedBy  string
+	Now        time.Time
+}
+
+type CompleteActivityResult struct {
+	Activity     domain.Activity
+	Lead         *domain.Lead     // set when a playbook step changed the lead
+	NextActivity *domain.Activity // next playbook step, nil when the run ended
+	Run          *domain.PlaybookRun
 }
 
 type UpdateActivityParams struct {
@@ -51,4 +68,5 @@ type ActivityRepository interface {
 	Complete(context.Context, coretenant.Scope, string, string) (domain.Activity, error)
 	Cancel(context.Context, coretenant.Scope, string, string) (domain.Activity, error)
 	Assign(context.Context, coretenant.Scope, string, string, string) (domain.Activity, error)
+	CompleteWithOutcome(ctx context.Context, scope coretenant.Scope, id string, params CompleteActivityParams) (CompleteActivityResult, error)
 }

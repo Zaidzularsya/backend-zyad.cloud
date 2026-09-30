@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -40,6 +41,9 @@ func (h *LeadHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddle
 	group.POST("/:id/restore", permissionmiddleware.RequireOrganizationOrGlobal(p, "lead.restore"), h.Restore)
 	group.POST("/:id/assign", permissionmiddleware.RequireOrganizationOrGlobal(p, "lead.assign"), h.Assign)
 	group.POST("/:id/convert", permissionmiddleware.RequireOrganizationOrGlobal(p, "lead.convert"), h.Convert)
+	group.POST("/:id/disqualify", permissionmiddleware.RequireOrganizationOrGlobal(p, "lead.update"), h.Disqualify)
+	group.POST("/:id/playbook/start", permissionmiddleware.RequireOrganizationOrGlobal(p, "lead.update"), h.StartPlaybook)
+	group.GET("/:id/events", permissionmiddleware.RequireOrganizationOrGlobal(p, "lead.read"), h.ListEvents)
 }
 
 func (h *LeadHandler) List(c *gin.Context) {
@@ -186,6 +190,11 @@ func (h *LeadHandler) Update(c *gin.Context) {
 		AnnualRevenue: req.AnnualRevenue,
 		Address:       req.Address,
 		UpdatedBy:     userID,
+
+		RequirementSummary: req.RequirementSummary,
+		BudgetEstimate:     req.BudgetEstimate,
+		TargetDate:         req.TargetDate,
+		DecisionMaker:      req.DecisionMaker,
 	})
 	if err != nil {
 		failLeadError(c, err)
@@ -289,11 +298,12 @@ func (h *LeadHandler) Convert(c *gin.Context) {
 // failLeadError memetakan error validasi service lead ke 422; error lain
 // diteruskan apa adanya (AppError dari MapNotFound, dsb).
 func failLeadError(c *gin.Context, err error) {
-	if errors.Is(err, service.ErrLeadOwnerNotMember) || errors.Is(err, service.ErrInvalidAnnualRevenue) {
+	if errors.Is(err, service.ErrLeadOwnerNotMember) || errors.Is(err, service.ErrInvalidAnnualRevenue) ||
+		errors.Is(err, service.ErrInvalidBudgetEstimate) || errors.Is(err, service.ErrInvalidTargetDate) {
 		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
 		return
 	}
-	corehttp.Fail(c, err)
+	corehttp.Fail(c, mapLeadError(err))
 }
 
 const maxLeadPerPage = 100
@@ -322,4 +332,71 @@ func parseLeadCreatedRange(from, to string) (time.Time, time.Time, error) {
 		return time.Time{}, time.Time{}, errors.New("created_from must not be after created_to")
 	}
 	return fromDate, toExcl, nil
+}
+
+func (h *LeadHandler) Disqualify(c *gin.Context) {
+	scope, err := coretenant.RequireScope(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, coreerrors.New("UNAUTHORIZED", "missing scope", http.StatusUnauthorized))
+		return
+	}
+	var req dto.DisqualifyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		return
+	}
+	lead, err := h.svc.Disqualify(c.Request.Context(), scope, c.Param("id"), repository.DisqualifyLeadParams{
+		Reason: domain.DisqualifyReason(req.Reason), Note: req.Note, UpdatedBy: permissionmiddleware.UserID(c),
+	})
+	if err != nil {
+		corehttp.Fail(c, mapLeadError(err))
+		return
+	}
+	corehttp.OK(c, "success", dto.LeadFromDomain(lead))
+}
+
+func (h *LeadHandler) StartPlaybook(c *gin.Context) {
+	scope, err := coretenant.RequireScope(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, coreerrors.New("UNAUTHORIZED", "missing scope", http.StatusUnauthorized))
+		return
+	}
+	run, err := h.svc.StartPlaybook(c.Request.Context(), scope, c.Param("id"), permissionmiddleware.UserID(c))
+	if err != nil {
+		corehttp.Fail(c, mapLeadError(err))
+		return
+	}
+	corehttp.OK(c, "success", dto.PlaybookRunFromDomain(&run))
+}
+
+func (h *LeadHandler) ListEvents(c *gin.Context) {
+	scope, err := coretenant.RequireScope(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, coreerrors.New("UNAUTHORIZED", "missing scope", http.StatusUnauthorized))
+		return
+	}
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	perPage, _ := strconv.Atoi(c.DefaultQuery("per_page", "50"))
+	events, total, err := h.svc.ListEvents(c.Request.Context(), scope, c.Param("id"), page, perPage)
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	out := make([]dto.LeadEventResponse, 0, len(events))
+	for _, e := range events {
+		out = append(out, dto.LeadEventFromDomain(e))
+	}
+	response.JSON(c, http.StatusOK, "success", out, dto.BuildMeta(page, perPage, total))
+}
+
+func mapLeadError(err error) error {
+	switch {
+	case errors.Is(err, service.ErrInvalidDisqualifyReason):
+		return coreerrors.New("DISQUALIFY_REASON_INVALID", err.Error(), http.StatusUnprocessableEntity)
+	case errors.Is(err, service.ErrUseDisqualifyEndpoint):
+		return coreerrors.New("USE_DISQUALIFY_ENDPOINT", err.Error(), http.StatusUnprocessableEntity)
+	case errors.Is(err, service.ErrLeadAlreadyConverted):
+		return coreerrors.New("LEAD_ALREADY_CONVERTED", err.Error(), http.StatusConflict)
+	}
+	return mapPlaybookError(err)
 }
