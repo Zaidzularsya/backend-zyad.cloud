@@ -6,6 +6,7 @@ type LeadStatus string
 
 const (
 	LeadStatusNew         LeadStatus = "new"
+	LeadStatusAttempting  LeadStatus = "attempting"
 	LeadStatusContacted   LeadStatus = "contacted"
 	LeadStatusQualified   LeadStatus = "qualified"
 	LeadStatusUnqualified LeadStatus = "unqualified"
@@ -14,7 +15,7 @@ const (
 
 func (s LeadStatus) IsValid() bool {
 	switch s {
-	case LeadStatusNew, LeadStatusContacted, LeadStatusQualified, LeadStatusUnqualified, LeadStatusConverted:
+	case LeadStatusNew, LeadStatusAttempting, LeadStatusContacted, LeadStatusQualified, LeadStatusUnqualified, LeadStatusConverted:
 		return true
 	default:
 		return false
@@ -51,6 +52,15 @@ type Lead struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	DeletedAt          *time.Time
+
+	RequirementSummary string
+	BudgetEstimate     *string
+	TargetDate         *time.Time
+	DecisionMaker      string
+	DisqualifyReason   string
+	DisqualifyNote     string
+	// Playbook diisi service (FindPlaybookSummaries), tidak dari leadColumns.
+	Playbook *LeadPlaybookSummary
 }
 
 // LeadConversionResult reports the entities created/linked by converting a

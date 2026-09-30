@@ -6,12 +6,14 @@ import "time"
 type LeadEventType string
 
 const (
-	LeadEventCreated       LeadEventType = "created"
-	LeadEventStatusChanged LeadEventType = "status_changed"
-	LeadEventAssigned      LeadEventType = "assigned"
-	LeadEventConverted     LeadEventType = "converted"
-	LeadEventDeleted       LeadEventType = "deleted"
-	LeadEventRestored      LeadEventType = "restored"
+	LeadEventCreated         LeadEventType = "created"
+	LeadEventStatusChanged   LeadEventType = "status_changed"
+	LeadEventAssigned        LeadEventType = "assigned"
+	LeadEventConverted       LeadEventType = "converted"
+	LeadEventDeleted         LeadEventType = "deleted"
+	LeadEventRestored        LeadEventType = "restored"
+	LeadEventPlaybookStarted LeadEventType = "playbook_started"
+	LeadEventPlaybookEnded   LeadEventType = "playbook_ended"
 )
 
 type LeadDashboardGranularity string
