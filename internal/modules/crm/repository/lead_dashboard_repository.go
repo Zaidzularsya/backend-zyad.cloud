@@ -239,6 +239,7 @@ func (r *leadDashboardRepository) Dashboard(ctx context.Context, scope coretenan
 			FROM crm_activities a
 			JOIN crm_leads l ON l.organization_id = a.organization_id AND l.id = a.related_entity_id AND l.deleted_at IS NULL
 			WHERE a.organization_id = $1 AND a.related_entity_type = 'lead'
+				AND a.type <> 'note'
 				AND a.status = 'pending' AND a.deleted_at IS NULL`,
 			orgID,
 			todayStart, tomorrowStart, weekEnd,
@@ -251,10 +252,13 @@ func (r *leadDashboardRepository) Dashboard(ctx context.Context, scope coretenan
 		rows, err = tx.Query(ctx, `
 			SELECT `+prefixedActivityColumns("a")+`,
 				l.contact_name, COALESCE(l.company_name, ''),
-				COALESCE(`+memberName("a.assignee_user_id")+`, '')
+				COALESCE(`+memberName("a.assignee_user_id")+`, ''),
+				COALESCE(ps.name, '')
 			FROM crm_activities a
 			JOIN crm_leads l ON l.organization_id = a.organization_id AND l.id = a.related_entity_id AND l.deleted_at IS NULL
+			LEFT JOIN crm_playbook_steps ps ON ps.id = a.playbook_step_id
 			WHERE a.organization_id = $1 AND a.related_entity_type = 'lead'
+				AND a.type <> 'note'
 				AND a.status = 'pending' AND a.deleted_at IS NULL
 			ORDER BY a.due_at NULLS LAST, a.created_at
 			LIMIT $2`,
@@ -264,7 +268,7 @@ func (r *leadDashboardRepository) Dashboard(ctx context.Context, scope coretenan
 		}
 		for rows.Next() {
 			var f domain.LeadFollowUp
-			a, err := scanActivityWith(rows, &f.LeadName, &f.CompanyName, &f.AssigneeName)
+			a, err := scanActivityWith(rows, &f.LeadName, &f.CompanyName, &f.AssigneeName, &f.StepName)
 			if err != nil {
 				rows.Close()
 				return err

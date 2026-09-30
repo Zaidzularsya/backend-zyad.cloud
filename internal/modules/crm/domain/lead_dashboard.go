@@ -82,6 +82,9 @@ type LeadFollowUp struct {
 	LeadName     string
 	CompanyName  string
 	AssigneeName string
+	// StepName is the playbook step ("Kontak pertama"); empty for follow-ups
+	// added by hand.
+	StepName string
 }
 
 // LeadActivityItem is one entry of the merged recent-activity feed: either a

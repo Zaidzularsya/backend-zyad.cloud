@@ -18,6 +18,7 @@ const dateLayout = "2006-01-02"
 
 var leadStatusOrder = []domain.LeadStatus{
 	domain.LeadStatusNew,
+	domain.LeadStatusAttempting,
 	domain.LeadStatusContacted,
 	domain.LeadStatusQualified,
 	domain.LeadStatusUnqualified,
@@ -77,6 +78,7 @@ type LeadFollowUpResponse struct {
 	LeadName     string `json:"lead_name"`
 	CompanyName  string `json:"company_name,omitempty"`
 	AssigneeName string `json:"assignee_name,omitempty"`
+	StepName     string `json:"step_name,omitempty"`
 }
 
 type LeadActivityItemResponse struct {
@@ -139,6 +141,7 @@ func LeadDashboardFromDomain(d domain.LeadDashboard, rng domain.LeadDashboardRan
 			LeadName:         f.LeadName,
 			CompanyName:      f.CompanyName,
 			AssigneeName:     f.AssigneeName,
+			StepName:         f.StepName,
 		})
 	}
 	for _, it := range d.RecentActivity {
