@@ -301,6 +301,25 @@ terbaru).
 - Timestamp `crm_*` bertipe `timestamp without time zone` dan diisi `now()` di timezone DB (Asia/Jakarta).
   Karena itu bucket memakai `date_trunc` langsung tanpa konversi zona.
 
+## Lead Playbook (SOP Penanganan Lead)
+
+Spec: `docs/superpowers/specs/2026-09-30-lead-playbook-design.md`. Setiap lead baru (form maupun WhatsApp auto-create) otomatis mendapat langkah SOP; menyelesaikan langkah selalu mencatat *hasil* yang menentukan status lead dan langkah berikutnya. Definisi playbook di `crm_playbooks/steps/outcomes` (seed migration `000136`), eksekusi di `crm_playbook_runs` + kolom `crm_activities.playbook_*`. Logika transisi murni ada di `internal/modules/crm/playbook`; efek samping dijalankan di transaksi repository (`repository/playbook_tx.go`).
+
+| Endpoint | Perubahan | Permission |
+|---|---|---|
+| `POST /activities/:id/complete` | Body opsional `{outcome_key, reschedule_at, requirements{summary,budget_estimate,target_date,decision_maker}, disqualify{reason,note}}`. Response: `{activity, lead?, next_activity?, run?}`. | `activity.complete` |
+| `POST /activities/:id/cancel` | Langkah playbook ditolak (`PLAYBOOK_STEP_CANCEL_NOT_ALLOWED`). | `activity.cancel` |
+| `POST /activities` | Field `status` (`pending` default \| `completed`); `note` selalu `completed`; pending non-note wajib `due_at` (`DUE_AT_REQUIRED`). | `activity.create` |
+| `GET /activities`, `GET /activities/:id` | Blok `playbook` (step, attempt, channel_actions, outcomes) bila activity adalah langkah SOP. | `activity.read` |
+| `GET /leads/:id/events` | Riwayat event lead, terbaru dulu (`page`, `per_page` maks 100). | `lead.read` |
+| `POST /leads/:id/playbook/start` | Mulai SOP manual (`PLAYBOOK_ALREADY_ACTIVE`/`PLAYBOOK_NOT_APPLICABLE` 409, `PLAYBOOK_DISABLED` 422). | `lead.update` |
+| `POST /leads/:id/disqualify` | Body `{reason, note}`; status → `unqualified`. | `lead.update` |
+| `PATCH /leads/:id` | Terima 4 field kebutuhan; status `unqualified`/`converted` ditolak (`USE_DISQUALIFY_ENDPOINT`). | `lead.update` |
+| `GET /leads`, `GET /leads/:id` | Field kebutuhan, `disqualify_*`, `playbook_run`. | `lead.read` |
+| `GET /crm/settings`, `PATCH /crm/settings` | Toggle `lead_playbook_enabled`. | `lead.read` / `crm_settings.update` |
+
+Aturan singkat (detail di spec §6): R1 start otomatis di repository Create; R2 satu run aktif per lead; R3 PIC = owner, fallback pembuat; R4 complete wajib hasil dan atomik; R5 langkah tidak bisa di-cancel; R6 run berakhir saat convert/disqualify/delete/status manual tak sesuai; R7 ganti owner memindahkan langkah pending; R8 "Mulai SOP" manual; R9 percobaan ke-3 tidak respon → langkah Tinjau; R10 note selalu completed; R11 jam kerja WIB Senin–Jumat 08–17; R12 toggle organisasi tidak menghentikan run aktif; R13 run menyimpan `playbook_version`.
+
 ## Non-Goals
 
 - Tidak menggantikan atau berinteraksi langsung dengan `billing_invoices`/`billing_payments` (modul

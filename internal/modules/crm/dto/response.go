@@ -142,10 +142,30 @@ type LeadResponse struct {
 	CreatedAt          time.Time      `json:"created_at"`
 	UpdatedAt          time.Time      `json:"updated_at"`
 	DeletedAt          *time.Time     `json:"deleted_at,omitempty"`
+
+	RequirementSummary string                `json:"requirement_summary,omitempty"`
+	BudgetEstimate     *string               `json:"budget_estimate,omitempty"`
+	TargetDate         *string               `json:"target_date,omitempty"` // YYYY-MM-DD
+	DecisionMaker      string                `json:"decision_maker,omitempty"`
+	DisqualifyReason   string                `json:"disqualify_reason,omitempty"`
+	DisqualifyNote     string                `json:"disqualify_note,omitempty"`
+	PlaybookRun        *LeadPlaybookResponse `json:"playbook_run,omitempty"`
 }
 
 func LeadFromDomain(l domain.Lead) LeadResponse {
+	var targetDate *string
+	if l.TargetDate != nil {
+		d := l.TargetDate.Format("2006-01-02")
+		targetDate = &d
+	}
 	return LeadResponse{
+		RequirementSummary: l.RequirementSummary,
+		BudgetEstimate:     l.BudgetEstimate,
+		TargetDate:         targetDate,
+		DecisionMaker:      l.DecisionMaker,
+		DisqualifyReason:   l.DisqualifyReason,
+		DisqualifyNote:     l.DisqualifyNote,
+		PlaybookRun:        leadPlaybookFromDomain(l.Playbook),
 		ID:                 l.ID,
 		ContactName:        l.ContactName,
 		CompanyName:        l.CompanyName,
@@ -675,4 +695,51 @@ func PlaybookRunFromDomain(r *domain.PlaybookRun) *PlaybookRunResponse {
 		resp.Result = &s
 	}
 	return resp
+}
+
+type LeadPlaybookResponse struct {
+	RunID       string     `json:"run_id"`
+	Status      string     `json:"status"`
+	Result      *string    `json:"result,omitempty"`
+	StepKey     string     `json:"step_key,omitempty"`
+	StepName    string     `json:"step_name,omitempty"`
+	DueAt       *time.Time `json:"due_at,omitempty"`
+	AttemptNo   int        `json:"attempt_no,omitempty"`
+	FinalReview bool       `json:"final_review"`
+}
+
+func leadPlaybookFromDomain(p *domain.LeadPlaybookSummary) *LeadPlaybookResponse {
+	if p == nil {
+		return nil
+	}
+	out := &LeadPlaybookResponse{RunID: p.RunID, Status: string(p.Status), StepKey: p.StepKey, StepName: p.StepName,
+		DueAt: p.DueAt, AttemptNo: p.AttemptNo, FinalReview: p.FinalReview}
+	if p.Result != nil {
+		r := string(*p.Result)
+		out.Result = &r
+	}
+	return out
+}
+
+type LeadEventResponse struct {
+	ID          string    `json:"id"`
+	LeadID      string    `json:"lead_id"`
+	EventType   string    `json:"event_type"`
+	FromValue   string    `json:"from_value,omitempty"`
+	ToValue     string    `json:"to_value,omitempty"`
+	ActorUserID string    `json:"actor_user_id,omitempty"`
+	ActorName   string    `json:"actor_name,omitempty"`
+	FromName    string    `json:"from_name,omitempty"`
+	ToName      string    `json:"to_name,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+func LeadEventFromDomain(e domain.LeadEvent) LeadEventResponse {
+	return LeadEventResponse{ID: e.ID, LeadID: e.LeadID, EventType: string(e.EventType), FromValue: e.FromValue, ToValue: e.ToValue,
+		ActorUserID: e.ActorUserID, ActorName: e.ActorName, FromName: e.FromName, ToName: e.ToName, CreatedAt: e.CreatedAt}
+}
+
+type CRMSettingsResponse struct {
+	LeadPlaybookEnabled bool       `json:"lead_playbook_enabled"`
+	UpdatedAt           *time.Time `json:"updated_at,omitempty"`
 }

@@ -50,6 +50,14 @@ func (f *fakeLeadRepo) Assign(_ context.Context, _ coretenant.Scope, id string, 
 	return domain.Lead{ID: id}, nil
 }
 
+func (f *fakeLeadRepo) FindPlaybookSummaries(context.Context, coretenant.Scope, []string) (map[string]domain.LeadPlaybookSummary, error) {
+	return map[string]domain.LeadPlaybookSummary{}, nil
+}
+
+func (f *fakeLeadRepo) Disqualify(_ context.Context, _ coretenant.Scope, id string, _ repository.DisqualifyLeadParams) (domain.Lead, error) {
+	return domain.Lead{ID: id, Status: domain.LeadStatusUnqualified}, nil
+}
+
 type fakeAttachmentRepo struct {
 	repository.LeadAttachmentRepository
 	attachments map[string]domain.LeadAttachment

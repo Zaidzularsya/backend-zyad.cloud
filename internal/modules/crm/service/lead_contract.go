@@ -16,6 +16,11 @@ var (
 	// user tenant lain.
 	ErrLeadOwnerNotMember   = errors.New("owner_user_id is not an active member of this organization")
 	ErrInvalidAnnualRevenue = errors.New("annual_revenue must be a non-negative number with at most 2 decimals")
+
+	ErrUseDisqualifyEndpoint   = errors.New("use POST /leads/:id/disqualify (unqualified) or /convert (converted) to change to this status")
+	ErrInvalidDisqualifyReason = errors.New("reason must be one of: unresponsive, not_interested, not_fit, budget, competitor, bad_data, duplicate, bad_timing")
+	ErrInvalidBudgetEstimate   = errors.New("budget_estimate must be a non-negative number with at most 2 decimals")
+	ErrInvalidTargetDate       = errors.New("target_date must be YYYY-MM-DD")
 )
 
 // LeadOwnerValidator adalah subset repository.MemberRepository yang
@@ -48,4 +53,7 @@ type LeadService interface {
 	Restore(context.Context, coretenant.Scope, string, string) error
 	Assign(context.Context, coretenant.Scope, string, string, string) (domain.Lead, error)
 	Convert(context.Context, coretenant.Scope, string, ConvertLeadParams) (domain.LeadConversionResult, error)
+	Disqualify(ctx context.Context, scope coretenant.Scope, id string, params repository.DisqualifyLeadParams) (domain.Lead, error)
+	StartPlaybook(ctx context.Context, scope coretenant.Scope, id string, startedBy string) (domain.PlaybookRun, error)
+	ListEvents(ctx context.Context, scope coretenant.Scope, id string, page, perPage int) ([]domain.LeadEvent, int64, error)
 }

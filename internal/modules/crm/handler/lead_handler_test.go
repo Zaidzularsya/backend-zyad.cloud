@@ -1,9 +1,23 @@
 package handler
 
 import (
+	"context"
+	"errors"
+	"net/http"
 	"testing"
 	"time"
+
+	"github.com/gin-gonic/gin"
+
+	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 )
+
+type denyAllChecker struct{}
+
+func (denyAllChecker) Can(context.Context, string, []string) error { return errors.New("denied") }
+func (denyAllChecker) CanOrganization(context.Context, string, string, []string) error {
+	return errors.New("denied")
+}
 
 func TestParseLeadCreatedRange(t *testing.T) {
 	from, toExcl, err := parseLeadCreatedRange("2026-09-01", "2026-09-28")
@@ -26,6 +40,24 @@ func TestParseLeadCreatedRange(t *testing.T) {
 	for _, tc := range [][2]string{{"2026-09-28", "2026-09-01"}, {"28/09/2026", ""}, {"", "yesterday"}} {
 		if _, _, err := parseLeadCreatedRange(tc[0], tc[1]); err == nil {
 			t.Errorf("parseLeadCreatedRange(%q, %q) expected error", tc[0], tc[1])
+		}
+	}
+}
+
+func TestLeadPlaybookRoutesRequirePermission(t *testing.T) {
+	r := newTestRouter(t)
+	r.Use(func(c *gin.Context) { permissionmiddleware.SetUserID(c, "u1"); c.Next() })
+	NewLeadHandler(nil).RegisterRoutes(r.Group(""), denyAllChecker{})
+
+	cases := []struct{ method, path string }{
+		{http.MethodPost, "/leads/l1/disqualify"},
+		{http.MethodPost, "/leads/l1/playbook/start"},
+		{http.MethodGet, "/leads/l1/events"},
+	}
+	for _, c := range cases {
+		w := performJSON(r, c.method, c.path, `{"reason":"duplicate"}`)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("%s %s without permission → %d, want 403", c.method, c.path, w.Code)
 		}
 	}
 }

@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/crm/domain"
 	"zyad.cloud/internal/modules/crm/playbook"
@@ -359,5 +361,28 @@ func TestCompleteNonPlaybookActivityIgnoresOutcome(t *testing.T) {
 	res := completeStep(t, db, tenants.A.Scope, a.ID, "", playbook.OutcomeInput{})
 	if res.Activity.Status != domain.ActivityStatusCompleted || res.Lead != nil || res.NextActivity != nil {
 		t.Fatalf("%+v", res)
+	}
+}
+
+func TestLeadEventsTenantIsolation(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+	setupCRMOrganizations(t, db, tenants)
+	leads := repository.NewLeadRepository(db)
+	lead, _ := leads.Create(ctx, tenants.A.Scope, repository.CreateLeadParams{ContactName: "Iso"})
+
+	events, total, err := leads.ListEvents(ctx, tenants.A.Scope, lead.ID, 50, 0)
+	// created and playbook_started share one transaction (same created_at),
+	// so assert membership, not order.
+	kinds := map[domain.LeadEventType]bool{}
+	for _, e := range events {
+		kinds[e.EventType] = true
+	}
+	if err != nil || total != 2 || !kinds[domain.LeadEventCreated] || !kinds[domain.LeadEventPlaybookStarted] {
+		t.Fatalf("own events %+v total=%d err=%v", events, total, err)
+	}
+	if _, _, err := leads.ListEvents(ctx, tenants.B.Scope, lead.ID, 50, 0); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("other tenant must get ErrNoRows, got %v", err)
 	}
 }

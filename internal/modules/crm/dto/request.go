@@ -127,6 +127,16 @@ type UpdateLeadRequest struct {
 	// AnnualRevenue "" = kosongkan (NULL).
 	AnnualRevenue *string        `json:"annual_revenue"`
 	Address       map[string]any `json:"address"`
+
+	// Form kebutuhan; "" mengosongkan nilai.
+	RequirementSummary *string `json:"requirement_summary"`
+	BudgetEstimate     *string `json:"budget_estimate"`
+	TargetDate         *string `json:"target_date"` // YYYY-MM-DD
+	DecisionMaker      *string `json:"decision_maker"`
+}
+
+type UpdateCRMSettingsRequest struct {
+	LeadPlaybookEnabled *bool `json:"lead_playbook_enabled" binding:"required"`
 }
 
 // AssignLeadRequest binds the payload for assigning a lead to a user.
