@@ -280,6 +280,18 @@ func (r *leadDashboardRepository) Dashboard(ctx context.Context, scope coretenan
 		if err := rows.Err(); err != nil {
 			return err
 		}
+		// Playbook steps expose their outcomes so the dashboard can open the
+		// outcome dialog instead of completing blindly.
+		followUpActivities := make([]domain.Activity, len(d.UpcomingFollowUps))
+		for i := range d.UpcomingFollowUps {
+			followUpActivities[i] = d.UpcomingFollowUps[i].Activity
+		}
+		if err := attachPlaybookInfo(ctx, tx, followUpActivities); err != nil {
+			return err
+		}
+		for i := range d.UpcomingFollowUps {
+			d.UpcomingFollowUps[i].Activity.Playbook = followUpActivities[i].Playbook
+		}
 
 		// 8. Recent activity: lead events merged with activities on leads.
 		rows, err = tx.Query(ctx, `

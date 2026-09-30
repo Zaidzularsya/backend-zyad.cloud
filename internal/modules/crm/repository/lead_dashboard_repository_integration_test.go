@@ -310,6 +310,9 @@ func TestDashboardShowsPlaybookStepName(t *testing.T) {
 	if len(d.UpcomingFollowUps) != 1 || d.UpcomingFollowUps[0].StepName != "Kontak pertama" {
 		t.Fatalf("follow-ups %+v", d.UpcomingFollowUps)
 	}
+	if pb := d.UpcomingFollowUps[0].Activity.Playbook; pb == nil || len(pb.Outcomes) == 0 {
+		t.Fatalf("follow-up must carry playbook outcomes, got %+v", pb)
+	}
 	if d.StatusCounts[domain.LeadStatusAttempting] != 1 {
 		t.Fatalf("status counts %+v", d.StatusCounts)
 	}
