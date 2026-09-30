@@ -173,7 +173,10 @@ func (m *CRMGateway) FindEntity(ctx context.Context, scope coretenant.Scope, ent
 }
 
 func (m *CRMGateway) RecordActivity(ctx context.Context, scope coretenant.Scope, input CRMActivityInput) error {
-	activity, err := m.activities.Create(ctx, scope, crmrepo.CreateActivityParams{
+	// A chat already happened, so the timeline entry is created completed,
+	// not a to-do. The repository is used directly, so service rule R10
+	// (due_at for pending) does not apply here.
+	_, err := m.activities.Create(ctx, scope, crmrepo.CreateActivityParams{
 		RelatedEntityType: crmdomain.ActivityEntityType(input.EntityType),
 		RelatedEntityID:   input.EntityID,
 		Type:              crmdomain.ActivityTypeWhatsApp,
@@ -181,12 +184,8 @@ func (m *CRMGateway) RecordActivity(ctx context.Context, scope coretenant.Scope,
 		Description:       input.Description,
 		AssigneeUserID:    input.UserID,
 		CreatedBy:         input.UserID,
+		Status:            crmdomain.ActivityStatusCompleted,
 	})
-	if err != nil {
-		return err
-	}
-	// A chat already happened, so the timeline entry is completed, not a to-do.
-	_, err = m.activities.Complete(ctx, scope, activity.ID, input.UserID)
 	return err
 }
 

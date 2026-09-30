@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/crm/domain"
+	"zyad.cloud/internal/modules/crm/playbook"
 	"zyad.cloud/internal/platform/database"
 )
 
@@ -386,4 +388,101 @@ func (r *activityRepository) Assign(ctx context.Context, scope coretenant.Scope,
 		return domain.Activity{}, err
 	}
 	return activity, nil
+}
+
+func (r *activityRepository) CompleteWithOutcome(ctx context.Context, scope coretenant.Scope, id string, params CompleteActivityParams) (CompleteActivityResult, error) {
+	if !scope.IsValid() {
+		return CompleteActivityResult{}, coretenant.ErrInvalidScope
+	}
+	now := params.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	var res CompleteActivityResult
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		current, err := scanActivity(tx.QueryRow(ctx, `SELECT `+activityColumns+` FROM crm_activities
+			WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL AND status = 'pending'
+			FOR UPDATE`, id, scope.OrganizationID()))
+		if err != nil {
+			return err
+		}
+
+		if current.PlaybookStepID == nil || current.PlaybookRunID == nil {
+			res.Activity, err = scanActivity(tx.QueryRow(ctx, `
+				UPDATE crm_activities SET status = 'completed', completed_at = NOW(), updated_by = $1, updated_at = NOW()
+				WHERE id = $2 AND organization_id = $3 RETURNING `+activityColumns,
+				nullableString(params.UpdatedBy), id, scope.OrganizationID()))
+			return err
+		}
+
+		run, err := scanRun(tx.QueryRow(ctx, `SELECT `+runColumns+` FROM crm_playbook_runs
+			WHERE id = $1 AND organization_id = $2 FOR UPDATE`, *current.PlaybookRunID, scope.OrganizationID()))
+		if err != nil {
+			return err
+		}
+		if run.Status != domain.PlaybookRunActive {
+			return ErrPlaybookRunNotActive
+		}
+		pb, err := loadPlaybookByID(ctx, tx, run.PlaybookID)
+		if err != nil {
+			return err
+		}
+		var step domain.PlaybookStep
+		for _, s := range pb.Steps {
+			if s.ID == *current.PlaybookStepID {
+				step = s
+			}
+		}
+		attempt := 1
+		if current.AttemptNo != nil {
+			attempt = *current.AttemptNo
+		}
+		tr, err := playbook.Resolve(playbook.ResolveRequest{
+			Playbook: pb, Step: step, AttemptNo: attempt, FinalReview: current.FinalReview,
+			OutcomeKey: params.OutcomeKey, Input: params.Input, Now: now,
+		})
+		if err != nil {
+			return err
+		}
+
+		res.Activity, err = scanActivity(tx.QueryRow(ctx, `
+			UPDATE crm_activities SET status = 'completed', completed_at = NOW(), outcome_key = $1, updated_by = $2, updated_at = NOW()
+			WHERE id = $3 AND organization_id = $4 RETURNING `+activityColumns,
+			tr.Outcome.Key, nullableString(params.UpdatedBy), id, scope.OrganizationID()))
+		if err != nil {
+			return err
+		}
+
+		lead, err := applyTransitionToLead(ctx, tx, scope, run.EntityID, tr, params.UpdatedBy)
+		if err != nil {
+			return err
+		}
+		res.Lead = &lead
+
+		if tr.EndRun {
+			if err := endLeadRunTx(ctx, tx, scope, lead.ID, *tr.RunResult, params.UpdatedBy); err != nil {
+				return err
+			}
+			ended, err := scanRun(tx.QueryRow(ctx, `SELECT `+runColumns+` FROM crm_playbook_runs WHERE id = $1 AND organization_id = $2`, run.ID, scope.OrganizationID()))
+			if err != nil {
+				return err
+			}
+			res.Run = &ended
+			return nil
+		}
+
+		next, err := insertPlaybookActivityTx(ctx, tx, scope, run, *tr.Next, leadPIC(lead), params.UpdatedBy)
+		if err != nil {
+			return err
+		}
+		withInfo := []domain.Activity{next}
+		if err := attachPlaybookInfo(ctx, tx, withInfo); err != nil {
+			return err
+		}
+		res.NextActivity = &withInfo[0]
+		run.CurrentStepID = &tr.Next.Step.ID
+		res.Run = &run
+		return nil
+	})
+	return res, err
 }

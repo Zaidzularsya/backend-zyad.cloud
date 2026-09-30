@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -310,4 +312,51 @@ func endRunIfStatusLeavesStep(ctx context.Context, tx pgx.Tx, scope coretenant.S
 		}
 	}
 	return endLeadRunTx(ctx, tx, scope, lead.ID, domain.PlaybookResultCancelled, actor)
+}
+
+// applyTransitionToLead writes status / requirements / disqualify fields of
+// a transition and records the status_changed event.
+func applyTransitionToLead(ctx context.Context, tx pgx.Tx, scope coretenant.Scope, leadID string, tr playbook.Transition, actor string) (domain.Lead, error) {
+	oldStatus, _, err := lockLeadState(ctx, tx, scope, leadID)
+	if err != nil {
+		return domain.Lead{}, err
+	}
+	sets := []string{"updated_at = NOW()"}
+	args := []any{}
+	add := func(col string, v any) {
+		args = append(args, v)
+		sets = append(sets, fmt.Sprintf("%s = $%d", col, len(args)))
+	}
+	if tr.SetLeadStatus != nil {
+		add("status", string(*tr.SetLeadStatus))
+	}
+	if tr.DisqualifyReason != nil {
+		add("disqualify_reason", string(*tr.DisqualifyReason))
+		add("disqualify_note", nullableString(tr.DisqualifyNote))
+	}
+	if r := tr.Requirements; r != nil {
+		add("requirement_summary", r.Summary)
+		if r.BudgetEstimate != nil {
+			add("budget_estimate", nullableString(*r.BudgetEstimate))
+		}
+		if r.TargetDate != nil {
+			add("target_date", r.TargetDate.Format("2006-01-02"))
+		}
+		add("decision_maker", nullableString(r.DecisionMaker))
+	}
+	if actor != "" {
+		add("updated_by", actor)
+	}
+	args = append(args, leadID, scope.OrganizationID())
+	lead, err := scanLead(tx.QueryRow(ctx, "UPDATE crm_leads SET "+strings.Join(sets, ", ")+
+		fmt.Sprintf(" WHERE id = $%d AND organization_id = $%d AND deleted_at IS NULL RETURNING ", len(args)-1, len(args))+leadColumns, args...))
+	if err != nil {
+		return domain.Lead{}, err
+	}
+	if string(lead.Status) != oldStatus {
+		if err := insertLeadEvent(ctx, tx, scope, lead.ID, domain.LeadEventStatusChanged, oldStatus, string(lead.Status), actor); err != nil {
+			return domain.Lead{}, err
+		}
+	}
+	return lead, nil
 }

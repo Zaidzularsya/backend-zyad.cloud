@@ -11,6 +11,7 @@ import (
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/crm/domain"
+	"zyad.cloud/internal/modules/crm/playbook"
 	"zyad.cloud/internal/modules/crm/repository"
 	"zyad.cloud/internal/platform/database"
 	"zyad.cloud/internal/platform/database/testutil"
@@ -257,4 +258,106 @@ func newCRMUser(t *testing.T, db *database.Pool) string {
 	}
 	t.Cleanup(func() { _, _ = db.Exec(context.Background(), "DELETE FROM users WHERE id = $1", id) })
 	return id
+}
+
+func completeStep(t *testing.T, db *database.Pool, scope coretenant.Scope, activityID, outcome string, in playbook.OutcomeInput) repository.CompleteActivityResult {
+	t.Helper()
+	res, err := repository.NewActivityRepository(db).CompleteWithOutcome(context.Background(), scope, activityID,
+		repository.CompleteActivityParams{OutcomeKey: outcome, Input: in, Now: time.Now()})
+	if err != nil {
+		t.Fatalf("complete %s: %v", outcome, err)
+	}
+	return res
+}
+
+func TestCompleteWithOutcomeHappyPath(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+	setupCRMOrganizations(t, db, tenants)
+	lead, _ := repository.NewLeadRepository(db).Create(ctx, tenants.A.Scope, repository.CreateLeadParams{ContactName: "Happy"})
+
+	step := pendingPlaybookSteps(t, db, tenants.A.Scope, lead.ID)[0]
+	res := completeStep(t, db, tenants.A.Scope, step.ID, "no_response", playbook.OutcomeInput{})
+	if res.Lead.Status != domain.LeadStatusAttempting || res.NextActivity == nil || *res.NextActivity.AttemptNo != 2 {
+		t.Fatalf("no_response %+v", res)
+	}
+	res = completeStep(t, db, tenants.A.Scope, res.NextActivity.ID, "connected", playbook.OutcomeInput{})
+	if res.Lead.Status != domain.LeadStatusContacted || res.NextActivity.Playbook.StepKey != "discovery" {
+		t.Fatalf("connected %+v", res)
+	}
+	budget := "25000000.00"
+	res = completeStep(t, db, tenants.A.Scope, res.NextActivity.ID, "qualified", playbook.OutcomeInput{
+		Requirements: &domain.LeadRequirements{Summary: "CRM 10 user", BudgetEstimate: &budget, DecisionMaker: "Pak Direktur"}})
+	if res.Lead.Status != domain.LeadStatusQualified || res.NextActivity != nil || res.Run.Status != domain.PlaybookRunCompleted ||
+		res.Lead.RequirementSummary != "CRM 10 user" || *res.Lead.BudgetEstimate != "25000000.00" {
+		t.Fatalf("qualified %+v", res)
+	}
+	if res.Activity.OutcomeKey != "qualified" || res.Activity.Status != domain.ActivityStatusCompleted {
+		t.Fatalf("activity %+v", res.Activity)
+	}
+}
+
+func TestCompleteWithOutcomeValidationRollsBack(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+	setupCRMOrganizations(t, db, tenants)
+	lead, _ := repository.NewLeadRepository(db).Create(ctx, tenants.A.Scope, repository.CreateLeadParams{ContactName: "Rollback"})
+	step := pendingPlaybookSteps(t, db, tenants.A.Scope, lead.ID)[0]
+
+	_, err := repository.NewActivityRepository(db).CompleteWithOutcome(ctx, tenants.A.Scope, step.ID,
+		repository.CompleteActivityParams{OutcomeKey: "call_back_later", Now: time.Now()})
+	if !errors.Is(err, playbook.ErrOutcomeInputRequired) {
+		t.Fatalf("err=%v", err)
+	}
+	if s := pendingPlaybookSteps(t, db, tenants.A.Scope, lead.ID); len(s) != 1 || s[0].ID != step.ID {
+		t.Fatalf("state changed after failed validation: %+v", s)
+	}
+}
+
+func TestCompleteWithOutcomeConcurrent(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+	setupCRMOrganizations(t, db, tenants)
+	lead, _ := repository.NewLeadRepository(db).Create(ctx, tenants.A.Scope, repository.CreateLeadParams{ContactName: "Race"})
+	step := pendingPlaybookSteps(t, db, tenants.A.Scope, lead.ID)[0]
+
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := repository.NewActivityRepository(db).CompleteWithOutcome(ctx, tenants.A.Scope, step.ID,
+				repository.CompleteActivityParams{OutcomeKey: "connected", Now: time.Now()})
+			errs <- err
+		}()
+	}
+	var ok int
+	for range 2 {
+		if err := <-errs; err == nil {
+			ok++
+		}
+	}
+	if ok != 1 {
+		t.Fatalf("successful completes = %d, want 1", ok)
+	}
+	if s := pendingPlaybookSteps(t, db, tenants.A.Scope, lead.ID); len(s) != 1 || s[0].Playbook.StepKey != "discovery" {
+		t.Fatalf("pending after race: %+v", s)
+	}
+}
+
+func TestCompleteNonPlaybookActivityIgnoresOutcome(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+	setupCRMOrganizations(t, db, tenants)
+	disablePlaybook(t, db, tenants.A.Scope)
+	lead, _ := repository.NewLeadRepository(db).Create(ctx, tenants.A.Scope, repository.CreateLeadParams{ContactName: "Plain"})
+	due := time.Now().Add(time.Hour)
+	a, _ := repository.NewActivityRepository(db).Create(ctx, tenants.A.Scope, repository.CreateActivityParams{
+		RelatedEntityType: domain.ActivityEntityLead, RelatedEntityID: lead.ID, Type: domain.ActivityTypeTask, Subject: "Kirim brosur", DueAt: &due})
+	res := completeStep(t, db, tenants.A.Scope, a.ID, "", playbook.OutcomeInput{})
+	if res.Activity.Status != domain.ActivityStatusCompleted || res.Lead != nil || res.NextActivity != nil {
+		t.Fatalf("%+v", res)
+	}
 }

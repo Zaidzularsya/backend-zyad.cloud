@@ -60,6 +60,18 @@ func (s *activityService) Create(ctx context.Context, scope coretenant.Scope, pa
 	if !params.Type.IsValid() {
 		return domain.Activity{}, ErrInvalidActivityType
 	}
+	switch params.Status {
+	case "", domain.ActivityStatusPending, domain.ActivityStatusCompleted:
+	default:
+		return domain.Activity{}, ErrInvalidActivityStatus
+	}
+	// R10: a note never waits; anything else still pending needs a due date.
+	if params.Type == domain.ActivityTypeNote {
+		params.Status = domain.ActivityStatusCompleted
+	}
+	if params.Status != domain.ActivityStatusCompleted && params.DueAt == nil {
+		return domain.Activity{}, ErrDueAtRequired
+	}
 	if err := s.validateRelatedEntity(ctx, scope, params.RelatedEntityType, params.RelatedEntityID); err != nil {
 		return domain.Activity{}, err
 	}
@@ -102,6 +114,13 @@ func (s *activityService) Complete(ctx context.Context, scope coretenant.Scope, 
 }
 
 func (s *activityService) Cancel(ctx context.Context, scope coretenant.Scope, id string, updatedBy string) (domain.Activity, error) {
+	current, err := s.repo.FindByID(ctx, scope, id)
+	if err != nil {
+		return domain.Activity{}, crmmodule.MapNotFound(err, "ACTIVITY_NOT_FOUND", "activity not found or already deleted")
+	}
+	if current.PlaybookStepID != nil {
+		return domain.Activity{}, ErrPlaybookStepCancelNotAllowed
+	}
 	activity, err := s.repo.Cancel(ctx, scope, id, updatedBy)
 	if err != nil {
 		return domain.Activity{}, crmmodule.MapNotFound(err, "ACTIVITY_NOT_PENDING", "activity not found, already deleted, or not pending")
@@ -115,4 +134,12 @@ func (s *activityService) Assign(ctx context.Context, scope coretenant.Scope, id
 		return domain.Activity{}, crmmodule.MapNotFound(err, "ACTIVITY_NOT_FOUND", "activity not found or already deleted")
 	}
 	return activity, nil
+}
+
+func (s *activityService) CompleteWithOutcome(ctx context.Context, scope coretenant.Scope, id string, params repository.CompleteActivityParams) (repository.CompleteActivityResult, error) {
+	res, err := s.repo.CompleteWithOutcome(ctx, scope, id, params)
+	if err != nil {
+		return repository.CompleteActivityResult{}, crmmodule.MapNotFound(err, "ACTIVITY_NOT_PENDING", "activity not found, already deleted, or not pending")
+	}
+	return res, nil
 }
