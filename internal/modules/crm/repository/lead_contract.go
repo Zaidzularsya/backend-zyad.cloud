@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -120,6 +121,22 @@ type MarkConvertedParams struct {
 	UpdatedBy          string
 }
 
+var (
+	ErrLeadAlreadyConverted = errors.New("lead already converted")
+	ErrLeadNotConverted     = errors.New("lead is not converted")
+	ErrLeadDealExists       = errors.New("lead already has a deal")
+)
+
+// ConvertLeadTxParams menggambarkan seluruh hasil convert yang ditulis dalam
+// satu transaksi.
+type ConvertLeadTxParams struct {
+	NewCompany        *CreateCompanyParams // nil = tidak membuat company
+	ExistingCompanyID string               // dipakai bila NewCompany nil; "" = tanpa company
+	Contact           CreateContactParams  // CompanyID diisi otomatis
+	Deal              *CreateDealParams    // nil = tanpa deal; ContactID/CompanyID diisi otomatis
+	UpdatedBy         string
+}
+
 // LeadRepository is the tenant-owned data contract. Every method requires a
 // verified immutable scope and row lookups include both scope and resource ID.
 type LeadRepository interface {
@@ -135,6 +152,9 @@ type LeadRepository interface {
 	Restore(context.Context, coretenant.Scope, string, string) error
 	Assign(context.Context, coretenant.Scope, string, string, string) (domain.Lead, error)
 	MarkConverted(context.Context, coretenant.Scope, string, MarkConvertedParams) (domain.Lead, error)
+	ConvertLead(ctx context.Context, scope coretenant.Scope, id string, params ConvertLeadTxParams) (domain.LeadConversionResult, error)
+	AttachDeal(ctx context.Context, scope coretenant.Scope, id string, params CreateDealParams) (domain.Lead, domain.Deal, error)
+	FindSourceLeadByDealID(ctx context.Context, scope coretenant.Scope, dealID string) (*domain.DealSourceLead, error)
 	// FindActiveByPhone returns the most recently updated non-deleted,
 	// non-converted lead whose phone_normalized matches (WhatsApp matching),
 	// or pgx.ErrNoRows.

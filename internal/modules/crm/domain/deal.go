@@ -47,3 +47,16 @@ type Deal struct {
 	UpdatedAt          time.Time
 	DeletedAt          *time.Time
 }
+
+// DealSourceLead adalah lead asal deal (lewat crm_leads.converted_deal_id).
+type DealSourceLead struct {
+	ID          string
+	ContactName string
+}
+
+// DealDetail dipakai GET /deals/:id.
+type DealDetail struct {
+	Deal       Deal
+	Pipeline   Pipeline
+	SourceLead *DealSourceLead
+}
