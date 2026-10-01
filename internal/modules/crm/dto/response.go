@@ -555,6 +555,7 @@ type LeadConversionResponse struct {
 	Lead    LeadResponse     `json:"lead"`
 	Contact ContactResponse  `json:"contact"`
 	Company *CompanyResponse `json:"company,omitempty"`
+	Deal    *DealResponse    `json:"deal,omitempty"`
 }
 
 func LeadConversionFromDomain(result domain.LeadConversionResult) LeadConversionResponse {
@@ -566,7 +567,16 @@ func LeadConversionFromDomain(result domain.LeadConversionResult) LeadConversion
 		companyResp := CompanyFromDomain(*result.Company)
 		resp.Company = &companyResp
 	}
+	if result.Deal != nil {
+		dealResp := DealFromDomain(*result.Deal)
+		resp.Deal = &dealResp
+	}
 	return resp
+}
+
+type LeadDealResponse struct {
+	Lead LeadResponse `json:"lead"`
+	Deal DealResponse `json:"deal"`
 }
 
 type MemberResponse struct {

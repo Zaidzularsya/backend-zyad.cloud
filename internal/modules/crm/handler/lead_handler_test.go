@@ -9,7 +9,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	coreerrors "zyad.cloud/internal/core/errors"
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
+	"zyad.cloud/internal/modules/crm/service"
 )
 
 type denyAllChecker struct{}
@@ -58,6 +60,63 @@ func TestLeadPlaybookRoutesRequirePermission(t *testing.T) {
 		w := performJSON(r, c.method, c.path, `{"reason":"duplicate"}`)
 		if w.Code != http.StatusForbidden {
 			t.Fatalf("%s %s without permission → %d, want 403", c.method, c.path, w.Code)
+		}
+	}
+}
+
+// allowOnlyChecker mengizinkan permission yang terdaftar saja.
+type allowOnlyChecker map[string]bool
+
+func (a allowOnlyChecker) Can(_ context.Context, _ string, perms []string) error {
+	for _, p := range perms {
+		if !a[p] {
+			return errors.New("denied")
+		}
+	}
+	return nil
+}
+func (a allowOnlyChecker) CanOrganization(ctx context.Context, u, _ string, perms []string) error {
+	return a.Can(ctx, u, perms)
+}
+
+func TestConvertWithDealRequiresDealCreate(t *testing.T) {
+	r := newTestRouter(t)
+	r.Use(func(c *gin.Context) { permissionmiddleware.SetUserID(c, "u1"); c.Next() })
+	NewLeadHandler(nil).RegisterRoutes(r.Group(""), allowOnlyChecker{"lead.convert": true})
+
+	w := performJSON(r, http.MethodPost, "/leads/l1/convert",
+		`{"deal":{"pipeline_id":"p1","stage_id":"s1","title":"X"}}`)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("convert+deal without deal.create → %d, want 403", w.Code)
+	}
+	w = performJSON(r, http.MethodPost, "/leads/l1/convert", `{"company":{"mode":"new","name":"PT A"}}`)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("convert+new company without company.create → %d, want 403", w.Code)
+	}
+}
+
+func TestCreateDealForLeadRouteRequiresPermission(t *testing.T) {
+	r := newTestRouter(t)
+	r.Use(func(c *gin.Context) { permissionmiddleware.SetUserID(c, "u1"); c.Next() })
+	NewLeadHandler(nil).RegisterRoutes(r.Group(""), allowOnlyChecker{"lead.convert": true})
+
+	w := performJSON(r, http.MethodPost, "/leads/l1/deal", `{"pipeline_id":"p1","stage_id":"s1","title":"X"}`)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("POST /leads/:id/deal without deal.create → %d, want 403", w.Code)
+	}
+}
+
+func TestMapLeadErrorConvertCodes(t *testing.T) {
+	cases := map[error]string{
+		service.ErrInvalidPipelineStage: "INVALID_PIPELINE_STAGE",
+		service.ErrInvalidStartStage:    "INVALID_START_STAGE",
+		service.ErrLeadNotConverted:     "LEAD_NOT_CONVERTED",
+		service.ErrLeadDealExists:       "LEAD_DEAL_EXISTS",
+	}
+	for err, code := range cases {
+		var appErr *coreerrors.AppError
+		if !errors.As(mapLeadError(err), &appErr) || appErr.Code != code {
+			t.Errorf("mapLeadError(%v) = %v, want code %s", err, mapLeadError(err), code)
 		}
 	}
 }
