@@ -43,7 +43,8 @@ const dealColumns = `
 	id, organization_id, pipeline_id, stage_id, company_id, contact_id, title,
 	value::text, currency, expected_close_date, status, lost_reason, owner_user_id,
 	discount_percent::text, discount_approved_by, discount_approved_at,
-	created_by, updated_by, created_at, updated_at, deleted_at
+	created_by, updated_by, created_at, updated_at, deleted_at,
+	description, decision_maker
 `
 
 func scanDeal(row pgx.Row) (domain.Deal, error) {
@@ -53,12 +54,14 @@ func scanDeal(row pgx.Row) (domain.Deal, error) {
 	var ownerUserID, discountApprovedBy, createdBy, updatedBy *string
 	var discountPercent *string
 	var status string
+	var description, decisionMaker *string
 
 	err := row.Scan(
 		&d.ID, &d.OrganizationID, &d.PipelineID, &d.StageID, &companyID, &contactID, &d.Title,
 		&d.Value, &d.Currency, &d.ExpectedCloseDate, &status, &lostReason, &ownerUserID,
 		&discountPercent, &discountApprovedBy, &d.DiscountApprovedAt,
 		&createdBy, &updatedBy, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt,
+		&description, &decisionMaker,
 	)
 	if err != nil {
 		return domain.Deal{}, err
@@ -83,6 +86,12 @@ func scanDeal(row pgx.Row) (domain.Deal, error) {
 	if updatedBy != nil {
 		d.UpdatedBy = *updatedBy
 	}
+	if description != nil {
+		d.Description = *description
+	}
+	if decisionMaker != nil {
+		d.DecisionMaker = *decisionMaker
+	}
 
 	return d, nil
 }
@@ -91,7 +100,19 @@ func (r *dealRepository) Create(ctx context.Context, scope coretenant.Scope, par
 	if !scope.IsValid() {
 		return domain.Deal{}, coretenant.ErrInvalidScope
 	}
+	var deal domain.Deal
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var err error
+		deal, err = insertDealTx(ctx, tx, scope, params)
+		return err
+	})
+	if err != nil {
+		return domain.Deal{}, err
+	}
+	return deal, nil
+}
 
+func insertDealTx(ctx context.Context, tx pgx.Tx, scope coretenant.Scope, params CreateDealParams) (domain.Deal, error) {
 	currency := params.Currency
 	if currency == "" {
 		currency = "IDR"
@@ -100,37 +121,28 @@ func (r *dealRepository) Create(ctx context.Context, scope coretenant.Scope, par
 	if value == "" {
 		value = "0"
 	}
-
-	query := `
+	return scanDeal(tx.QueryRow(ctx, `
 		INSERT INTO crm_deals (
 			organization_id, pipeline_id, stage_id, company_id, contact_id, title,
-			value, currency, expected_close_date, owner_user_id, created_by
+			value, currency, expected_close_date, owner_user_id, created_by,
+			description, decision_maker
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
-		) RETURNING ` + dealColumns
-
-	var deal domain.Deal
-	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
-		var scanErr error
-		deal, scanErr = scanDeal(tx.QueryRow(ctx, query,
-			scope.OrganizationID(),
-			params.PipelineID,
-			params.StageID,
-			nullableString(params.CompanyID),
-			nullableString(params.ContactID),
-			params.Title,
-			value,
-			currency,
-			params.ExpectedCloseDate,
-			nullableString(params.OwnerUserID),
-			nullableString(params.CreatedBy),
-		))
-		return scanErr
-	})
-	if err != nil {
-		return domain.Deal{}, err
-	}
-	return deal, nil
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+		) RETURNING `+dealColumns,
+		scope.OrganizationID(),
+		params.PipelineID,
+		params.StageID,
+		nullableString(params.CompanyID),
+		nullableString(params.ContactID),
+		params.Title,
+		value,
+		currency,
+		params.ExpectedCloseDate,
+		nullableString(params.OwnerUserID),
+		nullableString(params.CreatedBy),
+		nullableString(strings.TrimSpace(params.Description)),
+		nullableString(strings.TrimSpace(params.DecisionMaker)),
+	))
 }
 
 func (r *dealRepository) FindByID(ctx context.Context, scope coretenant.Scope, id string) (domain.Deal, error) {
@@ -271,6 +283,12 @@ func (r *dealRepository) Update(ctx context.Context, scope coretenant.Scope, id 
 	}
 	if params.OwnerUserID != nil {
 		addSet("owner_user_id", nullableString(*params.OwnerUserID))
+	}
+	if params.Description != nil {
+		addSet("description", nullableString(strings.TrimSpace(*params.Description)))
+	}
+	if params.DecisionMaker != nil {
+		addSet("decision_maker", nullableString(strings.TrimSpace(*params.DecisionMaker)))
 	}
 	if params.UpdatedBy != "" {
 		addSet("updated_by", params.UpdatedBy)

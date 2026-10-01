@@ -145,9 +145,32 @@ type AssignLeadRequest struct {
 }
 
 // ConvertLeadRequest binds the payload for converting a lead.
+type ConvertCompanyRequest struct {
+	Mode      string `json:"mode" binding:"required,oneof=none existing new"`
+	CompanyID string `json:"company_id"`
+	Name      string `json:"name" binding:"max=200"`
+	Industry  string `json:"industry" binding:"max=100"`
+	Website   string `json:"website" binding:"max=255"`
+	Phone     string `json:"phone" binding:"max=50"`
+}
+
+type ConvertDealRequest struct {
+	PipelineID        string `json:"pipeline_id" binding:"required"`
+	StageID           string `json:"stage_id" binding:"required"`
+	Title             string `json:"title" binding:"required,max=200"`
+	Value             string `json:"value"`
+	ExpectedCloseDate string `json:"expected_close_date"`
+	Description       string `json:"description" binding:"max=5000"`
+	DecisionMaker     string `json:"decision_maker" binding:"max=150"`
+	OwnerUserID       string `json:"owner_user_id"`
+}
+
+// ConvertLeadRequest: tanpa company/deal = perilaku lama (create_company).
 type ConvertLeadRequest struct {
-	CreateCompany bool   `json:"create_company"`
-	OwnerUserID   string `json:"owner_user_id"`
+	CreateCompany bool                   `json:"create_company"`
+	OwnerUserID   string                 `json:"owner_user_id"`
+	Company       *ConvertCompanyRequest `json:"company"`
+	Deal          *ConvertDealRequest    `json:"deal"`
 }
 
 // StageRequest binds one pipeline stage in a create/replace-stages request.
@@ -209,6 +232,8 @@ type CreateDealRequest struct {
 	Currency          string  `json:"currency"`
 	ExpectedCloseDate *string `json:"expected_close_date"`
 	OwnerUserID       string  `json:"owner_user_id"`
+	Description       string  `json:"description" binding:"max=5000"`
+	DecisionMaker     string  `json:"decision_maker" binding:"max=150"`
 }
 
 // UpdateDealRequest binds the payload for updating a deal.
@@ -221,6 +246,8 @@ type UpdateDealRequest struct {
 	Currency          *string `json:"currency"`
 	ExpectedCloseDate *string `json:"expected_close_date"`
 	OwnerUserID       *string `json:"owner_user_id"`
+	Description       *string `json:"description" binding:"omitempty,max=5000"`
+	DecisionMaker     *string `json:"decision_maker" binding:"omitempty,max=150"`
 }
 
 // MoveDealStageRequest binds the payload for POST .../deals/:id/move-stage.

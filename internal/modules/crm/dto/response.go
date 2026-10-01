@@ -262,6 +262,8 @@ type DealResponse struct {
 	ExpectedCloseDate  *time.Time `json:"expected_close_date,omitempty"`
 	Status             string     `json:"status"`
 	LostReason         string     `json:"lost_reason,omitempty"`
+	Description        string     `json:"description,omitempty"`
+	DecisionMaker      string     `json:"decision_maker,omitempty"`
 	OwnerUserID        string     `json:"owner_user_id,omitempty"`
 	DiscountPercent    *string    `json:"discount_percent,omitempty"`
 	DiscountApprovedBy string     `json:"discount_approved_by,omitempty"`
@@ -284,6 +286,8 @@ func DealFromDomain(d domain.Deal) DealResponse {
 		ExpectedCloseDate:  d.ExpectedCloseDate,
 		Status:             string(d.Status),
 		LostReason:         d.LostReason,
+		Description:        d.Description,
+		DecisionMaker:      d.DecisionMaker,
 		OwnerUserID:        d.OwnerUserID,
 		DiscountPercent:    d.DiscountPercent,
 		DiscountApprovedBy: d.DiscountApprovedBy,
@@ -551,6 +555,7 @@ type LeadConversionResponse struct {
 	Lead    LeadResponse     `json:"lead"`
 	Contact ContactResponse  `json:"contact"`
 	Company *CompanyResponse `json:"company,omitempty"`
+	Deal    *DealResponse    `json:"deal,omitempty"`
 }
 
 func LeadConversionFromDomain(result domain.LeadConversionResult) LeadConversionResponse {
@@ -562,7 +567,16 @@ func LeadConversionFromDomain(result domain.LeadConversionResult) LeadConversion
 		companyResp := CompanyFromDomain(*result.Company)
 		resp.Company = &companyResp
 	}
+	if result.Deal != nil {
+		dealResp := DealFromDomain(*result.Deal)
+		resp.Deal = &dealResp
+	}
 	return resp
+}
+
+type LeadDealResponse struct {
+	Lead LeadResponse `json:"lead"`
+	Deal DealResponse `json:"deal"`
 }
 
 type MemberResponse struct {
@@ -742,4 +756,25 @@ func LeadEventFromDomain(e domain.LeadEvent) LeadEventResponse {
 type CRMSettingsResponse struct {
 	LeadPlaybookEnabled bool       `json:"lead_playbook_enabled"`
 	UpdatedAt           *time.Time `json:"updated_at,omitempty"`
+}
+
+type DealSourceLeadResponse struct {
+	ID          string `json:"id"`
+	ContactName string `json:"contact_name"`
+}
+
+// DealDetailResponse menyisipkan DealResponse supaya klien lama yang
+// membaca field deal di level atas tetap bekerja.
+type DealDetailResponse struct {
+	DealResponse
+	Pipeline   PipelineResponse        `json:"pipeline"`
+	SourceLead *DealSourceLeadResponse `json:"source_lead"`
+}
+
+func DealDetailFromDomain(d domain.DealDetail) DealDetailResponse {
+	resp := DealDetailResponse{DealResponse: DealFromDomain(d.Deal), Pipeline: PipelineFromDomain(d.Pipeline)}
+	if d.SourceLead != nil {
+		resp.SourceLead = &DealSourceLeadResponse{ID: d.SourceLead.ID, ContactName: d.SourceLead.ContactName}
+	}
+	return resp
 }

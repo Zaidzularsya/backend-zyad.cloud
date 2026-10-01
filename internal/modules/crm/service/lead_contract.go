@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	ErrLeadAlreadyConverted = errors.New("lead already converted")
+	ErrLeadAlreadyConverted = repository.ErrLeadAlreadyConverted
 	// ErrLeadOwnerNotMember: owner_user_id harus anggota aktif organization
 	// yang sama — mencegah lead di-assign ke (dan nama owner dibocorkan dari)
 	// user tenant lain.
@@ -21,6 +21,13 @@ var (
 	ErrInvalidDisqualifyReason = errors.New("reason must be one of: unresponsive, not_interested, not_fit, budget, competitor, bad_data, duplicate, bad_timing")
 	ErrInvalidBudgetEstimate   = errors.New("budget_estimate must be a non-negative number with at most 2 decimals")
 	ErrInvalidTargetDate       = errors.New("target_date must be YYYY-MM-DD")
+
+	ErrInvalidPipelineStage = errors.New("pipeline or stage is not valid for a new deal")
+	ErrInvalidStartStage    = errors.New("a deal cannot start in a won or lost stage")
+	ErrInvalidDealInput     = errors.New("deal title is required (max 200), value must be a non-negative number with at most 2 decimals, expected_close_date must be YYYY-MM-DD")
+	ErrInvalidCompanyInput  = errors.New("company mode must be none, existing (with company_id) or new (with name)")
+	ErrLeadNotConverted     = repository.ErrLeadNotConverted
+	ErrLeadDealExists       = repository.ErrLeadDealExists
 )
 
 // LeadOwnerValidator adalah subset repository.MemberRepository yang
@@ -36,10 +43,23 @@ type LeadConvertedHook interface {
 	LeadConverted(ctx context.Context, scope coretenant.Scope, leadID, contactID string) error
 }
 
-// ConvertLeadParams controls how a lead is converted into a Contact and
-// optionally a Company. Deal creation lands in Fase 2 once crm_deals exists.
+type ConvertCompanyInput struct {
+	Mode                           string // "none" | "existing" | "new"
+	CompanyID                      string
+	Name, Industry, Website, Phone string
+}
+
+type ConvertDealInput struct {
+	PipelineID, StageID, Title, Value, ExpectedCloseDate string // date "YYYY-MM-DD" atau ""
+	Description, DecisionMaker, OwnerUserID              string
+}
+
+// ConvertLeadParams controls how a lead is converted into a Contact, an
+// optional Company and an optional Deal, all in one transaction.
 type ConvertLeadParams struct {
-	CreateCompany bool
+	CreateCompany bool                 // kontrak lama: company baru dari lead.CompanyName
+	Company       *ConvertCompanyInput // nil = pakai CreateCompany
+	Deal          *ConvertDealInput    // nil = tanpa deal
 	OwnerUserID   string
 	ConvertedBy   string
 }
@@ -53,6 +73,7 @@ type LeadService interface {
 	Restore(context.Context, coretenant.Scope, string, string) error
 	Assign(context.Context, coretenant.Scope, string, string, string) (domain.Lead, error)
 	Convert(context.Context, coretenant.Scope, string, ConvertLeadParams) (domain.LeadConversionResult, error)
+	CreateDealForLead(ctx context.Context, scope coretenant.Scope, leadID string, input ConvertDealInput, createdBy string) (domain.Lead, domain.Deal, error)
 	Disqualify(ctx context.Context, scope coretenant.Scope, id string, params repository.DisqualifyLeadParams) (domain.Lead, error)
 	StartPlaybook(ctx context.Context, scope coretenant.Scope, id string, startedBy string) (domain.PlaybookRun, error)
 	ListEvents(ctx context.Context, scope coretenant.Scope, id string, page, perPage int) ([]domain.LeadEvent, int64, error)

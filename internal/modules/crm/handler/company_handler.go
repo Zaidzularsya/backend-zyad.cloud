@@ -2,6 +2,8 @@ package handler
 
 import (
 	"net/http"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 
@@ -32,6 +34,7 @@ func (h *CompanyHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmid
 
 	group.GET("", permissionmiddleware.RequireOrganizationOrGlobal(p, "company.read"), h.List)
 	group.POST("", permissionmiddleware.RequireOrganizationOrGlobal(p, "company.create"), h.Create)
+	group.GET("/lookup", permissionmiddleware.RequireOrganizationOrGlobal(p, "company.read"), h.Lookup)
 	group.GET("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "company.read"), h.Get)
 	group.PATCH("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "company.update"), h.Update)
 	group.DELETE("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "company.delete"), h.Delete)
@@ -189,4 +192,23 @@ func (h *CompanyHandler) Restore(c *gin.Context) {
 	}
 
 	corehttp.OK(c, "restored", nil)
+}
+
+func (h *CompanyHandler) Lookup(c *gin.Context) {
+	scope, err := coretenant.RequireScope(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, coreerrors.New("UNAUTHORIZED", "missing scope", http.StatusUnauthorized))
+		return
+	}
+	name := strings.TrimSpace(c.Query("name"))
+	if utf8.RuneCountInString(name) > 200 {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "name is too long", http.StatusUnprocessableEntity))
+		return
+	}
+	companies, err := h.svc.FindSimilar(c.Request.Context(), scope, name)
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	corehttp.OK(c, "success", dto.CompanyListFromDomain(companies))
 }

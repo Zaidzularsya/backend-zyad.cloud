@@ -95,7 +95,19 @@ func (r *contactRepository) Create(ctx context.Context, scope coretenant.Scope, 
 	if !scope.IsValid() {
 		return domain.Contact{}, coretenant.ErrInvalidScope
 	}
+	var contact domain.Contact
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var err error
+		contact, err = insertContactTx(ctx, tx, scope, params)
+		return err
+	})
+	if err != nil {
+		return domain.Contact{}, err
+	}
+	return contact, nil
+}
 
+func insertContactTx(ctx context.Context, tx pgx.Tx, scope coretenant.Scope, params CreateContactParams) (domain.Contact, error) {
 	lifecycleStage := params.LifecycleStage
 	if lifecycleStage == "" {
 		lifecycleStage = domain.ContactLifecycleContact
@@ -108,40 +120,28 @@ func (r *contactRepository) Create(ctx context.Context, scope coretenant.Scope, 
 	if tags == nil {
 		tags = []string{}
 	}
-
-	query := `
+	return scanContact(tx.QueryRow(ctx, `
 		INSERT INTO crm_contacts (
 			organization_id, company_id, first_name, last_name, email, phone, job_title,
 			address, tags, source, owner_user_id, is_customer, lifecycle_stage, created_by
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
-		) RETURNING ` + contactColumns
-
-	var contact domain.Contact
-	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
-		var scanErr error
-		contact, scanErr = scanContact(tx.QueryRow(ctx, query,
-			scope.OrganizationID(),
-			nullableString(params.CompanyID),
-			params.FirstName,
-			nullableString(params.LastName),
-			nullableString(params.Email),
-			nullableString(params.Phone),
-			nullableString(params.JobTitle),
-			address,
-			tags,
-			nullableString(params.Source),
-			nullableString(params.OwnerUserID),
-			params.IsCustomer,
-			string(lifecycleStage),
-			nullableString(params.CreatedBy),
-		))
-		return scanErr
-	})
-	if err != nil {
-		return domain.Contact{}, err
-	}
-	return contact, nil
+		) RETURNING `+contactColumns,
+		scope.OrganizationID(),
+		nullableString(params.CompanyID),
+		params.FirstName,
+		nullableString(params.LastName),
+		nullableString(params.Email),
+		nullableString(params.Phone),
+		nullableString(params.JobTitle),
+		address,
+		tags,
+		nullableString(params.Source),
+		nullableString(params.OwnerUserID),
+		params.IsCustomer,
+		string(lifecycleStage),
+		nullableString(params.CreatedBy),
+	))
 }
 
 func (r *contactRepository) FindByID(ctx context.Context, scope coretenant.Scope, id string) (domain.Contact, error) {

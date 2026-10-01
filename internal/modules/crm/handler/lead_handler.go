@@ -21,7 +21,8 @@ import (
 )
 
 type LeadHandler struct {
-	svc service.LeadService
+	svc  service.LeadService
+	perm permissionmiddleware.CombinedPermissionChecker
 }
 
 func NewLeadHandler(svc service.LeadService) *LeadHandler {
@@ -31,6 +32,7 @@ func NewLeadHandler(svc service.LeadService) *LeadHandler {
 // RegisterRoutes registers lead routes under the given parent group. See
 // CompanyHandler.RegisterRoutes for the tenant/entitlement guard note.
 func (h *LeadHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker) {
+	h.perm = p
 	group := router.Group("/leads")
 
 	group.GET("", permissionmiddleware.RequireOrganizationOrGlobal(p, "lead.read"), h.List)
@@ -41,6 +43,7 @@ func (h *LeadHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddle
 	group.POST("/:id/restore", permissionmiddleware.RequireOrganizationOrGlobal(p, "lead.restore"), h.Restore)
 	group.POST("/:id/assign", permissionmiddleware.RequireOrganizationOrGlobal(p, "lead.assign"), h.Assign)
 	group.POST("/:id/convert", permissionmiddleware.RequireOrganizationOrGlobal(p, "lead.convert"), h.Convert)
+	group.POST("/:id/deal", permissionmiddleware.RequireOrganizationOrGlobal(p, "deal.create"), h.CreateDeal)
 	group.POST("/:id/disqualify", permissionmiddleware.RequireOrganizationOrGlobal(p, "lead.update"), h.Disqualify)
 	group.POST("/:id/playbook/start", permissionmiddleware.RequireOrganizationOrGlobal(p, "lead.update"), h.StartPlaybook)
 	group.GET("/:id/events", permissionmiddleware.RequireOrganizationOrGlobal(p, "lead.read"), h.ListEvents)
@@ -259,6 +262,22 @@ func (h *LeadHandler) Assign(c *gin.Context) {
 	corehttp.OK(c, "success", dto.LeadFromDomain(lead))
 }
 
+// allowed memeriksa permission tambahan yang bergantung pada isi body
+// (urutan sama dengan middleware: organization dulu, lalu global).
+func (h *LeadHandler) allowed(c *gin.Context, perms ...string) bool {
+	if h.perm == nil || len(perms) == 0 {
+		return true
+	}
+	ctx := c.Request.Context()
+	userID := permissionmiddleware.UserID(c)
+	if tc, ok := coretenant.FromContext(ctx); ok {
+		if h.perm.CanOrganization(ctx, userID, tc.OrganizationID(), perms) == nil {
+			return true
+		}
+	}
+	return h.perm.Can(ctx, userID, perms) == nil
+}
+
 func (h *LeadHandler) Convert(c *gin.Context) {
 	scope, err := coretenant.RequireScope(c.Request.Context())
 	if err != nil {
@@ -273,33 +292,83 @@ func (h *LeadHandler) Convert(c *gin.Context) {
 		return
 	}
 
+	var extra []string
+	if req.Deal != nil {
+		extra = append(extra, "deal.create")
+	}
+	if (req.Company != nil && req.Company.Mode == "new") || (req.Company == nil && req.CreateCompany) {
+		extra = append(extra, "company.create")
+	}
+	if !h.allowed(c, extra...) {
+		corehttp.Fail(c, coreerrors.New("FORBIDDEN", "insufficient permissions", http.StatusForbidden))
+		return
+	}
+
 	ownerUserID := req.OwnerUserID
 	if ownerUserID == "" {
 		ownerUserID = userID
 	}
-
-	result, err := h.svc.Convert(c.Request.Context(), scope, c.Param("id"), service.ConvertLeadParams{
-		CreateCompany: req.CreateCompany,
-		OwnerUserID:   ownerUserID,
-		ConvertedBy:   userID,
-	})
-	if err != nil {
-		if errors.Is(err, service.ErrLeadAlreadyConverted) {
-			corehttp.Fail(c, coreerrors.New("LEAD_ALREADY_CONVERTED", "lead already converted", http.StatusConflict))
-			return
+	params := service.ConvertLeadParams{CreateCompany: req.CreateCompany, OwnerUserID: ownerUserID, ConvertedBy: userID}
+	if req.Company != nil {
+		params.Company = &service.ConvertCompanyInput{
+			Mode: req.Company.Mode, CompanyID: req.Company.CompanyID, Name: req.Company.Name,
+			Industry: req.Company.Industry, Website: req.Company.Website, Phone: req.Company.Phone,
 		}
-		corehttp.Fail(c, err)
-		return
+	}
+	if req.Deal != nil {
+		deal := convertDealInput(*req.Deal)
+		if deal.OwnerUserID == "" {
+			deal.OwnerUserID = ownerUserID
+		}
+		params.Deal = &deal
 	}
 
+	result, err := h.svc.Convert(c.Request.Context(), scope, c.Param("id"), params)
+	if err != nil {
+		failLeadError(c, err)
+		return
+	}
 	corehttp.OK(c, "success", dto.LeadConversionFromDomain(result))
+}
+
+func convertDealInput(r dto.ConvertDealRequest) service.ConvertDealInput {
+	return service.ConvertDealInput{
+		PipelineID: r.PipelineID, StageID: r.StageID, Title: r.Title, Value: r.Value,
+		ExpectedCloseDate: r.ExpectedCloseDate, Description: r.Description,
+		DecisionMaker: r.DecisionMaker, OwnerUserID: r.OwnerUserID,
+	}
+}
+
+func (h *LeadHandler) CreateDeal(c *gin.Context) {
+	scope, err := coretenant.RequireScope(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, coreerrors.New("UNAUTHORIZED", "missing scope", http.StatusUnauthorized))
+		return
+	}
+	var req dto.ConvertDealRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		return
+	}
+	userID := permissionmiddleware.UserID(c)
+	input := convertDealInput(req)
+	if input.OwnerUserID == "" {
+		input.OwnerUserID = userID
+	}
+	lead, deal, err := h.svc.CreateDealForLead(c.Request.Context(), scope, c.Param("id"), input, userID)
+	if err != nil {
+		failLeadError(c, err)
+		return
+	}
+	corehttp.OK(c, "success", dto.LeadDealResponse{Lead: dto.LeadFromDomain(lead), Deal: dto.DealFromDomain(deal)})
 }
 
 // failLeadError memetakan error validasi service lead ke 422; error lain
 // diteruskan apa adanya (AppError dari MapNotFound, dsb).
 func failLeadError(c *gin.Context, err error) {
 	if errors.Is(err, service.ErrLeadOwnerNotMember) || errors.Is(err, service.ErrInvalidAnnualRevenue) ||
-		errors.Is(err, service.ErrInvalidBudgetEstimate) || errors.Is(err, service.ErrInvalidTargetDate) {
+		errors.Is(err, service.ErrInvalidBudgetEstimate) || errors.Is(err, service.ErrInvalidTargetDate) ||
+		errors.Is(err, service.ErrInvalidDealInput) || errors.Is(err, service.ErrInvalidCompanyInput) {
 		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
 		return
 	}
@@ -397,6 +466,14 @@ func mapLeadError(err error) error {
 		return coreerrors.New("USE_DISQUALIFY_ENDPOINT", err.Error(), http.StatusUnprocessableEntity)
 	case errors.Is(err, service.ErrLeadAlreadyConverted):
 		return coreerrors.New("LEAD_ALREADY_CONVERTED", err.Error(), http.StatusConflict)
+	case errors.Is(err, service.ErrInvalidPipelineStage):
+		return coreerrors.New("INVALID_PIPELINE_STAGE", err.Error(), http.StatusUnprocessableEntity)
+	case errors.Is(err, service.ErrInvalidStartStage):
+		return coreerrors.New("INVALID_START_STAGE", err.Error(), http.StatusUnprocessableEntity)
+	case errors.Is(err, service.ErrLeadNotConverted):
+		return coreerrors.New("LEAD_NOT_CONVERTED", err.Error(), http.StatusConflict)
+	case errors.Is(err, service.ErrLeadDealExists):
+		return coreerrors.New("LEAD_DEAL_EXISTS", err.Error(), http.StatusConflict)
 	}
 	return mapPlaybookError(err)
 }

@@ -320,6 +320,21 @@ Spec: `docs/superpowers/specs/2026-09-30-lead-playbook-design.md`. Setiap lead b
 
 Aturan singkat (detail di spec §6): R1 start otomatis di repository Create; R2 satu run aktif per lead; R3 PIC = owner, fallback pembuat; R4 complete wajib hasil dan atomik; R5 langkah tidak bisa di-cancel; R6 run berakhir saat convert/disqualify/delete/status manual tak sesuai; R7 ganti owner memindahkan langkah pending; R8 "Mulai SOP" manual; R9 percobaan ke-3 tidak respon → langkah Tinjau; R10 note selalu completed; R11 jam kerja WIB Senin–Jumat 08–17; R12 toggle organisasi tidak menghentikan run aktif; R13 run menyimpan `playbook_version`.
 
+## Convert Lead (Rilis 2)
+
+Spec: `docs/superpowers/specs/2026-10-01-lead-deal-quotation-design.md`. Convert kini menulis company (opsional), contact, deal (opsional) dan menandai lead `converted` dalam **satu transaksi** (`repository/lead_convert.go`); gagal di langkah mana pun membatalkan semuanya. Baris lead dikunci `FOR UPDATE`, sehingga convert kedua (klik ganda / dua tab) gagal `LEAD_ALREADY_CONVERTED` tanpa membuat record tambahan. Relasi lead↔deal memakai `crm_leads.converted_deal_id` (migration `000137` menambah index-nya dan kolom `crm_deals.description`, `crm_deals.decision_maker`).
+
+| Endpoint | Perubahan | Permission |
+|---|---|---|
+| `POST /leads/:id/convert` | Body `{create_company?, owner_user_id?, company?{mode: none\|existing\|new, company_id?, name?, industry?, website?, phone?}, deal?{pipeline_id, stage_id, title, value?, expected_close_date?, description?, decision_maker?, owner_user_id?}}`. Tanpa `company`/`deal` = perilaku lama. Response `{lead, contact, company?, deal?}`. | `lead.convert` (+ `deal.create` bila ada `deal`; + `company.create` bila company baru) |
+| `POST /leads/:id/deal` | Buat deal untuk lead yang sudah converted tanpa deal. Body = objek `deal` di atas. Response `{lead, deal}`. | `deal.create` |
+| `GET /companies/lookup?name=` | Maks 5 company yang namanya mirip (normalisasi: huruf kecil, tanpa PT/CV/Tbk/UD), untuk cegah duplikat. | `company.read` |
+| `GET /deals/:id` | Field deal di level atas (kompatibel) + `pipeline` + `source_lead {id, contact_name} \| null`. | `deal.read` |
+
+Validasi deal: pipeline milik organisasi dan tidak diarsipkan, stage milik pipeline itu dan bukan Won/Lost, judul wajib (maks 200), `value` desimal `^\d{1,16}(\.\d{1,2})?$` (kosong = `0`), `expected_close_date` `YYYY-MM-DD`. Owner deal default ke owner convert. Kebutuhan yang diedit saat convert disimpan ke deal saja; field kebutuhan di lead tidak diubah.
+
+Kode error: `422 INVALID_PIPELINE_STAGE`, `422 INVALID_START_STAGE`, `422 VALIDATION_ERROR` (input deal/company), `409 LEAD_ALREADY_CONVERTED`, `409 LEAD_NOT_CONVERTED`, `409 LEAD_DEAL_EXISTS`, `403 FORBIDDEN` (deal tanpa `deal.create`, company baru tanpa `company.create`).
+
 ## Non-Goals
 
 - Tidak menggantikan atau berinteraksi langsung dengan `billing_invoices`/`billing_payments` (modul

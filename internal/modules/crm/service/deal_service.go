@@ -13,6 +13,7 @@ type dealService struct {
 	repo         repository.DealRepository
 	pipelineRepo repository.PipelineRepository
 	contactRepo  repository.ContactRepository
+	leadRepo     repository.LeadRepository
 }
 
 type DealServiceOption func(*dealService)
@@ -23,6 +24,13 @@ type DealServiceOption func(*dealService)
 func WithDealContactSync(repo repository.ContactRepository) DealServiceOption {
 	return func(s *dealService) {
 		s.contactRepo = repo
+	}
+}
+
+// WithDealSourceLeads membuat GetDetail menyertakan lead asal deal.
+func WithDealSourceLeads(repo repository.LeadRepository) DealServiceOption {
+	return func(s *dealService) {
+		s.leadRepo = repo
 	}
 }
 
@@ -142,4 +150,23 @@ func (s *dealService) ApproveDiscount(ctx context.Context, scope coretenant.Scop
 		return domain.Deal{}, crmmodule.MapNotFound(err, "DEAL_NOT_FOUND", "deal not found or already deleted")
 	}
 	return deal, nil
+}
+
+func (s *dealService) GetDetail(ctx context.Context, scope coretenant.Scope, id string) (domain.DealDetail, error) {
+	deal, err := s.Get(ctx, scope, id)
+	if err != nil {
+		return domain.DealDetail{}, err
+	}
+	pipeline, err := s.pipelineRepo.FindByID(ctx, scope, deal.PipelineID)
+	if err != nil {
+		return domain.DealDetail{}, crmmodule.MapNotFound(err, "PIPELINE_NOT_FOUND", "pipeline not found or already deleted")
+	}
+	detail := domain.DealDetail{Deal: deal, Pipeline: pipeline}
+	if s.leadRepo != nil {
+		detail.SourceLead, err = s.leadRepo.FindSourceLeadByDealID(ctx, scope, deal.ID)
+		if err != nil {
+			return domain.DealDetail{}, err
+		}
+	}
+	return detail, nil
 }

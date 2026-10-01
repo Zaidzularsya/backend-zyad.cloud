@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	crmmodule "zyad.cloud/internal/modules/crm"
@@ -47,4 +48,33 @@ func (s *companyService) Delete(ctx context.Context, scope coretenant.Scope, id 
 
 func (s *companyService) Restore(ctx context.Context, scope coretenant.Scope, id string, restoredBy string) error {
 	return crmmodule.MapNotFound(s.repo.Restore(ctx, scope, id, restoredBy), "COMPANY_NOT_FOUND", "company not found or not deleted")
+}
+
+// FindSimilar mencari company yang namanya mirip (maks 5). Kandidat diambil
+// dengan kata terpanjang dari nama ter-normalisasi, lalu disaring di Go.
+func (s *companyService) FindSimilar(ctx context.Context, scope coretenant.Scope, name string) ([]domain.Company, error) {
+	normalized := NormalizeCompanyName(name)
+	if normalized == "" {
+		return []domain.Company{}, nil
+	}
+	longest := ""
+	for _, w := range strings.Fields(normalized) {
+		if len([]rune(w)) > len([]rune(longest)) {
+			longest = w
+		}
+	}
+	candidates, err := s.repo.FindCandidatesByName(ctx, scope, longest, 25)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.Company, 0, 5)
+	for _, c := range candidates {
+		if isSimilarCompanyName(normalized, c.Name) {
+			out = append(out, c)
+			if len(out) == 5 {
+				break
+			}
+		}
+	}
+	return out, nil
 }

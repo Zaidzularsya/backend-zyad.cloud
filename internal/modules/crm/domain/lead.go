@@ -69,4 +69,5 @@ type LeadConversionResult struct {
 	Lead    Lead
 	Contact Contact
 	Company *Company
+	Deal    *Deal
 }

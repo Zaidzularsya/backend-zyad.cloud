@@ -48,6 +48,9 @@ type UpdateCompanyParams struct {
 // CompanyRepository is the tenant-owned data contract. Every method requires
 // a verified immutable scope and row lookups include both scope and resource ID.
 type CompanyRepository interface {
+	// FindCandidatesByName: kandidat kasar untuk pengecekan duplikat
+	// (lower(name) mengandung needle). needle sudah lowercase.
+	FindCandidatesByName(ctx context.Context, scope coretenant.Scope, needle string, limit int) ([]domain.Company, error)
 	Create(context.Context, coretenant.Scope, CreateCompanyParams) (domain.Company, error)
 	FindByID(context.Context, coretenant.Scope, string) (domain.Company, error)
 	List(context.Context, coretenant.Scope, CompanyListFilter) ([]domain.Company, int64, error)
