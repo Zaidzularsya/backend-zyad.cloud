@@ -100,7 +100,19 @@ func (r *dealRepository) Create(ctx context.Context, scope coretenant.Scope, par
 	if !scope.IsValid() {
 		return domain.Deal{}, coretenant.ErrInvalidScope
 	}
+	var deal domain.Deal
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var err error
+		deal, err = insertDealTx(ctx, tx, scope, params)
+		return err
+	})
+	if err != nil {
+		return domain.Deal{}, err
+	}
+	return deal, nil
+}
 
+func insertDealTx(ctx context.Context, tx pgx.Tx, scope coretenant.Scope, params CreateDealParams) (domain.Deal, error) {
 	currency := params.Currency
 	if currency == "" {
 		currency = "IDR"
@@ -109,40 +121,28 @@ func (r *dealRepository) Create(ctx context.Context, scope coretenant.Scope, par
 	if value == "" {
 		value = "0"
 	}
-
-	query := `
+	return scanDeal(tx.QueryRow(ctx, `
 		INSERT INTO crm_deals (
 			organization_id, pipeline_id, stage_id, company_id, contact_id, title,
 			value, currency, expected_close_date, owner_user_id, created_by,
 			description, decision_maker
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
-		) RETURNING ` + dealColumns
-
-	var deal domain.Deal
-	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
-		var scanErr error
-		deal, scanErr = scanDeal(tx.QueryRow(ctx, query,
-			scope.OrganizationID(),
-			params.PipelineID,
-			params.StageID,
-			nullableString(params.CompanyID),
-			nullableString(params.ContactID),
-			params.Title,
-			value,
-			currency,
-			params.ExpectedCloseDate,
-			nullableString(params.OwnerUserID),
-			nullableString(params.CreatedBy),
-			nullableString(strings.TrimSpace(params.Description)),
-			nullableString(strings.TrimSpace(params.DecisionMaker)),
-		))
-		return scanErr
-	})
-	if err != nil {
-		return domain.Deal{}, err
-	}
-	return deal, nil
+		) RETURNING `+dealColumns,
+		scope.OrganizationID(),
+		params.PipelineID,
+		params.StageID,
+		nullableString(params.CompanyID),
+		nullableString(params.ContactID),
+		params.Title,
+		value,
+		currency,
+		params.ExpectedCloseDate,
+		nullableString(params.OwnerUserID),
+		nullableString(params.CreatedBy),
+		nullableString(strings.TrimSpace(params.Description)),
+		nullableString(strings.TrimSpace(params.DecisionMaker)),
+	))
 }
 
 func (r *dealRepository) FindByID(ctx context.Context, scope coretenant.Scope, id string) (domain.Deal, error) {
