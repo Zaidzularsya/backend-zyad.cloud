@@ -747,3 +747,24 @@ type CRMSettingsResponse struct {
 	LeadPlaybookEnabled bool       `json:"lead_playbook_enabled"`
 	UpdatedAt           *time.Time `json:"updated_at,omitempty"`
 }
+
+type DealSourceLeadResponse struct {
+	ID          string `json:"id"`
+	ContactName string `json:"contact_name"`
+}
+
+// DealDetailResponse menyisipkan DealResponse supaya klien lama yang
+// membaca field deal di level atas tetap bekerja.
+type DealDetailResponse struct {
+	DealResponse
+	Pipeline   PipelineResponse        `json:"pipeline"`
+	SourceLead *DealSourceLeadResponse `json:"source_lead"`
+}
+
+func DealDetailFromDomain(d domain.DealDetail) DealDetailResponse {
+	resp := DealDetailResponse{DealResponse: DealFromDomain(d.Deal), Pipeline: PipelineFromDomain(d.Pipeline)}
+	if d.SourceLead != nil {
+		resp.SourceLead = &DealSourceLeadResponse{ID: d.SourceLead.ID, ContactName: d.SourceLead.ContactName}
+	}
+	return resp
+}

@@ -17,6 +17,7 @@ var (
 type DealService interface {
 	Create(context.Context, coretenant.Scope, repository.CreateDealParams) (domain.Deal, error)
 	Get(context.Context, coretenant.Scope, string) (domain.Deal, error)
+	GetDetail(ctx context.Context, scope coretenant.Scope, id string) (domain.DealDetail, error)
 	List(context.Context, coretenant.Scope, repository.DealListFilter) ([]domain.Deal, int64, error)
 	Update(context.Context, coretenant.Scope, string, repository.UpdateDealParams) (domain.Deal, error)
 	Delete(context.Context, coretenant.Scope, string, string) error

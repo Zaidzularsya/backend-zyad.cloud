@@ -459,6 +459,7 @@ func New(ctx context.Context) (*App, error) {
 		crmDealRepo,
 		crmPipelineRepo,
 		crmservice.WithDealContactSync(crmContactRepo),
+		crmservice.WithDealSourceLeads(crmLeadRepo),
 	)
 	crmActivityRepo := crmrepo.NewActivityRepository(db)
 	crmActivitySvc := crmservice.NewActivityService(crmActivityRepo, crmLeadRepo, crmContactRepo, crmCompanyRepo, crmDealRepo)
