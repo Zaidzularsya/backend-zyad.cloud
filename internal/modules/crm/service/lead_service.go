@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"log/slog"
 	"regexp"
 	"time"
 
@@ -13,12 +12,13 @@ import (
 )
 
 type leadService struct {
-	repo        repository.LeadRepository
-	contactRepo repository.ContactRepository
-	companyRepo repository.CompanyRepository
-	quotaGuard  ContactQuotaGuard
-	ownerCheck  LeadOwnerValidator
-	onConvert   LeadConvertedHook
+	repo         repository.LeadRepository
+	contactRepo  repository.ContactRepository
+	companyRepo  repository.CompanyRepository
+	quotaGuard   ContactQuotaGuard
+	ownerCheck   LeadOwnerValidator
+	onConvert    LeadConvertedHook
+	pipelineRepo repository.PipelineRepository
 }
 
 // annualRevenuePattern mengikuti batas kolom numeric(18,2): maks 16 digit
@@ -48,6 +48,14 @@ func WithLeadOwnerValidator(validator LeadOwnerValidator) LeadServiceOption {
 func WithLeadConvertedHook(hook LeadConvertedHook) LeadServiceOption {
 	return func(service *leadService) {
 		service.onConvert = hook
+	}
+}
+
+// WithLeadDealPipelines mengaktifkan pembuatan deal saat convert (validasi
+// pipeline/stage). Tanpa option ini, input deal ditolak ErrInvalidPipelineStage.
+func WithLeadDealPipelines(repo repository.PipelineRepository) LeadServiceOption {
+	return func(service *leadService) {
+		service.pipelineRepo = repo
 	}
 }
 
@@ -156,84 +164,6 @@ func (s *leadService) Assign(ctx context.Context, scope coretenant.Scope, id str
 		return domain.Lead{}, crmmodule.MapNotFound(err, "LEAD_NOT_FOUND", "lead not found or already deleted")
 	}
 	return lead, nil
-}
-
-// Convert creates a Contact (and optionally a Company) from a lead's captured
-// details and marks the lead as converted.
-//
-// This is not atomic across crm_leads/crm_contacts/crm_companies — each
-// repository call commits its own transaction (matching the per-resource
-// withTx pattern used across this module). If MarkConverted fails after the
-// Contact/Company were created, those rows remain as valid (if orphaned)
-// records rather than being rolled back; callers should treat a failed
-// Convert as needing manual follow-up, not automatic retry.
-func (s *leadService) Convert(ctx context.Context, scope coretenant.Scope, id string, params ConvertLeadParams) (domain.LeadConversionResult, error) {
-	lead, err := s.repo.FindByID(ctx, scope, id)
-	if err != nil {
-		return domain.LeadConversionResult{}, crmmodule.MapNotFound(err, "LEAD_NOT_FOUND", "lead not found or already deleted")
-	}
-	if lead.Status == domain.LeadStatusConverted {
-		return domain.LeadConversionResult{}, ErrLeadAlreadyConverted
-	}
-
-	var company *domain.Company
-	companyID := ""
-	if params.CreateCompany && lead.CompanyName != "" {
-		created, err := s.companyRepo.Create(ctx, scope, repository.CreateCompanyParams{
-			Name:        lead.CompanyName,
-			OwnerUserID: params.OwnerUserID,
-			CreatedBy:   params.ConvertedBy,
-		})
-		if err != nil {
-			return domain.LeadConversionResult{}, err
-		}
-		company = &created
-		companyID = created.ID
-	}
-
-	if err := s.requireContactQuota(ctx, scope); err != nil {
-		return domain.LeadConversionResult{}, err
-	}
-
-	contact, err := s.contactRepo.Create(ctx, scope, repository.CreateContactParams{
-		CompanyID:      companyID,
-		FirstName:      lead.ContactName,
-		Email:          lead.Email,
-		Phone:          lead.Phone,
-		JobTitle:       lead.JobTitle,
-		Address:        lead.Address,
-		Source:         lead.Source,
-		OwnerUserID:    params.OwnerUserID,
-		LifecycleStage: domain.ContactLifecycleContact,
-		CreatedBy:      params.ConvertedBy,
-	})
-	if err != nil {
-		return domain.LeadConversionResult{}, err
-	}
-
-	convertedLead, err := s.repo.MarkConverted(ctx, scope, id, repository.MarkConvertedParams{
-		ConvertedContactID: contact.ID,
-		ConvertedCompanyID: companyID,
-		UpdatedBy:          params.ConvertedBy,
-	})
-	if err != nil {
-		return domain.LeadConversionResult{}, err
-	}
-
-	if s.onConvert != nil {
-		// Konversi sudah tersimpan; kegagalan hook tidak membatalkannya.
-		// Percakapan yang tertinggal di lead masih dipindah saat chat dibuka
-		// dari contact (lihat whatsapp ConversationService.Start).
-		if err := s.onConvert.LeadConverted(ctx, scope, id, contact.ID); err != nil {
-			slog.WarnContext(ctx, "lead converted hook failed", "lead_id", id, "contact_id", contact.ID, "error", err)
-		}
-	}
-
-	return domain.LeadConversionResult{
-		Lead:    convertedLead,
-		Contact: contact,
-		Company: company,
-	}, nil
 }
 
 // requireOwnerMember: string kosong berarti "tanpa owner" dan selalu lolos.

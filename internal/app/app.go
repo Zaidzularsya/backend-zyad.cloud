@@ -429,12 +429,14 @@ func New(ctx context.Context) (*App, error) {
 		crmservice.WithContactQuotaGuard(subscriptionGuardService),
 	)
 	crmMemberRepo := crmrepo.NewMemberRepository(db)
+	crmPipelineRepo := crmrepo.NewPipelineRepository(db)
 	crmLeadSvc := crmservice.NewLeadService(
 		crmLeadRepo,
 		crmContactRepo,
 		crmCompanyRepo,
 		crmservice.WithLeadContactQuotaGuard(subscriptionGuardService),
 		crmservice.WithLeadOwnerValidator(crmMemberRepo),
+		crmservice.WithLeadDealPipelines(crmPipelineRepo),
 		crmservice.WithLeadConvertedHook(whatsappservice.NewLeadConversionRelinker(whatsapprepo.NewConversationRepository(db))),
 	)
 	crmMemberSvc := crmservice.NewMemberService(crmMemberRepo)
@@ -448,7 +450,6 @@ func New(ctx context.Context) (*App, error) {
 		crmContactRepo,
 		assetSvc,
 	)
-	crmPipelineRepo := crmrepo.NewPipelineRepository(db)
 	crmDealRepo := crmrepo.NewDealRepository(db)
 	crmPipelineSvc := crmservice.NewPipelineService(
 		crmPipelineRepo,
