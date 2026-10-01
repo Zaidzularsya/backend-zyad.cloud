@@ -209,6 +209,8 @@ type CreateDealRequest struct {
 	Currency          string  `json:"currency"`
 	ExpectedCloseDate *string `json:"expected_close_date"`
 	OwnerUserID       string  `json:"owner_user_id"`
+	Description       string  `json:"description" binding:"max=5000"`
+	DecisionMaker     string  `json:"decision_maker" binding:"max=150"`
 }
 
 // UpdateDealRequest binds the payload for updating a deal.
@@ -221,6 +223,8 @@ type UpdateDealRequest struct {
 	Currency          *string `json:"currency"`
 	ExpectedCloseDate *string `json:"expected_close_date"`
 	OwnerUserID       *string `json:"owner_user_id"`
+	Description       *string `json:"description" binding:"omitempty,max=5000"`
+	DecisionMaker     *string `json:"decision_maker" binding:"omitempty,max=150"`
 }
 
 // MoveDealStageRequest binds the payload for POST .../deals/:id/move-stage.

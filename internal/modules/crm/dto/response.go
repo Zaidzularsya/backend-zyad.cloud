@@ -262,6 +262,8 @@ type DealResponse struct {
 	ExpectedCloseDate  *time.Time `json:"expected_close_date,omitempty"`
 	Status             string     `json:"status"`
 	LostReason         string     `json:"lost_reason,omitempty"`
+	Description        string     `json:"description,omitempty"`
+	DecisionMaker      string     `json:"decision_maker,omitempty"`
 	OwnerUserID        string     `json:"owner_user_id,omitempty"`
 	DiscountPercent    *string    `json:"discount_percent,omitempty"`
 	DiscountApprovedBy string     `json:"discount_approved_by,omitempty"`
@@ -284,6 +286,8 @@ func DealFromDomain(d domain.Deal) DealResponse {
 		ExpectedCloseDate:  d.ExpectedCloseDate,
 		Status:             string(d.Status),
 		LostReason:         d.LostReason,
+		Description:        d.Description,
+		DecisionMaker:      d.DecisionMaker,
 		OwnerUserID:        d.OwnerUserID,
 		DiscountPercent:    d.DiscountPercent,
 		DiscountApprovedBy: d.DiscountApprovedBy,

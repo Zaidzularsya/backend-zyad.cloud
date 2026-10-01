@@ -29,11 +29,14 @@ type Deal struct {
 	Title          string
 	// Value/DiscountPercent are decimal strings (see PipelineStage.Probability
 	// doc comment for why — matches internal/modules/billing convention).
-	Value              string
-	Currency           string
-	ExpectedCloseDate  *time.Time
-	Status             DealStatus
-	LostReason         string
+	Value             string
+	Currency          string
+	ExpectedCloseDate *time.Time
+	Status            DealStatus
+	LostReason        string
+	// Description / DecisionMaker membawa form kebutuhan lead saat convert.
+	Description        string
+	DecisionMaker      string
 	OwnerUserID        string
 	DiscountPercent    *string
 	DiscountApprovedBy string

@@ -123,6 +123,8 @@ func (h *DealHandler) Create(c *gin.Context) {
 		Currency:          req.Currency,
 		ExpectedCloseDate: expectedCloseDate,
 		OwnerUserID:       req.OwnerUserID,
+		Description:       req.Description,
+		DecisionMaker:     req.DecisionMaker,
 		CreatedBy:         userID,
 	})
 	if err != nil {
@@ -186,6 +188,8 @@ func (h *DealHandler) Update(c *gin.Context) {
 		Currency:          req.Currency,
 		ExpectedCloseDate: expectedCloseDate,
 		OwnerUserID:       req.OwnerUserID,
+		Description:       req.Description,
+		DecisionMaker:     req.DecisionMaker,
 		UpdatedBy:         userID,
 	})
 	if err != nil {

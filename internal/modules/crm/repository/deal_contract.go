@@ -33,6 +33,8 @@ type CreateDealParams struct {
 	ExpectedCloseDate *time.Time
 	OwnerUserID       string
 	CreatedBy         string
+	Description       string
+	DecisionMaker     string
 }
 
 type UpdateDealParams struct {
@@ -44,6 +46,8 @@ type UpdateDealParams struct {
 	Currency          *string
 	ExpectedCloseDate *time.Time
 	OwnerUserID       *string
+	Description       *string
+	DecisionMaker     *string
 	UpdatedBy         string
 }
 

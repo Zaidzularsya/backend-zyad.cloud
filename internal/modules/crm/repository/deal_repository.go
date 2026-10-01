@@ -43,7 +43,8 @@ const dealColumns = `
 	id, organization_id, pipeline_id, stage_id, company_id, contact_id, title,
 	value::text, currency, expected_close_date, status, lost_reason, owner_user_id,
 	discount_percent::text, discount_approved_by, discount_approved_at,
-	created_by, updated_by, created_at, updated_at, deleted_at
+	created_by, updated_by, created_at, updated_at, deleted_at,
+	description, decision_maker
 `
 
 func scanDeal(row pgx.Row) (domain.Deal, error) {
@@ -53,12 +54,14 @@ func scanDeal(row pgx.Row) (domain.Deal, error) {
 	var ownerUserID, discountApprovedBy, createdBy, updatedBy *string
 	var discountPercent *string
 	var status string
+	var description, decisionMaker *string
 
 	err := row.Scan(
 		&d.ID, &d.OrganizationID, &d.PipelineID, &d.StageID, &companyID, &contactID, &d.Title,
 		&d.Value, &d.Currency, &d.ExpectedCloseDate, &status, &lostReason, &ownerUserID,
 		&discountPercent, &discountApprovedBy, &d.DiscountApprovedAt,
 		&createdBy, &updatedBy, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt,
+		&description, &decisionMaker,
 	)
 	if err != nil {
 		return domain.Deal{}, err
@@ -83,6 +86,12 @@ func scanDeal(row pgx.Row) (domain.Deal, error) {
 	if updatedBy != nil {
 		d.UpdatedBy = *updatedBy
 	}
+	if description != nil {
+		d.Description = *description
+	}
+	if decisionMaker != nil {
+		d.DecisionMaker = *decisionMaker
+	}
 
 	return d, nil
 }
@@ -104,9 +113,10 @@ func (r *dealRepository) Create(ctx context.Context, scope coretenant.Scope, par
 	query := `
 		INSERT INTO crm_deals (
 			organization_id, pipeline_id, stage_id, company_id, contact_id, title,
-			value, currency, expected_close_date, owner_user_id, created_by
+			value, currency, expected_close_date, owner_user_id, created_by,
+			description, decision_maker
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 		) RETURNING ` + dealColumns
 
 	var deal domain.Deal
@@ -124,6 +134,8 @@ func (r *dealRepository) Create(ctx context.Context, scope coretenant.Scope, par
 			params.ExpectedCloseDate,
 			nullableString(params.OwnerUserID),
 			nullableString(params.CreatedBy),
+			nullableString(strings.TrimSpace(params.Description)),
+			nullableString(strings.TrimSpace(params.DecisionMaker)),
 		))
 		return scanErr
 	})
@@ -271,6 +283,12 @@ func (r *dealRepository) Update(ctx context.Context, scope coretenant.Scope, id 
 	}
 	if params.OwnerUserID != nil {
 		addSet("owner_user_id", nullableString(*params.OwnerUserID))
+	}
+	if params.Description != nil {
+		addSet("description", nullableString(strings.TrimSpace(*params.Description)))
+	}
+	if params.DecisionMaker != nil {
+		addSet("decision_maker", nullableString(strings.TrimSpace(*params.DecisionMaker)))
 	}
 	if params.UpdatedBy != "" {
 		addSet("updated_by", params.UpdatedBy)
