@@ -342,3 +342,29 @@ func nullableString(value string) interface{} {
 	}
 	return value
 }
+
+func (r *companyRepository) FindCandidatesByName(ctx context.Context, scope coretenant.Scope, needle string, limit int) ([]domain.Company, error) {
+	if !scope.IsValid() {
+		return nil, coretenant.ErrInvalidScope
+	}
+	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(needle)
+	var out []domain.Company
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, "SELECT "+companyColumns+` FROM crm_companies
+			WHERE organization_id = $1 AND deleted_at IS NULL AND lower(name) LIKE '%' || $2 || '%' ESCAPE '\'
+			ORDER BY name LIMIT $3`, scope.OrganizationID(), escaped, limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			c, err := scanCompany(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, c)
+		}
+		return rows.Err()
+	})
+	return out, err
+}

@@ -10,6 +10,7 @@ import (
 
 type CompanyService interface {
 	Create(context.Context, coretenant.Scope, repository.CreateCompanyParams) (domain.Company, error)
+	FindSimilar(ctx context.Context, scope coretenant.Scope, name string) ([]domain.Company, error)
 	Get(context.Context, coretenant.Scope, string) (domain.Company, error)
 	List(context.Context, coretenant.Scope, repository.CompanyListFilter) ([]domain.Company, int64, error)
 	Update(context.Context, coretenant.Scope, string, repository.UpdateCompanyParams) (domain.Company, error)

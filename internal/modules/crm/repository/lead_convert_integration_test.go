@@ -163,3 +163,27 @@ func TestAttachDealToConvertedLead(t *testing.T) {
 		t.Fatalf("second attach err = %v", err)
 	}
 }
+
+func TestFindCandidatesByNameIsTenantScopedAndEscapesWildcards(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+	setupCRMOrganizations(t, db, tenants)
+
+	companies := repository.NewCompanyRepository(db)
+	for _, n := range []string{"PT Maju Jaya", "CV Maju 100%"} {
+		if _, err := companies.Create(ctx, tenants.A.Scope, repository.CreateCompanyParams{Name: n}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := companies.Create(ctx, tenants.B.Scope, repository.CreateCompanyParams{Name: "PT Maju Lain"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := companies.FindCandidatesByName(ctx, tenants.A.Scope, "maju", 25)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("maju → %d err=%v, want 2 (tenant A only)", len(got), err)
+	}
+	if got, _ := companies.FindCandidatesByName(ctx, tenants.A.Scope, "%", 25); len(got) != 1 {
+		t.Fatalf("literal %% must match only the name containing it, got %d", len(got))
+	}
+}
