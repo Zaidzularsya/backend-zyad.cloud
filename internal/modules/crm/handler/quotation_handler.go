@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 
@@ -20,7 +21,8 @@ import (
 )
 
 type QuotationHandler struct {
-	svc service.QuotationService
+	svc  service.QuotationService
+	perm permissionmiddleware.CombinedPermissionChecker
 }
 
 func NewQuotationHandler(svc service.QuotationService) *QuotationHandler {
@@ -30,6 +32,7 @@ func NewQuotationHandler(svc service.QuotationService) *QuotationHandler {
 // RegisterRoutes registers quotation routes under the given parent group.
 // See CompanyHandler.RegisterRoutes for the tenant/entitlement guard note.
 func (h *QuotationHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker) {
+	h.perm = p
 	group := router.Group("/quotations")
 
 	group.GET("", permissionmiddleware.RequireOrganizationOrGlobal(p, "quotation.read"), h.List)
@@ -42,10 +45,33 @@ func (h *QuotationHandler) RegisterRoutes(router *gin.RouterGroup, p permissionm
 	group.POST("/:id/reject", permissionmiddleware.RequireOrganizationOrGlobal(p, "quotation.reject"), h.Reject)
 	group.POST("/:id/revise", permissionmiddleware.RequireOrganizationOrGlobal(p, "quotation.update"), h.Revise)
 	group.GET("/:id/pdf", permissionmiddleware.RequireOrganizationOrGlobal(p, "quotation.read"), h.PDF)
+	group.GET("/:id/summary", permissionmiddleware.RequireOrganizationOrGlobal(p, "quotation.read"), h.Summary)
+	group.GET("/:id/sends", permissionmiddleware.RequireOrganizationOrGlobal(p, "quotation.read"), h.Sends)
+}
+
+// allowed: cek permission tambahan di dalam handler (mis. izin kanal kirim).
+func (h *QuotationHandler) allowed(c *gin.Context, perms ...string) bool {
+	if h.perm == nil || len(perms) == 0 {
+		return true
+	}
+	ctx := c.Request.Context()
+	userID := permissionmiddleware.UserID(c)
+	if tc, ok := coretenant.FromContext(ctx); ok {
+		if h.perm.CanOrganization(ctx, userID, tc.OrganizationID(), perms) == nil {
+			return true
+		}
+	}
+	return h.perm.Can(ctx, userID, perms) == nil
 }
 
 func failQuotation(c *gin.Context, err error) {
 	switch {
+	case errors.Is(err, service.ErrChannelUnavailable):
+		corehttp.Fail(c, coreerrors.New("CHANNEL_UNAVAILABLE", err.Error(), http.StatusUnprocessableEntity))
+	case errors.Is(err, service.ErrQuotationNotSendable):
+		corehttp.Fail(c, coreerrors.New("QUOTATION_NOT_SENDABLE", "Quotation dengan status ini tidak bisa dikirim.", http.StatusConflict))
+	case errors.Is(err, service.ErrInvalidSendInput):
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
 	case errors.Is(err, service.ErrQuotationLocked):
 		corehttp.Fail(c, coreerrors.New("QUOTATION_LOCKED", "Quotation sudah terkirim. Buat revisi untuk mengubah.", http.StatusConflict))
 	case errors.Is(err, service.ErrQuotationNotRevisable):
@@ -67,7 +93,9 @@ func failQuotation(c *gin.Context, err error) {
 // quotation dilaporkan sebagai QUOTATION_PDF_FAILED (detail hanya di log).
 func failQuotationDocument(c *gin.Context, err error) {
 	var appErr *coreerrors.AppError
-	if errors.As(err, &appErr) || errors.Is(err, service.ErrQuotationLocked) || errors.Is(err, service.ErrQuotationNotRevisable) ||
+	if errors.As(err, &appErr) || errors.Is(err, service.ErrChannelUnavailable) ||
+		errors.Is(err, service.ErrQuotationNotSendable) || errors.Is(err, service.ErrInvalidSendInput) ||
+		errors.Is(err, service.ErrQuotationLocked) || errors.Is(err, service.ErrQuotationNotRevisable) ||
 		errors.Is(err, service.ErrProductInactive) || errors.Is(err, service.ErrQuotationDealNotFound) ||
 		errors.Is(err, service.ErrInvalidQuotationAmount) || errors.Is(err, service.ErrQuotationDocumentsUnavailable) {
 		failQuotation(c, err)
@@ -263,8 +291,8 @@ func (h *QuotationHandler) Send(c *gin.Context) {
 			return
 		}
 	}
-	if req.Channel != "" && req.Channel != "manual" {
-		corehttp.Fail(c, coreerrors.New("CHANNEL_NOT_SUPPORTED", "channel belum tersedia", http.StatusUnprocessableEntity))
+	if req.Channel == "email" || req.Channel == "whatsapp" {
+		h.sendVia(c, scope, userID, req)
 		return
 	}
 	quotation, err := h.svc.MarkSentManually(c.Request.Context(), scope, c.Param("id"), userID)
@@ -341,4 +369,75 @@ func (h *QuotationHandler) PDF(c *gin.Context) {
 	c.Header("Content-Disposition", `attachment; filename="`+pdf.Filename+`"`)
 	c.Header("Cache-Control", "no-store")
 	c.Data(http.StatusOK, "application/pdf", pdf.Content)
+}
+
+func (h *QuotationHandler) sendVia(c *gin.Context, scope coretenant.Scope, userID string, req dto.SendQuotationRequest) {
+	need := "email.send"
+	if req.Channel == "whatsapp" {
+		need = "whatsapp.message.send"
+	}
+	if !h.allowed(c, need) {
+		corehttp.Fail(c, coreerrors.New("FORBIDDEN", "insufficient permissions", http.StatusForbidden))
+		return
+	}
+	if req.Mode == "" || req.ClientRequestID == "" {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "mode and client_request_id are required", http.StatusUnprocessableEntity))
+		return
+	}
+	res, err := h.svc.SendVia(c.Request.Context(), scope, c.Param("id"), service.SendQuotationInput{
+		Channel:            domain.QuotationSendChannel(req.Channel),
+		Mode:               domain.QuotationSendMode(req.Mode),
+		Recipient:          req.Recipient,
+		Message:            req.Message,
+		MailboxID:          req.MailboxID,
+		SessionID:          req.WASessionID,
+		ClientRequestID:    req.ClientRequestID,
+		UserID:             userID,
+		CanReadAllWhatsApp: h.allowed(c, "whatsapp.conversation.read_all"),
+	})
+	if err != nil {
+		failQuotationDocument(c, err)
+		return
+	}
+	corehttp.OK(c, "success", dto.QuotationSendResultResponse{
+		Quotation: dto.QuotationFromDomain(res.Quotation),
+		Send:      dto.QuotationSendFromDomain(res.Send),
+	})
+}
+
+func (h *QuotationHandler) Summary(c *gin.Context) {
+	scope, err := coretenant.RequireScope(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, coreerrors.New("UNAUTHORIZED", "missing scope", http.StatusUnauthorized))
+		return
+	}
+	message := c.Query("message")
+	if utf8.RuneCountInString(message) > 2000 {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "message max 2000 characters", http.StatusUnprocessableEntity))
+		return
+	}
+	summary, err := h.svc.Summary(c.Request.Context(), scope, c.Param("id"), message)
+	if err != nil {
+		failQuotationDocument(c, err)
+		return
+	}
+	corehttp.OK(c, "success", dto.QuotationSummaryResponse{Subject: summary.Subject, Text: summary.Text, HTML: summary.HTML})
+}
+
+func (h *QuotationHandler) Sends(c *gin.Context) {
+	scope, err := coretenant.RequireScope(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, coreerrors.New("UNAUTHORIZED", "missing scope", http.StatusUnauthorized))
+		return
+	}
+	sends, err := h.svc.ListSends(c.Request.Context(), scope, c.Param("id"))
+	if err != nil {
+		failQuotation(c, err)
+		return
+	}
+	out := make([]dto.QuotationSendResponse, 0, len(sends))
+	for _, s := range sends {
+		out = append(out, dto.QuotationSendFromDomain(s))
+	}
+	corehttp.OK(c, "success", out)
 }

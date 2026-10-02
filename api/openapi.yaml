@@ -7884,7 +7884,7 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/v1/app/crm/quotations/{id}/send:
     post:
-      summary: Mark a draft quotation as sent
+      summary: Mark a quotation as sent manually, or send it via email/WhatsApp
       operationId: sendCrmQuotation
       tags:
       - CRM Quotation
@@ -7911,7 +7911,30 @@ paths:
                   - manual
                   - email
                   - whatsapp
-                  description: Empty body or `manual` marks the quotation as sent manually.
+                  description: Empty body or `manual` marks the quotation as sent manually; `email`/`whatsapp` sends through the channel (requires `email.send` / `whatsapp.message.send`).
+                mode:
+                  type: string
+                  enum:
+                  - text
+                  - pdf
+                  - text_pdf
+                  description: Required for email/whatsapp.
+                client_request_id:
+                  type: string
+                  maxLength: 100
+                  description: Required for email/whatsapp. Same id returns the first result without sending again.
+                recipient:
+                  type: string
+                  maxLength: 255
+                  description: Email only; defaults to the contact email. WhatsApp always uses the contact phone.
+                message:
+                  type: string
+                  maxLength: 2000
+                  description: Opening message; empty = default greeting.
+                mailbox_id:
+                  type: string
+                wa_session_id:
+                  type: string
       responses:
         '200':
           description: Success
@@ -7950,8 +7973,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Status cannot be sent (QUOTATION_NOT_SENDABLE)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
-          description: Unknown or unsupported channel (VALIDATION_ERROR / CHANNEL_NOT_SUPPORTED)
+          description: Invalid body (VALIDATION_ERROR) or channel unavailable (CHANNEL_UNAVAILABLE, message = reason; nothing is logged)
           content:
             application/json:
               schema:
@@ -8000,6 +8029,112 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
           description: Forbidden (permission, entitlement crm.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (QUOTATION_NOT_FOUND)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/crm/quotations/{id}/summary:
+    get:
+      summary: Preview the quotation summary (text for WhatsApp, HTML for email)
+      operationId: getCrmQuotationSummary
+      tags:
+      - CRM Quotation
+      security:
+      - BearerAuth: []
+      description: 'Permission: `quotation.read`. Tenant: customer or platform organization; requires entitlement `crm.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: message
+        in: query
+        description: Opening message (max 2000); empty = default greeting
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      subject:
+                        type: string
+                      text:
+                        type: string
+                      html:
+                        type: string
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (QUOTATION_NOT_FOUND)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/crm/quotations/{id}/sends:
+    get:
+      summary: List send attempts of a quotation (newest first)
+      operationId: listCrmQuotationSends
+      tags:
+      - CRM Quotation
+      security:
+      - BearerAuth: []
+      description: 'Permission: `quotation.read`. Tenant: customer or platform organization; requires entitlement `crm.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CrmQuotationSend'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
           content:
             application/json:
               schema:
@@ -11067,6 +11202,37 @@ components:
             enum:
             - won
             - ''
+    CrmQuotationSend:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        channel:
+          type: string
+          enum:
+          - email
+          - whatsapp
+        mode:
+          type: string
+          enum:
+          - text
+          - pdf
+          - text_pdf
+        recipient:
+          type: string
+        status:
+          type: string
+          enum:
+          - sent
+          - failed
+        error:
+          type: string
+        sent_by_name:
+          type: string
+        sent_at:
+          type: string
+          format: date-time
     ErrorResponse:
       type: object
       required:

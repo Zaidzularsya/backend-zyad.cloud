@@ -101,6 +101,7 @@ type MessageResponse struct {
 	Direction      string    `json:"direction"`
 	Body           string    `json:"body"`
 	HasMedia       bool      `json:"has_media"`
+	AttachmentName string    `json:"attachment_name,omitempty"`
 	Status         string    `json:"status"`
 	Error          string    `json:"error,omitempty"`
 	SentByUserID   string    `json:"sent_by_user_id,omitempty"`
@@ -109,12 +110,17 @@ type MessageResponse struct {
 
 func MessageFromDomain(m domain.Message) MessageResponse {
 	hasMedia, _ := m.Raw["hasMedia"].(bool)
+	var attachment string
+	if kind, _ := m.Raw["kind"].(string); kind == "document" {
+		attachment, _ = m.Raw["filename"].(string)
+	}
 	return MessageResponse{
 		ID:             m.ID,
 		ConversationID: m.ConversationID,
 		Direction:      string(m.Direction),
 		Body:           m.Body,
 		HasMedia:       hasMedia,
+		AttachmentName: attachment,
 		Status:         string(m.Status),
 		Error:          m.Error,
 		SentByUserID:   m.SentByUserID,

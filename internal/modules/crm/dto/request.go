@@ -367,9 +367,16 @@ type UpdateQuotationRequest struct {
 	Items      []LineItemRequest `json:"items" binding:"omitempty,min=1,dive"`
 }
 
-// SendQuotationRequest: channel kosong = manual (kontrak lama tanpa body).
+// SendQuotationRequest: channel kosong/manual = tandai terkirim manual (kontrak
+// lama tanpa body); email/whatsapp = kirim lewat kanal.
 type SendQuotationRequest struct {
-	Channel string `json:"channel" binding:"omitempty,oneof=manual email whatsapp"`
+	Channel         string `json:"channel" binding:"omitempty,oneof=manual email whatsapp"`
+	Mode            string `json:"mode" binding:"omitempty,oneof=text pdf text_pdf"`
+	ClientRequestID string `json:"client_request_id" binding:"max=100"`
+	Recipient       string `json:"recipient" binding:"max=255"`
+	Message         string `json:"message" binding:"max=2000"`
+	MailboxID       string `json:"mailbox_id"`
+	WASessionID     string `json:"wa_session_id"`
 }
 
 // InvoiceListQuery binds query parameters for listing invoices.

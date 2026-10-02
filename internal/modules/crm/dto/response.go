@@ -401,6 +401,33 @@ type QuotationDecisionResponse struct {
 	SuggestDealStatus string `json:"suggest_deal_status"`
 }
 
+type QuotationSendResponse struct {
+	ID         string    `json:"id"`
+	Channel    string    `json:"channel"`
+	Mode       string    `json:"mode"`
+	Recipient  string    `json:"recipient"`
+	Status     string    `json:"status"`
+	Error      string    `json:"error,omitempty"`
+	SentByName string    `json:"sent_by_name,omitempty"`
+	SentAt     time.Time `json:"sent_at"`
+}
+
+func QuotationSendFromDomain(s domain.QuotationSend) QuotationSendResponse {
+	return QuotationSendResponse{ID: s.ID, Channel: string(s.Channel), Mode: string(s.Mode), Recipient: s.Recipient,
+		Status: string(s.Status), Error: s.Error, SentByName: s.SentByName, SentAt: s.SentAt}
+}
+
+type QuotationSendResultResponse struct {
+	Quotation QuotationResponse     `json:"quotation"`
+	Send      QuotationSendResponse `json:"send"`
+}
+
+type QuotationSummaryResponse struct {
+	Subject string `json:"subject"`
+	Text    string `json:"text"`
+	HTML    string `json:"html"`
+}
+
 func quotationItemsFromDomain(items []domain.QuotationItem) []LineItemResponse {
 	responses := make([]LineItemResponse, 0, len(items))
 	for _, item := range items {

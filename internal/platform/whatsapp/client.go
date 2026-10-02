@@ -14,6 +14,16 @@ type Message struct {
 	Metadata map[string]any
 }
 
+// FileMessage adalah dokumen (mis. PDF penawaran) yang dikirim lewat WAHA sendFile.
+type FileMessage struct {
+	Session  string
+	To       string
+	Caption  string
+	Filename string
+	MimeType string
+	Data     []byte
+}
+
 type Result struct {
 	Provider  string
 	MessageID string
