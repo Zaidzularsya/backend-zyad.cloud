@@ -311,6 +311,18 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		deps.CRMIntegrationHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
 	}
 
+	// Katalog produk tenant (dipakai quotation CRM). Aturan tenant sama dengan CRM.
+	if deps.CatalogProductHandler != nil {
+		catalogGroup := protected.Group("/app/catalog")
+		catalogGroup.Use(
+			middleware.RequireActiveTenant(),
+			middleware.RequireCustomerOrPlatformTenant(),
+			middleware.RequireEntitlement(deps.CRMEntitlementChecker, "crm.enabled"),
+		)
+		deps.CatalogProductHandler.RegisterRoutes(catalogGroup, deps.PermissionChecker)
+		deps.CatalogCategoryHandler.RegisterRoutes(catalogGroup, deps.PermissionChecker)
+	}
+
 	// CRM email: each user's own mailboxes. Same tenant rules as CRM.
 	if deps.MailboxHandler != nil {
 		emailMiddleware := []gin.HandlerFunc{

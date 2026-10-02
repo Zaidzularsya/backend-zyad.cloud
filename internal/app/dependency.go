@@ -10,6 +10,7 @@ import (
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	assethandler "zyad.cloud/internal/modules/asset/handler"
 	billinghandler "zyad.cloud/internal/modules/billing/handler"
+	cataloghandler "zyad.cloud/internal/modules/catalog/handler"
 	crmhandler "zyad.cloud/internal/modules/crm/handler"
 	financehandler "zyad.cloud/internal/modules/finance/handler"
 	landinghandler "zyad.cloud/internal/modules/landing/handler"
@@ -73,6 +74,8 @@ type Dependencies struct {
 	CRMLeadAttachmentHandler         *crmhandler.LeadAttachmentHandler
 	CRMContactAttachmentHandler      *crmhandler.ContactAttachmentHandler
 	MailboxHandler                   *mailboxhandler.Handler
+	CatalogProductHandler            *cataloghandler.ProductHandler
+	CatalogCategoryHandler           *cataloghandler.CategoryHandler
 	CRMLeadDashboardHandler          *crmhandler.LeadDashboardHandler
 	CRMSettingsHandler               *crmhandler.CRMSettingsHandler
 	CRMMemberHandler                 *crmhandler.MemberHandler

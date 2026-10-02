@@ -7293,6 +7293,493 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/catalog/products:
+    get:
+      summary: List tenant catalog products
+      operationId: listCatalogProducts
+      tags:
+      - Catalog
+      security:
+      - BearerAuth: []
+      description: 'Permission: `catalog_product.read`. Tenant: customer or platform organization; requires entitlement `crm.enabled`.'
+      parameters:
+      - name: q
+        in: query
+        description: Search by name or SKU (case-insensitive)
+        schema:
+          type: string
+      - name: category_id
+        in: query
+        schema:
+          type: string
+          format: uuid
+      - name: is_active
+        in: query
+        schema:
+          type: string
+          enum:
+          - 'true'
+          - 'false'
+      - name: page
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+      - name: per_page
+        in: query
+        description: Default 20, max 100
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CatalogProduct'
+                  meta:
+                    $ref: '#/components/schemas/PaginationMeta'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement crm.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation error (VALIDATION_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Create a catalog product
+      operationId: createCatalogProduct
+      tags:
+      - Catalog
+      security:
+      - BearerAuth: []
+      description: 'SKU is unique per organization (case-insensitive) only when filled. Permission: `catalog_product.create`. Tenant: customer or platform organization; requires entitlement `crm.enabled`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogProductCreateRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/CatalogProduct'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement crm.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: SKU already used (PRODUCT_SKU_EXISTS)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation error (VALIDATION_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/catalog/products/{id}:
+    get:
+      summary: Get a catalog product
+      operationId: getCatalogProduct
+      tags:
+      - Catalog
+      security:
+      - BearerAuth: []
+      description: 'Permission: `catalog_product.read`. Tenant: customer or platform organization; requires entitlement `crm.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/CatalogProduct'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement crm.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (PRODUCT_NOT_FOUND)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Update a catalog product
+      operationId: updateCatalogProduct
+      tags:
+      - Catalog
+      security:
+      - BearerAuth: []
+      description: 'Only provided fields change; empty string clears category_id, sku, description. Permission: `catalog_product.update`. Tenant: customer or platform organization; requires entitlement `crm.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogProductUpdateRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/CatalogProduct'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement crm.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (PRODUCT_NOT_FOUND)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: SKU already used (PRODUCT_SKU_EXISTS)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation error (VALIDATION_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Soft-delete a catalog product
+      operationId: deleteCatalogProduct
+      tags:
+      - Catalog
+      security:
+      - BearerAuth: []
+      description: 'Permission: `catalog_product.delete`. Tenant: customer or platform organization; requires entitlement `crm.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    nullable: true
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement crm.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (PRODUCT_NOT_FOUND)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/catalog/categories:
+    get:
+      summary: List catalog categories
+      operationId: listCatalogCategories
+      tags:
+      - Catalog
+      security:
+      - BearerAuth: []
+      description: 'Permission: `catalog_product.read`. Tenant: customer or platform organization; requires entitlement `crm.enabled`.'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CatalogCategory'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement crm.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Create a catalog category
+      operationId: createCatalogCategory
+      tags:
+      - Catalog
+      security:
+      - BearerAuth: []
+      description: '`name` is required. Permission: `catalog_product.create`. Tenant: customer or platform organization; requires entitlement `crm.enabled`.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogCategoryRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/CatalogCategory'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement crm.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Name already exists (CATEGORY_NAME_EXISTS)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation error (VALIDATION_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/catalog/categories/{id}:
+    patch:
+      summary: Update a catalog category
+      operationId: updateCatalogCategory
+      tags:
+      - Catalog
+      security:
+      - BearerAuth: []
+      description: 'Permission: `catalog_product.update`. Tenant: customer or platform organization; requires entitlement `crm.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogCategoryRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/CatalogCategory'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement crm.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (CATEGORY_NOT_FOUND)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Name already exists (CATEGORY_NAME_EXISTS)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation error (VALIDATION_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Soft-delete a catalog category
+      operationId: deleteCatalogCategory
+      tags:
+      - Catalog
+      security:
+      - BearerAuth: []
+      description: 'Products in the category keep existing with an empty category. Permission: `catalog_product.delete`. Tenant: customer or platform organization; requires entitlement `crm.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    nullable: true
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement crm.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (CATEGORY_NOT_FOUND)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/webhooks/waha:
     post:
       summary: Receive WAHA webhooks (HMAC-signed)
@@ -10139,6 +10626,115 @@ components:
           example: password reset successfully
         data:
           nullable: true
+    CatalogProduct:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        category_id:
+          type: string
+          format: uuid
+          nullable: true
+        category_name:
+          type: string
+        sku:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        unit:
+          type: string
+        base_price:
+          type: string
+          description: Decimal string, 2 decimals (e.g. "350000.00")
+        tax_percent:
+          type: string
+          description: Decimal string 0-100 (e.g. "11.00")
+        currency:
+          type: string
+          example: IDR
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CatalogProductCreateRequest:
+      type: object
+      required:
+      - name
+      properties:
+        category_id:
+          type: string
+          format: uuid
+        sku:
+          type: string
+          maxLength: 64
+        name:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 5000
+        unit:
+          type: string
+          maxLength: 30
+          description: Default `pcs`
+        base_price:
+          type: string
+          pattern: ^\d{1,16}(\.\d{1,2})?$
+          description: Default "0"
+        tax_percent:
+          type: string
+          description: 0-100, max 2 decimals; default "0"
+        is_active:
+          type: boolean
+          default: true
+    CatalogProductUpdateRequest:
+      type: object
+      properties:
+        category_id:
+          type: string
+        sku:
+          type: string
+          maxLength: 64
+        name:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 5000
+        unit:
+          type: string
+          maxLength: 30
+        base_price:
+          type: string
+        tax_percent:
+          type: string
+        is_active:
+          type: boolean
+    CatalogCategory:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        position:
+          type: integer
+    CatalogCategoryRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 100
+        position:
+          type: integer
     ErrorResponse:
       type: object
       required:
