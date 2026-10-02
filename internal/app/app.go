@@ -27,6 +27,9 @@ import (
 	billinghandler "zyad.cloud/internal/modules/billing/handler"
 	billingrepo "zyad.cloud/internal/modules/billing/repository"
 	billingservice "zyad.cloud/internal/modules/billing/service"
+	cataloghandler "zyad.cloud/internal/modules/catalog/handler"
+	catalogrepo "zyad.cloud/internal/modules/catalog/repository"
+	catalogservice "zyad.cloud/internal/modules/catalog/service"
 	crmhandler "zyad.cloud/internal/modules/crm/handler"
 	crmrepo "zyad.cloud/internal/modules/crm/repository"
 	crmservice "zyad.cloud/internal/modules/crm/service"
@@ -475,6 +478,8 @@ func New(ctx context.Context) (*App, error) {
 	crmLeadHandler := crmhandler.NewLeadHandler(crmLeadSvc)
 	crmLeadAttachmentHandler := crmhandler.NewLeadAttachmentHandler(crmLeadAttachmentSvc)
 	crmContactAttachmentHandler := crmhandler.NewContactAttachmentHandler(crmContactAttachmentSvc)
+	catalogProductHandler := cataloghandler.NewProductHandler(catalogservice.NewProductService(catalogrepo.NewProductRepository(db)))
+	catalogCategoryHandler := cataloghandler.NewCategoryHandler(catalogservice.NewCategoryService(catalogrepo.NewCategoryRepository(db)))
 	mailboxRepo := mailboxrepo.NewMailboxRepository(db)
 	mailMessageRepo := mailboxrepo.NewMessageRepository(db)
 	mailboxHandler := mailboxhandler.NewHandler(
@@ -566,6 +571,8 @@ func New(ctx context.Context) (*App, error) {
 		CRMLeadAttachmentHandler:         crmLeadAttachmentHandler,
 		CRMContactAttachmentHandler:      crmContactAttachmentHandler,
 		MailboxHandler:                   mailboxHandler,
+		CatalogProductHandler:            catalogProductHandler,
+		CatalogCategoryHandler:           catalogCategoryHandler,
 		CRMLeadDashboardHandler:          crmLeadDashboardHandler,
 		CRMSettingsHandler:               crmSettingsHandler,
 		CRMMemberHandler:                 crmMemberHandler,
