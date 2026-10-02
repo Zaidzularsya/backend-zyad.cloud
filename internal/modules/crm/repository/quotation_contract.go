@@ -2,11 +2,28 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/crm/domain"
 )
+
+var (
+	ErrQuotationLocked       = errors.New("quotation is not a draft")
+	ErrQuotationNotRevisable = errors.New("only sent, rejected or expired quotations can be revised")
+)
+
+// ReplaceQuotationItemsParams mengganti seluruh item draft beserta total header
+// yang sudah dihitung service.
+type ReplaceQuotationItemsParams struct {
+	Items         []QuotationItemInput
+	Subtotal      string
+	DiscountTotal string
+	TaxTotal      string
+	GrandTotal    string
+	UpdatedBy     string
+}
 
 type QuotationListFilter struct {
 	Status         domain.QuotationStatus
@@ -27,6 +44,12 @@ type QuotationItemInput struct {
 	DiscountPercent string
 	LineTotal       string
 	Position        int
+	// Snapshot katalog (kosong untuk baris bebas).
+	ProductID  string
+	SKU        string
+	Unit       string
+	TaxPercent string
+	TaxAmount  string
 }
 
 // CreateQuotationParams intentionally excludes OrganizationID. Implementations
@@ -46,6 +69,8 @@ type CreateQuotationParams struct {
 	Notes           string
 	Items           []QuotationItemInput
 	CreatedBy       string
+	RevisionOfID    string
+	RevisionNo      int
 }
 
 type UpdateQuotationParams struct {
@@ -69,4 +94,13 @@ type QuotationRepository interface {
 	Send(context.Context, coretenant.Scope, string, string) (domain.Quotation, error)
 	Approve(context.Context, coretenant.Scope, string, string) (domain.Quotation, error)
 	Reject(context.Context, coretenant.Scope, string, string) (domain.Quotation, error)
+	// ReplaceItems hanya untuk draft (ErrQuotationLocked selain itu).
+	ReplaceItems(ctx context.Context, scope coretenant.Scope, id string, p ReplaceQuotationItemsParams) (domain.Quotation, error)
+	// Revise menandai id superseded dan membuat draft baru dalam satu transaksi;
+	// hanya dari sent/rejected/expired (ErrQuotationNotRevisable). RevisionOfID diisi = id.
+	Revise(ctx context.Context, scope coretenant.Scope, id string, p CreateQuotationParams) (domain.Quotation, error)
+	// ExpireDue mengubah sent dengan valid_until < today menjadi expired.
+	ExpireDue(ctx context.Context, scope coretenant.Scope, today time.Time) (int64, error)
+	// SetPDFSnapshot menyimpan snapshot PDF final sekali; false bila sudah ada.
+	SetPDFSnapshot(ctx context.Context, scope coretenant.Scope, id, assetID string) (bool, error)
 }

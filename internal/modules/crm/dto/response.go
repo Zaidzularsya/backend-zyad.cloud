@@ -360,6 +360,11 @@ type LineItemResponse struct {
 	DiscountPercent *string `json:"discount_percent,omitempty"`
 	LineTotal       string  `json:"line_total"`
 	Position        int     `json:"position"`
+	ProductID       *string `json:"product_id,omitempty"`
+	SKU             string  `json:"sku,omitempty"`
+	Unit            string  `json:"unit,omitempty"`
+	TaxPercent      string  `json:"tax_percent,omitempty"`
+	TaxAmount       string  `json:"tax_amount,omitempty"`
 }
 
 type QuotationResponse struct {
@@ -383,6 +388,17 @@ type QuotationResponse struct {
 	CreatedAt       time.Time          `json:"created_at"`
 	UpdatedAt       time.Time          `json:"updated_at"`
 	DeletedAt       *time.Time         `json:"deleted_at,omitempty"`
+	RevisionOfID    *string            `json:"revision_of_id,omitempty"`
+	RevisionNo      int                `json:"revision_no"`
+	HasPDF          bool               `json:"has_pdf"`
+	PDFGeneratedAt  *time.Time         `json:"pdf_generated_at,omitempty"`
+}
+
+// QuotationDecisionResponse: hasil approve/reject + saran status deal untuk UI
+// ("won" bila quotation terhubung ke deal saat approve).
+type QuotationDecisionResponse struct {
+	QuotationResponse
+	SuggestDealStatus string `json:"suggest_deal_status"`
 }
 
 func quotationItemsFromDomain(items []domain.QuotationItem) []LineItemResponse {
@@ -396,6 +412,11 @@ func quotationItemsFromDomain(items []domain.QuotationItem) []LineItemResponse {
 			DiscountPercent: item.DiscountPercent,
 			LineTotal:       item.LineTotal,
 			Position:        item.Position,
+			ProductID:       item.ProductID,
+			SKU:             item.SKU,
+			Unit:            item.Unit,
+			TaxPercent:      item.TaxPercent,
+			TaxAmount:       item.TaxAmount,
 		})
 	}
 	return responses
@@ -423,6 +444,10 @@ func QuotationFromDomain(q domain.Quotation) QuotationResponse {
 		CreatedAt:       q.CreatedAt,
 		UpdatedAt:       q.UpdatedAt,
 		DeletedAt:       q.DeletedAt,
+		RevisionOfID:    q.RevisionOfID,
+		RevisionNo:      q.RevisionNo,
+		HasPDF:          q.PDFAssetID != nil,
+		PDFGeneratedAt:  q.PDFGeneratedAt,
 	}
 }
 

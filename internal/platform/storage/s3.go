@@ -37,9 +37,10 @@ type S3Provider struct {
 }
 
 var (
-	_ ObjectStorage      = (*S3Provider)(nil)
-	_ PublicObjectReader = (*S3Provider)(nil)
-	_ PresignedStorage   = (*S3Provider)(nil)
+	_ ObjectStorage       = (*S3Provider)(nil)
+	_ PublicObjectReader  = (*S3Provider)(nil)
+	_ PresignedStorage    = (*S3Provider)(nil)
+	_ PrivateObjectReader = (*S3Provider)(nil)
 )
 
 const defaultPresignExpiry = 15 * time.Minute
@@ -148,6 +149,25 @@ func (p *S3Provider) OpenPublic(ctx context.Context, key string) (io.ReadCloser,
 		Bucket: aws.String(p.bucket),
 		Key:    aws.String(cleaned),
 	})
+	if err != nil {
+		if isS3NotFound(err) {
+			return nil, "", ErrObjectNotFound
+		}
+		return nil, "", fmt.Errorf("get s3 object: %w", err)
+	}
+	contentType := "application/octet-stream"
+	if out.ContentType != nil && *out.ContentType != "" {
+		contentType = *out.ContentType
+	}
+	return out.Body, contentType, nil
+}
+
+func (p *S3Provider) Open(ctx context.Context, key string) (io.ReadCloser, string, error) {
+	cleaned := cleanObjectKey(key)
+	if cleaned == "" {
+		return nil, "", ErrInvalidTenantObject
+	}
+	out, err := p.client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(p.bucket), Key: aws.String(cleaned)})
 	if err != nil {
 		if isS3NotFound(err) {
 			return nil, "", ErrObjectNotFound

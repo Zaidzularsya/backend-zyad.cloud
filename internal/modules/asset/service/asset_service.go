@@ -23,6 +23,8 @@ var (
 	ErrFileTooLarge    = errors.New("file too large")
 	ErrStorageRequired = errors.New("asset storage is not configured")
 	ErrQuotaExceeded   = errors.New("tenant storage quota exceeded")
+	// ErrStorageReadUnsupported: provider storage tidak bisa membaca object privat.
+	ErrStorageReadUnsupported = errors.New("storage provider cannot read objects")
 )
 
 // MaxObjectSizeBytes: batas per-file. Sama seperti landing media untuk saat
@@ -313,4 +315,25 @@ func extractLimit(limits map[string]any, key string) (*int64, error) {
 		return nil, errors.New("entitlement limit has unexpected type")
 	}
 	return &limit, nil
+}
+
+// OpenObject membaca isi object privat milik tenant lewat backend (tanpa URL
+// publik/presigned). Pemanggil wajib menutup reader.
+func (s *assetService) OpenObject(ctx context.Context, scope coretenant.Scope, id string) (io.ReadCloser, domain.AssetObject, error) {
+	object, err := s.assetRepo.Get(ctx, scope, id)
+	if err != nil {
+		return nil, domain.AssetObject{}, err
+	}
+	if err := storage.ValidateObjectOwnership(scope, object.StorageKey); err != nil {
+		return nil, domain.AssetObject{}, err
+	}
+	reader, ok := s.objectStorage.(storage.PrivateObjectReader)
+	if !ok {
+		return nil, domain.AssetObject{}, ErrStorageReadUnsupported
+	}
+	rc, _, err := reader.Open(ctx, object.StorageKey)
+	if err != nil {
+		return nil, domain.AssetObject{}, err
+	}
+	return rc, object, nil
 }

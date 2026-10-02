@@ -328,6 +328,10 @@ type LineItemRequest struct {
 	Quantity        string `json:"quantity"`
 	UnitPrice       string `json:"unit_price"`
 	DiscountPercent string `json:"discount_percent"`
+	// Quotation v2 (diabaikan invoice).
+	ProductID  string `json:"product_id"`
+	TaxPercent string `json:"tax_percent"`
+	Unit       string `json:"unit" binding:"max=30"`
 }
 
 // QuotationListQuery binds query parameters for listing quotations.
@@ -355,11 +359,17 @@ type CreateQuotationRequest struct {
 
 // UpdateQuotationRequest binds the payload for updating a quotation.
 type UpdateQuotationRequest struct {
-	DealID     *string `json:"deal_id"`
-	ContactID  *string `json:"contact_id"`
-	CompanyID  *string `json:"company_id"`
-	ValidUntil *string `json:"valid_until"`
-	Notes      *string `json:"notes"`
+	DealID     *string           `json:"deal_id"`
+	ContactID  *string           `json:"contact_id"`
+	CompanyID  *string           `json:"company_id"`
+	ValidUntil *string           `json:"valid_until"`
+	Notes      *string           `json:"notes"`
+	Items      []LineItemRequest `json:"items" binding:"omitempty,min=1,dive"`
+}
+
+// SendQuotationRequest: channel kosong = manual (kontrak lama tanpa body).
+type SendQuotationRequest struct {
+	Channel string `json:"channel" binding:"omitempty,oneof=manual email whatsapp"`
 }
 
 // InvoiceListQuery binds query parameters for listing invoices.

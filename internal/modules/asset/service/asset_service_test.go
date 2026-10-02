@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -242,3 +243,42 @@ func TestAssetServiceGetUsageSumsAcrossBothTables(t *testing.T) {
 }
 
 var _ storage.ObjectStorage = (*objectStoragePutStub)(nil)
+
+type objectStorageReadStub struct {
+	objectStoragePutStub
+	content string
+}
+
+func (s *objectStorageReadStub) Open(context.Context, string) (io.ReadCloser, string, error) {
+	return io.NopCloser(strings.NewReader(s.content)), "application/pdf", nil
+}
+
+func TestOpenObjectReadsOwnedPrivateObject(t *testing.T) {
+	own := "organizations/" + assetServiceOrganizationID + "/private/tenant-storage/q.pdf"
+	repo := &assetRepoStub{getResult: domain.AssetObject{ID: "a1", StorageKey: own}}
+	svc := NewAssetService(repo, &landingMediaSumStub{}, WithAssetObjectStorage(&objectStorageReadStub{content: "%PDF"}))
+	rc, obj, err := svc.OpenObject(context.Background(), mustAssetScope(t), "a1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rc.Close()
+	b, _ := io.ReadAll(rc)
+	if string(b) != "%PDF" || obj.ID != "a1" {
+		t.Fatalf("content=%q obj=%+v", b, obj)
+	}
+}
+
+func TestOpenObjectRejectsForeignKeyAndUnreadableStorage(t *testing.T) {
+	foreign := "organizations/22222222-2222-2222-2222-222222222222/private/tenant-storage/q.pdf"
+	svc := NewAssetService(&assetRepoStub{getResult: domain.AssetObject{ID: "a1", StorageKey: foreign}}, &landingMediaSumStub{},
+		WithAssetObjectStorage(&objectStorageReadStub{content: "x"}))
+	if _, _, err := svc.OpenObject(context.Background(), mustAssetScope(t), "a1"); err == nil {
+		t.Fatal("foreign object key must be rejected")
+	}
+	own := "organizations/" + assetServiceOrganizationID + "/private/tenant-storage/q.pdf"
+	svc = NewAssetService(&assetRepoStub{getResult: domain.AssetObject{ID: "a1", StorageKey: own}}, &landingMediaSumStub{},
+		WithAssetObjectStorage(&objectStoragePutStub{}))
+	if _, _, err := svc.OpenObject(context.Background(), mustAssetScope(t), "a1"); !errors.Is(err, ErrStorageReadUnsupported) {
+		t.Fatalf("err = %v, want ErrStorageReadUnsupported", err)
+	}
+}
