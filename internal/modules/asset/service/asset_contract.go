@@ -43,6 +43,8 @@ type AssetService interface {
 	// GetUsage menjumlahkan pemakaian storage tenant gabungan (asset_objects +
 	// landing_media_assets) dan, kalau tersedia, limit kuotanya.
 	GetUsage(ctx context.Context, scope coretenant.Scope) (StorageUsage, error)
+	// OpenObject membaca isi object privat setelah kepemilikan tenant divalidasi.
+	OpenObject(ctx context.Context, scope coretenant.Scope, id string) (io.ReadCloser, domain.AssetObject, error)
 }
 
 // LandingMediaSumRepository adalah subset kecil dari
