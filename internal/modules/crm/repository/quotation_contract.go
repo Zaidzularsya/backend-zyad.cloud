@@ -27,6 +27,12 @@ type QuotationItemInput struct {
 	DiscountPercent string
 	LineTotal       string
 	Position        int
+	// Snapshot katalog (kosong untuk baris bebas).
+	ProductID  string
+	SKU        string
+	Unit       string
+	TaxPercent string
+	TaxAmount  string
 }
 
 // CreateQuotationParams intentionally excludes OrganizationID. Implementations
@@ -46,6 +52,8 @@ type CreateQuotationParams struct {
 	Notes           string
 	Items           []QuotationItemInput
 	CreatedBy       string
+	RevisionOfID    string
+	RevisionNo      int
 }
 
 type UpdateQuotationParams struct {

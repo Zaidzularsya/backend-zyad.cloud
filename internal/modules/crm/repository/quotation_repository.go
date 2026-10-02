@@ -42,11 +42,13 @@ func (r *quotationRepository) withTx(ctx context.Context, scope coretenant.Scope
 const quotationColumns = `
 	id, organization_id, deal_id, contact_id, company_id, quotation_number, status, valid_until,
 	subtotal::text, discount_total::text, tax_total::text, grand_total::text, currency, notes,
-	sent_at, approved_at, rejected_at, created_by, updated_by, created_at, updated_at, deleted_at
+	sent_at, approved_at, rejected_at, created_by, updated_by, created_at, updated_at, deleted_at,
+	revision_of_id, revision_no, pdf_asset_id, pdf_generated_at
 `
 
 const quotationItemColumns = `
-	id, description, quantity::text, unit_price::text, discount_percent::text, line_total::text, position
+	id, description, quantity::text, unit_price::text, discount_percent::text, line_total::text, position,
+	product_id, sku, unit, tax_percent::text, tax_amount::text
 `
 
 func scanQuotation(row pgx.Row) (domain.Quotation, error) {
@@ -60,6 +62,7 @@ func scanQuotation(row pgx.Row) (domain.Quotation, error) {
 		&q.ID, &q.OrganizationID, &dealID, &contactID, &companyID, &q.QuotationNumber, &status, &q.ValidUntil,
 		&q.Subtotal, &q.DiscountTotal, &q.TaxTotal, &q.GrandTotal, &q.Currency, &notes,
 		&q.SentAt, &q.ApprovedAt, &q.RejectedAt, &createdBy, &updatedBy, &q.CreatedAt, &q.UpdatedAt, &q.DeletedAt,
+		&q.RevisionOfID, &q.RevisionNo, &q.PDFAssetID, &q.PDFGeneratedAt,
 	)
 	if err != nil {
 		return domain.Quotation{}, err
@@ -84,8 +87,40 @@ func scanQuotation(row pgx.Row) (domain.Quotation, error) {
 
 func scanQuotationItem(row pgx.Row) (domain.QuotationItem, error) {
 	var item domain.QuotationItem
-	err := row.Scan(&item.ID, &item.Description, &item.Quantity, &item.UnitPrice, &item.DiscountPercent, &item.LineTotal, &item.Position)
+	var sku, unit *string
+	err := row.Scan(&item.ID, &item.Description, &item.Quantity, &item.UnitPrice, &item.DiscountPercent, &item.LineTotal, &item.Position,
+		&item.ProductID, &sku, &unit, &item.TaxPercent, &item.TaxAmount)
+	if sku != nil {
+		item.SKU = *sku
+	}
+	if unit != nil {
+		item.Unit = *unit
+	}
 	return item, err
+}
+
+func insertQuotationItemsTx(ctx context.Context, tx pgx.Tx, scope coretenant.Scope, quotationID string, items []QuotationItemInput) error {
+	for _, item := range items {
+		taxPercent := item.TaxPercent
+		if taxPercent == "" {
+			taxPercent = "0"
+		}
+		taxAmount := item.TaxAmount
+		if taxAmount == "" {
+			taxAmount = "0"
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO crm_quotation_items (
+				organization_id, quotation_id, description, quantity, unit_price, discount_percent, line_total, position,
+				product_id, sku, unit, tax_percent, tax_amount
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+			scope.OrganizationID(), quotationID, item.Description, item.Quantity, item.UnitPrice,
+			nullableString(item.DiscountPercent), item.LineTotal, item.Position,
+			nullableString(item.ProductID), nullableString(item.SKU), nullableString(item.Unit), taxPercent, taxAmount); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func loadQuotationItems(ctx context.Context, tx pgx.Tx, organizationID string, quotationID string) ([]domain.QuotationItem, error) {
@@ -123,9 +158,10 @@ func (r *quotationRepository) Create(ctx context.Context, scope coretenant.Scope
 	query := `
 		INSERT INTO crm_quotations (
 			organization_id, deal_id, contact_id, company_id, quotation_number, valid_until,
-			subtotal, discount_total, tax_total, grand_total, currency, notes, created_by
+			subtotal, discount_total, tax_total, grand_total, currency, notes, created_by,
+			revision_of_id, revision_no
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 		) RETURNING ` + quotationColumns
 
 	var quotation domain.Quotation
@@ -145,20 +181,15 @@ func (r *quotationRepository) Create(ctx context.Context, scope coretenant.Scope
 			currency,
 			nullableString(params.Notes),
 			nullableString(params.CreatedBy),
+			nullableString(params.RevisionOfID),
+			params.RevisionNo,
 		))
 		if scanErr != nil {
 			return scanErr
 		}
 
-		for _, item := range params.Items {
-			_, err := tx.Exec(ctx, `
-				INSERT INTO crm_quotation_items (
-					organization_id, quotation_id, description, quantity, unit_price, discount_percent, line_total, position
-				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-			`, scope.OrganizationID(), quotation.ID, item.Description, item.Quantity, item.UnitPrice, nullableString(item.DiscountPercent), item.LineTotal, item.Position)
-			if err != nil {
-				return err
-			}
+		if err := insertQuotationItemsTx(ctx, tx, scope, quotation.ID, params.Items); err != nil {
+			return err
 		}
 
 		items, err := loadQuotationItems(ctx, tx, scope.OrganizationID(), quotation.ID)

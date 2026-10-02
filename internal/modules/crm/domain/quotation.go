@@ -10,21 +10,20 @@ const (
 	QuotationStatusApproved QuotationStatus = "approved"
 	QuotationStatusRejected QuotationStatus = "rejected"
 	QuotationStatusExpired  QuotationStatus = "expired"
+	// Superseded: versi lama yang sudah digantikan revisi.
+	QuotationStatusSuperseded QuotationStatus = "superseded"
 )
 
 func (s QuotationStatus) IsValid() bool {
 	switch s {
-	case QuotationStatusDraft, QuotationStatusSent, QuotationStatusApproved, QuotationStatusRejected, QuotationStatusExpired:
+	case QuotationStatusDraft, QuotationStatusSent, QuotationStatusApproved, QuotationStatusRejected, QuotationStatusExpired, QuotationStatusSuperseded:
 		return true
 	default:
 		return false
 	}
 }
 
-// QuotationItem is immutable once its quotation is created — Fase 4 does not
-// support editing line items after creation (only header fields and status
-// transitions), see docs/reference-crm.md "Fase Implementasi" for the
-// documented limitation.
+// Item hanya bisa diganti selama quotation berstatus draft (QuotationRepository.ReplaceItems).
 type QuotationItem struct {
 	ID              string
 	Description     string
@@ -33,6 +32,13 @@ type QuotationItem struct {
 	DiscountPercent *string
 	LineTotal       string
 	Position        int
+	// Snapshot katalog saat baris ditambahkan; ProductID nil = baris bebas
+	// atau produk sudah dihapus.
+	ProductID  *string
+	SKU        string
+	Unit       string
+	TaxPercent string
+	TaxAmount  string
 }
 
 // Quotation money fields (Subtotal/DiscountTotal/TaxTotal/GrandTotal) are
@@ -65,4 +71,8 @@ type Quotation struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	DeletedAt       *time.Time
+	RevisionOfID    *string
+	RevisionNo      int
+	PDFAssetID      *string
+	PDFGeneratedAt  *time.Time
 }
