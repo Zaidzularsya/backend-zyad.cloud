@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -38,6 +40,41 @@ func (h *QuotationHandler) RegisterRoutes(router *gin.RouterGroup, p permissionm
 	group.POST("/:id/send", permissionmiddleware.RequireOrganizationOrGlobal(p, "quotation.send"), h.Send)
 	group.POST("/:id/approve", permissionmiddleware.RequireOrganizationOrGlobal(p, "quotation.approve"), h.Approve)
 	group.POST("/:id/reject", permissionmiddleware.RequireOrganizationOrGlobal(p, "quotation.reject"), h.Reject)
+	group.POST("/:id/revise", permissionmiddleware.RequireOrganizationOrGlobal(p, "quotation.update"), h.Revise)
+	group.GET("/:id/pdf", permissionmiddleware.RequireOrganizationOrGlobal(p, "quotation.read"), h.PDF)
+}
+
+func failQuotation(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, service.ErrQuotationLocked):
+		corehttp.Fail(c, coreerrors.New("QUOTATION_LOCKED", "Quotation sudah terkirim. Buat revisi untuk mengubah.", http.StatusConflict))
+	case errors.Is(err, service.ErrQuotationNotRevisable):
+		corehttp.Fail(c, coreerrors.New("QUOTATION_NOT_REVISABLE", err.Error(), http.StatusConflict))
+	case errors.Is(err, service.ErrProductInactive):
+		corehttp.Fail(c, coreerrors.New("PRODUCT_INACTIVE", "Produk tidak aktif atau sudah dihapus.", http.StatusUnprocessableEntity))
+	case errors.Is(err, service.ErrQuotationDealNotFound):
+		corehttp.Fail(c, coreerrors.New("QUOTATION_DEAL_NOT_FOUND", "Deal tidak ditemukan.", http.StatusUnprocessableEntity))
+	case errors.Is(err, service.ErrInvalidQuotationAmount):
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "Item tidak valid: deskripsi wajib, qty/harga ≥ 0, diskon & pajak 0–100.", http.StatusUnprocessableEntity))
+	case errors.Is(err, service.ErrQuotationDocumentsUnavailable):
+		corehttp.Fail(c, coreerrors.New("QUOTATION_PDF_FAILED", "PDF tidak dapat dibuat.", http.StatusBadGateway))
+	default:
+		corehttp.Fail(c, err)
+	}
+}
+
+// failQuotationDocument: error render/storage yang bukan AppError atau sentinel
+// quotation dilaporkan sebagai QUOTATION_PDF_FAILED (detail hanya di log).
+func failQuotationDocument(c *gin.Context, err error) {
+	var appErr *coreerrors.AppError
+	if errors.As(err, &appErr) || errors.Is(err, service.ErrQuotationLocked) || errors.Is(err, service.ErrQuotationNotRevisable) ||
+		errors.Is(err, service.ErrProductInactive) || errors.Is(err, service.ErrQuotationDealNotFound) ||
+		errors.Is(err, service.ErrInvalidQuotationAmount) || errors.Is(err, service.ErrQuotationDocumentsUnavailable) {
+		failQuotation(c, err)
+		return
+	}
+	slog.ErrorContext(c.Request.Context(), "quotation pdf failed", "quotation_id", c.Param("id"), "error", err)
+	corehttp.Fail(c, coreerrors.New("QUOTATION_PDF_FAILED", "PDF tidak dapat dibuat.", http.StatusBadGateway))
 }
 
 func lineItemsFromRequest(requests []dto.LineItemRequest) []service.QuotationLineInput {
@@ -126,11 +163,7 @@ func (h *QuotationHandler) Create(c *gin.Context) {
 		CreatedBy:       userID,
 	})
 	if err != nil {
-		if err == service.ErrInvalidQuotationAmount {
-			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
-			return
-		}
-		corehttp.Fail(c, err)
+		failQuotation(c, err)
 		return
 	}
 
@@ -177,6 +210,11 @@ func (h *QuotationHandler) Update(c *gin.Context) {
 		validUntil = parsed
 	}
 
+	var items []service.QuotationLineInput
+	if req.Items != nil {
+		items = lineItemsFromRequest(req.Items)
+	}
+
 	quotation, err := h.svc.Update(c.Request.Context(), scope, c.Param("id"), service.UpdateQuotationInput{
 		DealID:     req.DealID,
 		ContactID:  req.ContactID,
@@ -184,9 +222,10 @@ func (h *QuotationHandler) Update(c *gin.Context) {
 		ValidUntil: validUntil,
 		Notes:      req.Notes,
 		UpdatedBy:  userID,
+		Items:      items,
 	})
 	if err != nil {
-		corehttp.Fail(c, err)
+		failQuotation(c, err)
 		return
 	}
 
@@ -202,7 +241,7 @@ func (h *QuotationHandler) Delete(c *gin.Context) {
 	userID := permissionmiddleware.UserID(c)
 
 	if err := h.svc.Delete(c.Request.Context(), scope, c.Param("id"), userID); err != nil {
-		corehttp.Fail(c, err)
+		failQuotation(c, err)
 		return
 	}
 
@@ -217,9 +256,20 @@ func (h *QuotationHandler) Send(c *gin.Context) {
 	}
 	userID := permissionmiddleware.UserID(c)
 
-	quotation, err := h.svc.Send(c.Request.Context(), scope, c.Param("id"), userID)
+	var req dto.SendQuotationRequest
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+			return
+		}
+	}
+	if req.Channel != "" && req.Channel != "manual" {
+		corehttp.Fail(c, coreerrors.New("CHANNEL_NOT_SUPPORTED", "channel belum tersedia", http.StatusUnprocessableEntity))
+		return
+	}
+	quotation, err := h.svc.MarkSentManually(c.Request.Context(), scope, c.Param("id"), userID)
 	if err != nil {
-		corehttp.Fail(c, err)
+		failQuotationDocument(c, err)
 		return
 	}
 
@@ -236,11 +286,14 @@ func (h *QuotationHandler) Approve(c *gin.Context) {
 
 	quotation, err := h.svc.Approve(c.Request.Context(), scope, c.Param("id"), userID)
 	if err != nil {
-		corehttp.Fail(c, err)
+		failQuotation(c, err)
 		return
 	}
 
-	corehttp.OK(c, "success", dto.QuotationFromDomain(quotation))
+	corehttp.OK(c, "success", dto.QuotationDecisionResponse{
+		QuotationResponse: dto.QuotationFromDomain(quotation),
+		SuggestDealStatus: service.SuggestDealStatusAfterApprove(quotation),
+	})
 }
 
 func (h *QuotationHandler) Reject(c *gin.Context) {
@@ -253,9 +306,39 @@ func (h *QuotationHandler) Reject(c *gin.Context) {
 
 	quotation, err := h.svc.Reject(c.Request.Context(), scope, c.Param("id"), userID)
 	if err != nil {
-		corehttp.Fail(c, err)
+		failQuotation(c, err)
 		return
 	}
 
+	corehttp.OK(c, "success", dto.QuotationDecisionResponse{QuotationResponse: dto.QuotationFromDomain(quotation)})
+}
+
+func (h *QuotationHandler) Revise(c *gin.Context) {
+	scope, err := coretenant.RequireScope(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, coreerrors.New("UNAUTHORIZED", "missing scope", http.StatusUnauthorized))
+		return
+	}
+	quotation, err := h.svc.Revise(c.Request.Context(), scope, c.Param("id"), permissionmiddleware.UserID(c))
+	if err != nil {
+		failQuotation(c, err)
+		return
+	}
 	corehttp.OK(c, "success", dto.QuotationFromDomain(quotation))
+}
+
+func (h *QuotationHandler) PDF(c *gin.Context) {
+	scope, err := coretenant.RequireScope(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, coreerrors.New("UNAUTHORIZED", "missing scope", http.StatusUnauthorized))
+		return
+	}
+	pdf, err := h.svc.PDF(c.Request.Context(), scope, c.Param("id"))
+	if err != nil {
+		failQuotationDocument(c, err)
+		return
+	}
+	c.Header("Content-Disposition", `attachment; filename="`+pdf.Filename+`"`)
+	c.Header("Cache-Control", "no-store")
+	c.Data(http.StatusOK, "application/pdf", pdf.Content)
 }

@@ -394,6 +394,13 @@ type QuotationResponse struct {
 	PDFGeneratedAt  *time.Time         `json:"pdf_generated_at,omitempty"`
 }
 
+// QuotationDecisionResponse: hasil approve/reject + saran status deal untuk UI
+// ("won" bila quotation terhubung ke deal saat approve).
+type QuotationDecisionResponse struct {
+	QuotationResponse
+	SuggestDealStatus string `json:"suggest_deal_status"`
+}
+
 func quotationItemsFromDomain(items []domain.QuotationItem) []LineItemResponse {
 	responses := make([]LineItemResponse, 0, len(items))
 	for _, item := range items {

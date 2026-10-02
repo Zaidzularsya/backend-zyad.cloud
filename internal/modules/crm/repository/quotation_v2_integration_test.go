@@ -164,3 +164,37 @@ func TestQuotationExpireDueAndPDFSnapshot(t *testing.T) {
 		t.Fatalf("snapshot not stored: %+v", got)
 	}
 }
+
+func TestQuotationIssuerPrefersBrandingName(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	tenants := testutil.NewTenantPair(t)
+	setupCRMOrganizations(t, db, tenants)
+
+	// Nama branding default (bila ada) mengalahkan nama organisasi.
+	// landing_brandings ber-RLS, jadi ekspektasi dihitung dalam scope tenant.
+	ctx := context.Background()
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	var orgName string
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", tenants.A.OrganizationID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(NULLIF(b.company_name, ''), o.name)
+		FROM organizations o
+		LEFT JOIN landing_brandings b ON b.organization_id = o.id AND b.landing_page_id IS NULL
+		WHERE o.id = $1`, tenants.A.OrganizationID).Scan(&orgName); err != nil {
+		t.Fatal(err)
+	}
+
+	issuer, err := repository.NewQuotationIssuerRepository(db).Find(ctx, tenants.A.Scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issuer.Name != orgName || orgName == "" {
+		t.Fatalf("issuer = %+v", issuer)
+	}
+}

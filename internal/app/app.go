@@ -31,6 +31,7 @@ import (
 	catalogrepo "zyad.cloud/internal/modules/catalog/repository"
 	catalogservice "zyad.cloud/internal/modules/catalog/service"
 	crmhandler "zyad.cloud/internal/modules/crm/handler"
+	crmquotationpdf "zyad.cloud/internal/modules/crm/quotationpdf"
 	crmrepo "zyad.cloud/internal/modules/crm/repository"
 	crmservice "zyad.cloud/internal/modules/crm/service"
 	financehandler "zyad.cloud/internal/modules/finance/handler"
@@ -472,6 +473,14 @@ func New(ctx context.Context) (*App, error) {
 	crmQuotationSvc := crmservice.NewQuotationService(crmQuotationRepo, crmDocumentCounterRepo,
 		crmservice.WithQuotationCatalog(catalogrepo.NewProductRepository(db)),
 		crmservice.WithQuotationDeals(crmDealRepo),
+		crmservice.WithQuotationDocuments(crmservice.QuotationDocumentDeps{
+			Issuers:    crmrepo.NewQuotationIssuerRepository(db),
+			Contacts:   crmContactRepo,
+			Companies:  crmCompanyRepo,
+			Activities: crmActivityRepo,
+			Files:      assetSvc,
+			Renderer:   crmquotationpdf.NewRenderer(),
+		}),
 	)
 	crmInvoiceSvc := crmservice.NewInvoiceService(crmInvoiceRepo, crmQuotationRepo, crmDocumentCounterRepo)
 	crmIntegrationRepo := crmrepo.NewIntegrationRepository(db)

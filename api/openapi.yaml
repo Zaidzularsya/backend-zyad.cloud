@@ -7780,6 +7780,236 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/crm/quotations/{id}/revise:
+    post:
+      summary: Create a revision of a sent/rejected/expired quotation
+      operationId: reviseCrmQuotation
+      tags:
+      - CRM Quotation
+      security:
+      - BearerAuth: []
+      description: 'Creates draft `{root number}-R{n}` copying item snapshots and marks the old version `superseded` in one transaction. Permission: `quotation.update`. Tenant: customer or platform organization; requires entitlement `crm.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/CrmQuotationV2'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement crm.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (QUOTATION_NOT_FOUND)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Not revisable (QUOTATION_NOT_REVISABLE)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/crm/quotations/{id}/pdf:
+    get:
+      summary: Download quotation PDF
+      operationId: getCrmQuotationPdf
+      tags:
+      - CRM Quotation
+      security:
+      - BearerAuth: []
+      description: 'Draft: rendered on demand with a DRAFT watermark. Other statuses: the stored final snapshot (created on first request if missing). Streamed by the backend; no public storage URL. Permission: `quotation.read`. Tenant: customer or platform organization; requires entitlement `crm.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: 'PDF file (`Content-Disposition: attachment; filename="<number>.pdf"`, `Cache-Control: no-store`)'
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement crm.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (QUOTATION_NOT_FOUND)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: PDF render or storage failure (QUOTATION_PDF_FAILED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/crm/quotations/{id}/send:
+    post:
+      summary: Mark a draft quotation as sent
+      operationId: sendCrmQuotation
+      tags:
+      - CRM Quotation
+      security:
+      - BearerAuth: []
+      description: 'Stores the final PDF snapshot, sets status `sent` and logs a completed note activity on the linked deal. Permission: `quotation.send`. Tenant: customer or platform organization; requires entitlement `crm.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                channel:
+                  type: string
+                  enum:
+                  - manual
+                  - email
+                  - whatsapp
+                  description: Empty body or `manual` marks the quotation as sent manually.
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/CrmQuotationV2'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement crm.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (QUOTATION_NOT_FOUND)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Quotation is not a draft (QUOTATION_LOCKED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Unknown or unsupported channel (VALIDATION_ERROR / CHANNEL_NOT_SUPPORTED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: PDF render or storage failure (QUOTATION_PDF_FAILED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/crm/quotations/{id}/approve:
+    post:
+      summary: Approve a sent quotation
+      operationId: approveCrmQuotation
+      tags:
+      - CRM Quotation
+      security:
+      - BearerAuth: []
+      description: 'Only from `sent`. Response adds `suggest_deal_status` (`won` when linked to a deal); the deal is not changed automatically. Permission: `quotation.approve`. Tenant: customer or platform organization; requires entitlement `crm.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/CrmQuotationDecision'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission, entitlement crm.enabled, or tenant type)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (QUOTATION_NOT_FOUND)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/webhooks/waha:
     post:
       summary: Receive WAHA webhooks (HMAC-signed)
@@ -10735,6 +10965,108 @@ components:
           maxLength: 100
         position:
           type: integer
+    CrmQuotationItemV2:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Catalog product the line was snapshotted from (null = free line or product deleted)
+        description:
+          type: string
+        sku:
+          type: string
+        unit:
+          type: string
+        quantity:
+          type: string
+        unit_price:
+          type: string
+        discount_percent:
+          type: string
+          nullable: true
+        tax_percent:
+          type: string
+        tax_amount:
+          type: string
+        line_total:
+          type: string
+          description: Net amount (gross - discount), rounded half-up per line
+        position:
+          type: integer
+    CrmQuotationV2:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        deal_id:
+          type: string
+          format: uuid
+        contact_id:
+          type: string
+          format: uuid
+        company_id:
+          type: string
+          format: uuid
+        quotation_number:
+          type: string
+        status:
+          type: string
+          enum:
+          - draft
+          - sent
+          - approved
+          - rejected
+          - expired
+          - superseded
+        valid_until:
+          type: string
+          format: date-time
+        subtotal:
+          type: string
+        discount_total:
+          type: string
+        tax_total:
+          type: string
+        grand_total:
+          type: string
+        currency:
+          type: string
+        notes:
+          type: string
+        sent_at:
+          type: string
+          format: date-time
+        revision_of_id:
+          type: string
+          format: uuid
+        revision_no:
+          type: integer
+        has_pdf:
+          type: boolean
+          description: True when a final PDF snapshot is stored
+        pdf_generated_at:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CrmQuotationItemV2'
+    CrmQuotationDecision:
+      allOf:
+      - $ref: '#/components/schemas/CrmQuotationV2'
+      - type: object
+        properties:
+          suggest_deal_status:
+            type: string
+            enum:
+            - won
+            - ''
     ErrorResponse:
       type: object
       required:

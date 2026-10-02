@@ -37,6 +37,7 @@ type quotationService struct {
 	numberRepo repository.DocumentCounterRepository
 	catalog    CatalogProducts
 	deals      repository.DealRepository
+	docs       *QuotationDocumentDeps
 	now        func() time.Time
 }
 

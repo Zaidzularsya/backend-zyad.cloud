@@ -335,6 +335,22 @@ Validasi deal: pipeline milik organisasi dan tidak diarsipkan, stage milik pipel
 
 Kode error: `422 INVALID_PIPELINE_STAGE`, `422 INVALID_START_STAGE`, `422 VALIDATION_ERROR` (input deal/company), `409 LEAD_ALREADY_CONVERTED`, `409 LEAD_NOT_CONVERTED`, `409 LEAD_DEAL_EXISTS`, `403 FORBIDDEN` (deal tanpa `deal.create`, company baru tanpa `company.create`).
 
+## Quotation v2 (Rilis 2 S3)
+
+Migration `000140` menambah `crm_quotations.revision_of_id`, `revision_no`, `pdf_asset_id`, `pdf_generated_at`, status `superseded`, serta snapshot item `crm_quotation_items.product_id` (FK ke `catalog_products`, `ON DELETE SET NULL (product_id)`), `sku`, `unit`, `tax_percent`, `tax_amount`.
+
+**Aturan**
+
+- **Dari deal.** `POST /quotations` menerima `deal_id`; contact, company, dan mata uang diisi dari deal bila kosong (deal tidak ada → `422 QUOTATION_DEAL_NOT_FOUND`).
+- **Snapshot katalog (R4).** Item dengan `product_id` diisi nama, SKU, satuan, harga, dan pajak dari katalog sebagai nilai awal; nilai yang dikirim klien (deskripsi/harga/pajak/satuan) mengalahkan katalog. Produk nonaktif/terhapus → `422 PRODUCT_INACTIVE`. Perubahan katalog tidak mengubah item yang sudah tersimpan; revisi menyalin snapshot apa adanya (tidak membaca katalog).
+- **Kalkulasi (R5).** `math/big.Rat`, half-up 2 desimal per baris: `gross = qty × harga`, `disc = gross × d%`, `net = gross − disc` (= `line_total`), `tax = net × t%`. Header: `subtotal = Σgross`, `discount_total = Σdisc`, `tax_total = Σtax`, `grand_total = subtotal − discount_total + tax_total`. Total dari klien diabaikan. Kontrak lama (`tax_total` header tanpa pajak per baris) tetap diterima saat create.
+- **Penguncian (R6).** Hanya `draft` yang bisa diubah (`PATCH`, termasuk `items` yang mengganti seluruh item) atau dihapus; selain itu `409 QUOTATION_LOCKED`. Baris dikunci `FOR UPDATE`, jadi edit dari tab lama setelah quotation terkirim tetap ditolak.
+- **Revisi (R7).** `POST /quotations/:id/revise` hanya dari `sent`/`rejected`/`expired` (`409 QUOTATION_NOT_REVISABLE`). Satu transaksi: versi lama → `superseded`, draft baru `{nomor akar}-R{n}` dengan `revision_no = n` (nomor akar = nomor tanpa akhiran `-R<n>`, jadi R2 dari R1 menjadi `QUO-…-R2`).
+- **PDF.** `GET /quotations/:id/pdf`: draft dirender on-demand dengan watermark DRAFT; status lain dilayani dari snapshot final (asset privat kelas `private`, label `quotation`) yang dibuat sekali saat pertama ditandai terkirim, atau saat PDF pertama diminta untuk quotation lama. Tidak ada URL publik; stream lewat backend dengan `Cache-Control: no-store`. Renderer: `internal/modules/crm/quotationpdf` (`codeberg.org/go-pdf/fpdf` + Noto Sans ter-embed, lisensi OFL di `fonts/OFL.txt`). Penerbit = `company_name`/`contact` branding default tenant, fallback nama organisasi. Gagal render/simpan → `502 QUOTATION_PDF_FAILED`.
+- **Tandai terkirim.** `POST /quotations/:id/send` tanpa body atau `{"channel":"manual"}`: buat snapshot PDF, status `sent`, dan activity *note completed* "Penawaran … ditandai terkirim (manual)" pada deal. Channel `email`/`whatsapp` disiapkan untuk S4 (`422 CHANNEL_NOT_SUPPORTED` sampai tersedia).
+- **Approve/Reject (R4b/R10).** Hanya dari `sent`. Respons menambah `suggest_deal_status` (`won` bila terhubung deal); deal tidak diubah otomatis.
+- **Expiry (R11).** Dihitung *lazy* per tenant saat `GET`/`List` quotation: `sent` dengan `valid_until` < hari ini (Asia/Jakarta) → `expired`. Tidak ada job lintas tenant (tabel CRM ber-RLS).
+
 ## Non-Goals
 
 - Tidak menggantikan atau berinteraksi langsung dengan `billing_invoices`/`billing_payments` (modul
