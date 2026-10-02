@@ -78,6 +78,29 @@ type QuotationDocumentDeps struct {
 	Renderer   QuotationPDFRenderer
 }
 
+type QuotationChannelDeps struct {
+	Sends    repository.QuotationSendRepository
+	Email    QuotationEmailSender    // nil = kanal tidak tersedia
+	WhatsApp QuotationWhatsAppSender // nil = kanal tidak tersedia
+}
+
+type SendQuotationInput struct {
+	Channel            domain.QuotationSendChannel
+	Mode               domain.QuotationSendMode
+	Recipient          string // email saja; "" = email kontak
+	Message            string // pesan pembuka; "" = default
+	MailboxID          string
+	SessionID          string
+	ClientRequestID    string
+	UserID             string
+	CanReadAllWhatsApp bool
+}
+
+type SendQuotationResult struct {
+	Quotation domain.Quotation
+	Send      domain.QuotationSend
+}
+
 type QuotationPDF struct {
 	Filename string
 	Content  []byte
@@ -99,4 +122,9 @@ type QuotationService interface {
 	PDF(ctx context.Context, scope coretenant.Scope, id string) (QuotationPDF, error)
 	// MarkSentManually: snapshot PDF final + status sent + activity deal.
 	MarkSentManually(ctx context.Context, scope coretenant.Scope, id, userID string) (domain.Quotation, error)
+	// SendVia mengirim lewat email/WhatsApp, mencatat log, dan menandai sent
+	// pada kiriman sukses pertama. Kanal tidak tersedia → ChannelError (tidak dicatat).
+	SendVia(ctx context.Context, scope coretenant.Scope, id string, in SendQuotationInput) (SendQuotationResult, error)
+	Summary(ctx context.Context, scope coretenant.Scope, id, opening string) (quotationpdf.Summary, error)
+	ListSends(ctx context.Context, scope coretenant.Scope, id string) ([]domain.QuotationSend, error)
 }

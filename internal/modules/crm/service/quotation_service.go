@@ -38,6 +38,7 @@ type quotationService struct {
 	catalog    CatalogProducts
 	deals      repository.DealRepository
 	docs       *QuotationDocumentDeps
+	channels   *QuotationChannelDeps
 	now        func() time.Time
 }
 
