@@ -469,7 +469,10 @@ func New(ctx context.Context) (*App, error) {
 	crmQuotationRepo := crmrepo.NewQuotationRepository(db)
 	crmInvoiceRepo := crmrepo.NewInvoiceRepository(db)
 	crmDocumentCounterRepo := crmrepo.NewDocumentCounterRepository(db)
-	crmQuotationSvc := crmservice.NewQuotationService(crmQuotationRepo, crmDocumentCounterRepo)
+	crmQuotationSvc := crmservice.NewQuotationService(crmQuotationRepo, crmDocumentCounterRepo,
+		crmservice.WithQuotationCatalog(catalogrepo.NewProductRepository(db)),
+		crmservice.WithQuotationDeals(crmDealRepo),
+	)
 	crmInvoiceSvc := crmservice.NewInvoiceService(crmInvoiceRepo, crmQuotationRepo, crmDocumentCounterRepo)
 	crmIntegrationRepo := crmrepo.NewIntegrationRepository(db)
 	crmIntegrationSvc := crmservice.NewIntegrationService(crmIntegrationRepo, cfg.App.Secret)

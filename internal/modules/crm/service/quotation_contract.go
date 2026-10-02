@@ -5,6 +5,7 @@ import (
 	"time"
 
 	coretenant "zyad.cloud/internal/core/tenant"
+	catalogdomain "zyad.cloud/internal/modules/catalog/domain"
 	"zyad.cloud/internal/modules/crm/domain"
 	"zyad.cloud/internal/modules/crm/repository"
 )
@@ -42,7 +43,16 @@ type UpdateQuotationInput struct {
 	ValidUntil *time.Time
 	Notes      *string
 	UpdatedBy  string
+	// Items nil = item tidak diubah; non-nil mengganti seluruh item (hanya draft).
+	Items []QuotationLineInput
 }
+
+// CatalogProducts adalah subset katalog yang dipakai quotation untuk snapshot item.
+type CatalogProducts interface {
+	FindByIDs(ctx context.Context, scope coretenant.Scope, ids []string) (map[string]catalogdomain.Product, error)
+}
+
+type QuotationServiceOption func(*quotationService)
 
 type QuotationService interface {
 	Create(context.Context, coretenant.Scope, CreateQuotationInput) (domain.Quotation, error)
@@ -53,4 +63,6 @@ type QuotationService interface {
 	Send(context.Context, coretenant.Scope, string, string) (domain.Quotation, error)
 	Approve(context.Context, coretenant.Scope, string, string) (domain.Quotation, error)
 	Reject(context.Context, coretenant.Scope, string, string) (domain.Quotation, error)
+	// Revise membuat draft {nomor akar}-R{n} dari quotation sent/rejected/expired.
+	Revise(ctx context.Context, scope coretenant.Scope, id, userID string) (domain.Quotation, error)
 }
