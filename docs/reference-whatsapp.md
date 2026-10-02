@@ -291,6 +291,13 @@ Di bawah `/api/v1/app/whatsapp` (grup yang sama dengan session).
   percakapan dimulai atau pesan terkirim, hanya untuk percakapan yang terhubung ke lead/contact.
 - Response tidak memuat `chat_id` WAHA maupun nama session; klien memakai `phone` dan `session_id`.
 
+## Kirim Dokumen (Rilis 2 S4)
+
+- `platform/whatsapp.WAHAClient.SendFile` memanggil `POST /api/sendFile` dengan `file.data` base64 (`mimetype`, `filename`) dan `caption` opsional. Menurut dokumentasi resmi WAHA (dicek 2026-10-02) endpoint ini tersedia di WAHA Core dan didukung engine GOWS; pengiriman dokumen nyata di instance dev **belum diuji** saat kode ini ditulis.
+- `ConversationService.SendDocument` mencatat pesan keluar dengan `raw = {"kind":"document","filename","mimetype"}`, preview `[Dokumen] <nama file>`, body = caption (maks `MaxDocumentCaption` = 1.000 karakter), ukuran maks 10 MB. Isi file tidak disimpan, sehingga pesan dokumen yang gagal **tidak bisa di-retry** (`WHATSAPP_MESSAGE_NOT_RETRYABLE`); kirim ulang dilakukan dari dialog Kirim quotation.
+- Respons pesan menambah `attachment_name` untuk pesan dokumen (ditampilkan "Dokumen: …" di panel chat).
+- Adapter `QuotationSender` (dipakai CRM untuk kirim penawaran) memulai/menggunakan percakapan kontak, mengecek entitlement `whatsapp.enabled`, dan memetakan kegagalan validasi (nomor tidak valid, tidak ada session tersambung, percakapan milik sales lain, WAHA belum dikonfigurasi) menjadi `CHANNEL_UNAVAILABLE` di CRM. Mode teks+PDF: teks ≤ 1.000 karakter menjadi caption dokumen; lebih panjang dikirim sebagai pesan teks terpisah lalu dokumen tanpa caption.
+
 ## Realtime Stream (SSE)
 
 `GET /api/v1/app/whatsapp/stream` (permission `whatsapp.conversation.read`, grup + tenant rule sama dengan

@@ -470,18 +470,6 @@ func New(ctx context.Context) (*App, error) {
 	crmQuotationRepo := crmrepo.NewQuotationRepository(db)
 	crmInvoiceRepo := crmrepo.NewInvoiceRepository(db)
 	crmDocumentCounterRepo := crmrepo.NewDocumentCounterRepository(db)
-	crmQuotationSvc := crmservice.NewQuotationService(crmQuotationRepo, crmDocumentCounterRepo,
-		crmservice.WithQuotationCatalog(catalogrepo.NewProductRepository(db)),
-		crmservice.WithQuotationDeals(crmDealRepo),
-		crmservice.WithQuotationDocuments(crmservice.QuotationDocumentDeps{
-			Issuers:    crmrepo.NewQuotationIssuerRepository(db),
-			Contacts:   crmContactRepo,
-			Companies:  crmCompanyRepo,
-			Activities: crmActivityRepo,
-			Files:      assetSvc,
-			Renderer:   crmquotationpdf.NewRenderer(),
-		}),
-	)
 	crmInvoiceSvc := crmservice.NewInvoiceService(crmInvoiceRepo, crmQuotationRepo, crmDocumentCounterRepo)
 	crmIntegrationRepo := crmrepo.NewIntegrationRepository(db)
 	crmIntegrationSvc := crmservice.NewIntegrationService(crmIntegrationRepo, cfg.App.Secret)
@@ -494,20 +482,22 @@ func New(ctx context.Context) (*App, error) {
 	catalogCategoryHandler := cataloghandler.NewCategoryHandler(catalogservice.NewCategoryService(catalogrepo.NewCategoryRepository(db)))
 	mailboxRepo := mailboxrepo.NewMailboxRepository(db)
 	mailMessageRepo := mailboxrepo.NewMessageRepository(db)
-	mailboxHandler := mailboxhandler.NewHandler(
-		mailboxservice.NewMailboxService(mailboxRepo, mailMessageRepo, assetSvc, mailboxservice.MailboxServiceOptions{
+	mailboxSvc := mailboxservice.NewMailboxService(mailboxRepo, mailMessageRepo, assetSvc, mailboxservice.MailboxServiceOptions{
+		SecretKey:         cfg.App.Secret,
+		AllowPrivateHosts: cfg.Mail.MailboxAllowPrivateHosts,
+	})
+	mailMessageSvc := mailboxservice.NewMessageService(
+		mailboxRepo, mailMessageRepo, assetSvc,
+		mailboxservice.NewCRMGateway(crmLeadRepo, crmContactRepo, crmActivityRepo),
+		mailboxservice.MessageServiceOptions{
 			SecretKey:         cfg.App.Secret,
 			AllowPrivateHosts: cfg.Mail.MailboxAllowPrivateHosts,
-		}),
-		mailboxservice.NewMessageService(
-			mailboxRepo, mailMessageRepo, assetSvc,
-			mailboxservice.NewCRMGateway(crmLeadRepo, crmContactRepo, crmActivityRepo),
-			mailboxservice.MessageServiceOptions{
-				SecretKey:         cfg.App.Secret,
-				AllowPrivateHosts: cfg.Mail.MailboxAllowPrivateHosts,
-				Log:               log,
-			},
-		),
+			Log:               log,
+		},
+	)
+	mailboxHandler := mailboxhandler.NewHandler(
+		mailboxSvc,
+		mailMessageSvc,
 		// "Sync now" from the API, independent of the worker's own interval
 		// (cmd/worker runs the same service on a timer).
 		NewMailSyncServiceWithStorage(cfg, db, assetSvc, log),
@@ -518,7 +508,6 @@ func New(ctx context.Context) (*App, error) {
 	crmPipelineHandler := crmhandler.NewPipelineHandler(crmPipelineSvc)
 	crmDealHandler := crmhandler.NewDealHandler(crmDealSvc)
 	crmActivityHandler := crmhandler.NewActivityHandler(crmActivitySvc)
-	crmQuotationHandler := crmhandler.NewQuotationHandler(crmQuotationSvc)
 	crmInvoiceHandler := crmhandler.NewInvoiceHandler(crmInvoiceSvc)
 	crmIntegrationHandler := crmhandler.NewIntegrationHandler(crmIntegrationSvc)
 
@@ -526,12 +515,32 @@ func New(ctx context.Context) (*App, error) {
 	whatsappSessionHandler := whatsapphandler.NewSessionHandler(whatsappSessionSvc)
 	whatsappWebhookHandler := NewWhatsAppWebhookHandler(cfg, db, log)
 	whatsappBus := NewWhatsAppRealtimeBus(redisClient, log)
-	whatsappConversationHandler := whatsapphandler.NewConversationHandler(
-		NewWhatsAppConversationService(cfg, db, redisClient, whatsappBus, log),
-	)
+	whatsappConversationSvc := NewWhatsAppConversationService(cfg, db, redisClient, whatsappBus, log)
+	whatsappConversationHandler := whatsapphandler.NewConversationHandler(whatsappConversationSvc)
 	if whatsappBus != nil {
 		whatsappConversationHandler.WithStream(whatsappBus)
 	}
+
+	// Quotation service dibuat setelah mailbox & WhatsApp karena memakai keduanya sebagai kanal kirim.
+	crmQuotationSvc := crmservice.NewQuotationService(crmQuotationRepo, crmDocumentCounterRepo,
+		crmservice.WithQuotationCatalog(catalogrepo.NewProductRepository(db)),
+		crmservice.WithQuotationDeals(crmDealRepo),
+		crmservice.WithQuotationDocuments(crmservice.QuotationDocumentDeps{
+			Issuers:    crmrepo.NewQuotationIssuerRepository(db),
+			Contacts:   crmContactRepo,
+			Companies:  crmCompanyRepo,
+			Activities: crmActivityRepo,
+			Files:      assetSvc,
+			Renderer:   crmquotationpdf.NewRenderer(),
+		}),
+		// Kanal kirim: adapter di modul mailbox & whatsapp (CRM tidak mengimpor mereka).
+		crmservice.WithQuotationChannels(crmservice.QuotationChannelDeps{
+			Sends:    crmrepo.NewQuotationSendRepository(db),
+			Email:    mailboxservice.NewQuotationMailer(mailboxSvc, mailMessageSvc),
+			WhatsApp: whatsappservice.NewQuotationSender(whatsappConversationSvc, crmEntitlementChecker),
+		}),
+	)
+	crmQuotationHandler := crmhandler.NewQuotationHandler(crmQuotationSvc)
 
 	router, err := newRouter(Dependencies{
 		Config:                           cfg,

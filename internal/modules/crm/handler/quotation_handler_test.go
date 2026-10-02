@@ -41,3 +41,21 @@ func TestQuotationSendRejectsUnknownChannel(t *testing.T) {
 		t.Fatalf("send fax → %d, want 422", w.Code)
 	}
 }
+
+func TestSendQuotationChannelPermissions(t *testing.T) {
+	r := newTestRouter(t)
+	r.Use(func(c *gin.Context) { permissionmiddleware.SetUserID(c, "u1"); c.Next() })
+	NewQuotationHandler(nil).RegisterRoutes(r.Group(""), allowOnlyChecker{"quotation.send": true})
+
+	for _, ch := range []string{"email", "whatsapp"} {
+		w := performJSON(r, http.MethodPost, "/quotations/q1/send",
+			`{"channel":"`+ch+`","mode":"text","client_request_id":"11111111-1111-1111-1111-111111111111"}`)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("%s without channel permission → %d, want 403", ch, w.Code)
+		}
+	}
+	w := performJSON(r, http.MethodPost, "/quotations/q1/send", `{"channel":"email","mode":"fax","client_request_id":"x"}`)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("bad mode → %d, want 422", w.Code)
+	}
+}

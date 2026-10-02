@@ -351,6 +351,26 @@ Migration `000140` menambah `crm_quotations.revision_of_id`, `revision_no`, `pdf
 - **Approve/Reject (R4b/R10).** Hanya dari `sent`. Respons menambah `suggest_deal_status` (`won` bila terhubung deal); deal tidak diubah otomatis.
 - **Expiry (R11).** Dihitung *lazy* per tenant saat `GET`/`List` quotation: `sent` dengan `valid_until` < hari ini (Asia/Jakarta) → `expired`. Tidak ada job lintas tenant (tabel CRM ber-RLS).
 
+## Kirim Penawaran (Rilis 2 S4)
+
+Migration `000141` membuat `crm_quotation_sends` (log setiap percobaan kirim; RLS; unik `(organization_id, quotation_id, client_request_id)`).
+
+| Endpoint | Perilaku | Permission |
+|---|---|---|
+| `POST /quotations/:id/send` | Tanpa body / `{"channel":"manual"}` = tandai terkirim manual (S3). `{"channel":"email"\|"whatsapp", "mode":"text"\|"pdf"\|"text_pdf", "client_request_id", "recipient"?, "message"?, "mailbox_id"?, "wa_session_id"?}` = kirim lewat kanal; respons `{quotation, send}`. | `quotation.send` + `email.send` (email) / `whatsapp.message.send` (WhatsApp) |
+| `GET /quotations/:id/summary?message=` | Preview ringkasan `{subject, text, html}` persis seperti yang dikirim. | `quotation.read` |
+| `GET /quotations/:id/sends` | Riwayat kiriman, terbaru dulu. | `quotation.read` |
+
+Aturan (R8–R9):
+
+- Hanya `draft`/`sent` yang bisa dikirim (`409 QUOTATION_NOT_SENDABLE`); `sent` boleh dikirim ulang atau ke kanal lain.
+- Penerima: email = `recipient` atau email kontak quotation (divalidasi); WhatsApp = selalu nomor kontak (percakapan terikat ke kontak).
+- Kanal tidak bisa dipakai (kontak tanpa email/nomor valid, tidak ada mailbox aktif, tidak ada session WA tersambung, WhatsApp belum aktif/dikonfigurasi) → `422 CHANNEL_UNAVAILABLE` dengan alasan berbahasa Indonesia; **tidak dicatat** dan status tidak berubah.
+- Mode yang butuh PDF memakai snapshot final (`ensureSnapshot`, S3). Email: lampiran PDF, body HTML ringkasan (teks pengguna di-escape), lewat mailbox milik pengirim (`RelatedEntityType=contact`), dianggap sukses saat masuk antrean mailbox. WhatsApp: teks ≤ 1.000 karakter jadi caption dokumen, lebih panjang dikirim terpisah; sukses saat WAHA menerima.
+- Setiap percobaan dicatat `sent`/`failed` + alasan. Kiriman sukses pertama mengubah `draft → sent` dan menulis activity completed (`email`/`whatsapp`) "Penawaran … dikirim via …" pada deal. Kiriman gagal tidak mengubah status.
+- Idempotensi: `client_request_id` yang sama mengembalikan hasil pertama tanpa mengirim lagi.
+- Kode modul ringkasan: `crm/quotationpdf/summary.go` (view-model yang sama dengan PDF). Adapter kanal: `mailbox/service/quotation_mailer.go`, `whatsapp/service/quotation_sender.go` (CRM hanya mendefinisikan interface di `crm/service/quotation_channels.go`).
+
 ## Non-Goals
 
 - Tidak menggantikan atau berinteraksi langsung dengan `billing_invoices`/`billing_payments` (modul
