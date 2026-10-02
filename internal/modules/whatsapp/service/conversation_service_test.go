@@ -179,6 +179,16 @@ type fakeSender struct {
 	sent    []platformwhatsapp.Message
 	seen    int
 	sendErr error
+	files   []platformwhatsapp.FileMessage
+	fileErr error
+}
+
+func (s *fakeSender) SendFile(_ context.Context, m platformwhatsapp.FileMessage) (platformwhatsapp.Result, error) {
+	if s.fileErr != nil {
+		return platformwhatsapp.Result{}, s.fileErr
+	}
+	s.files = append(s.files, m)
+	return platformwhatsapp.Result{MessageID: "true_file_" + m.Filename}, nil
 }
 
 func (s *fakeSender) SendText(_ context.Context, message platformwhatsapp.Message) (platformwhatsapp.Result, error) {
@@ -541,5 +551,40 @@ func TestMessagesPageIsChronological(t *testing.T) {
 	}
 	if len(page.Messages) != 2 || page.Messages[0].Body != "b" || page.Messages[1].Body != "c" || page.NextBefore != "mb" {
 		t.Fatalf("page = %+v", page)
+	}
+}
+
+func TestSendDocument(t *testing.T) {
+	h := newConversationHarness(t)
+	conversation := h.start(t, sales2, "contact")
+
+	msg, err := h.svc.SendDocument(ctxTest, h.scope, sales2, conversation.ID, DocumentInput{
+		Filename: "QUO-1.pdf", MimeType: "application/pdf", Data: []byte("%PDF"), Caption: "Penawaran QUO-1",
+	})
+	if err != nil || msg.Status != domain.MessageStatusSent || msg.WAHAMessageID != "true_file_QUO-1.pdf" {
+		t.Fatalf("msg = %+v err=%v", msg, err)
+	}
+	f := h.sender.files[0]
+	if f.To != conversation.ChatID || f.Caption != "Penawaran QUO-1" || f.Session != h.session.Name {
+		t.Fatalf("file = %+v", f)
+	}
+	if msg.Body != "Penawaran QUO-1" || msg.Raw["kind"] != "document" || msg.Raw["filename"] != "QUO-1.pdf" {
+		t.Fatalf("stored = %+v", msg)
+	}
+}
+
+func TestSendDocumentFailureIsNotRetryable(t *testing.T) {
+	h := newConversationHarness(t)
+	conversation := h.start(t, sales2, "contact")
+	h.sender.fileErr = errors.New("boom")
+	msg, err := h.svc.SendDocument(ctxTest, h.scope, sales2, conversation.ID, DocumentInput{Filename: "a.pdf", MimeType: "application/pdf", Data: []byte("x")})
+	if err != nil || msg.Status != domain.MessageStatusFailed {
+		t.Fatalf("msg = %+v err=%v", msg, err)
+	}
+	if _, err := h.svc.Retry(ctxTest, h.scope, sales2, msg.ID); !errors.Is(err, whatsappmodule.ErrMessageNotRetryable) {
+		t.Fatalf("retry err = %v", err)
+	}
+	if _, err := h.svc.SendDocument(ctxTest, h.scope, sales2, conversation.ID, DocumentInput{Filename: "a.pdf", MimeType: "application/pdf"}); err == nil {
+		t.Fatal("empty data must be rejected")
 	}
 }

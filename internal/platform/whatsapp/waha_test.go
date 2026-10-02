@@ -2,6 +2,7 @@ package whatsapp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -359,5 +360,30 @@ func TestToChatID(t *testing.T) {
 		if got := ToChatID(input); got != want {
 			t.Fatalf("ToChatID(%q) = %q, want %q", input, got, want)
 		}
+	}
+}
+
+func TestWAHASendFilePostsBase64Document(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/sendFile" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_, _ = w.Write([]byte(`{"id":"true_628@c.us_ABC","timestamp":1790000000}`))
+	}))
+	defer srv.Close()
+	client := NewWAHAClient(WAHAConfig{BaseURL: srv.URL, APIKey: testAPIKey, DefaultSession: "default"})
+
+	res, err := client.SendFile(context.Background(), FileMessage{
+		Session: "zc_test", To: "6281234567890", Caption: "Penawaran", Filename: "QUO-1.pdf", MimeType: "application/pdf", Data: []byte("%PDF-1.4"),
+	})
+	if err != nil || res.MessageID != "true_628@c.us_ABC" {
+		t.Fatalf("res = %+v err=%v", res, err)
+	}
+	file := body["file"].(map[string]any)
+	if body["chatId"] != "6281234567890@c.us" || body["caption"] != "Penawaran" || file["filename"] != "QUO-1.pdf" ||
+		file["mimetype"] != "application/pdf" || file["data"] != base64.StdEncoding.EncodeToString([]byte("%PDF-1.4")) {
+		t.Fatalf("body = %+v", body)
 	}
 }

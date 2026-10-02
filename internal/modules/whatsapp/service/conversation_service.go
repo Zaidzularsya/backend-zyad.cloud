@@ -24,8 +24,22 @@ const maxMessageLength = 4096
 // MessageSender is the subset of the WAHA client used to send messages.
 type MessageSender interface {
 	SendText(ctx context.Context, message platformwhatsapp.Message) (platformwhatsapp.Result, error)
+	SendFile(ctx context.Context, message platformwhatsapp.FileMessage) (platformwhatsapp.Result, error)
 	SendSeen(ctx context.Context, session, chatID string, messageIDs []string) error
 }
+
+// DocumentInput adalah dokumen yang dikirim ke percakapan (mis. PDF penawaran).
+type DocumentInput struct {
+	Filename string
+	MimeType string
+	Data     []byte
+	Caption  string
+}
+
+// MaxDocumentCaption membatasi caption dokumen WhatsApp.
+const MaxDocumentCaption = 1000
+
+const maxDocumentBytes = 10 << 20
 
 // Viewer is the user calling the API. Without CanReadAll a user only sees
 // conversations assigned to them (docs/reference-whatsapp.md).
@@ -376,6 +390,10 @@ func (s *ConversationService) Retry(ctx context.Context, scope coretenant.Scope,
 	if message.Direction != domain.MessageDirectionOut || message.Status != domain.MessageStatusFailed {
 		return domain.Message{}, whatsappmodule.ErrMessageNotRetryable
 	}
+	// Isi dokumen tidak disimpan, jadi dokumen gagal tidak bisa dikirim ulang dari sini.
+	if kind, _ := message.Raw["kind"].(string); kind == "document" {
+		return domain.Message{}, whatsappmodule.ErrMessageNotRetryable
+	}
 	session, err := s.readySession(ctx, scope, conversation)
 	if err != nil {
 		return domain.Message{}, err
@@ -411,7 +429,19 @@ func (s *ConversationService) readySession(ctx context.Context, scope coretenant
 	return session, nil
 }
 
+type sendFunc func(ctx context.Context, session domain.Session) (platformwhatsapp.Result, error)
+
 func (s *ConversationService) deliver(ctx context.Context, scope coretenant.Scope, conversation domain.Conversation, session domain.Session, message domain.Message, userID string) (domain.Message, error) {
+	return s.deliverWith(ctx, scope, conversation, session, message, userID, func(ctx context.Context, session domain.Session) (platformwhatsapp.Result, error) {
+		return s.sender.SendText(ctx, platformwhatsapp.Message{
+			Session: session.Name,
+			To:      conversation.ChatID,
+			Text:    message.Body,
+		})
+	})
+}
+
+func (s *ConversationService) deliverWith(ctx context.Context, scope coretenant.Scope, conversation domain.Conversation, session domain.Session, message domain.Message, userID string, send sendFunc) (domain.Message, error) {
 	// WAHA recommends marking the chat as seen before replying (reduces the
 	// risk of the number being flagged). Best effort.
 	if conversation.UnreadCount > 0 {
@@ -420,11 +450,7 @@ func (s *ConversationService) deliver(ctx context.Context, scope coretenant.Scop
 		}
 	}
 
-	result, err := s.sender.SendText(ctx, platformwhatsapp.Message{
-		Session: session.Name,
-		To:      conversation.ChatID,
-		Text:    message.Body,
-	})
+	result, err := send(ctx, session)
 	if err != nil {
 		s.log.Warn("whatsapp: send message failed", "conversation_id", conversation.ID, "message_id", message.ID, "error", err)
 		failed, markErr := s.conversations.MarkMessageFailed(ctx, scope, message.ID, sendFailureReason(err))
@@ -442,6 +468,46 @@ func (s *ConversationService) deliver(ctx context.Context, scope coretenant.Scop
 	s.recordDailyActivity(ctx, scope, conversation, session, userID)
 	publishChange(ctx, s.realtime, scope, realtime.EventMessage, conversation, sent.ID)
 	return sent, nil
+}
+
+// SendDocument mengirim dokumen ke percakapan (WAHA sendFile). Pesan dicatat
+// dengan Raw kind=document; isi file tidak disimpan.
+func (s *ConversationService) SendDocument(ctx context.Context, scope coretenant.Scope, viewer Viewer, conversationID string, doc DocumentInput) (domain.Message, error) {
+	caption := strings.TrimSpace(doc.Caption)
+	if len(doc.Data) == 0 || len(doc.Data) > maxDocumentBytes || doc.Filename == "" || doc.MimeType == "" ||
+		utf8.RuneCountInString(caption) > MaxDocumentCaption {
+		return domain.Message{}, whatsappmodule.ErrInvalidMessageText
+	}
+	conversation, err := s.Get(ctx, scope, viewer, conversationID)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	session, err := s.readySession(ctx, scope, conversation)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	message, _, err := s.conversations.RecordMessage(ctx, scope, conversation.ID, repository.RecordMessageParams{
+		Direction:    domain.MessageDirectionOut,
+		Body:         caption,
+		Preview:      "[Dokumen] " + doc.Filename,
+		Status:       domain.MessageStatusPending,
+		SentByUserID: viewer.UserID,
+		SentAt:       s.now(),
+		Raw:          map[string]any{"kind": "document", "filename": doc.Filename, "mimetype": doc.MimeType},
+	})
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return s.deliverWith(ctx, scope, conversation, session, message, viewer.UserID, func(ctx context.Context, session domain.Session) (platformwhatsapp.Result, error) {
+		return s.sender.SendFile(ctx, platformwhatsapp.FileMessage{
+			Session:  session.Name,
+			To:       conversation.ChatID,
+			Caption:  caption,
+			Filename: doc.Filename,
+			MimeType: doc.MimeType,
+			Data:     doc.Data,
+		})
+	})
 }
 
 // recordDailyActivity writes at most one 'whatsapp' CRM activity per

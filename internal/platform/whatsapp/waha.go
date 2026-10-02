@@ -3,6 +3,7 @@ package whatsapp
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -462,4 +463,42 @@ func preview(body []byte) string {
 		return text[:errorBodyPreviewLen] + "..."
 	}
 	return text
+}
+
+// SendFile mengirim dokumen (base64) lewat POST /api/sendFile.
+func (c *WAHAClient) SendFile(ctx context.Context, m FileMessage) (Result, error) {
+	session := strings.TrimSpace(m.Session)
+	if session == "" {
+		session = c.config.DefaultSession
+	}
+	if err := validateSessionName(session); err != nil {
+		return Result{}, err
+	}
+	chatID := ToChatID(m.To)
+	if chatID == "" {
+		return Result{}, fmt.Errorf("whatsapp: recipient is required")
+	}
+	if len(m.Data) == 0 || m.Filename == "" || m.MimeType == "" {
+		return Result{}, fmt.Errorf("whatsapp: file is required")
+	}
+	body := map[string]any{
+		"session": session,
+		"chatId":  chatID,
+		"file":    map[string]any{"mimetype": m.MimeType, "filename": m.Filename, "data": base64.StdEncoding.EncodeToString(m.Data)},
+	}
+	if strings.TrimSpace(m.Caption) != "" {
+		body["caption"] = m.Caption
+	}
+	var response struct {
+		ID        string  `json:"id"`
+		Timestamp float64 `json:"timestamp"`
+	}
+	if err := c.do(ctx, "send file", http.MethodPost, "/api/sendFile", body, &response); err != nil {
+		return Result{}, err
+	}
+	sentAt := c.now()
+	if response.Timestamp > 0 {
+		sentAt = time.Unix(int64(response.Timestamp), 0).UTC()
+	}
+	return Result{Provider: ProviderWAHA, MessageID: response.ID, Raw: map[string]any{"session": session, "chat_id": chatID}, SentAt: sentAt}, nil
 }

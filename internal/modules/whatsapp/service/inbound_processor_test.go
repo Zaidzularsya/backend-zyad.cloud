@@ -91,7 +91,7 @@ func (c *fakeConversations) RecordMessage(_ context.Context, _ coretenant.Scope,
 	c.recorded = append(c.recorded, p)
 	message := domain.Message{
 		ID: "msg-" + key, ConversationID: conversationID, WAHAMessageID: p.WAHAMessageID, Direction: p.Direction,
-		Body: p.Body, Status: p.Status, SentByUserID: p.SentByUserID, SentAt: p.SentAt,
+		Body: p.Body, Status: p.Status, SentByUserID: p.SentByUserID, SentAt: p.SentAt, Raw: p.Raw,
 	}
 	c.messages[key] = message
 	return message, true, nil
