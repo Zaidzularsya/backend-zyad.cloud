@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -358,6 +359,13 @@ func (r *quotationRepository) Update(ctx context.Context, scope coretenant.Scope
 
 	var quotation domain.Quotation
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		status, err := lockQuotationStatus(ctx, tx, scope, id)
+		if err != nil {
+			return err
+		}
+		if status != string(domain.QuotationStatusDraft) {
+			return ErrQuotationLocked
+		}
 		var scanErr error
 		quotation, scanErr = scanQuotation(tx.QueryRow(ctx, query, args...))
 		if scanErr != nil {
@@ -388,6 +396,13 @@ func (r *quotationRepository) Delete(ctx context.Context, scope coretenant.Scope
 	`
 
 	return r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		status, err := lockQuotationStatus(ctx, tx, scope, id)
+		if err != nil {
+			return err
+		}
+		if status != string(domain.QuotationStatusDraft) {
+			return ErrQuotationLocked
+		}
 		cmdTag, err := tx.Exec(ctx, query, nullableString(deletedBy), id, scope.OrganizationID())
 		if err != nil {
 			return err
@@ -440,4 +455,118 @@ func (r *quotationRepository) Approve(ctx context.Context, scope coretenant.Scop
 
 func (r *quotationRepository) Reject(ctx context.Context, scope coretenant.Scope, id string, updatedBy string) (domain.Quotation, error) {
 	return r.transition(ctx, scope, id, updatedBy, string(domain.QuotationStatusSent), string(domain.QuotationStatusRejected), "rejected_at")
+}
+
+// lockQuotationStatus mengunci baris quotation (FOR UPDATE) dan mengembalikan statusnya.
+func lockQuotationStatus(ctx context.Context, tx pgx.Tx, scope coretenant.Scope, id string) (string, error) {
+	var status string
+	err := tx.QueryRow(ctx, `SELECT status FROM crm_quotations
+		WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL FOR UPDATE`, id, scope.OrganizationID()).Scan(&status)
+	return status, err
+}
+
+func (r *quotationRepository) ReplaceItems(ctx context.Context, scope coretenant.Scope, id string, p ReplaceQuotationItemsParams) (domain.Quotation, error) {
+	if !scope.IsValid() {
+		return domain.Quotation{}, coretenant.ErrInvalidScope
+	}
+	var q domain.Quotation
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		status, err := lockQuotationStatus(ctx, tx, scope, id)
+		if err != nil {
+			return err
+		}
+		if status != string(domain.QuotationStatusDraft) {
+			return ErrQuotationLocked
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM crm_quotation_items WHERE organization_id = $1 AND quotation_id = $2`, scope.OrganizationID(), id); err != nil {
+			return err
+		}
+		if err := insertQuotationItemsTx(ctx, tx, scope, id, p.Items); err != nil {
+			return err
+		}
+		q, err = scanQuotation(tx.QueryRow(ctx, `UPDATE crm_quotations
+			SET subtotal = $1, discount_total = $2, tax_total = $3, grand_total = $4, updated_by = $5, updated_at = NOW()
+			WHERE id = $6 AND organization_id = $7 RETURNING `+quotationColumns,
+			p.Subtotal, p.DiscountTotal, p.TaxTotal, p.GrandTotal, nullableString(p.UpdatedBy), id, scope.OrganizationID()))
+		if err != nil {
+			return err
+		}
+		q.Items, err = loadQuotationItems(ctx, tx, scope.OrganizationID(), id)
+		return err
+	})
+	return q, err
+}
+
+func (r *quotationRepository) Revise(ctx context.Context, scope coretenant.Scope, id string, p CreateQuotationParams) (domain.Quotation, error) {
+	if !scope.IsValid() {
+		return domain.Quotation{}, coretenant.ErrInvalidScope
+	}
+	var q domain.Quotation
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		status, err := lockQuotationStatus(ctx, tx, scope, id)
+		if err != nil {
+			return err
+		}
+		switch domain.QuotationStatus(status) {
+		case domain.QuotationStatusSent, domain.QuotationStatusRejected, domain.QuotationStatusExpired:
+		default:
+			return ErrQuotationNotRevisable
+		}
+		if _, err := tx.Exec(ctx, `UPDATE crm_quotations SET status = 'superseded', updated_by = $1, updated_at = NOW()
+			WHERE id = $2 AND organization_id = $3`, nullableString(p.CreatedBy), id, scope.OrganizationID()); err != nil {
+			return err
+		}
+		currency := p.Currency
+		if currency == "" {
+			currency = "IDR"
+		}
+		q, err = scanQuotation(tx.QueryRow(ctx, `
+			INSERT INTO crm_quotations (
+				organization_id, deal_id, contact_id, company_id, quotation_number, valid_until,
+				subtotal, discount_total, tax_total, grand_total, currency, notes, created_by, revision_of_id, revision_no
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+			RETURNING `+quotationColumns,
+			scope.OrganizationID(), nullableString(p.DealID), nullableString(p.ContactID), nullableString(p.CompanyID),
+			p.QuotationNumber, p.ValidUntil, p.Subtotal, p.DiscountTotal, p.TaxTotal, p.GrandTotal, currency,
+			nullableString(p.Notes), nullableString(p.CreatedBy), id, p.RevisionNo))
+		if err != nil {
+			return err
+		}
+		if err := insertQuotationItemsTx(ctx, tx, scope, q.ID, p.Items); err != nil {
+			return err
+		}
+		q.Items, err = loadQuotationItems(ctx, tx, scope.OrganizationID(), q.ID)
+		return err
+	})
+	return q, err
+}
+
+func (r *quotationRepository) ExpireDue(ctx context.Context, scope coretenant.Scope, today time.Time) (int64, error) {
+	if !scope.IsValid() {
+		return 0, coretenant.ErrInvalidScope
+	}
+	var n int64
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE crm_quotations SET status = 'expired', updated_at = NOW()
+			WHERE organization_id = $1 AND deleted_at IS NULL AND status = 'sent' AND valid_until < $2::date`,
+			scope.OrganizationID(), today.Format("2006-01-02"))
+		n = tag.RowsAffected()
+		return err
+	})
+	return n, err
+}
+
+func (r *quotationRepository) SetPDFSnapshot(ctx context.Context, scope coretenant.Scope, id, assetID string) (bool, error) {
+	if !scope.IsValid() {
+		return false, coretenant.ErrInvalidScope
+	}
+	var ok bool
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE crm_quotations SET pdf_asset_id = $1, pdf_generated_at = NOW()
+			WHERE id = $2 AND organization_id = $3 AND deleted_at IS NULL AND pdf_asset_id IS NULL`,
+			assetID, id, scope.OrganizationID())
+		ok = tag.RowsAffected() == 1
+		return err
+	})
+	return ok, err
 }
