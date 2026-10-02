@@ -9,15 +9,17 @@ import (
 	"zyad.cloud/internal/modules/crm/repository"
 )
 
-// QuotationLineInput is the raw (unpriced-total) line item a caller submits.
-// QuotationService.computeTotals fills in LineTotal/Subtotal/DiscountTotal/
-// GrandTotal from these before handing off to the repository, using
-// math/big.Rat arithmetic (see that method's doc comment).
+// QuotationLineInput is the raw line item a caller submits. priceQuotationLines
+// computes line/header totals from it with per-line half-up rounding.
 type QuotationLineInput struct {
+	ProductID       string // S3: snapshot katalog bila diisi
 	Description     string
 	Quantity        string
 	UnitPrice       string
 	DiscountPercent string
+	TaxPercent      string
+	Unit            string
+	SKU             string // diisi service dari katalog; klien tidak mengirim
 }
 
 type CreateQuotationInput struct {

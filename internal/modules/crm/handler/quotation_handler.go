@@ -48,6 +48,9 @@ func lineItemsFromRequest(requests []dto.LineItemRequest) []service.QuotationLin
 			Quantity:        r.Quantity,
 			UnitPrice:       r.UnitPrice,
 			DiscountPercent: r.DiscountPercent,
+			ProductID:       r.ProductID,
+			TaxPercent:      r.TaxPercent,
+			Unit:            r.Unit,
 		})
 	}
 	return items

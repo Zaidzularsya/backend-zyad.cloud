@@ -22,10 +22,10 @@ func NewInvoiceService(repo repository.InvoiceRepository, quotationRepo reposito
 	return &invoiceService{repo: repo, quotationRepo: quotationRepo, numberRepo: numberRepo}
 }
 
-// computeInvoiceTotals mirrors quotationService.computeTotals but without a
+// computeInvoiceTotals mirrors the quotation pricing (priceQuotationLines) but without a
 // separate discount_total header field (crm_invoices doesn't have one —
 // discounts are only tracked per line item, already folded into LineTotal).
-// Money arithmetic uses math/big.Rat (not float64) — see computeTotals.
+// Money arithmetic uses math/big.Rat (not float64) — see priceQuotationLines.
 func (s *invoiceService) computeInvoiceTotals(items []InvoiceLineInput, taxTotalInput string) (subtotal string, grandTotal string, lineItems []repository.InvoiceItemInput, err error) {
 	subtotalValue := new(big.Rat)
 	hundred := big.NewRat(100, 1)

@@ -328,6 +328,10 @@ type LineItemRequest struct {
 	Quantity        string `json:"quantity"`
 	UnitPrice       string `json:"unit_price"`
 	DiscountPercent string `json:"discount_percent"`
+	// Quotation v2 (diabaikan invoice).
+	ProductID  string `json:"product_id"`
+	TaxPercent string `json:"tax_percent"`
+	Unit       string `json:"unit" binding:"max=30"`
 }
 
 // QuotationListQuery binds query parameters for listing quotations.

@@ -32,64 +32,6 @@ func formatDocumentNumber(prefix string, year int, seq int) string {
 	return fmt.Sprintf("%s-%d-%04d", prefix, year, seq)
 }
 
-// computeTotals converts the caller-submitted decimal-string line items into
-// priced repository.QuotationItemInput plus header totals.
-//
-// Money arithmetic uses math/big.Rat (not float64), matching the convention
-// in internal/modules/finance and internal/modules/billing — avoids
-// penny-level rounding drift on large quotations.
-func (s *quotationService) computeTotals(items []QuotationLineInput, taxTotalInput string) (subtotal string, discountTotal string, grandTotal string, lineItems []repository.QuotationItemInput, err error) {
-	subtotalValue := new(big.Rat)
-	discountTotalValue := new(big.Rat)
-	hundred := big.NewRat(100, 1)
-
-	lineItems = make([]repository.QuotationItemInput, 0, len(items))
-	for i, item := range items {
-		quantity, parseErr := parseDecimalOrDefault(item.Quantity, "1")
-		if parseErr != nil {
-			return "", "", "", nil, ErrInvalidQuotationAmount
-		}
-		unitPrice, parseErr := parseDecimalOrDefault(item.UnitPrice, "0")
-		if parseErr != nil {
-			return "", "", "", nil, ErrInvalidQuotationAmount
-		}
-		discountPercent, parseErr := parseDecimalOrDefault(item.DiscountPercent, "0")
-		if parseErr != nil {
-			return "", "", "", nil, ErrInvalidQuotationAmount
-		}
-
-		lineSubtotal := new(big.Rat).Mul(quantity, unitPrice)
-		discountAmount := new(big.Rat).Quo(new(big.Rat).Mul(lineSubtotal, discountPercent), hundred)
-		lineTotal := new(big.Rat).Sub(lineSubtotal, discountAmount)
-
-		subtotalValue.Add(subtotalValue, lineSubtotal)
-		discountTotalValue.Add(discountTotalValue, discountAmount)
-
-		var discountPercentPtr string
-		if item.DiscountPercent != "" {
-			discountPercentPtr = item.DiscountPercent
-		}
-
-		lineItems = append(lineItems, repository.QuotationItemInput{
-			Description:     item.Description,
-			Quantity:        formatDecimal(quantity),
-			UnitPrice:       formatDecimal(unitPrice),
-			DiscountPercent: discountPercentPtr,
-			LineTotal:       formatDecimal(lineTotal),
-			Position:        i,
-		})
-	}
-
-	taxTotalValue, err := parseDecimalOrDefault(taxTotalInput, "0")
-	if err != nil {
-		return "", "", "", nil, ErrInvalidQuotationAmount
-	}
-
-	grandTotalValue := new(big.Rat).Add(new(big.Rat).Sub(subtotalValue, discountTotalValue), taxTotalValue)
-
-	return formatDecimal(subtotalValue), formatDecimal(discountTotalValue), formatDecimal(grandTotalValue), lineItems, nil
-}
-
 func parseDecimalOrDefault(value string, fallback string) (*big.Rat, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -113,13 +55,9 @@ func formatDecimal(value *big.Rat) string {
 }
 
 func (s *quotationService) Create(ctx context.Context, scope coretenant.Scope, input CreateQuotationInput) (domain.Quotation, error) {
-	subtotal, discountTotal, grandTotal, items, err := s.computeTotals(input.Items, input.TaxTotal)
+	totals, items, err := priceQuotationLines(input.Items, input.TaxTotal)
 	if err != nil {
 		return domain.Quotation{}, err
-	}
-	taxTotal := input.TaxTotal
-	if taxTotal == "" {
-		taxTotal = "0.00"
 	}
 
 	quotationNumber := strings.TrimSpace(input.QuotationNumber)
@@ -137,10 +75,10 @@ func (s *quotationService) Create(ctx context.Context, scope coretenant.Scope, i
 		CompanyID:       input.CompanyID,
 		QuotationNumber: quotationNumber,
 		ValidUntil:      input.ValidUntil,
-		Subtotal:        subtotal,
-		DiscountTotal:   discountTotal,
-		TaxTotal:        taxTotal,
-		GrandTotal:      grandTotal,
+		Subtotal:        totals.Subtotal,
+		DiscountTotal:   totals.DiscountTotal,
+		TaxTotal:        totals.TaxTotal,
+		GrandTotal:      totals.GrandTotal,
 		Currency:        input.Currency,
 		Notes:           input.Notes,
 		Items:           items,
