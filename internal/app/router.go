@@ -317,24 +317,25 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		deps.CRMIntegrationHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
 	}
 
-	// Katalog produk tenant (dipakai quotation CRM). Aturan tenant sama dengan CRM.
+	// Katalog produk tenant (dipakai quotation CRM dan invoice receivable). Aturan tenant sama
+	// dengan CRM; entitlement cukup salah satu dari crm.enabled / receivable.enabled.
 	if deps.CatalogProductHandler != nil {
 		catalogGroup := protected.Group("/app/catalog")
 		catalogGroup.Use(
 			middleware.RequireActiveTenant(),
 			middleware.RequireCustomerOrPlatformTenant(),
-			middleware.RequireEntitlement(deps.CRMEntitlementChecker, "crm.enabled"),
+			middleware.RequireAnyEntitlement(deps.CRMEntitlementChecker, "crm.enabled", "receivable.enabled"),
 		)
 		deps.CatalogProductHandler.RegisterRoutes(catalogGroup, deps.PermissionChecker)
 		deps.CatalogCategoryHandler.RegisterRoutes(catalogGroup, deps.PermissionChecker)
 	}
 
-	// CRM email: each user's own mailboxes. Same tenant rules as CRM.
+	// Email: each user's own mailboxes (CRM and receivable). Same tenant rules as CRM.
 	if deps.MailboxHandler != nil {
 		emailMiddleware := []gin.HandlerFunc{
 			middleware.RequireActiveTenant(),
 			middleware.RequireCustomerOrPlatformTenant(),
-			middleware.RequireEntitlement(deps.CRMEntitlementChecker, "crm.enabled"),
+			middleware.RequireAnyEntitlement(deps.CRMEntitlementChecker, "crm.enabled", "receivable.enabled"),
 		}
 		mailboxGroup := protected.Group("/app/mailboxes", emailMiddleware...)
 		emailGroup := protected.Group("/app/emails", emailMiddleware...)
