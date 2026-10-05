@@ -1,3 +1,7 @@
+DELETE FROM notification_templates
+WHERE code IN ('crm.quotation_approved', 'crm.quotation_revision_requested')
+	AND channel = 'email' AND locale = 'id-ID' AND version = 1 AND is_system = true;
+
 -- Kembalikan data ke bentuk yang diterima constraint lama sebelum constraint dipasang.
 UPDATE crm_quotations SET status = 'sent' WHERE status = 'revision_requested';
 UPDATE crm_activities SET type = 'note' WHERE type = 'quotation_response';

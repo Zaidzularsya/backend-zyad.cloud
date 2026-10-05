@@ -41,6 +41,8 @@ func TestVariableRegistryCodes(t *testing.T) {
 	want := []string{
 		"auth.password_changed",
 		"auth.password_reset",
+		"crm.quotation_approved",
+		"crm.quotation_revision_requested",
 		"lead.created",
 		"payment.paid",
 		"permission.updated",

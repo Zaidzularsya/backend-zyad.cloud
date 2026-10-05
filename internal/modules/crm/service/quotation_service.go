@@ -34,14 +34,15 @@ func formatDocumentNumber(prefix string, year int, seq int) string {
 }
 
 type quotationService struct {
-	repo       repository.QuotationRepository
-	numberRepo repository.DocumentCounterRepository
-	catalog    CatalogProducts
-	deals      repository.DealRepository
-	docs       *QuotationDocumentDeps
-	channels   *QuotationChannelDeps
-	links      *QuotationLinkDeps
-	now        func() time.Time
+	repo         repository.QuotationRepository
+	numberRepo   repository.DocumentCounterRepository
+	catalog      CatalogProducts
+	deals        repository.DealRepository
+	docs         *QuotationDocumentDeps
+	channels     *QuotationChannelDeps
+	links        *QuotationLinkDeps
+	approvedHook QuotationApprovedHook
+	now          func() time.Time
 }
 
 func WithQuotationCatalog(p CatalogProducts) QuotationServiceOption {
@@ -292,6 +293,11 @@ func (s *quotationService) Approve(ctx context.Context, scope coretenant.Scope, 
 	quotation, err := s.repo.Approve(ctx, scope, id, updatedBy)
 	if err != nil {
 		return domain.Quotation{}, crmmodule.MapNotFound(err, "QUOTATION_NOT_SENT", "quotation not found, already deleted, or not sent")
+	}
+	if s.approvedHook != nil {
+		if err := s.approvedHook.QuotationApproved(ctx, scope, quotation, updatedBy); err != nil {
+			slog.WarnContext(ctx, "quotation approved hook failed", "quotation_id", quotation.ID, "error", err)
+		}
 	}
 	return quotation, nil
 }

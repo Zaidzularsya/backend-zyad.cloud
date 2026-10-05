@@ -88,6 +88,22 @@ func defaultVariables() map[string][]domain.NotificationVariable {
 			{Key: "ip_address", Description: "Login IP address", Required: true, Example: "127.0.0.1"},
 			{Key: "device_name", Description: "Device or browser name", Required: false, Example: "Chrome on Linux"},
 		},
+		"crm.quotation_approved": {
+			{Key: "app_name", Description: "Application name", Required: true, Example: "Zyad Cloud"},
+			{Key: "user_name", Description: "Recipient user name", Required: true, Example: "Sari"},
+			{Key: "quotation_number", Description: "Quotation number", Required: true, Example: "QUO-2026-0001"},
+			{Key: "responder_name", Description: "Name the customer entered when responding", Required: true, Example: "Budi Santoso"},
+			{Key: "deal_url", Description: "Deal (or quotation) page URL", Required: true, Example: "https://app.example.test/app/crm/deals/1"},
+		},
+		"crm.quotation_revision_requested": {
+			{Key: "app_name", Description: "Application name", Required: true, Example: "Zyad Cloud"},
+			{Key: "user_name", Description: "Recipient user name", Required: true, Example: "Sari"},
+			{Key: "quotation_number", Description: "Quotation number", Required: true, Example: "QUO-2026-0001"},
+			{Key: "responder_name", Description: "Name the customer entered when responding", Required: true, Example: "Budi Santoso"},
+			{Key: "categories", Description: "Requested revision categories (labels, comma separated)", Required: true, Example: "Harga/diskon, Lainnya"},
+			{Key: "note", Description: "Customer note (plain text, optional)", Required: false, Example: "Mohon diskon tambahan"},
+			{Key: "deal_url", Description: "Deal (or quotation) page URL", Required: true, Example: "https://app.example.test/app/crm/deals/1"},
+		},
 		"whatsapp.session_disconnected": {
 			{Key: "app_name", Description: "Application name", Required: true, Example: "Zyad Cloud"},
 			{Key: "user_name", Description: "Recipient user name", Required: true, Example: "Admin"},
