@@ -12,6 +12,7 @@ import (
 	catalogdomain "zyad.cloud/internal/modules/catalog/domain"
 	"zyad.cloud/internal/modules/crm/domain"
 	"zyad.cloud/internal/modules/crm/repository"
+	"zyad.cloud/internal/shared/pricing"
 )
 
 type fakeQuotationRepo struct {
@@ -80,7 +81,9 @@ func quotationFixture() (*quotationService, *fakeQuotationRepo) {
 	repo := &fakeQuotationRepo{stored: map[string]domain.Quotation{}}
 	svc := NewQuotationService(repo, fakeCounter{},
 		WithQuotationCatalog(fakeCatalog{
-			"p1":    {ID: "p1", Name: "Internet 50 Mbps", SKU: "NET-50", Unit: "bulan", BasePrice: "350000.00", TaxPercent: "11.00", IsActive: true},
+			"p1": {ID: "p1", Name: "Internet 50 Mbps", SKU: "NET-50", Unit: "bulan", BasePrice: "350000.00", TaxPercent: "11.00", IsActive: true},
+			"p-net": {ID: "p-net", Name: "Internet langganan", Unit: "bulan", BasePrice: "300000.00", TaxPercent: "0.00", IsActive: true,
+				Pricing: pricing.Attributes{ChargeType: pricing.Recurring, Frequency: pricing.Monthly, PaymentTiming: pricing.Prepaid}},
 			"p-off": {ID: "p-off", Name: "Lama", Unit: "pcs", BasePrice: "1.00", TaxPercent: "0.00", IsActive: false},
 		}),
 		WithQuotationDeals(fakeDeals{deals: map[string]domain.Deal{"d1": {ID: "d1", ContactID: &contact, CompanyID: &company}}}),
@@ -172,5 +175,46 @@ func TestRootQuotationNumber(t *testing.T) {
 		if got := rootQuotationNumber(in); got != want {
 			t.Errorf("rootQuotationNumber(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestApplyCatalogCopiesPricingAndLineOverrides(t *testing.T) {
+	svc, repo := quotationFixture()
+	annual := pricing.Attributes{ChargeType: pricing.Recurring, Frequency: pricing.Annual, PaymentTiming: pricing.Postpaid}
+	_, err := svc.Create(context.Background(), coretenant.Scope{}, CreateQuotationInput{
+		Items: []QuotationLineInput{
+			{ProductID: "p-net", Quantity: "1"},
+			{ProductID: "p-net", Quantity: "1", Pricing: annual},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := repo.created[0].Items
+	if items[0].Pricing != (pricing.Attributes{ChargeType: pricing.Recurring, Frequency: pricing.Monthly, PaymentTiming: pricing.Prepaid}) {
+		t.Fatalf("snapshot katalog = %+v", items[0].Pricing)
+	}
+	if items[1].Pricing != annual {
+		t.Fatalf("nilai baris harus menang = %+v", items[1].Pricing)
+	}
+	if got := repo.created[0].RecurringTotals; got[pricing.Monthly] != "300000.00" || got[pricing.Annual] != "300000.00" {
+		t.Fatalf("recurring totals = %v", got)
+	}
+}
+
+func TestReviseCopiesPricing(t *testing.T) {
+	svc, repo := quotationFixture()
+	repo.stored["r1"] = domain.Quotation{ID: "r1", QuotationNumber: "QUO-2026-0007", Status: domain.QuotationStatusSent,
+		Items: []domain.QuotationItem{{Description: "Internet", Quantity: "1.00", UnitPrice: "100.00", TaxPercent: "0.00", LineTotal: "100.00",
+			Pricing: pricing.Attributes{ChargeType: pricing.Recurring, Frequency: pricing.Monthly, PaymentTiming: pricing.Postpaid}}}}
+	if _, err := svc.Revise(context.Background(), coretenant.Scope{}, "r1", "u1"); err != nil {
+		t.Fatal(err)
+	}
+	got := repo.revised[0]
+	if got.Items[0].Pricing.Frequency != pricing.Monthly || got.Items[0].Pricing.PaymentTiming != pricing.Postpaid {
+		t.Fatalf("revisi tidak menyalin atribut: %+v", got.Items[0].Pricing)
+	}
+	if got.RecurringTotals[pricing.Monthly] != "100.00" || got.FirstInvoiceTotal != "0.00" || got.OneTimeTotal != "0.00" {
+		t.Fatalf("totals revisi = %+v", got)
 	}
 }

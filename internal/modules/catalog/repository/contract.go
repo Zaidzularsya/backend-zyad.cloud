@@ -6,6 +6,7 @@ import (
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/catalog/domain"
+	"zyad.cloud/internal/shared/pricing"
 )
 
 var (
@@ -30,6 +31,7 @@ type CreateProductParams struct {
 	BasePrice   string
 	TaxPercent  string
 	Currency    string
+	Pricing     pricing.Attributes
 	IsActive    bool
 	CreatedBy   string
 }
@@ -44,6 +46,7 @@ type UpdateProductParams struct {
 	Unit        *string
 	BasePrice   *string
 	TaxPercent  *string
+	Pricing     *pricing.Attributes // dikirim utuh (tiga field); nil = tidak diubah
 	IsActive    *bool
 	UpdatedBy   string
 }

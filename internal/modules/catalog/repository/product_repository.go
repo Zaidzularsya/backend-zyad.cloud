@@ -12,6 +12,7 @@ import (
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/catalog/domain"
 	"zyad.cloud/internal/platform/database"
+	"zyad.cloud/internal/shared/pricing"
 )
 
 type productRepository struct{ db *database.Pool }
@@ -51,7 +52,7 @@ func isUniqueViolation(err error, index string) bool {
 
 const productSelect = `
 	SELECT p.id, p.organization_id, p.category_id, COALESCE(c.name, ''), p.sku, p.name, p.description,
-		p.unit, p.base_price::text, p.tax_percent::text, p.currency, p.is_active,
+		p.unit, p.base_price::text, p.tax_percent::text, p.currency, p.charge_type, p.billing_frequency, p.payment_timing, p.is_active,
 		p.created_by, p.updated_by, p.created_at, p.updated_at, p.deleted_at
 	FROM catalog_products p
 	LEFT JOIN catalog_product_categories c
@@ -59,10 +60,13 @@ const productSelect = `
 
 func scanProduct(row pgx.Row) (domain.Product, error) {
 	var p domain.Product
-	var sku, description, createdBy, updatedBy *string
+	var sku, description, createdBy, updatedBy, frequency *string
 	err := row.Scan(&p.ID, &p.OrganizationID, &p.CategoryID, &p.CategoryName, &sku, &p.Name, &description,
-		&p.Unit, &p.BasePrice, &p.TaxPercent, &p.Currency, &p.IsActive,
+		&p.Unit, &p.BasePrice, &p.TaxPercent, &p.Currency, &p.Pricing.ChargeType, &frequency, &p.Pricing.PaymentTiming, &p.IsActive,
 		&createdBy, &updatedBy, &p.CreatedAt, &p.UpdatedAt, &p.DeletedAt)
+	if frequency != nil {
+		p.Pricing.Frequency = pricing.Frequency(*frequency)
+	}
 	if sku != nil {
 		p.SKU = *sku
 	}
@@ -90,13 +94,20 @@ func (r *productRepository) Create(ctx context.Context, scope coretenant.Scope, 
 		if currency == "" {
 			currency = "IDR"
 		}
+		// Service sudah menormalisasi; ini menjaga pemanggil langsung tanpa atribut harga.
+		if in.Pricing.ChargeType == "" {
+			in.Pricing.ChargeType = pricing.OneTime
+		}
+		if in.Pricing.PaymentTiming == "" {
+			in.Pricing.PaymentTiming = pricing.Prepaid
+		}
 		err := tx.QueryRow(ctx, `
 			INSERT INTO catalog_products (organization_id, category_id, sku, name, description, unit,
-				base_price, tax_percent, currency, is_active, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+				base_price, tax_percent, currency, charge_type, billing_frequency, payment_timing, is_active, created_by)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
 			scope.OrganizationID(), nullable(in.CategoryID), nullable(in.SKU), strings.TrimSpace(in.Name),
 			nullable(in.Description), strings.TrimSpace(in.Unit), in.BasePrice, in.TaxPercent, currency,
-			in.IsActive, nullable(in.CreatedBy)).Scan(&id)
+			string(in.Pricing.ChargeType), nullable(string(in.Pricing.Frequency)), string(in.Pricing.PaymentTiming), in.IsActive, nullable(in.CreatedBy)).Scan(&id)
 		if err != nil {
 			return err
 		}
@@ -221,6 +232,11 @@ func (r *productRepository) Update(ctx context.Context, scope coretenant.Scope, 
 	}
 	if in.TaxPercent != nil {
 		add("tax_percent", *in.TaxPercent)
+	}
+	if in.Pricing != nil {
+		add("charge_type", string(in.Pricing.ChargeType))
+		add("billing_frequency", nullable(string(in.Pricing.Frequency)))
+		add("payment_timing", string(in.Pricing.PaymentTiming))
 	}
 	if in.IsActive != nil {
 		add("is_active", *in.IsActive)

@@ -19,7 +19,7 @@ Modul ini **berbeda** dari modul `product`:
   organisasi (case-insensitive) di antara baris yang belum dihapus.
 - `catalog_products`: `category_id` (nullable), `sku varchar(64)` (nullable), `name varchar(200)`,
   `description`, `unit varchar(30)` default `pcs`, `base_price numeric(18,2)` ≥ 0,
-  `tax_percent numeric(5,2)` 0–100, `currency char(3)` default `IDR`, `is_active`, audit, soft delete.
+  `tax_percent numeric(5,2)` 0–100, `currency char(3)` default `IDR`, atribut harga (`charge_type`, `billing_frequency`, `payment_timing`; lihat di bawah), `is_active`, audit, soft delete.
 
 Kedua tabel memakai `apply_organization_rls`; setiap query repository berjalan dalam transaksi dengan
 `set_config('app.organization_id', …)` dan filter `organization_id` eksplisit.
@@ -54,9 +54,9 @@ Guard tenant sama dengan CRM: `RequireActiveTenant`, `RequireCustomerOrPlatformT
 | Method & path | Permission | Catatan |
 |---|---|---|
 | `GET /products` | `catalog_product.read` | Query `q` (nama/SKU), `category_id`, `is_active` (`true`/`false`), `page`, `per_page` (default 20, maks 100) |
-| `POST /products` | `catalog_product.create` | `{category_id?, sku?, name, description?, unit?, base_price?, tax_percent?, is_active?}`; `is_active` default `true` |
+| `POST /products` | `catalog_product.create` | `{category_id?, sku?, name, description?, unit?, base_price?, tax_percent?, charge_type?, billing_frequency?, payment_timing?, is_active?}`; `is_active` default `true` |
 | `GET /products/:id` | `catalog_product.read` | |
-| `PATCH /products/:id` | `catalog_product.update` | Field opsional; string kosong mengosongkan `category_id`/`sku`/`description` |
+| `PATCH /products/:id` | `catalog_product.update` | Field opsional; string kosong mengosongkan `category_id`/`sku`/`description`. Atribut harga dikirim utuh (lihat di bawah) |
 | `DELETE /products/:id` | `catalog_product.delete` | Soft delete |
 | `GET /categories` | `catalog_product.read` | Urut `position`, lalu nama |
 | `POST /categories` | `catalog_product.create` | `{name, position?}` |
@@ -70,3 +70,19 @@ Error: 422 `VALIDATION_ERROR`, 409 `PRODUCT_SKU_EXISTS` / `CATEGORY_NAME_EXISTS`
 
 Varian, bundle, stok, harga bertingkat/per pelanggan, multi-mata uang, model TM Forum
 (Specification → Offering → Price).
+
+## Atribut harga (Rilis 3 S1)
+
+Migration `000142` menambah tiga kolom pada `catalog_products`. Kosakata dan validasi ada di paket bersama `internal/shared/pricing`
+(dipakai juga oleh `crm`).
+
+| Kolom / JSON | Nilai | Catatan |
+|---|---|---|
+| `charge_type` | `one_time` (default), `recurring` | |
+| `billing_frequency` | `daily`, `weekly`, `monthly`, `quarterly`, `semiannual`, `annual` | Wajib bila `recurring`, harus kosong (`null`) bila `one_time` — dijaga service **dan** CHECK `(charge_type='recurring') = (billing_frequency IS NOT NULL)` |
+| `payment_timing` | `prepaid` (default), `postpaid` | |
+
+- Produk lama otomatis `one_time` + `prepaid`.
+- `POST`: field kosong → default; kombinasi tidak valid → `422 VALIDATION_ERROR`.
+- `PATCH`: atribut dikirim **utuh** — `charge_type` dan `payment_timing` bersamaan (+ `billing_frequency` bila `recurring`). Hanya sebagian → `422`. Tidak mengirim satu pun → tidak berubah.
+- Nilai ini menjadi default snapshot baris quotation; lihat `reference-crm.md` (Atribut harga).

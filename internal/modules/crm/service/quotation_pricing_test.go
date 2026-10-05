@@ -4,6 +4,8 @@ import (
 	"errors"
 	"math/big"
 	"testing"
+
+	"zyad.cloud/internal/shared/pricing"
 )
 
 func TestRoundHalfUp2(t *testing.T) {
@@ -28,7 +30,7 @@ func TestPriceQuotationLinesPerLineRounding(t *testing.T) {
 	if a.LineTotal != "89999.99" || a.TaxAmount != "9900.00" || a.Quantity != "3.00" || a.UnitPrice != "33333.33" || a.Unit != "pcs" || a.Position != 0 {
 		t.Fatalf("line A = %+v", a)
 	}
-	if totals != (QuotationTotals{Subtotal: "599999.99", DiscountTotal: "10000.00", TaxTotal: "9900.00", GrandTotal: "599899.99"}) {
+	if totals.Subtotal != "599999.99" || totals.DiscountTotal != "10000.00" || totals.TaxTotal != "9900.00" || totals.GrandTotal != "599899.99" {
 		t.Fatalf("totals = %+v", totals)
 	}
 }
@@ -76,5 +78,38 @@ func TestPriceQuotationLinesRejectsInvalid(t *testing.T) {
 	}
 	if _, _, err := priceQuotationLines(nil, ""); !errors.Is(err, ErrInvalidQuotationAmount) {
 		t.Error("empty lines must be rejected")
+	}
+}
+
+func TestPriceQuotationLinesBreakdown(t *testing.T) {
+	lines := []QuotationLineInput{
+		{Description: "Instalasi", Quantity: "1", UnitPrice: "500000", Pricing: pricing.Attributes{ChargeType: pricing.OneTime, PaymentTiming: pricing.Prepaid}},
+		{Description: "Internet 50 Mbps", Quantity: "1", UnitPrice: "300000", TaxPercent: "11", Pricing: pricing.Attributes{ChargeType: pricing.Recurring, Frequency: pricing.Monthly, PaymentTiming: pricing.Prepaid}},
+		{Description: "Website", Quantity: "1", UnitPrice: "5000000", Pricing: pricing.Attributes{ChargeType: pricing.OneTime, PaymentTiming: pricing.Postpaid}},
+		{Description: "Domain", Quantity: "1", UnitPrice: "200000", Pricing: pricing.Attributes{ChargeType: pricing.Recurring, Frequency: pricing.Annual, PaymentTiming: pricing.Postpaid}},
+		{Description: "Baris bebas", Quantity: "1", UnitPrice: "1000"}, // default one_time prepaid
+	}
+	totals, items, err := priceQuotationLines(lines, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if totals.OneTimeTotal != "5501000.00" || totals.FirstInvoiceTotal != "834000.00" {
+		t.Fatalf("one_time=%s first=%s", totals.OneTimeTotal, totals.FirstInvoiceTotal)
+	}
+	if totals.RecurringTotals[pricing.Monthly] != "333000.00" || totals.RecurringTotals[pricing.Annual] != "200000.00" || len(totals.RecurringTotals) != 2 {
+		t.Fatalf("recurring=%v", totals.RecurringTotals)
+	}
+	if totals.GrandTotal != "6034000.00" {
+		t.Fatalf("grand=%s", totals.GrandTotal)
+	}
+	if items[4].Pricing != (pricing.Attributes{ChargeType: pricing.OneTime, PaymentTiming: pricing.Prepaid}) {
+		t.Fatalf("default item pricing %+v", items[4].Pricing)
+	}
+	if _, _, err := priceQuotationLines([]QuotationLineInput{{Description: "x", Pricing: pricing.Attributes{ChargeType: pricing.Recurring}}}, ""); !errors.Is(err, ErrInvalidQuotationAmount) {
+		t.Fatalf("invalid pricing err=%v", err)
+	}
+	only, _, _ := priceQuotationLines([]QuotationLineInput{{Description: "A", UnitPrice: "10"}}, "")
+	if only.RecurringTotals == nil || len(only.RecurringTotals) != 0 {
+		t.Fatalf("recurring harus map kosong non-nil: %#v", only.RecurringTotals)
 	}
 }

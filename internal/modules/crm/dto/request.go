@@ -332,6 +332,10 @@ type LineItemRequest struct {
 	ProductID  string `json:"product_id"`
 	TaxPercent string `json:"tax_percent"`
 	Unit       string `json:"unit" binding:"max=30"`
+	// Atribut harga (quotation saja; kosong = ikut katalog/default).
+	ChargeType       string `json:"charge_type" binding:"omitempty,oneof=one_time recurring"`
+	BillingFrequency string `json:"billing_frequency"`
+	PaymentTiming    string `json:"payment_timing" binding:"omitempty,oneof=prepaid postpaid"`
 }
 
 // QuotationListQuery binds query parameters for listing quotations.

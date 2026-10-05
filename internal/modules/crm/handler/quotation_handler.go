@@ -17,6 +17,7 @@ import (
 	"zyad.cloud/internal/modules/crm/dto"
 	"zyad.cloud/internal/modules/crm/repository"
 	"zyad.cloud/internal/modules/crm/service"
+	"zyad.cloud/internal/shared/pricing"
 	"zyad.cloud/internal/shared/response"
 )
 
@@ -81,7 +82,7 @@ func failQuotation(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrQuotationDealNotFound):
 		corehttp.Fail(c, coreerrors.New("QUOTATION_DEAL_NOT_FOUND", "Deal tidak ditemukan.", http.StatusUnprocessableEntity))
 	case errors.Is(err, service.ErrInvalidQuotationAmount):
-		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "Item tidak valid: deskripsi wajib, qty/harga ≥ 0, diskon & pajak 0–100.", http.StatusUnprocessableEntity))
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "Item tidak valid: deskripsi wajib, qty/harga ≥ 0, diskon & pajak 0–100; charge_type one_time|recurring, billing_frequency wajib hanya untuk recurring, payment_timing prepaid|postpaid.", http.StatusUnprocessableEntity))
 	case errors.Is(err, service.ErrQuotationDocumentsUnavailable):
 		corehttp.Fail(c, coreerrors.New("QUOTATION_PDF_FAILED", "PDF tidak dapat dibuat.", http.StatusBadGateway))
 	default:
@@ -116,6 +117,11 @@ func lineItemsFromRequest(requests []dto.LineItemRequest) []service.QuotationLin
 			ProductID:       r.ProductID,
 			TaxPercent:      r.TaxPercent,
 			Unit:            r.Unit,
+			Pricing: pricing.Attributes{
+				ChargeType:    pricing.ChargeType(r.ChargeType),
+				Frequency:     pricing.Frequency(r.BillingFrequency),
+				PaymentTiming: pricing.PaymentTiming(r.PaymentTiming),
+			},
 		})
 	}
 	return items

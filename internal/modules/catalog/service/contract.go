@@ -7,10 +7,11 @@ import (
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/catalog/domain"
 	"zyad.cloud/internal/modules/catalog/repository"
+	"zyad.cloud/internal/shared/pricing"
 )
 
 var (
-	ErrInvalidProduct  = errors.New("name (max 200) and unit (max 30) are required; base_price must be a non-negative number with at most 2 decimals; tax_percent must be between 0 and 100; sku max 64")
+	ErrInvalidProduct  = errors.New("name (max 200) and unit (max 30) are required; base_price must be a non-negative number with at most 2 decimals; tax_percent must be between 0 and 100; sku max 64; " + pricing.ErrInvalidAttributes.Error())
 	ErrInvalidCategory = errors.New("category name is required (max 100)")
 )
 
@@ -22,6 +23,7 @@ type ProductInput struct {
 	Unit        string
 	BasePrice   string
 	TaxPercent  string
+	Pricing     pricing.Attributes
 	IsActive    bool
 }
 

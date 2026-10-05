@@ -19,6 +19,18 @@ func DefaultOpening(doc Document) string {
 	return "Halo " + name + ", berikut penawaran " + doc.Number + " dari " + doc.Issuer.Name + "."
 }
 
+// totalsBreakdown: baris rincian (label, nilai, tebal) hanya bila ada baris berulang.
+func totalsBreakdown(doc Document) [][3]string {
+	if !doc.HasRecurring {
+		return nil
+	}
+	rows := [][3]string{{"Sekali bayar", doc.OneTimeTotal, ""}}
+	for _, r := range doc.RecurringTotals {
+		rows = append(rows, [3]string{"Berulang (" + r.Label + ")", r.Amount, ""})
+	}
+	return append(rows, [3]string{"Tagihan pertama", doc.FirstInvoiceTotal, "b"})
+}
+
 func lineDetail(l Line) string {
 	parts := []string{l.Quantity + " × " + l.UnitPrice}
 	if l.Discount != "-" && l.Discount != "" {
@@ -48,6 +60,13 @@ func BuildSummary(doc Document, opening string) Summary {
 		t.WriteString("Pajak: " + doc.TaxTotal + "\n")
 	}
 	t.WriteString("*Total: " + doc.GrandTotal + "*\n")
+	if doc.HasRecurring {
+		t.WriteString("Sekali bayar: " + doc.OneTimeTotal + "\n")
+		for _, r := range doc.RecurringTotals {
+			t.WriteString("Berulang: " + r.Amount + "\n")
+		}
+		t.WriteString("*Tagihan pertama: " + doc.FirstInvoiceTotal + "*\n")
+	}
 	if doc.ValidUntil != "" && doc.ValidUntil != "-" {
 		t.WriteString("Berlaku s.d. " + doc.ValidUntil + "\n")
 	}
@@ -66,6 +85,13 @@ func BuildSummary(doc Document, opening string) Summary {
 	h.WriteString("</table>")
 	h.WriteString("<p>Subtotal: " + e(doc.Subtotal) + "<br>Diskon: " + e(doc.DiscountTotal) + "<br>Pajak: " + e(doc.TaxTotal) +
 		"<br><strong>Total: " + e(doc.GrandTotal) + "</strong></p>")
+	if doc.HasRecurring {
+		h.WriteString("<p>Sekali bayar: " + e(doc.OneTimeTotal))
+		for _, r := range doc.RecurringTotals {
+			h.WriteString("<br>Berulang: " + e(r.Amount))
+		}
+		h.WriteString("<br><strong>Tagihan pertama: " + e(doc.FirstInvoiceTotal) + "</strong></p>")
+	}
 	if doc.ValidUntil != "" && doc.ValidUntil != "-" {
 		h.WriteString("<p>Berlaku s.d. " + e(doc.ValidUntil) + "</p>")
 	}

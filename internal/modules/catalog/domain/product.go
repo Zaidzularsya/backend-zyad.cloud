@@ -1,6 +1,10 @@
 package domain
 
-import "time"
+import (
+	"time"
+
+	"zyad.cloud/internal/shared/pricing"
+)
 
 // Category mengelompokkan produk katalog tenant.
 type Category struct {
@@ -26,6 +30,7 @@ type Product struct {
 	BasePrice      string
 	TaxPercent     string
 	Currency       string
+	Pricing        pricing.Attributes
 	IsActive       bool
 	CreatedBy      string
 	UpdatedBy      string

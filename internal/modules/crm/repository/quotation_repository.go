@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/crm/domain"
 	"zyad.cloud/internal/platform/database"
+	"zyad.cloud/internal/shared/pricing"
 )
 
 type quotationRepository struct {
@@ -44,12 +46,14 @@ const quotationColumns = `
 	id, organization_id, deal_id, contact_id, company_id, quotation_number, status, valid_until,
 	subtotal::text, discount_total::text, tax_total::text, grand_total::text, currency, notes,
 	sent_at, approved_at, rejected_at, created_by, updated_by, created_at, updated_at, deleted_at,
-	revision_of_id, revision_no, pdf_asset_id, pdf_generated_at
+	revision_of_id, revision_no, pdf_asset_id, pdf_generated_at,
+	one_time_total::text, first_invoice_total::text, recurring_totals
 `
 
 const quotationItemColumns = `
 	id, description, quantity::text, unit_price::text, discount_percent::text, line_total::text, position,
-	product_id, sku, unit, tax_percent::text, tax_amount::text
+	product_id, sku, unit, tax_percent::text, tax_amount::text,
+	charge_type, billing_frequency, payment_timing
 `
 
 func scanQuotation(row pgx.Row) (domain.Quotation, error) {
@@ -58,15 +62,23 @@ func scanQuotation(row pgx.Row) (domain.Quotation, error) {
 	var notes *string
 	var createdBy, updatedBy *string
 	var status string
+	var recurringJSON []byte
 
 	err := row.Scan(
 		&q.ID, &q.OrganizationID, &dealID, &contactID, &companyID, &q.QuotationNumber, &status, &q.ValidUntil,
 		&q.Subtotal, &q.DiscountTotal, &q.TaxTotal, &q.GrandTotal, &q.Currency, &notes,
 		&q.SentAt, &q.ApprovedAt, &q.RejectedAt, &createdBy, &updatedBy, &q.CreatedAt, &q.UpdatedAt, &q.DeletedAt,
 		&q.RevisionOfID, &q.RevisionNo, &q.PDFAssetID, &q.PDFGeneratedAt,
+		&q.OneTimeTotal, &q.FirstInvoiceTotal, &recurringJSON,
 	)
 	if err != nil {
 		return domain.Quotation{}, err
+	}
+	q.RecurringTotals = map[pricing.Frequency]string{}
+	if len(recurringJSON) > 0 {
+		if err := json.Unmarshal(recurringJSON, &q.RecurringTotals); err != nil {
+			return domain.Quotation{}, err
+		}
 	}
 
 	q.Status = domain.QuotationStatus(status)
@@ -88,9 +100,13 @@ func scanQuotation(row pgx.Row) (domain.Quotation, error) {
 
 func scanQuotationItem(row pgx.Row) (domain.QuotationItem, error) {
 	var item domain.QuotationItem
-	var sku, unit *string
+	var sku, unit, frequency *string
 	err := row.Scan(&item.ID, &item.Description, &item.Quantity, &item.UnitPrice, &item.DiscountPercent, &item.LineTotal, &item.Position,
-		&item.ProductID, &sku, &unit, &item.TaxPercent, &item.TaxAmount)
+		&item.ProductID, &sku, &unit, &item.TaxPercent, &item.TaxAmount,
+		&item.Pricing.ChargeType, &frequency, &item.Pricing.PaymentTiming)
+	if frequency != nil {
+		item.Pricing.Frequency = pricing.Frequency(*frequency)
+	}
 	if sku != nil {
 		item.SKU = *sku
 	}
@@ -106,6 +122,13 @@ func insertQuotationItemsTx(ctx context.Context, tx pgx.Tx, scope coretenant.Sco
 		if taxPercent == "" {
 			taxPercent = "0"
 		}
+		attrs := item.Pricing
+		if attrs.ChargeType == "" {
+			attrs.ChargeType = pricing.OneTime
+		}
+		if attrs.PaymentTiming == "" {
+			attrs.PaymentTiming = pricing.Prepaid
+		}
 		taxAmount := item.TaxAmount
 		if taxAmount == "" {
 			taxAmount = "0"
@@ -113,11 +136,12 @@ func insertQuotationItemsTx(ctx context.Context, tx pgx.Tx, scope coretenant.Sco
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO crm_quotation_items (
 				organization_id, quotation_id, description, quantity, unit_price, discount_percent, line_total, position,
-				product_id, sku, unit, tax_percent, tax_amount
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+				product_id, sku, unit, tax_percent, tax_amount, charge_type, billing_frequency, payment_timing
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
 			scope.OrganizationID(), quotationID, item.Description, item.Quantity, item.UnitPrice,
 			nullableString(item.DiscountPercent), item.LineTotal, item.Position,
-			nullableString(item.ProductID), nullableString(item.SKU), nullableString(item.Unit), taxPercent, taxAmount); err != nil {
+			nullableString(item.ProductID), nullableString(item.SKU), nullableString(item.Unit), taxPercent, taxAmount,
+			attrs.ChargeType, nullableString(string(attrs.Frequency)), attrs.PaymentTiming); err != nil {
 			return err
 		}
 	}
@@ -146,6 +170,22 @@ func loadQuotationItems(ctx context.Context, tx pgx.Tx, organizationID string, q
 	return items, rows.Err()
 }
 
+// recurringTotalsJSON menyerialkan rincian berulang; nil → objek kosong agar
+// kolom jsonb NOT NULL tidak pernah menerima null.
+func recurringTotalsJSON(m map[pricing.Frequency]string) ([]byte, error) {
+	if m == nil {
+		m = map[pricing.Frequency]string{}
+	}
+	return json.Marshal(m)
+}
+
+func totalOrZero(v string) string {
+	if v == "" {
+		return "0"
+	}
+	return v
+}
+
 func (r *quotationRepository) Create(ctx context.Context, scope coretenant.Scope, params CreateQuotationParams) (domain.Quotation, error) {
 	if !scope.IsValid() {
 		return domain.Quotation{}, coretenant.ErrInvalidScope
@@ -160,13 +200,17 @@ func (r *quotationRepository) Create(ctx context.Context, scope coretenant.Scope
 		INSERT INTO crm_quotations (
 			organization_id, deal_id, contact_id, company_id, quotation_number, valid_until,
 			subtotal, discount_total, tax_total, grand_total, currency, notes, created_by,
-			revision_of_id, revision_no
+			revision_of_id, revision_no, one_time_total, first_invoice_total, recurring_totals
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
 		) RETURNING ` + quotationColumns
 
+	recurringJSON, err := recurringTotalsJSON(params.RecurringTotals)
+	if err != nil {
+		return domain.Quotation{}, err
+	}
 	var quotation domain.Quotation
-	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+	err = r.withTx(ctx, scope, func(tx pgx.Tx) error {
 		var scanErr error
 		quotation, scanErr = scanQuotation(tx.QueryRow(ctx, query,
 			scope.OrganizationID(),
@@ -184,6 +228,9 @@ func (r *quotationRepository) Create(ctx context.Context, scope coretenant.Scope
 			nullableString(params.CreatedBy),
 			nullableString(params.RevisionOfID),
 			params.RevisionNo,
+			totalOrZero(params.OneTimeTotal),
+			totalOrZero(params.FirstInvoiceTotal),
+			recurringJSON,
 		))
 		if scanErr != nil {
 			return scanErr
@@ -469,8 +516,12 @@ func (r *quotationRepository) ReplaceItems(ctx context.Context, scope coretenant
 	if !scope.IsValid() {
 		return domain.Quotation{}, coretenant.ErrInvalidScope
 	}
+	recurringJSON, err := recurringTotalsJSON(p.RecurringTotals)
+	if err != nil {
+		return domain.Quotation{}, err
+	}
 	var q domain.Quotation
-	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+	err = r.withTx(ctx, scope, func(tx pgx.Tx) error {
 		status, err := lockQuotationStatus(ctx, tx, scope, id)
 		if err != nil {
 			return err
@@ -485,9 +536,12 @@ func (r *quotationRepository) ReplaceItems(ctx context.Context, scope coretenant
 			return err
 		}
 		q, err = scanQuotation(tx.QueryRow(ctx, `UPDATE crm_quotations
-			SET subtotal = $1, discount_total = $2, tax_total = $3, grand_total = $4, updated_by = $5, updated_at = NOW()
-			WHERE id = $6 AND organization_id = $7 RETURNING `+quotationColumns,
-			p.Subtotal, p.DiscountTotal, p.TaxTotal, p.GrandTotal, nullableString(p.UpdatedBy), id, scope.OrganizationID()))
+			SET subtotal = $1, discount_total = $2, tax_total = $3, grand_total = $4,
+				one_time_total = $5, first_invoice_total = $6, recurring_totals = $7, updated_by = $8, updated_at = NOW()
+			WHERE id = $9 AND organization_id = $10 RETURNING `+quotationColumns,
+			p.Subtotal, p.DiscountTotal, p.TaxTotal, p.GrandTotal,
+			totalOrZero(p.OneTimeTotal), totalOrZero(p.FirstInvoiceTotal), recurringJSON,
+			nullableString(p.UpdatedBy), id, scope.OrganizationID()))
 		if err != nil {
 			return err
 		}
@@ -501,8 +555,12 @@ func (r *quotationRepository) Revise(ctx context.Context, scope coretenant.Scope
 	if !scope.IsValid() {
 		return domain.Quotation{}, coretenant.ErrInvalidScope
 	}
+	recurringJSON, err := recurringTotalsJSON(p.RecurringTotals)
+	if err != nil {
+		return domain.Quotation{}, err
+	}
 	var q domain.Quotation
-	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+	err = r.withTx(ctx, scope, func(tx pgx.Tx) error {
 		status, err := lockQuotationStatus(ctx, tx, scope, id)
 		if err != nil {
 			return err
@@ -523,12 +581,14 @@ func (r *quotationRepository) Revise(ctx context.Context, scope coretenant.Scope
 		q, err = scanQuotation(tx.QueryRow(ctx, `
 			INSERT INTO crm_quotations (
 				organization_id, deal_id, contact_id, company_id, quotation_number, valid_until,
-				subtotal, discount_total, tax_total, grand_total, currency, notes, created_by, revision_of_id, revision_no
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+				subtotal, discount_total, tax_total, grand_total, currency, notes, created_by, revision_of_id, revision_no,
+				one_time_total, first_invoice_total, recurring_totals
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 			RETURNING `+quotationColumns,
 			scope.OrganizationID(), nullableString(p.DealID), nullableString(p.ContactID), nullableString(p.CompanyID),
 			p.QuotationNumber, p.ValidUntil, p.Subtotal, p.DiscountTotal, p.TaxTotal, p.GrandTotal, currency,
-			nullableString(p.Notes), nullableString(p.CreatedBy), id, p.RevisionNo))
+			nullableString(p.Notes), nullableString(p.CreatedBy), id, p.RevisionNo,
+			totalOrZero(p.OneTimeTotal), totalOrZero(p.FirstInvoiceTotal), recurringJSON))
 		if err != nil {
 			return err
 		}

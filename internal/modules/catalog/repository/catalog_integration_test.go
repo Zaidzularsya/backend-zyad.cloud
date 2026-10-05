@@ -10,6 +10,7 @@ import (
 	"zyad.cloud/internal/modules/catalog/repository"
 	"zyad.cloud/internal/platform/database"
 	"zyad.cloud/internal/platform/database/testutil"
+	"zyad.cloud/internal/shared/pricing"
 )
 
 func setupOrgs(t *testing.T, db *database.Pool, tenants testutil.TenantPair) {
@@ -57,6 +58,22 @@ func TestProductCRUDAndSKURules(t *testing.T) {
 	}
 	if p.CategoryName != "Internet" || p.BasePrice != "350000.00" || p.TaxPercent != "11.00" || p.Currency != "IDR" {
 		t.Fatalf("product = %+v", p)
+	}
+
+	if p.Pricing != (pricing.Attributes{ChargeType: pricing.OneTime, PaymentTiming: pricing.Prepaid}) {
+		t.Fatalf("default pricing = %+v", p.Pricing)
+	}
+	rec := pricing.Attributes{ChargeType: pricing.Recurring, Frequency: pricing.Monthly, PaymentTiming: pricing.Postpaid}
+	rp, err := products.Create(ctx, tenants.A.Scope, repository.CreateProductParams{SKU: "NET-REC", Name: "Internet langganan", Unit: "bulan", BasePrice: "300000", TaxPercent: "0", Pricing: rec, IsActive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rp.Pricing != rec {
+		t.Fatalf("recurring pricing round-trip = %+v", rp.Pricing)
+	}
+	oneTime := pricing.Attributes{ChargeType: pricing.OneTime, PaymentTiming: pricing.Prepaid}
+	if up, err := products.Update(ctx, tenants.A.Scope, rp.ID, repository.UpdateProductParams{Pricing: &oneTime}); err != nil || up.Pricing != oneTime {
+		t.Fatalf("update to one_time = %+v err=%v", up.Pricing, err)
 	}
 
 	// SKU unik case-insensitive.

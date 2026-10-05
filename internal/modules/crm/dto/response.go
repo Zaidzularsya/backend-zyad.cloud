@@ -365,33 +365,41 @@ type LineItemResponse struct {
 	Unit            string  `json:"unit,omitempty"`
 	TaxPercent      string  `json:"tax_percent,omitempty"`
 	TaxAmount       string  `json:"tax_amount,omitempty"`
+	// Atribut harga: hanya diisi untuk item quotation (omitempty menjaga respons invoice).
+	ChargeType       string  `json:"charge_type,omitempty"`
+	BillingFrequency *string `json:"billing_frequency,omitempty"`
+	PaymentTiming    string  `json:"payment_timing,omitempty"`
 }
 
 type QuotationResponse struct {
-	ID              string             `json:"id"`
-	DealID          *string            `json:"deal_id,omitempty"`
-	ContactID       *string            `json:"contact_id,omitempty"`
-	CompanyID       *string            `json:"company_id,omitempty"`
-	QuotationNumber string             `json:"quotation_number"`
-	Status          string             `json:"status"`
-	ValidUntil      *time.Time         `json:"valid_until,omitempty"`
-	Subtotal        string             `json:"subtotal"`
-	DiscountTotal   string             `json:"discount_total"`
-	TaxTotal        string             `json:"tax_total"`
-	GrandTotal      string             `json:"grand_total"`
-	Currency        string             `json:"currency"`
-	Notes           string             `json:"notes,omitempty"`
-	SentAt          *time.Time         `json:"sent_at,omitempty"`
-	ApprovedAt      *time.Time         `json:"approved_at,omitempty"`
-	RejectedAt      *time.Time         `json:"rejected_at,omitempty"`
-	Items           []LineItemResponse `json:"items"`
-	CreatedAt       time.Time          `json:"created_at"`
-	UpdatedAt       time.Time          `json:"updated_at"`
-	DeletedAt       *time.Time         `json:"deleted_at,omitempty"`
-	RevisionOfID    *string            `json:"revision_of_id,omitempty"`
-	RevisionNo      int                `json:"revision_no"`
-	HasPDF          bool               `json:"has_pdf"`
-	PDFGeneratedAt  *time.Time         `json:"pdf_generated_at,omitempty"`
+	ID              string     `json:"id"`
+	DealID          *string    `json:"deal_id,omitempty"`
+	ContactID       *string    `json:"contact_id,omitempty"`
+	CompanyID       *string    `json:"company_id,omitempty"`
+	QuotationNumber string     `json:"quotation_number"`
+	Status          string     `json:"status"`
+	ValidUntil      *time.Time `json:"valid_until,omitempty"`
+	Subtotal        string     `json:"subtotal"`
+	DiscountTotal   string     `json:"discount_total"`
+	TaxTotal        string     `json:"tax_total"`
+	GrandTotal      string     `json:"grand_total"`
+	// Rincian: sekali bayar, berulang per frekuensi, dan tagihan pertama.
+	OneTimeTotal      string             `json:"one_time_total"`
+	FirstInvoiceTotal string             `json:"first_invoice_total"`
+	RecurringTotals   map[string]string  `json:"recurring_totals"`
+	Currency          string             `json:"currency"`
+	Notes             string             `json:"notes,omitempty"`
+	SentAt            *time.Time         `json:"sent_at,omitempty"`
+	ApprovedAt        *time.Time         `json:"approved_at,omitempty"`
+	RejectedAt        *time.Time         `json:"rejected_at,omitempty"`
+	Items             []LineItemResponse `json:"items"`
+	CreatedAt         time.Time          `json:"created_at"`
+	UpdatedAt         time.Time          `json:"updated_at"`
+	DeletedAt         *time.Time         `json:"deleted_at,omitempty"`
+	RevisionOfID      *string            `json:"revision_of_id,omitempty"`
+	RevisionNo        int                `json:"revision_no"`
+	HasPDF            bool               `json:"has_pdf"`
+	PDFGeneratedAt    *time.Time         `json:"pdf_generated_at,omitempty"`
 }
 
 // QuotationDecisionResponse: hasil approve/reject + saran status deal untuk UI
@@ -431,6 +439,11 @@ type QuotationSummaryResponse struct {
 func quotationItemsFromDomain(items []domain.QuotationItem) []LineItemResponse {
 	responses := make([]LineItemResponse, 0, len(items))
 	for _, item := range items {
+		var freq *string
+		if item.Pricing.Frequency != "" {
+			f := string(item.Pricing.Frequency)
+			freq = &f
+		}
 		responses = append(responses, LineItemResponse{
 			ID:              item.ID,
 			Description:     item.Description,
@@ -444,37 +457,48 @@ func quotationItemsFromDomain(items []domain.QuotationItem) []LineItemResponse {
 			Unit:            item.Unit,
 			TaxPercent:      item.TaxPercent,
 			TaxAmount:       item.TaxAmount,
+
+			ChargeType:       string(item.Pricing.ChargeType),
+			BillingFrequency: freq,
+			PaymentTiming:    string(item.Pricing.PaymentTiming),
 		})
 	}
 	return responses
 }
 
 func QuotationFromDomain(q domain.Quotation) QuotationResponse {
+	recurring := make(map[string]string, len(q.RecurringTotals))
+	for f, v := range q.RecurringTotals {
+		recurring[string(f)] = v
+	}
 	return QuotationResponse{
-		ID:              q.ID,
-		DealID:          q.DealID,
-		ContactID:       q.ContactID,
-		CompanyID:       q.CompanyID,
-		QuotationNumber: q.QuotationNumber,
-		Status:          string(q.Status),
-		ValidUntil:      q.ValidUntil,
-		Subtotal:        q.Subtotal,
-		DiscountTotal:   q.DiscountTotal,
-		TaxTotal:        q.TaxTotal,
-		GrandTotal:      q.GrandTotal,
-		Currency:        q.Currency,
-		Notes:           q.Notes,
-		SentAt:          q.SentAt,
-		ApprovedAt:      q.ApprovedAt,
-		RejectedAt:      q.RejectedAt,
-		Items:           quotationItemsFromDomain(q.Items),
-		CreatedAt:       q.CreatedAt,
-		UpdatedAt:       q.UpdatedAt,
-		DeletedAt:       q.DeletedAt,
-		RevisionOfID:    q.RevisionOfID,
-		RevisionNo:      q.RevisionNo,
-		HasPDF:          q.PDFAssetID != nil,
-		PDFGeneratedAt:  q.PDFGeneratedAt,
+		OneTimeTotal:      q.OneTimeTotal,
+		FirstInvoiceTotal: q.FirstInvoiceTotal,
+		RecurringTotals:   recurring,
+		ID:                q.ID,
+		DealID:            q.DealID,
+		ContactID:         q.ContactID,
+		CompanyID:         q.CompanyID,
+		QuotationNumber:   q.QuotationNumber,
+		Status:            string(q.Status),
+		ValidUntil:        q.ValidUntil,
+		Subtotal:          q.Subtotal,
+		DiscountTotal:     q.DiscountTotal,
+		TaxTotal:          q.TaxTotal,
+		GrandTotal:        q.GrandTotal,
+		Currency:          q.Currency,
+		Notes:             q.Notes,
+		SentAt:            q.SentAt,
+		ApprovedAt:        q.ApprovedAt,
+		RejectedAt:        q.RejectedAt,
+		Items:             quotationItemsFromDomain(q.Items),
+		CreatedAt:         q.CreatedAt,
+		UpdatedAt:         q.UpdatedAt,
+		DeletedAt:         q.DeletedAt,
+		RevisionOfID:      q.RevisionOfID,
+		RevisionNo:        q.RevisionNo,
+		HasPDF:            q.PDFAssetID != nil,
+		PDFGeneratedAt:    q.PDFGeneratedAt,
 	}
 }
 

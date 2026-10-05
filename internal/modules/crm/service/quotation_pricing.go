@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	"zyad.cloud/internal/modules/crm/repository"
+	"zyad.cloud/internal/shared/pricing"
 )
 
 type QuotationTotals struct {
@@ -13,6 +14,11 @@ type QuotationTotals struct {
 	DiscountTotal string
 	TaxTotal      string
 	GrandTotal    string
+	// Rincian: total per baris = line_total + pajak. FirstInvoiceTotal = semua
+	// baris prabayar (sekali bayar maupun berulang periode pertama).
+	OneTimeTotal      string
+	FirstInvoiceTotal string
+	RecurringTotals   map[pricing.Frequency]string
 }
 
 var (
@@ -38,7 +44,8 @@ func parseNonNegative(value, fallback string, max *big.Rat) (*big.Rat, bool) {
 }
 
 // priceQuotationLines menghitung setiap baris (dibulatkan per baris) dan
-// total header. legacyTaxTotal dipakai hanya bila tidak ada baris berpajak
+// total header. Atribut harga tiap baris dinormalisasi (default one_time +
+// prepaid); atribut tidak valid → ErrInvalidQuotationAmount. legacyTaxTotal dipakai hanya bila tidak ada baris berpajak
 // (kontrak lama POST /quotations dengan tax_total header).
 func priceQuotationLines(lines []QuotationLineInput, legacyTaxTotal string) (QuotationTotals, []repository.QuotationItemInput, error) {
 	if len(lines) == 0 {
@@ -47,13 +54,16 @@ func priceQuotationLines(lines []QuotationLineInput, legacyTaxTotal string) (Quo
 	subtotal, discountTotal, taxTotal := new(big.Rat), new(big.Rat), new(big.Rat)
 	items := make([]repository.QuotationItemInput, 0, len(lines))
 	anyLineTax := false
+	oneTime, firstInvoice := new(big.Rat), new(big.Rat)
+	recurring := map[pricing.Frequency]*big.Rat{}
 	for i, l := range lines {
 		description := strings.TrimSpace(l.Description)
 		qty, ok1 := parseNonNegative(l.Quantity, "1", nil)
 		price, ok2 := parseNonNegative(l.UnitPrice, "0", nil)
 		discPct, ok3 := parseNonNegative(l.DiscountPercent, "0", ratHundred)
 		taxPct, ok4 := parseNonNegative(l.TaxPercent, "0", ratHundred)
-		if description == "" || utf8.RuneCountInString(description) > 500 || !ok1 || !ok2 || !ok3 || !ok4 {
+		attrs, attrErr := pricing.Normalize(l.Pricing)
+		if attrErr != nil || description == "" || utf8.RuneCountInString(description) > 500 || !ok1 || !ok2 || !ok3 || !ok4 {
 			return QuotationTotals{}, nil, ErrInvalidQuotationAmount
 		}
 		gross := roundHalfUp2(new(big.Rat).Mul(qty, price))
@@ -67,6 +77,19 @@ func priceQuotationLines(lines []QuotationLineInput, legacyTaxTotal string) (Quo
 		discountTotal.Add(discountTotal, disc)
 		taxTotal.Add(taxTotal, tax)
 
+		lineGross := new(big.Rat).Add(net, tax)
+		if attrs.ChargeType == pricing.Recurring {
+			if recurring[attrs.Frequency] == nil {
+				recurring[attrs.Frequency] = new(big.Rat)
+			}
+			recurring[attrs.Frequency].Add(recurring[attrs.Frequency], lineGross)
+		} else {
+			oneTime.Add(oneTime, lineGross)
+		}
+		if attrs.PaymentTiming == pricing.Prepaid {
+			firstInvoice.Add(firstInvoice, lineGross)
+		}
+
 		discount := ""
 		if strings.TrimSpace(l.DiscountPercent) != "" {
 			discount = discPct.FloatString(2)
@@ -74,7 +97,7 @@ func priceQuotationLines(lines []QuotationLineInput, legacyTaxTotal string) (Quo
 		items = append(items, repository.QuotationItemInput{
 			ProductID: l.ProductID, Description: description, SKU: strings.TrimSpace(l.SKU), Unit: strings.TrimSpace(l.Unit),
 			Quantity: qty.FloatString(2), UnitPrice: price.FloatString(2), DiscountPercent: discount,
-			TaxPercent: taxPct.FloatString(2), TaxAmount: tax.FloatString(2), LineTotal: net.FloatString(2), Position: i,
+			TaxPercent: taxPct.FloatString(2), TaxAmount: tax.FloatString(2), LineTotal: net.FloatString(2), Position: i, Pricing: attrs,
 		})
 	}
 	if !anyLineTax && strings.TrimSpace(legacyTaxTotal) != "" {
@@ -85,8 +108,13 @@ func priceQuotationLines(lines []QuotationLineInput, legacyTaxTotal string) (Quo
 		taxTotal = legacy
 	}
 	grand := new(big.Rat).Add(new(big.Rat).Sub(subtotal, discountTotal), taxTotal)
+	recurringTotals := make(map[pricing.Frequency]string, len(recurring))
+	for f, v := range recurring {
+		recurringTotals[f] = v.FloatString(2)
+	}
 	return QuotationTotals{
 		Subtotal: subtotal.FloatString(2), DiscountTotal: discountTotal.FloatString(2),
 		TaxTotal: taxTotal.FloatString(2), GrandTotal: grand.FloatString(2),
+		OneTimeTotal: oneTime.FloatString(2), FirstInvoiceTotal: firstInvoice.FloatString(2), RecurringTotals: recurringTotals,
 	}, items, nil
 }

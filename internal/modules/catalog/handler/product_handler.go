@@ -12,6 +12,7 @@ import (
 	"zyad.cloud/internal/modules/catalog/dto"
 	"zyad.cloud/internal/modules/catalog/repository"
 	"zyad.cloud/internal/modules/catalog/service"
+	"zyad.cloud/internal/shared/pricing"
 	"zyad.cloud/internal/shared/response"
 )
 
@@ -100,7 +101,12 @@ func (h *ProductHandler) Create(c *gin.Context) {
 		Unit:        req.Unit,
 		BasePrice:   req.BasePrice,
 		TaxPercent:  req.TaxPercent,
-		IsActive:    req.IsActive == nil || *req.IsActive,
+		Pricing: pricing.Attributes{
+			ChargeType:    pricing.ChargeType(req.ChargeType),
+			Frequency:     pricing.Frequency(req.BillingFrequency),
+			PaymentTiming: pricing.PaymentTiming(req.PaymentTiming),
+		},
+		IsActive: req.IsActive == nil || *req.IsActive,
 	}, permissionmiddleware.UserID(c))
 	if err != nil {
 		failCatalog(c, err)
@@ -121,6 +127,11 @@ func (h *ProductHandler) Update(c *gin.Context) {
 		validationError(c, err)
 		return
 	}
+	attrs, err := req.Pricing()
+	if err != nil {
+		validationError(c, err)
+		return
+	}
 	h.respond(c, func(scope coretenant.Scope) (domain.Product, error) {
 		return h.svc.Update(c.Request.Context(), scope, c.Param("id"), repository.UpdateProductParams{
 			CategoryID:  req.CategoryID,
@@ -130,6 +141,7 @@ func (h *ProductHandler) Update(c *gin.Context) {
 			Unit:        req.Unit,
 			BasePrice:   req.BasePrice,
 			TaxPercent:  req.TaxPercent,
+			Pricing:     attrs,
 			IsActive:    req.IsActive,
 			UpdatedBy:   permissionmiddleware.UserID(c),
 		})

@@ -11,6 +11,7 @@ import (
 	catalogmodule "zyad.cloud/internal/modules/catalog"
 	"zyad.cloud/internal/modules/catalog/domain"
 	"zyad.cloud/internal/modules/catalog/repository"
+	"zyad.cloud/internal/shared/pricing"
 )
 
 var moneyPattern = regexp.MustCompile(`^\d{1,16}(\.\d{1,2})?$`)
@@ -48,13 +49,14 @@ func (s *productService) Create(ctx context.Context, scope coretenant.Scope, in 
 	if in.TaxPercent == "" {
 		in.TaxPercent = "0"
 	}
-	if !validText(in.Name, 200, true) || !validText(in.Unit, 30, true) || !validText(in.SKU, 64, false) ||
+	attrs, err := pricing.Normalize(in.Pricing)
+	if err != nil || !validText(in.Name, 200, true) || !validText(in.Unit, 30, true) || !validText(in.SKU, 64, false) ||
 		!ValidMoney(in.BasePrice) || !ValidPercent(in.TaxPercent) {
 		return domain.Product{}, ErrInvalidProduct
 	}
 	return s.repo.Create(ctx, scope, repository.CreateProductParams{
 		CategoryID: in.CategoryID, SKU: in.SKU, Name: in.Name, Description: in.Description, Unit: in.Unit,
-		BasePrice: in.BasePrice, TaxPercent: in.TaxPercent, IsActive: in.IsActive, CreatedBy: userID,
+		BasePrice: in.BasePrice, TaxPercent: in.TaxPercent, Pricing: attrs, IsActive: in.IsActive, CreatedBy: userID,
 	})
 }
 
@@ -72,6 +74,13 @@ func (s *productService) Update(ctx context.Context, scope coretenant.Scope, id 
 		(in.SKU != nil && !validText(*in.SKU, 64, false)) ||
 		(in.BasePrice != nil && !ValidMoney(*in.BasePrice)) || (in.TaxPercent != nil && !ValidPercent(*in.TaxPercent)) {
 		return domain.Product{}, ErrInvalidProduct
+	}
+	if in.Pricing != nil {
+		attrs, err := pricing.Normalize(*in.Pricing)
+		if err != nil {
+			return domain.Product{}, ErrInvalidProduct
+		}
+		in.Pricing = &attrs
 	}
 	p, err := s.repo.Update(ctx, scope, id, in)
 	return p, catalogmodule.MapNotFound(err, "PRODUCT_NOT_FOUND", "product not found or already deleted")

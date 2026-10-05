@@ -111,6 +111,9 @@ func (r *Renderer) Render(doc Document) ([]byte, error) {
 	for _, l := range doc.Lines {
 		descLines := pdf.SplitText(l.Description, cols[1]-2)
 		rowH := float64(len(descLines))*lineH + 2
+		if l.Billing != "" {
+			rowH += 3.5
+		}
 		if pdf.GetY()+rowH > 297-20 {
 			pdf.AddPage()
 			drawHeader()
@@ -125,6 +128,14 @@ func (r *Renderer) Render(doc Document) ([]byte, error) {
 				for _, dl := range descLines {
 					pdf.SetX(cx + 1)
 					pdf.CellFormat(cols[1]-2, lineH, dl, "", 2, "L", false, 0, "")
+				}
+				if l.Billing != "" {
+					pdf.SetFont("Noto", "", 7)
+					pdf.SetTextColor(120, 120, 120)
+					pdf.SetX(cx + 1)
+					pdf.CellFormat(cols[1]-2, 3.5, l.Billing, "", 2, "L", false, 0, "")
+					pdf.SetTextColor(20, 20, 20)
+					pdf.SetFont("Noto", "", 8.5)
 				}
 			} else {
 				pdf.SetXY(cx, y+1)
@@ -152,6 +163,15 @@ func (r *Renderer) Render(doc Document) ([]byte, error) {
 		pdf.SetFont("Noto", style, 9.5)
 		pdf.CellFormat(40, 6, kv[0], "", 0, "L", false, 0, "")
 		pdf.CellFormat(40, 6, kv[1], "", 1, "R", false, 0, "")
+	}
+	if rows := totalsBreakdown(doc); rows != nil {
+		pdf.Ln(2)
+		for _, kv := range rows {
+			pdf.SetX(margin + content - 80)
+			pdf.SetFont("Noto", kv[2], 9.5)
+			pdf.CellFormat(40, 6, kv[0], "", 0, "L", false, 0, "")
+			pdf.CellFormat(40, 6, kv[1], "", 1, "R", false, 0, "")
+		}
 	}
 
 	if doc.Notes != "" {

@@ -11020,6 +11020,17 @@ components:
         currency:
           type: string
           example: IDR
+        charge_type:
+          type: string
+          enum: [one_time, recurring]
+        billing_frequency:
+          type: string
+          nullable: true
+          enum: [daily, weekly, monthly, quarterly, semiannual, annual]
+          description: Required when `charge_type` is `recurring`; null otherwise
+        payment_timing:
+          type: string
+          enum: [prepaid, postpaid]
         is_active:
           type: boolean
         created_at:
@@ -11056,6 +11067,18 @@ components:
         tax_percent:
           type: string
           description: 0-100, max 2 decimals; default "0"
+        charge_type:
+          type: string
+          enum: [one_time, recurring]
+          description: Default `one_time`
+        billing_frequency:
+          type: string
+          enum: [daily, weekly, monthly, quarterly, semiannual, annual]
+          description: Required for `recurring`, must be empty for `one_time` (422 VALIDATION_ERROR otherwise)
+        payment_timing:
+          type: string
+          enum: [prepaid, postpaid]
+          description: Default `prepaid`
         is_active:
           type: boolean
           default: true
@@ -11080,6 +11103,16 @@ components:
           type: string
         tax_percent:
           type: string
+        charge_type:
+          type: string
+          enum: [one_time, recurring]
+        billing_frequency:
+          type: string
+          enum: [daily, weekly, monthly, quarterly, semiannual, annual]
+        payment_timing:
+          type: string
+          enum: [prepaid, postpaid]
+          description: Pricing attributes are sent whole. `charge_type` and `payment_timing` must be sent together (plus `billing_frequency` when recurring); a partial set is rejected with 422. Omit all three to leave them unchanged.
         is_active:
           type: boolean
     CatalogCategory:
@@ -11133,6 +11166,17 @@ components:
           description: Net amount (gross - discount), rounded half-up per line
         position:
           type: integer
+        charge_type:
+          type: string
+          enum: [one_time, recurring]
+        billing_frequency:
+          type: string
+          nullable: true
+          enum: [daily, weekly, monthly, quarterly, semiannual, annual]
+          description: Snapshot from the catalog or set on the line; null for one_time
+        payment_timing:
+          type: string
+          enum: [prepaid, postpaid]
     CrmQuotationV2:
       type: object
       properties:
@@ -11170,6 +11214,16 @@ components:
           type: string
         grand_total:
           type: string
+        one_time_total:
+          type: string
+          description: Sum of one_time lines (line_total + tax)
+        first_invoice_total:
+          type: string
+          description: Sum of all prepaid lines (one_time and recurring first period)
+        recurring_totals:
+          type: object
+          additionalProperties: {type: string}
+          description: 'Per billing frequency, e.g. {"monthly":"333000.00"}; empty when no recurring lines'
         currency:
           type: string
         notes:
