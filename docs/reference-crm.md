@@ -335,6 +335,17 @@ Validasi deal: pipeline milik organisasi dan tidak diarsipkan, stage milik pipel
 
 Kode error: `422 INVALID_PIPELINE_STAGE`, `422 INVALID_START_STAGE`, `422 VALIDATION_ERROR` (input deal/company), `409 LEAD_ALREADY_CONVERTED`, `409 LEAD_NOT_CONVERTED`, `409 LEAD_DEAL_EXISTS`, `403 FORBIDDEN` (deal tanpa `deal.create`, company baru tanpa `company.create`).
 
+## Atribut harga quotation (Rilis 3 S1)
+
+Migration `000142`: `crm_quotation_items.charge_type`, `billing_frequency`, `payment_timing` (CHECK sama dengan katalog) dan
+`crm_quotations.one_time_total`, `first_invoice_total`, `recurring_totals jsonb`. Backfill: quotation lama `one_time_total = first_invoice_total = grand_total`.
+
+- **Input item** (`POST/PATCH /quotations`): `charge_type?`, `billing_frequency?`, `payment_timing?`. Kosong semuanya → ikut katalog bila ada `product_id`, selain itu `one_time` + `prepaid`. Nilai yang dikirim di baris mengalahkan katalog (sama dengan harga/pajak). Kombinasi tidak valid → `422 VALIDATION_ERROR`, item tidak tersimpan.
+- **Revisi** menyalin atribut tiap baris apa adanya (tidak membaca katalog).
+- **Rincian total** (dihitung `priceQuotationLines`, total baris = `line_total + tax_amount`, setelah diskon): `one_time_total` = Σ baris `one_time`; `recurring_totals[frekuensi]` = Σ baris `recurring` per frekuensi; `first_invoice_total` = Σ semua baris `prepaid` (sekali bayar maupun periode pertama berulang). `grand_total` tidak berubah maknanya.
+- **Respons**: item + `charge_type`, `billing_frequency` (`null` untuk one_time), `payment_timing`; quotation + `one_time_total`, `first_invoice_total`, `recurring_totals` (`{"monthly":"333000.00"}`, objek kosong bila tidak ada baris berulang).
+- **PDF / ringkasan WA & email**: harga baris berulang diberi akhiran (`/bulan`, …), baris atribut kecil di bawah deskripsi (kecuali Sekali bayar · Prabayar), dan blok "Sekali bayar / Berulang (frekuensi) / Tagihan pertama" **hanya bila** ada baris berulang — dokumen lama tidak berubah.
+
 ## Quotation v2 (Rilis 2 S3)
 
 Migration `000140` menambah `crm_quotations.revision_of_id`, `revision_no`, `pdf_asset_id`, `pdf_generated_at`, status `superseded`, serta snapshot item `crm_quotation_items.product_id` (FK ke `catalog_products`, `ON DELETE SET NULL (product_id)`), `sku`, `unit`, `tax_percent`, `tax_amount`.
