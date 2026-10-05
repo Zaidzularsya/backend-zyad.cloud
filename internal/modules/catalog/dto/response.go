@@ -7,23 +7,31 @@ import (
 )
 
 type ProductResponse struct {
-	ID           string    `json:"id"`
-	CategoryID   *string   `json:"category_id"`
-	CategoryName string    `json:"category_name,omitempty"`
-	SKU          string    `json:"sku,omitempty"`
-	Name         string    `json:"name"`
-	Description  string    `json:"description,omitempty"`
-	Unit         string    `json:"unit"`
-	BasePrice    string    `json:"base_price"`
-	TaxPercent   string    `json:"tax_percent"`
-	Currency     string    `json:"currency"`
-	IsActive     bool      `json:"is_active"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID               string    `json:"id"`
+	CategoryID       *string   `json:"category_id"`
+	CategoryName     string    `json:"category_name,omitempty"`
+	SKU              string    `json:"sku,omitempty"`
+	Name             string    `json:"name"`
+	Description      string    `json:"description,omitempty"`
+	Unit             string    `json:"unit"`
+	BasePrice        string    `json:"base_price"`
+	TaxPercent       string    `json:"tax_percent"`
+	Currency         string    `json:"currency"`
+	ChargeType       string    `json:"charge_type"`
+	BillingFrequency *string   `json:"billing_frequency"`
+	PaymentTiming    string    `json:"payment_timing"`
+	IsActive         bool      `json:"is_active"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 func ProductFromDomain(p domain.Product) ProductResponse {
-	return ProductResponse{ID: p.ID, CategoryID: p.CategoryID, CategoryName: p.CategoryName, SKU: p.SKU, Name: p.Name,
+	var freq *string
+	if p.Pricing.Frequency != "" {
+		f := string(p.Pricing.Frequency)
+		freq = &f
+	}
+	return ProductResponse{ChargeType: string(p.Pricing.ChargeType), BillingFrequency: freq, PaymentTiming: string(p.Pricing.PaymentTiming), ID: p.ID, CategoryID: p.CategoryID, CategoryName: p.CategoryName, SKU: p.SKU, Name: p.Name,
 		Description: p.Description, Unit: p.Unit, BasePrice: p.BasePrice, TaxPercent: p.TaxPercent,
 		Currency: p.Currency, IsActive: p.IsActive, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}
 }

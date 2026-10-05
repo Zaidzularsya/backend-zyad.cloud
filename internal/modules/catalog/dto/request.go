@@ -1,5 +1,14 @@
 package dto
 
+import (
+	"errors"
+
+	"zyad.cloud/internal/shared/pricing"
+)
+
+// ErrPartialPricing: atribut harga pada update harus dikirim utuh.
+var ErrPartialPricing = errors.New("charge_type and payment_timing must be sent together (with billing_frequency when recurring)")
+
 type ProductListQuery struct {
 	Q          string `form:"q"`
 	CategoryID string `form:"category_id"`
@@ -16,7 +25,12 @@ type CreateProductRequest struct {
 	Unit        string `json:"unit" binding:"max=30"`
 	BasePrice   string `json:"base_price"`
 	TaxPercent  string `json:"tax_percent"`
-	IsActive    *bool  `json:"is_active"`
+
+	ChargeType       string `json:"charge_type" binding:"omitempty,oneof=one_time recurring"`
+	BillingFrequency string `json:"billing_frequency"`
+	PaymentTiming    string `json:"payment_timing" binding:"omitempty,oneof=prepaid postpaid"`
+
+	IsActive *bool `json:"is_active"`
 }
 
 type UpdateProductRequest struct {
@@ -27,7 +41,29 @@ type UpdateProductRequest struct {
 	Unit        *string `json:"unit" binding:"omitempty,max=30"`
 	BasePrice   *string `json:"base_price"`
 	TaxPercent  *string `json:"tax_percent"`
-	IsActive    *bool   `json:"is_active"`
+
+	ChargeType       *string `json:"charge_type" binding:"omitempty,oneof=one_time recurring"`
+	BillingFrequency *string `json:"billing_frequency"`
+	PaymentTiming    *string `json:"payment_timing" binding:"omitempty,oneof=prepaid postpaid"`
+
+	IsActive *bool `json:"is_active"`
+}
+
+// Pricing mengembalikan atribut harga utuh, atau nil bila tidak ada yang
+// dikirim. Mengirim sebagian saja (tanpa charge_type/payment_timing, atau
+// billing_frequency tanpa charge_type) ditolak agar tidak menimpa diam-diam.
+func (r UpdateProductRequest) Pricing() (*pricing.Attributes, error) {
+	if r.ChargeType == nil && r.BillingFrequency == nil && r.PaymentTiming == nil {
+		return nil, nil
+	}
+	if r.ChargeType == nil || r.PaymentTiming == nil {
+		return nil, ErrPartialPricing
+	}
+	a := pricing.Attributes{ChargeType: pricing.ChargeType(*r.ChargeType), PaymentTiming: pricing.PaymentTiming(*r.PaymentTiming)}
+	if r.BillingFrequency != nil {
+		a.Frequency = pricing.Frequency(*r.BillingFrequency)
+	}
+	return &a, nil
 }
 
 type CategoryRequest struct {

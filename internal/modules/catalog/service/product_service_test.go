@@ -8,6 +8,7 @@ import (
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/catalog/domain"
 	"zyad.cloud/internal/modules/catalog/repository"
+	"zyad.cloud/internal/shared/pricing"
 )
 
 type fakeProducts struct {
@@ -18,7 +19,7 @@ type fakeProducts struct {
 
 func (f *fakeProducts) Create(_ context.Context, _ coretenant.Scope, p repository.CreateProductParams) (domain.Product, error) {
 	f.created = append(f.created, p)
-	return domain.Product{ID: "p1", Name: p.Name}, nil
+	return domain.Product{ID: "p1", Name: p.Name, Pricing: p.Pricing}, nil
 }
 
 func (f *fakeProducts) Update(_ context.Context, _ coretenant.Scope, id string, p repository.UpdateProductParams) (domain.Product, error) {
@@ -83,5 +84,28 @@ func TestUpdateProductValidatesOnlyProvidedFields(t *testing.T) {
 	active := false
 	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{IsActive: &active}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCreateProductPricingDefaultsAndValidation(t *testing.T) {
+	repo := &fakeProducts{}
+	svc := NewProductService(repo)
+	p, err := svc.Create(context.Background(), scope(t), ProductInput{Name: "Router", BasePrice: "500000"}, "u1")
+	if err != nil || p.Pricing != (pricing.Attributes{ChargeType: pricing.OneTime, PaymentTiming: pricing.Prepaid}) {
+		t.Fatalf("p=%+v err=%v", p.Pricing, err)
+	}
+	if _, err := svc.Create(context.Background(), scope(t), ProductInput{Name: "Internet", Pricing: pricing.Attributes{ChargeType: pricing.Recurring}}, "u1"); !errors.Is(err, ErrInvalidProduct) {
+		t.Fatalf("recurring tanpa frekuensi err=%v", err)
+	}
+	bad := pricing.Attributes{ChargeType: pricing.OneTime, Frequency: pricing.Monthly}
+	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Pricing: &bad}); !errors.Is(err, ErrInvalidProduct) {
+		t.Fatalf("update err=%v", err)
+	}
+	good := pricing.Attributes{ChargeType: pricing.Recurring, Frequency: pricing.Monthly}
+	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Pricing: &good}); err != nil {
+		t.Fatal(err)
+	}
+	if got := *repo.updated[len(repo.updated)-1].Pricing; got.PaymentTiming != pricing.Prepaid {
+		t.Fatalf("update pricing tidak dinormalisasi: %+v", got)
 	}
 }
