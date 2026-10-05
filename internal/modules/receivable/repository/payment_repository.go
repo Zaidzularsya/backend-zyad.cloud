@@ -35,7 +35,8 @@ func (r *paymentRepository) Record(ctx context.Context, scope coretenant.Scope, 
 			invoiceID, orgID).Scan(&status); err != nil {
 			return err
 		}
-		if p.Reference != "" {
+		// Hanya referensi provider yang idempoten; referensi manual adalah catatan bebas.
+		if p.Reference != "" && p.Method != "manual" {
 			existing, err := scanPayment(tx.QueryRow(ctx, `SELECT `+paymentColumns+` FROM receivable_payments p
 				WHERE p.organization_id = $1 AND p.method = $2 AND p.reference = $3`, orgID, p.Method, p.Reference))
 			if err == nil {

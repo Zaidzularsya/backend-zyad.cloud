@@ -470,3 +470,25 @@ func TestSettingsDefault(t *testing.T) {
 		t.Fatal("lead days > 60 must be rejected by the database CHECK")
 	}
 }
+
+// Referensi pembayaran manual bebas diisi tenant (mis. nomor transfer): tidak boleh
+// bentrok lintas tenant maupun antar-pembayaran, hanya referensi provider yang idempoten.
+func TestManualPaymentReferenceNotGloballyUnique(t *testing.T) {
+	e := setup(t)
+	a, b := e.tenants.A.Scope, e.tenants.B.Scope
+	invA := e.issued(t, a, e.account(t, a, "Budi").ID, "INV-2026-0001")
+	invB := e.issued(t, b, e.account(t, b, "Siti").ID, "INV-2026-0001")
+	pay := repository.PaymentParams{Amount: "1000", Method: "manual", Reference: "TRF-001", PaidAt: time.Now().UTC()}
+
+	for _, tc := range []struct {
+		scope coretenant.Scope
+		id    string
+	}{{a, invA.ID}, {b, invB.ID}, {a, invA.ID}} {
+		if _, _, created, err := e.payments.Record(e.ctx, tc.scope, tc.id, pay); err != nil || !created {
+			t.Fatalf("manual payment with shared reference: created=%v err=%v", created, err)
+		}
+	}
+	if got, _ := e.invoices.FindByID(e.ctx, a, invA.ID); got.AmountPaid != "2000.00" {
+		t.Fatalf("both manual payments on A must count, paid = %s", got.AmountPaid)
+	}
+}

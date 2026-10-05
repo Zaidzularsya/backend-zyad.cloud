@@ -84,8 +84,8 @@ type PaymentParams struct {
 
 type PaymentRepository interface {
 	// Record: SELECT invoice FOR UPDATE; status issued|overdue; amount <= sisa; amount_paid += amount;
-	// lunas → status paid + paid_at. Satu transaksi. (method, reference) duplikat → pembayaran lama
-	// dikembalikan (created=false) dan invoice tidak berubah.
+	// lunas → status paid + paid_at. Satu transaksi. (method, reference) provider duplikat → pembayaran lama
+	// dikembalikan (created=false) dan invoice tidak berubah. Referensi method manual tidak idempoten.
 	Record(ctx context.Context, scope coretenant.Scope, invoiceID string, p PaymentParams) (domain.Invoice, domain.Payment, bool, error)
 	List(ctx context.Context, scope coretenant.Scope, invoiceID string) ([]domain.Payment, error)
 	// ListAll terbaru dulu, dengan nomor invoice & nama account.

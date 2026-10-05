@@ -194,9 +194,10 @@ CREATE TABLE IF NOT EXISTS receivable_payments (
 		REFERENCES receivable_invoices(organization_id, id) ON DELETE RESTRICT,
 	CONSTRAINT fk_receivable_payments_recorded_by FOREIGN KEY (recorded_by) REFERENCES users(id) ON DELETE SET NULL
 );
--- Referensi unik global per metode: webhook provider yang sama tidak boleh dicatat dua kali.
+-- Referensi provider unik global: webhook yang sama tidak boleh dicatat dua kali. Referensi
+-- manual bebas diisi tenant (mis. nomor transfer), jadi tidak boleh unik lintas tenant.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_receivable_payments_method_reference
-	ON receivable_payments(method, reference) WHERE reference IS NOT NULL;
+	ON receivable_payments(method, reference) WHERE reference IS NOT NULL AND method <> 'manual';
 CREATE INDEX IF NOT EXISTS idx_receivable_payments_invoice
 	ON receivable_payments(organization_id, invoice_id, paid_at);
 SELECT apply_organization_rls('receivable_payments'::regclass);
