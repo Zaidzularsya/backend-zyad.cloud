@@ -48,6 +48,8 @@ func (h *QuotationHandler) RegisterRoutes(router *gin.RouterGroup, p permissionm
 	group.GET("/:id/pdf", permissionmiddleware.RequireOrganizationOrGlobal(p, "quotation.read"), h.PDF)
 	group.GET("/:id/summary", permissionmiddleware.RequireOrganizationOrGlobal(p, "quotation.read"), h.Summary)
 	group.GET("/:id/sends", permissionmiddleware.RequireOrganizationOrGlobal(p, "quotation.read"), h.Sends)
+	group.POST("/:id/link", permissionmiddleware.RequireOrganizationOrGlobal(p, "quotation.send"), h.Link)
+	group.GET("/:id/responses", permissionmiddleware.RequireOrganizationOrGlobal(p, "quotation.read"), h.Responses)
 }
 
 // allowed: cek permission tambahan di dalam handler (mis. izin kanal kirim).
@@ -446,4 +448,32 @@ func (h *QuotationHandler) Sends(c *gin.Context) {
 		out = append(out, dto.QuotationSendFromDomain(s))
 	}
 	corehttp.OK(c, "success", out)
+}
+
+func (h *QuotationHandler) Link(c *gin.Context) {
+	scope, err := coretenant.RequireScope(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, coreerrors.New("UNAUTHORIZED", "missing scope", http.StatusUnauthorized))
+		return
+	}
+	link, err := h.svc.Link(c.Request.Context(), scope, c.Param("id"), permissionmiddleware.UserID(c))
+	if err != nil {
+		failQuotation(c, err)
+		return
+	}
+	corehttp.OK(c, "success", dto.QuotationLinkResponse{URL: link.URL, ExpiresAt: link.ExpiresAt})
+}
+
+func (h *QuotationHandler) Responses(c *gin.Context) {
+	scope, err := coretenant.RequireScope(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, coreerrors.New("UNAUTHORIZED", "missing scope", http.StatusUnauthorized))
+		return
+	}
+	list, err := h.svc.Responses(c.Request.Context(), scope, c.Param("id"))
+	if err != nil {
+		failQuotation(c, err)
+		return
+	}
+	corehttp.OK(c, "success", dto.QuotationResponsesFromDomain(list))
 }

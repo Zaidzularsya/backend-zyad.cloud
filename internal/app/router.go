@@ -27,7 +27,7 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		middleware.CORS(),
 		middleware.RequestID(),
 		middleware.Recovery(deps.Logger),
-		gin.Logger(),
+		middleware.AccessLogger(),
 	)
 
 	router.GET("/healthz", func(c *gin.Context) {
@@ -111,6 +111,12 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	// WAHA webhooks authenticate via X-Webhook-Hmac; same placement as DOKU.
 	if deps.WhatsAppWebhookHandler != nil {
 		deps.WhatsAppWebhookHandler.RegisterRoutes(api)
+	}
+
+	// Link penawaran publik: akses lewat token (bukan JWT/tenant host), dengan
+	// rate limit per IP dan per token. Detail di handler.
+	if deps.CRMPublicQuotationHandler != nil {
+		deps.CRMPublicQuotationHandler.RegisterRoutes(api)
 	}
 
 	protected := api.Group("")
