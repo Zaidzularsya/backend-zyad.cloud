@@ -461,7 +461,7 @@ func (r *quotationRepository) Delete(ctx context.Context, scope coretenant.Scope
 	})
 }
 
-func (r *quotationRepository) transition(ctx context.Context, scope coretenant.Scope, id string, updatedBy string, fromStatus string, toStatus string, timestampColumn string) (domain.Quotation, error) {
+func (r *quotationRepository) transition(ctx context.Context, scope coretenant.Scope, id string, updatedBy string, fromStatuses []string, toStatus string, timestampColumn string) (domain.Quotation, error) {
 	if !scope.IsValid() {
 		return domain.Quotation{}, coretenant.ErrInvalidScope
 	}
@@ -469,13 +469,13 @@ func (r *quotationRepository) transition(ctx context.Context, scope coretenant.S
 	query := fmt.Sprintf(`
 		UPDATE crm_quotations
 		SET status = $1, %s = NOW(), updated_by = $2, updated_at = NOW()
-		WHERE id = $3 AND organization_id = $4 AND deleted_at IS NULL AND status = $5
+		WHERE id = $3 AND organization_id = $4 AND deleted_at IS NULL AND status = ANY($5)
 		RETURNING `, timestampColumn) + quotationColumns
 
 	var quotation domain.Quotation
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
 		var scanErr error
-		quotation, scanErr = scanQuotation(tx.QueryRow(ctx, query, toStatus, nullableString(updatedBy), id, scope.OrganizationID(), fromStatus))
+		quotation, scanErr = scanQuotation(tx.QueryRow(ctx, query, toStatus, nullableString(updatedBy), id, scope.OrganizationID(), fromStatuses))
 		if scanErr != nil {
 			return scanErr
 		}
@@ -493,15 +493,15 @@ func (r *quotationRepository) transition(ctx context.Context, scope coretenant.S
 }
 
 func (r *quotationRepository) Send(ctx context.Context, scope coretenant.Scope, id string, updatedBy string) (domain.Quotation, error) {
-	return r.transition(ctx, scope, id, updatedBy, string(domain.QuotationStatusDraft), string(domain.QuotationStatusSent), "sent_at")
+	return r.transition(ctx, scope, id, updatedBy, []string{string(domain.QuotationStatusDraft)}, string(domain.QuotationStatusSent), "sent_at")
 }
 
 func (r *quotationRepository) Approve(ctx context.Context, scope coretenant.Scope, id string, updatedBy string) (domain.Quotation, error) {
-	return r.transition(ctx, scope, id, updatedBy, string(domain.QuotationStatusSent), string(domain.QuotationStatusApproved), "approved_at")
+	return r.transition(ctx, scope, id, updatedBy, []string{string(domain.QuotationStatusSent)}, string(domain.QuotationStatusApproved), "approved_at")
 }
 
 func (r *quotationRepository) Reject(ctx context.Context, scope coretenant.Scope, id string, updatedBy string) (domain.Quotation, error) {
-	return r.transition(ctx, scope, id, updatedBy, string(domain.QuotationStatusSent), string(domain.QuotationStatusRejected), "rejected_at")
+	return r.transition(ctx, scope, id, updatedBy, []string{string(domain.QuotationStatusSent), string(domain.QuotationStatusRevisionRequested)}, string(domain.QuotationStatusRejected), "rejected_at")
 }
 
 // lockQuotationStatus mengunci baris quotation (FOR UPDATE) dan mengembalikan statusnya.
@@ -566,7 +566,7 @@ func (r *quotationRepository) Revise(ctx context.Context, scope coretenant.Scope
 			return err
 		}
 		switch domain.QuotationStatus(status) {
-		case domain.QuotationStatusSent, domain.QuotationStatusRejected, domain.QuotationStatusExpired:
+		case domain.QuotationStatusSent, domain.QuotationStatusRejected, domain.QuotationStatusExpired, domain.QuotationStatusRevisionRequested:
 		default:
 			return ErrQuotationNotRevisable
 		}

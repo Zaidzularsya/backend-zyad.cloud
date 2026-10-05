@@ -319,6 +319,7 @@ type ActivityResponse struct {
 	AssigneeUserID    string                    `json:"assignee_user_id,omitempty"`
 	OutcomeKey        string                    `json:"outcome_key,omitempty"`
 	Playbook          *ActivityPlaybookResponse `json:"playbook,omitempty"`
+	Metadata          map[string]any            `json:"metadata,omitempty"`
 	CreatedAt         time.Time                 `json:"created_at"`
 	UpdatedAt         time.Time                 `json:"updated_at"`
 	DeletedAt         *time.Time                `json:"deleted_at,omitempty"`
@@ -338,6 +339,7 @@ func ActivityFromDomain(a domain.Activity) ActivityResponse {
 		AssigneeUserID:    a.AssigneeUserID,
 		OutcomeKey:        a.OutcomeKey,
 		Playbook:          activityPlaybookFromDomain(a.Playbook),
+		Metadata:          a.Metadata,
 		CreatedAt:         a.CreatedAt,
 		UpdatedAt:         a.UpdatedAt,
 		DeletedAt:         a.DeletedAt,

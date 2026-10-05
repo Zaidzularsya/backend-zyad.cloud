@@ -129,3 +129,10 @@ func TestMarkSentStoresSnapshotOnceAndLogsDealActivity(t *testing.T) {
 		t.Fatalf("pdf = %q uploads = %d err=%v", pdf.Content, files.uploads, err)
 	}
 }
+
+func (r *snapshotRepo) Approve(_ context.Context, _ coretenant.Scope, id, _ string) (domain.Quotation, error) {
+	q := r.stored[id]
+	q.Status = domain.QuotationStatusApproved
+	r.stored[id] = q
+	return q, nil
+}

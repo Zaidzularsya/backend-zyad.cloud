@@ -64,6 +64,7 @@ import (
 	"zyad.cloud/internal/platform/mail"
 	redisplatform "zyad.cloud/internal/platform/redis"
 	"zyad.cloud/internal/platform/storage"
+	"zyad.cloud/internal/shared/publiclink"
 )
 
 type App struct {
@@ -521,8 +522,17 @@ func New(ctx context.Context) (*App, error) {
 		whatsappConversationHandler.WithStream(whatsappBus)
 	}
 
+	// Link publik dokumen (quotation sekarang, invoice di rilis berikutnya).
+	publicLinkSvc := publiclink.NewService(publiclink.NewRepository(db), cfg.App.Secret)
+	crmQuotationResponseRepo := crmrepo.NewQuotationResponseRepository(db)
+
 	// Quotation service dibuat setelah mailbox & WhatsApp karena memakai keduanya sebagai kanal kirim.
 	crmQuotationSvc := crmservice.NewQuotationService(crmQuotationRepo, crmDocumentCounterRepo,
+		crmservice.WithQuotationLinks(crmservice.QuotationLinkDeps{
+			Links:       publicLinkSvc,
+			FrontendURL: cfg.App.FrontendURL,
+			Responses:   crmQuotationResponseRepo,
+		}),
 		crmservice.WithQuotationCatalog(catalogrepo.NewProductRepository(db)),
 		crmservice.WithQuotationDeals(crmDealRepo),
 		crmservice.WithQuotationDocuments(crmservice.QuotationDocumentDeps{
@@ -541,6 +551,23 @@ func New(ctx context.Context) (*App, error) {
 		}),
 	)
 	crmQuotationHandler := crmhandler.NewQuotationHandler(crmQuotationSvc)
+	// Halaman publik penawaran: scope tenant dibangun dari baris link lewat
+	// resolver worker (identitas public-document-link), lalu query CRM berjalan di bawah RLS.
+	crmPublicQuotationSvc := crmservice.NewPublicQuotationService(
+		publicLinkSvc,
+		organizationservice.NewWorkerResolver(organizationrepo.NewOrganizationRepository(db), crmservice.PublicLinkIdentity),
+		crmQuotationSvc,
+		crmQuotationResponseRepo,
+		crmrepo.NewQuotationIssuerRepository(db),
+		crmActivityRepo,
+		crmservice.NewQuotationNotifier(
+			notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts),
+			crmDealRepo, crmMemberRepo, cfg.App.Name, cfg.App.FrontendURL, cfg.Notification.DefaultLocale,
+		),
+		nil, // QuotationApprovedHook: diisi rilis sales order
+		time.Now,
+	)
+	crmPublicQuotationHandler := crmhandler.NewPublicQuotationHandler(crmPublicQuotationSvc, redisClient)
 
 	router, err := newRouter(Dependencies{
 		Config:                           cfg,
@@ -601,6 +628,7 @@ func New(ctx context.Context) (*App, error) {
 		CRMDealHandler:                   crmDealHandler,
 		CRMActivityHandler:               crmActivityHandler,
 		CRMQuotationHandler:              crmQuotationHandler,
+		CRMPublicQuotationHandler:        crmPublicQuotationHandler,
 		CRMInvoiceHandler:                crmInvoiceHandler,
 		CRMIntegrationHandler:            crmIntegrationHandler,
 		WhatsAppEntitlementChecker:       crmEntitlementChecker,

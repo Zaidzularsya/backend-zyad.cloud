@@ -16,11 +16,13 @@ const (
 	QuotationStatusExpired  QuotationStatus = "expired"
 	// Superseded: versi lama yang sudah digantikan revisi.
 	QuotationStatusSuperseded QuotationStatus = "superseded"
+	// Customer meminta revisi lewat link publik; sales memutuskan revisi/tolak.
+	QuotationStatusRevisionRequested QuotationStatus = "revision_requested"
 )
 
 func (s QuotationStatus) IsValid() bool {
 	switch s {
-	case QuotationStatusDraft, QuotationStatusSent, QuotationStatusApproved, QuotationStatusRejected, QuotationStatusExpired, QuotationStatusSuperseded:
+	case QuotationStatusDraft, QuotationStatusSent, QuotationStatusApproved, QuotationStatusRejected, QuotationStatusExpired, QuotationStatusSuperseded, QuotationStatusRevisionRequested:
 		return true
 	default:
 		return false

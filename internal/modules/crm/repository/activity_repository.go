@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -45,7 +46,7 @@ const activityColumns = `
 	id, organization_id, related_entity_type, related_entity_id, type, subject, description,
 	due_at, completed_at, status, assignee_user_id, created_by, updated_by,
 	created_at, updated_at, deleted_at,
-	playbook_run_id, playbook_step_id, outcome_key, attempt_no, final_review
+	playbook_run_id, playbook_step_id, outcome_key, attempt_no, final_review, metadata
 `
 
 // prefixedActivityColumns returns activityColumns qualified with a table
@@ -68,12 +69,13 @@ func scanActivityWith(row pgx.Row, extra ...any) (domain.Activity, error) {
 	var description *string
 	var assigneeUserID, createdBy, updatedBy, outcomeKey *string
 	var relatedEntityType, activityType, status string
+	var metadataRaw []byte
 
 	dest := []any{
 		&a.ID, &a.OrganizationID, &relatedEntityType, &a.RelatedEntityID, &activityType, &a.Subject, &description,
 		&a.DueAt, &a.CompletedAt, &status, &assigneeUserID, &createdBy, &updatedBy,
 		&a.CreatedAt, &a.UpdatedAt, &a.DeletedAt,
-		&a.PlaybookRunID, &a.PlaybookStepID, &outcomeKey, &a.AttemptNo, &a.FinalReview,
+		&a.PlaybookRunID, &a.PlaybookStepID, &outcomeKey, &a.AttemptNo, &a.FinalReview, &metadataRaw,
 	}
 	err := row.Scan(append(dest, extra...)...)
 	if err != nil {
@@ -98,6 +100,11 @@ func scanActivityWith(row pgx.Row, extra ...any) (domain.Activity, error) {
 	if outcomeKey != nil {
 		a.OutcomeKey = *outcomeKey
 	}
+	if len(metadataRaw) > 0 {
+		if err := json.Unmarshal(metadataRaw, &a.Metadata); err != nil {
+			return domain.Activity{}, err
+		}
+	}
 
 	return a, nil
 }
@@ -114,11 +121,20 @@ func (r *activityRepository) Create(ctx context.Context, scope coretenant.Scope,
 	query := `
 		INSERT INTO crm_activities (
 			organization_id, related_entity_type, related_entity_id, type, subject, description,
-			due_at, assignee_user_id, created_by, status, completed_at
+			due_at, assignee_user_id, created_by, status, completed_at, metadata
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text, CASE WHEN $10::text = 'completed' THEN NOW() END
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10::text, CASE WHEN $10::text = 'completed' THEN NOW() END, $11
 		) RETURNING ` + activityColumns + `
 	`
+
+	var metadataJSON any
+	if len(params.Metadata) > 0 {
+		raw, err := json.Marshal(params.Metadata)
+		if err != nil {
+			return domain.Activity{}, err
+		}
+		metadataJSON = raw
+	}
 
 	var activity domain.Activity
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
@@ -134,6 +150,7 @@ func (r *activityRepository) Create(ctx context.Context, scope coretenant.Scope,
 			nullableString(params.AssigneeUserID),
 			nullableString(params.CreatedBy),
 			string(status),
+			metadataJSON,
 		))
 		return scanErr
 	})

@@ -32,6 +32,8 @@ type CreateActivityParams struct {
 	CreatedBy         string
 	// "" = pending. completed sets completed_at = NOW().
 	Status domain.ActivityStatus
+	// Metadata opsional (jsonb), mis. detail respons customer atas quotation.
+	Metadata map[string]any
 }
 
 type CompleteActivityParams struct {

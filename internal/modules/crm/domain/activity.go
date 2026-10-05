@@ -31,11 +31,14 @@ const (
 	// ActivityTypeWhatsApp is written by the whatsapp module (one summary
 	// activity per conversation per day), not by the activity form.
 	ActivityTypeWhatsApp ActivityType = "whatsapp"
+	// ActivityTypeQuotationResponse dicatat sistem saat customer menyetujui /
+	// meminta revisi penawaran lewat link publik (detail di Metadata).
+	ActivityTypeQuotationResponse ActivityType = "quotation_response"
 )
 
 func (t ActivityType) IsValid() bool {
 	switch t {
-	case ActivityTypeCall, ActivityTypeEmail, ActivityTypeMeeting, ActivityTypeTask, ActivityTypeNote, ActivityTypeWhatsApp:
+	case ActivityTypeCall, ActivityTypeEmail, ActivityTypeMeeting, ActivityTypeTask, ActivityTypeNote, ActivityTypeWhatsApp, ActivityTypeQuotationResponse:
 		return true
 	default:
 		return false
@@ -87,6 +90,8 @@ type Activity struct {
 	OutcomeKey     string
 	AttemptNo      *int
 	FinalReview    bool
+	// Metadata: data terstruktur tambahan (mis. respons quotation); nil bila kosong.
+	Metadata map[string]any
 	// Playbook diisi repository (attachPlaybookInfo) untuk activity playbook.
 	Playbook *ActivityPlaybookInfo
 }

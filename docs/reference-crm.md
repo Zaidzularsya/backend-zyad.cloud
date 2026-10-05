@@ -382,6 +382,30 @@ Aturan (R8–R9):
 - Idempotensi: `client_request_id` yang sama mengembalikan hasil pertama tanpa mengirim lagi.
 - Kode modul ringkasan: `crm/quotationpdf/summary.go` (view-model yang sama dengan PDF). Adapter kanal: `mailbox/service/quotation_mailer.go`, `whatsapp/service/quotation_sender.go` (CRM hanya mendefinisikan interface di `crm/service/quotation_channels.go`).
 
+## Link penawaran & respons customer (Rilis 3 S2)
+
+Migration `000143`: tabel bersama `public_links` (directory token → dokumen, **tanpa RLS**, pola `mailbox_directory`; dipakai juga invoice di S3), `crm_quotation_responses` (RLS), status `revision_requested`, tipe aktivitas `quotation_response` + kolom `crm_activities.metadata jsonb`, dan template notifikasi `crm.quotation_approved` / `crm.quotation_revision_requested`. Paket: `internal/shared/publiclink`.
+
+| Endpoint | Perilaku | Akses |
+|---|---|---|
+| `GET /public/quotations/:token` | Isi penawaran + `state` (`active`/`decided`/`expired`/`superseded`) + `last_response` | token |
+| `GET /public/quotations/:token/pdf` | PDF inline (`no-store`, `noindex`) | token |
+| `POST /public/quotations/:token/approve` | `{responder_name, agree:true}` | token |
+| `POST /public/quotations/:token/revision` | `{responder_name, categories[], note?}` | token |
+| `POST /quotations/:id/link` | URL publik quotation `sent` (idempoten) | `quotation.send` |
+| `GET /quotations/:id/responses` | Riwayat respons customer | `quotation.read` |
+
+Aturan (R3–R5):
+
+- **Token.** 32 byte `crypto/rand`, base64url (43 karakter). DB menyimpan `sha256(token)` untuk pencarian dan token terenkripsi (`corecrypto.EncryptSecret`, `APP_SECRET`) agar URL yang sama bisa disisipkan di kiriman berikutnya. Token tidak ditulis ke log (`middleware.AccessLogger` me-mask path `/public/quotations/*`). Satu link aktif per quotation; revisi mencabutnya.
+- **Scope tenant.** Dari token → `organization_id` → `WorkerResolver` (identitas `public-document-link`) → query CRM biasa di bawah RLS. Endpoint publik tidak menerima ID selain token.
+- **Masa berlaku.** `valid_until` 23:59:59 WIB, atau 30 hari sejak dibuat bila kosong. Lewat masa berlaku ≤ 30 hari → `state: expired` (tombol hilang, POST `409`); lebih lama, token tak dikenal, atau dicabut bukan karena revisi → `404 LINK_INVALID` (pesan sama). Dicabut karena revisi → `state: superseded` (PDF versi lama tetap bisa dilihat).
+- **Respons.** Hanya dari `sent`; `UPDATE … WHERE status = 'sent'` + insert respons dalam satu transaksi, jadi klik ganda / dua tab → satu respons, yang kedua `409 QUOTATION_NOT_RESPONDABLE`. Kategori revisi: `price`, `quantity`, `items`, `specification`, `schedule`, `payment_terms`, `validity`, `other` (catatan wajib bila `other`, maks 2.000 karakter). Catatan disimpan apa adanya dan wajib ditampilkan sebagai teks.
+- **Efek samping** (kegagalannya dicatat, tidak membatalkan respons): aktivitas `quotation_response` pada deal (metadata `action`, `categories`, `note`, …), email ke pemilik deal (pembuat quotation bila tanpa deal; email notifikasi `text/plain`), dan `QuotationApprovedHook` (sengaja `nil` di S2; S4 mengisinya). Approve internal oleh sales memanggil hook yang sama.
+- **Status.** `revision_requested` boleh di-Reject atau di-Revise oleh sales; tidak bisa di-Approve internal.
+- **Rate limit.** 30 request/menit per IP (semua endpoint publik) dan 10 aksi POST/jam per token → `429 RATE_LIMITED`. Redis mati → fail open.
+- **Catatan operasional.** Token juga muncul di path halaman frontend `/q/<token>`; log akses nginx perlu me-mask atau tidak menyimpan path tersebut.
+
 ## Non-Goals
 
 - Tidak menggantikan atau berinteraksi langsung dengan `billing_invoices`/`billing_payments` (modul

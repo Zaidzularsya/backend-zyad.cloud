@@ -129,4 +129,7 @@ type QuotationService interface {
 	SendVia(ctx context.Context, scope coretenant.Scope, id string, in SendQuotationInput) (SendQuotationResult, error)
 	Summary(ctx context.Context, scope coretenant.Scope, id, opening string) (quotationpdf.Summary, error)
 	ListSends(ctx context.Context, scope coretenant.Scope, id string) ([]domain.QuotationSend, error)
+	// Link: URL publik untuk quotation berstatus sent (dibuat bila belum ada).
+	Link(ctx context.Context, scope coretenant.Scope, id, userID string) (QuotationLink, error)
+	Responses(ctx context.Context, scope coretenant.Scope, id string) ([]domain.QuotationResponse, error)
 }

@@ -83,6 +83,7 @@ type Dependencies struct {
 	CRMDealHandler                   *crmhandler.DealHandler
 	CRMActivityHandler               *crmhandler.ActivityHandler
 	CRMQuotationHandler              *crmhandler.QuotationHandler
+	CRMPublicQuotationHandler        *crmhandler.PublicQuotationHandler
 	CRMInvoiceHandler                *crmhandler.InvoiceHandler
 	CRMIntegrationHandler            *crmhandler.IntegrationHandler
 	WhatsAppEntitlementChecker       middleware.EntitlementChecker
