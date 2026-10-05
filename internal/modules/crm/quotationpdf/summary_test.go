@@ -21,7 +21,7 @@ func summaryDoc() Document {
 }
 
 func TestBuildSummaryText(t *testing.T) {
-	s := BuildSummary(summaryDoc(), "")
+	s := BuildSummary(summaryDoc(), "", "")
 	want := []string{
 		"Halo Budi, berikut penawaran QUO-2026-0001 dari PT Zyad.",
 		"1. Internet <b>50</b> Mbps & instalasi",
@@ -42,7 +42,7 @@ func TestBuildSummaryText(t *testing.T) {
 }
 
 func TestBuildSummaryHTMLEscapes(t *testing.T) {
-	s := BuildSummary(summaryDoc(), `Halo "Pak" Budi <script>`)
+	s := BuildSummary(summaryDoc(), `Halo "Pak" Budi <script>`, "")
 	if strings.Contains(s.HTML, "<b>50</b>") || strings.Contains(s.HTML, "<script>") {
 		t.Fatalf("html not escaped: %s", s.HTML)
 	}
@@ -69,7 +69,7 @@ func TestBuildDocumentRecurring(t *testing.T) {
 	if !doc.HasRecurring || doc.FirstInvoiceTotal != "Rp 833.000" || doc.OneTimeTotal != "Rp 500.000" || doc.RecurringTotals[0] != (RecurringTotal{"Bulanan", "Rp 333.000/bulan"}) {
 		t.Fatalf("totals %+v", doc)
 	}
-	s := BuildSummary(doc, "")
+	s := BuildSummary(doc, "", "")
 	for _, w := range []string{"Berulang: Rp 333.000/bulan", "*Tagihan pertama: Rp 833.000*", "Sekali bayar: Rp 500.000"} {
 		if !strings.Contains(s.Text, w) {
 			t.Errorf("text missing %q", w)
@@ -93,7 +93,7 @@ func TestBuildDocumentMixedFrequenciesOrdered(t *testing.T) {
 }
 
 func TestSummaryWithoutRecurringUnchanged(t *testing.T) {
-	s := BuildSummary(summaryDoc(), "")
+	s := BuildSummary(summaryDoc(), "", "")
 	if strings.Contains(s.Text, "Tagihan pertama") || strings.Contains(s.HTML, "Tagihan pertama") {
 		t.Fatal("one-time only quotation must not show breakdown")
 	}
@@ -105,5 +105,16 @@ func TestBuildDocumentLegacyQuotationHasNoBreakdown(t *testing.T) {
 	doc := BuildDocument(q, Issuer{}, Customer{}, time.Now())
 	if doc.HasRecurring || doc.Lines[0].Billing != "" || doc.Lines[0].UnitPrice != "Rp 100" {
 		t.Fatalf("legacy doc %+v", doc)
+	}
+}
+
+func TestSummaryIncludesLink(t *testing.T) {
+	s := BuildSummary(summaryDoc(), "", "https://app.zyad.cloud/q/abc")
+	if !strings.Contains(s.Text, "Lihat & setujui penawaran: https://app.zyad.cloud/q/abc") ||
+		!strings.Contains(s.HTML, `<a href="https://app.zyad.cloud/q/abc">Lihat &amp; setujui penawaran</a>`) {
+		t.Fatalf("text=%s html=%s", s.Text, s.HTML)
+	}
+	if plain := BuildSummary(summaryDoc(), "", ""); strings.Contains(plain.Text, "Lihat & setujui") || strings.Contains(plain.HTML, "Lihat &amp; setujui") {
+		t.Fatal("no link line expected when link is empty")
 	}
 }

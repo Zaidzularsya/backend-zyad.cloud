@@ -45,7 +45,7 @@ func (s *quotationService) Summary(ctx context.Context, scope coretenant.Scope, 
 	if err != nil {
 		return quotationpdf.Summary{}, err
 	}
-	return quotationpdf.BuildSummary(doc, opening), nil
+	return quotationpdf.BuildSummary(doc, opening, ""), nil
 }
 
 func (s *quotationService) ListSends(ctx context.Context, scope coretenant.Scope, id string) ([]domain.QuotationSend, error) {
@@ -107,7 +107,8 @@ func (s *quotationService) SendVia(ctx context.Context, scope coretenant.Scope, 
 	if err != nil {
 		return SendQuotationResult{}, err
 	}
-	summary := quotationpdf.BuildSummary(doc, in.Message)
+	linkURL := s.publicLinkURL(ctx, scope, q, in.UserID)
+	summary := quotationpdf.BuildSummary(doc, in.Message, linkURL)
 	var attachment *QuotationAttachment
 	pdfAssetID := ""
 	if in.Mode.NeedsPDF() {
@@ -131,6 +132,9 @@ func (s *quotationService) SendVia(ctx context.Context, scope coretenant.Scope, 
 			body = "<p>" + htmlEscape(quotationpdf.DefaultOpening(doc)) + " Detail terlampir.</p>"
 			if strings.TrimSpace(in.Message) != "" {
 				body = "<p>" + htmlEscape(in.Message) + "</p>"
+			}
+			if linkURL != "" {
+				body += `<p><a href="` + htmlEscape(linkURL) + `">Lihat &amp; setujui penawaran</a></p>`
 			}
 		}
 		externalID, sendErr = s.channels.Email.SendQuotationEmail(ctx, scope, QuotationEmailInput{

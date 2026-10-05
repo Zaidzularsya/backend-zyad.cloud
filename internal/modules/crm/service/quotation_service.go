@@ -40,6 +40,7 @@ type quotationService struct {
 	deals      repository.DealRepository
 	docs       *QuotationDocumentDeps
 	channels   *QuotationChannelDeps
+	links      *QuotationLinkDeps
 	now        func() time.Time
 }
 
@@ -271,6 +272,7 @@ func (s *quotationService) Revise(ctx context.Context, scope coretenant.Scope, i
 	if err != nil {
 		return domain.Quotation{}, crmmodule.MapNotFound(err, "QUOTATION_NOT_FOUND", "quotation not found or already deleted")
 	}
+	s.revokeLink(ctx, scope, id)
 	return revised, nil
 }
 

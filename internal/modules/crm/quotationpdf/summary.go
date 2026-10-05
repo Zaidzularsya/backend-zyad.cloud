@@ -42,7 +42,8 @@ func lineDetail(l Line) string {
 	return strings.Join(parts, " · ") + " = " + l.Total
 }
 
-func BuildSummary(doc Document, opening string) Summary {
+// BuildSummary menyusun ringkasan teks/HTML; link "" = tanpa baris link customer.
+func BuildSummary(doc Document, opening, link string) Summary {
 	opening = strings.TrimSpace(opening)
 	if opening == "" {
 		opening = DefaultOpening(doc)
@@ -70,6 +71,9 @@ func BuildSummary(doc Document, opening string) Summary {
 	if doc.ValidUntil != "" && doc.ValidUntil != "-" {
 		t.WriteString("Berlaku s.d. " + doc.ValidUntil + "\n")
 	}
+	if link != "" {
+		t.WriteString("\nLihat & setujui penawaran: " + link + "\n")
+	}
 	t.WriteString("\n" + doc.Issuer.Name)
 
 	e := html.EscapeString
@@ -94,6 +98,9 @@ func BuildSummary(doc Document, opening string) Summary {
 	}
 	if doc.ValidUntil != "" && doc.ValidUntil != "-" {
 		h.WriteString("<p>Berlaku s.d. " + e(doc.ValidUntil) + "</p>")
+	}
+	if link != "" {
+		h.WriteString(`<p><a href="` + e(link) + `">Lihat &amp; setujui penawaran</a></p>`)
 	}
 	h.WriteString("<p>" + e(doc.Issuer.Name) + "</p>")
 
