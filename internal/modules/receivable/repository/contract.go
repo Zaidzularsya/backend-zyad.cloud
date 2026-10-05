@@ -105,6 +105,8 @@ type SendRepository interface {
 	ListByInvoice(ctx context.Context, scope coretenant.Scope, invoiceID string) ([]domain.Send, error)
 	// LatestFailedByInvoice: kiriman gagal terbaru yang belum disusul kiriman sukses pada kanal yang sama.
 	LatestFailedByInvoice(ctx context.Context, scope coretenant.Scope, invoiceID string) (domain.Send, error)
+	// LatestByInvoices: kiriman terbaru per invoice dalam satu query; invoice tanpa kiriman tidak muncul di peta.
+	LatestByInvoices(ctx context.Context, scope coretenant.Scope, invoiceIDs []string) (map[string]domain.Send, error)
 }
 
 type SettingsRepository interface {

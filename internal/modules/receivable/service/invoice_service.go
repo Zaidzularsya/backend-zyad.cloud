@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -30,6 +29,7 @@ type invoiceService struct {
 	renderer    PDFRenderer
 	links       Links
 	sender      AutoSender
+	members     MemberDirectory
 	listeners   *Registry
 	frontendURL string
 	now         func() time.Time
@@ -42,16 +42,12 @@ func NewInvoiceService(d InvoiceDeps) InvoiceService {
 	}
 	return &invoiceService{
 		accounts: d.Accounts, invoices: d.Invoices, counters: d.Counters, settings: d.Settings, issuers: d.Issuers,
-		files: d.Files, renderer: d.Renderer, links: d.Links, sender: d.Sender, listeners: d.Listeners,
+		files: d.Files, renderer: d.Renderer, links: d.Links, sender: d.Sender, members: d.Members, listeners: d.Listeners,
 		frontendURL: d.FrontendURL, now: now,
 	}
 }
 
 var currencyPattern = regexp.MustCompile(`^[A-Z]{3}$`)
-
-func invalidInvoice(format string, args ...any) error {
-	return fmt.Errorf("%w: %s", ErrInvalidInvoice, fmt.Sprintf(format, args...))
-}
 
 func validPeriod(start, end *time.Time) bool {
 	return start == nil || end == nil || !end.Before(*start)
@@ -76,20 +72,29 @@ func (s *invoiceService) buildParams(ctx context.Context, scope coretenant.Scope
 		sourceType = domain.SourceManual
 	case domain.SourceSalesOrder, domain.SourceContract:
 	default:
-		return zero, invalidInvoice("unknown source type %q", sourceType)
+		return zero, invalidInvoice("Jenis sumber tidak dikenal.")
 	}
 	currency := strings.TrimSpace(in.Currency)
 	if currency == "" {
 		currency = "IDR"
 	}
 	if !currencyPattern.MatchString(currency) {
-		return zero, invalidInvoice("currency must be a 3-letter code")
+		return zero, invalidInvoice("Mata uang harus kode 3 huruf, mis. IDR.")
 	}
 	if len(in.IdempotencyKey) > 100 {
-		return zero, invalidInvoice("idempotency key must be at most 100 characters")
+		return zero, invalidInvoice("Kunci idempotensi maksimal 100 karakter.")
 	}
 	if !validPeriod(in.PeriodStart, in.PeriodEnd) {
-		return zero, invalidInvoice("period end must not be before period start")
+		return zero, invalidInvoice("Akhir periode tidak boleh sebelum awal periode.")
+	}
+
+	if pic := strings.TrimSpace(in.PICUserID); pic != "" && s.members != nil {
+		if _, err := s.members.Find(ctx, scope, pic); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return zero, invalidInvoice("PIC harus anggota aktif organisasi ini.")
+			}
+			return zero, err
+		}
 	}
 
 	channels := in.Channels
@@ -106,21 +111,21 @@ func (s *invoiceService) buildParams(ctx context.Context, scope coretenant.Scope
 	}
 
 	if len(in.Lines) == 0 {
-		return zero, invalidInvoice("at least one line is required")
+		return zero, invalidInvoice("Tambahkan minimal satu baris.")
 	}
 	lines := make([]pricing.LineInput, len(in.Lines))
 	for i, l := range in.Lines {
 		lines[i] = l.LineInput
 		if !validPeriod(l.PeriodStart, l.PeriodEnd) {
-			return zero, invalidInvoice("line %d: period end must not be before period start", i+1)
+			return zero, invalidInvoice("Baris %d: akhir periode tidak boleh sebelum awal periode.", i+1)
 		}
 		if utf8.RuneCountInString(strings.TrimSpace(l.Unit)) > 30 || utf8.RuneCountInString(strings.TrimSpace(l.SKU)) > 64 {
-			return zero, invalidInvoice("line %d: unit max 30 and sku max 64 characters", i+1)
+			return zero, invalidInvoice("Baris %d: satuan maksimal 30 dan SKU maksimal 64 karakter.", i+1)
 		}
 	}
 	totals, priced, err := pricing.PriceLines(lines)
 	if err != nil {
-		return zero, invalidInvoice("%v", err)
+		return zero, invalidInvoice("Baris tidak valid: deskripsi 1–500 karakter, qty/harga ≥ 0, diskon & pajak 0–100, atribut harga valid.")
 	}
 	items := make([]repository.InvoiceItemParams, len(priced))
 	for i, p := range priced {
@@ -143,7 +148,7 @@ func normalizeChannels(in []string) ([]string, error) {
 	for _, c := range in {
 		c = strings.TrimSpace(c)
 		if c != "email" && c != "whatsapp" {
-			return nil, invalidInvoice("channel must be email or whatsapp")
+			return nil, invalidInvoice("Kanal harus email atau whatsapp.")
 		}
 		if !seen[c] {
 			seen[c] = true
@@ -151,7 +156,7 @@ func normalizeChannels(in []string) ([]string, error) {
 		}
 	}
 	if len(out) == 0 {
-		return nil, invalidInvoice("at least one channel is required")
+		return nil, invalidInvoice("Pilih minimal satu kanal.")
 	}
 	return out, nil
 }

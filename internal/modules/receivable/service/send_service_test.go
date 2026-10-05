@@ -49,6 +49,18 @@ func (f *fakeSendRepo) ListByInvoice(_ context.Context, _ coretenant.Scope, invo
 	}
 	return out, nil
 }
+func (f *fakeSendRepo) LatestByInvoices(_ context.Context, _ coretenant.Scope, ids []string) (map[string]domain.Send, error) {
+	out := map[string]domain.Send{}
+	for _, id := range ids {
+		for i := len(f.records) - 1; i >= 0; i-- {
+			if f.records[i].InvoiceID == id {
+				out[id] = f.records[i]
+				break
+			}
+		}
+	}
+	return out, nil
+}
 func (f *fakeSendRepo) LatestFailedByInvoice(context.Context, coretenant.Scope, string) (domain.Send, error) {
 	return domain.Send{}, pgx.ErrNoRows
 }
@@ -108,6 +120,14 @@ func (n *fakeNotifier) NotifySendFailed(_ context.Context, _ coretenant.Scope, e
 type fakeMembers struct {
 	byID       map[string]Member
 	permission []Member
+}
+
+func (m fakeMembers) Active(context.Context, coretenant.Scope) ([]Member, error) {
+	out := make([]Member, 0, len(m.byID))
+	for _, mem := range m.byID {
+		out = append(out, mem)
+	}
+	return out, nil
 }
 
 func (m fakeMembers) Find(_ context.Context, _ coretenant.Scope, id string) (Member, error) {
@@ -389,5 +409,14 @@ func TestEmailRecipientOverrideAndValidation(t *testing.T) {
 	h.rebuild(false)
 	if _, err := h.svc.Send(ctx, scope, "inv-1", SendInput{Channel: "email"}, "u-actor"); !errors.Is(err, ErrChannelUnavailable) {
 		t.Fatalf("account without email err = %v", err)
+	}
+}
+
+func TestLatestByInvoicesReturnsNewestPerInvoice(t *testing.T) {
+	h := newSendHarness(t)
+	h.svc.AutoSend(ctx, scope, h.invoice, "") // email sent, whatsapp failed (urutan kanal)
+	got, err := h.svc.LatestByInvoices(ctx, scope, []string{"inv-1", "other"})
+	if err != nil || len(got) != 1 || got["inv-1"].Channel != "whatsapp" || got["inv-1"].Status != "failed" {
+		t.Fatalf("latest = %+v err=%v", got, err)
 	}
 }

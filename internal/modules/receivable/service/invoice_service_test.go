@@ -255,3 +255,34 @@ func TestMarkOverdueDelegatesWithBusinessToday(t *testing.T) {
 		t.Fatalf("n=%d err=%v seen=%v", n, err, h.store.overdueSeen)
 	}
 }
+
+func TestPICMustBeAnActiveMemberOfThisOrganization(t *testing.T) {
+	h := newInvoiceHarness(t)
+	h.svc.members = fakeMembers{byID: map[string]Member{"u-pic": {UserID: "u-pic"}}}
+	in := InvoiceInput{AccountID: "a1", Lines: []LineInput{line("x", "1")}}
+
+	in.PICUserID = "u-pic"
+	if inv, err := h.svc.CreateDraft(ctx, scope, in, "u1"); err != nil || inv.PICUserID != "u-pic" {
+		t.Fatalf("valid pic: %+v err=%v", inv, err)
+	}
+	in.PICUserID = "user-from-another-tenant"
+	if _, err := h.svc.CreateDraft(ctx, scope, in, "u1"); !errors.Is(err, ErrInvalidInvoice) {
+		t.Fatalf("foreign pic err = %v", err)
+	}
+	in.PICUserID = ""
+	if _, err := h.svc.CreateDraft(ctx, scope, in, "u1"); err != nil {
+		t.Fatalf("empty pic is allowed: %v", err)
+	}
+}
+
+func TestValidationMessagesAreIndonesian(t *testing.T) {
+	h := newInvoiceHarness(t)
+	_, err := h.svc.CreateDraft(ctx, scope, InvoiceInput{AccountID: "a1"}, "u1")
+	if err == nil || !strings.Contains(err.Error(), "baris") {
+		t.Fatalf("message must be Indonesian, got %v", err)
+	}
+	_, err = h.svc.CreateDraft(ctx, scope, InvoiceInput{AccountID: "a1", Lines: []LineInput{line(" ", "1")}}, "u1")
+	if err == nil || !strings.Contains(err.Error(), "deskripsi") {
+		t.Fatalf("pricing error must be Indonesian, got %v", err)
+	}
+}

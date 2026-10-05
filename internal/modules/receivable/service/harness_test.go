@@ -254,10 +254,11 @@ func (c *fakeCounter) Next(context.Context, coretenant.Scope, string, int) (int,
 
 type fakeSettings struct{ s domain.Settings }
 
-func (f fakeSettings) Get(context.Context, coretenant.Scope) (domain.Settings, error) {
+func (f *fakeSettings) Get(context.Context, coretenant.Scope) (domain.Settings, error) {
 	return f.s, nil
 }
-func (f fakeSettings) Upsert(_ context.Context, _ coretenant.Scope, s domain.Settings, _ string) (domain.Settings, error) {
+func (f *fakeSettings) Upsert(_ context.Context, _ coretenant.Scope, s domain.Settings, _ string) (domain.Settings, error) {
+	f.s = s
 	return s, nil
 }
 
@@ -365,7 +366,7 @@ func newInvoiceHarness(t *testing.T) *invoiceHarness {
 	registry.Add(h.listener)
 	h.svc = NewInvoiceService(InvoiceDeps{
 		Accounts: fakeAccounts{}, Invoices: h.store, Counters: h.counter,
-		Settings: fakeSettings{domain.Settings{InvoiceLeadDays: 7, PaymentTermsDays: 7, DefaultChannels: []string{"email"}}},
+		Settings: &fakeSettings{domain.Settings{InvoiceLeadDays: 7, PaymentTermsDays: 7, DefaultChannels: []string{"email"}}},
 		Issuers:  fakeIssuer{}, Files: h.files, Renderer: h.renderer, Links: h.links, Sender: h.sender,
 		Listeners: registry, FrontendURL: "https://app.test/", Now: func() time.Time { return nowWIB },
 	}).(*invoiceService)

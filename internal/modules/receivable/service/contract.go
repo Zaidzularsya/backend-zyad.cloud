@@ -20,6 +20,7 @@ var (
 	// ErrInvalidInvoice membungkus detail validasi (errors.Is(err, ErrInvalidInvoice)).
 	ErrInvalidInvoice       = errors.New("invalid invoice")
 	ErrInvalidAccount       = errors.New("invalid account")
+	ErrInvalidSettings      = errors.New("invalid receivable settings")
 	ErrInvalidPayment       = errors.New("amount must be > 0 with at most 2 decimals and paid_at must not be in the future")
 	ErrVoidReasonRequired   = errors.New("void reason is required (1-500 characters)")
 	ErrInvoiceNotSendable   = errors.New("invoice can only be sent when issued, overdue or paid")
@@ -101,7 +102,8 @@ type InvoiceDeps struct {
 	Files       FileStore
 	Renderer    PDFRenderer
 	Links       Links
-	Sender      AutoSender // nil = tanpa kirim otomatis
+	Sender      AutoSender      // nil = tanpa kirim otomatis
+	Members     MemberDirectory // nil = PIC tidak divalidasi (hanya untuk test)
 	Listeners   *Registry
 	FrontendURL string
 	Now         func() time.Time // nil = time.Now
@@ -154,4 +156,12 @@ type ContractRef struct {
 type Listener interface {
 	InvoicePaid(ctx context.Context, scope coretenant.Scope, inv InvoiceRef)
 	ContractCreated(ctx context.Context, scope coretenant.Scope, c ContractRef) // dipanggil mulai S4
+}
+
+// SettingsService mengelola pengaturan penagihan organisasi.
+type SettingsService interface {
+	Get(ctx context.Context, scope coretenant.Scope) (domain.Settings, error)
+	Update(ctx context.Context, scope coretenant.Scope, s domain.Settings, userID string) (domain.Settings, error)
+	// Senders: anggota aktif untuk pilihan pengirim default dan PIC.
+	Senders(ctx context.Context, scope coretenant.Scope) ([]Member, error)
 }

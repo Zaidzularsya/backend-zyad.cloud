@@ -99,3 +99,32 @@ func (r *sendRepository) LatestFailedByInvoice(ctx context.Context, scope corete
 	})
 	return out, err
 }
+
+func (r *sendRepository) LatestByInvoices(ctx context.Context, scope coretenant.Scope, invoiceIDs []string) (map[string]domain.Send, error) {
+	out := map[string]domain.Send{}
+	if len(invoiceIDs) == 0 {
+		return out, nil
+	}
+	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT DISTINCT ON (s.invoice_id) s.id, s.invoice_id, s.channel, s.recipient, s.status, s.error, s.external_message_id,
+				COALESCE(s.client_request_id, ''), s.trigger, COALESCE(s.sent_by::text, ''), COALESCE(u.name, ''), s.sent_at
+			FROM receivable_invoice_sends s
+			LEFT JOIN users u ON u.id = s.sent_by
+			WHERE s.organization_id = $1 AND s.invoice_id = ANY($2::uuid[])
+			ORDER BY s.invoice_id, s.sent_at DESC, s.id DESC`, scope.OrganizationID(), invoiceIDs)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			s, err := scanSend(rows)
+			if err != nil {
+				return err
+			}
+			out[s.InvoiceID] = s
+		}
+		return rows.Err()
+	})
+	return out, err
+}

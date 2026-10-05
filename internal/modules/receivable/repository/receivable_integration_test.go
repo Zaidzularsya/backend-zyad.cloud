@@ -492,3 +492,31 @@ func TestManualPaymentReferenceNotGloballyUnique(t *testing.T) {
 		t.Fatalf("both manual payments on A must count, paid = %s", got.AmountPaid)
 	}
 }
+
+func TestLatestSendByInvoices(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	acc := e.account(t, scope, "Budi")
+	one := e.issued(t, scope, acc.ID, "INV-2026-0001")
+	two := e.issued(t, scope, acc.ID, "INV-2026-0002")
+	none := e.issued(t, scope, acc.ID, "INV-2026-0003")
+
+	_, _ = e.sends.Record(e.ctx, scope, repository.RecordSendParams{InvoiceID: one.ID, Channel: "email", Status: "failed", Error: "x", Trigger: "auto"})
+	time.Sleep(5 * time.Millisecond)
+	_, _ = e.sends.Record(e.ctx, scope, repository.RecordSendParams{InvoiceID: one.ID, Channel: "email", Status: "sent", Trigger: "manual"})
+	_, _ = e.sends.Record(e.ctx, scope, repository.RecordSendParams{InvoiceID: two.ID, Channel: "whatsapp", Status: "failed", Error: "y", Trigger: "auto"})
+
+	got, err := e.sends.LatestByInvoices(e.ctx, scope, []string{one.ID, two.ID, none.ID})
+	if err != nil || len(got) != 2 || got[one.ID].Status != "sent" || got[two.ID].Channel != "whatsapp" {
+		t.Fatalf("latest = %+v err=%v", got, err)
+	}
+	if _, ok := got[none.ID]; ok {
+		t.Fatal("invoice without sends must be absent")
+	}
+	if other, _ := e.sends.LatestByInvoices(e.ctx, e.tenants.B.Scope, []string{one.ID}); len(other) != 0 {
+		t.Fatal("tenant B must not see tenant A sends")
+	}
+	if empty, err := e.sends.LatestByInvoices(e.ctx, scope, nil); err != nil || len(empty) != 0 {
+		t.Fatalf("empty input = %+v err=%v", empty, err)
+	}
+}

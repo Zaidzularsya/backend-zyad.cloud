@@ -37,6 +37,8 @@ type SendService interface {
 	// failed); setiap failed → notifikasi ke PIC, atau ke pemegang permission invoice.send bila PIC kosong.
 	AutoSend(ctx context.Context, scope coretenant.Scope, inv domain.Invoice, actorUserID string)
 	List(ctx context.Context, scope coretenant.Scope, invoiceID string) ([]domain.Send, error)
+	// LatestByInvoices: kiriman terbaru per invoice (untuk kolom "kiriman terakhir" di daftar); tanpa kiriman → tidak ada key.
+	LatestByInvoices(ctx context.Context, scope coretenant.Scope, invoiceIDs []string) (map[string]domain.Send, error)
 }
 
 // FailureEvent: satu notifikasi "invoice gagal dikirim" untuk satu penerima.
@@ -55,6 +57,8 @@ type Member struct{ UserID, Name, Email string }
 type MemberDirectory interface {
 	Find(ctx context.Context, scope coretenant.Scope, userID string) (Member, error)
 	WithPermission(ctx context.Context, scope coretenant.Scope, permission string) ([]Member, error)
+	// Active: semua anggota aktif (pilihan pengirim default / PIC).
+	Active(ctx context.Context, scope coretenant.Scope) ([]Member, error)
 }
 
 // InvoiceReader dan InvoiceDocs adalah subset repository/InvoiceService yang dipakai pengiriman.
@@ -93,6 +97,10 @@ func (s *sendService) List(ctx context.Context, scope coretenant.Scope, invoiceI
 	return s.Sends.ListByInvoice(ctx, scope, invoiceID)
 }
 
+func (s *sendService) LatestByInvoices(ctx context.Context, scope coretenant.Scope, invoiceIDs []string) (map[string]domain.Send, error) {
+	return s.Sends.LatestByInvoices(ctx, scope, invoiceIDs)
+}
+
 // attempt adalah hasil satu percobaan kirim pada satu kanal.
 type attempt struct {
 	recipient, externalID string
@@ -116,7 +124,7 @@ func sendable(st domain.InvoiceStatus) bool {
 func (s *sendService) Send(ctx context.Context, scope coretenant.Scope, invoiceID string, in SendInput, userID string) (domain.Send, error) {
 	channel := strings.TrimSpace(in.Channel)
 	if channel != channelEmail && channel != channelWhatsApp {
-		return domain.Send{}, invalidInvoice("channel must be email or whatsapp")
+		return domain.Send{}, invalidInvoice("Kanal harus email atau whatsapp.")
 	}
 	if in.ClientRequestID != "" {
 		if prev, err := s.Sends.FindByClientRequest(ctx, scope, invoiceID, in.ClientRequestID); err == nil {

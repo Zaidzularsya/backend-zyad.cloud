@@ -2,7 +2,6 @@ package service
 
 import (
 	"errors"
-	"fmt"
 	"net/mail"
 	"strings"
 	"unicode/utf8"
@@ -23,34 +22,30 @@ func NewAccountService(repo repository.AccountRepository) AccountService {
 	return &accountService{repo: repo}
 }
 
-func invalidAccount(format string, args ...any) error {
-	return fmt.Errorf("%w: %s", ErrInvalidAccount, fmt.Sprintf(format, args...))
-}
-
 func normalizeAccount(in AccountInput, allowSource bool) (repository.AccountParams, error) {
 	p := repository.AccountParams{
 		Name: strings.TrimSpace(in.Name), CompanyName: strings.TrimSpace(in.CompanyName), Email: strings.TrimSpace(in.Email),
 		Phone: strings.TrimSpace(in.Phone), Address: strings.TrimSpace(in.Address),
 	}
 	if n := utf8.RuneCountInString(p.Name); n < 1 || n > 200 {
-		return p, invalidAccount("name must be 1-200 characters")
+		return p, invalidAccount("Nama wajib diisi (1–200 karakter).")
 	}
 	if utf8.RuneCountInString(p.CompanyName) > 200 {
-		return p, invalidAccount("company name must be at most 200 characters")
+		return p, invalidAccount("Nama perusahaan maksimal 200 karakter.")
 	}
 	if utf8.RuneCountInString(p.Phone) > 50 {
-		return p, invalidAccount("phone must be at most 50 characters")
+		return p, invalidAccount("Telepon maksimal 50 karakter.")
 	}
 	if p.Email != "" {
 		addr, err := mail.ParseAddress(p.Email)
 		if err != nil || addr.Address != p.Email || len(p.Email) > 255 {
-			return p, invalidAccount("email is not valid")
+			return p, invalidAccount("Alamat email tidak valid.")
 		}
 	}
 	if allowSource {
 		p.SourceType, p.SourceID = strings.TrimSpace(in.SourceType), strings.TrimSpace(in.SourceID)
 		if (p.SourceType == "") != (p.SourceID == "") || (p.SourceType != "" && p.SourceType != domain.SourceTypeCRMContact) {
-			return p, invalidAccount("source must be a crm_contact with an id")
+			return p, invalidAccount("Sumber harus kontak CRM beserta id-nya.")
 		}
 	}
 	return p, nil
@@ -70,7 +65,7 @@ func (s *accountService) EnsureForSource(ctx context.Context, scope coretenant.S
 		return domain.Account{}, err
 	}
 	if p.SourceID == "" {
-		return domain.Account{}, invalidAccount("source is required")
+		return domain.Account{}, invalidAccount("Sumber wajib diisi.")
 	}
 	found, err := s.repo.FindBySource(ctx, scope, p.SourceType, p.SourceID)
 	if err == nil {
