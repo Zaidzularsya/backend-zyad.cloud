@@ -25,7 +25,7 @@ Membangun modul CRM tenant-only yang menangani:
 - Sales pipeline: tahapan penjualan dinamis per organisasi, Kanban board di FE.
 - Deal: nilai transaksi, tahapan, win/loss, approval diskon.
 - Activity log: interaksi (call/email/meeting/task/note) terhadap Lead/Contact/Company/Deal.
-- Quotation & Invoice tenant-ke-customer (bukan invoice billing platform — lihat Naming Conflict).
+- Quotation tenant-ke-customer. (Invoice tenant-ke-customer dulu di sini; sejak Rilis 3 S3 ada di modul `receivable`.)
 - Integration: koneksi CRM ke sistem eksternal (webhook, WhatsApp, form capture, dsb).
 - Entitlement/quota enforcement per plan tenant.
 
@@ -38,7 +38,7 @@ satu bounded module):
 internal/modules/crm/
 ├── domain/
 │   ├── company.go, contact.go, lead.go, pipeline.go, deal.go
-│   ├── activity.go, quotation.go, invoice.go, integration.go
+│   ├── activity.go, quotation.go, integration.go
 │   └── feature.go        # konstanta feature key: FeatureCRMEnabled, FeatureCRMMaxContacts, dst
 ├── repository/            # satu file per sub-resource, withTx(ctx, scope, fn) — pola branding_repository.go
 ├── service/               # satu file per sub-resource, functional-option quota/feature guard
@@ -74,17 +74,13 @@ berbeda. Secara data model, satu tabel `crm_contacts` dipakai untuk keduanya:
   kompatibilitasnya (dicek 2026-09-07 — hanya ada `customer_subscriptions` milik modul `subscription`,
   representasi langganan tenant ke platform, tidak berkaitan dengan pelanggan tenant).
 
-### `crm_invoices` vs `billing_invoices`
+### Invoice tenant → customer sudah pindah ke modul `receivable`
 
-Dua entitas yang sama sekali berbeda pihak — **jangan tertukar**:
-
-- `billing_invoices` (modul `billing`, sudah ada) = tagihan **platform Zyad ke tenant** untuk pembayaran
-  langganan SaaS tenant tersebut.
-- `crm_invoices` (modul CRM, baru) = tagihan **tenant ke customer miliknya sendiri**, dihasilkan dari
-  Deal/Quotation yang closed-won.
-
-Nama tabel sengaja eksplisit `crm_invoices` (bukan `invoices`) supaya grep/pencarian langsung menunjukkan
-dua modul berbeda.
+`crm_invoices` / `crm_invoice_items` **dihapus** (Rilis 3 S3, migration `000145`); penagihan tenant ke pelanggannya
+sekarang ada di modul `receivable` (`receivable_*`, route `/api/v1/app/receivable/*`, lihat
+[reference-receivable.md](reference-receivable.md)) dan bisa dipakai tenant tanpa CRM. `billing_invoices` tetap
+tagihan **platform Zyad ke tenant** (modul `billing`). Sebelum menjalankan `000145` di produksi:
+`SELECT count(*) FROM crm_invoices;` — bila > 0, ekspor dulu. Permission `invoice.*` kini bermodul `receivable`.
 
 ## Tenant Boundary
 
@@ -172,7 +168,7 @@ Integration -- organization-level, tidak berelasi ke entity lain
   `/api/v1/app/crm/activities`. `related_entity_id` polymorphic (lead/contact/company/deal) tanpa FK —
   eksistensi diverifikasi di `ActivityService.validateRelatedEntity` dengan memanggil repository resource
   terkait (`404 ACTIVITY_RELATED_ENTITY_NOT_FOUND` kalau tidak ada).
-- **Fase 4** (selesai — backend; FE menyusul): Quotation + Invoice CRM. Migration `000084`
+- **Fase 4** (selesai — backend; FE menyusul): Quotation + Invoice CRM. **[Bagian Invoice dihapus di Rilis 3 S3 — migration `000145`; lihat modul `receivable`. Paragraf ini dipertahankan sebagai riwayat.]** Migration `000084`
   (`crm_quotations`+`crm_quotation_items`), `000085` (`crm_invoices`+`crm_invoice_items`), `000086`
   (permission seed). Endpoint: CRUD (tanpa restore, sesuai matriks) + `send`/`approve`/`reject` untuk
   Quotation; CRUD (tanpa restore) + `send`/`mark-paid`/`cancel` untuk Invoice, di bawah

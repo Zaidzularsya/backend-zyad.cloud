@@ -383,48 +383,6 @@ type SendQuotationRequest struct {
 	WASessionID     string `json:"wa_session_id"`
 }
 
-// InvoiceListQuery binds query parameters for listing invoices.
-type InvoiceListQuery struct {
-	Page        int    `form:"page"`
-	PerPage     int    `form:"per_page"`
-	Status      string `form:"status"`
-	DealID      string `form:"deal_id"`
-	ContactID   string `form:"contact_id"`
-	CompanyID   string `form:"company_id"`
-	QuotationID string `form:"quotation_id"`
-}
-
-// CreateInvoiceRequest binds the payload for creating an invoice. When
-// QuotationID is set and Items is empty, items/totals are copied from that
-// quotation instead of being computed from Items.
-type CreateInvoiceRequest struct {
-	QuotationID   string            `json:"quotation_id"`
-	DealID        string            `json:"deal_id"`
-	ContactID     string            `json:"contact_id"`
-	CompanyID     string            `json:"company_id"`
-	InvoiceNumber string            `json:"invoice_number"`
-	IssueDate     *string           `json:"issue_date"`
-	DueDate       *string           `json:"due_date"`
-	Currency      string            `json:"currency"`
-	TaxTotal      string            `json:"tax_total"`
-	Items         []LineItemRequest `json:"items"`
-}
-
-// UpdateInvoiceRequest binds the payload for updating an invoice.
-type UpdateInvoiceRequest struct {
-	QuotationID *string `json:"quotation_id"`
-	DealID      *string `json:"deal_id"`
-	ContactID   *string `json:"contact_id"`
-	CompanyID   *string `json:"company_id"`
-	IssueDate   *string `json:"issue_date"`
-	DueDate     *string `json:"due_date"`
-}
-
-// MarkInvoicePaidRequest binds the payload for POST .../invoices/:id/mark-paid.
-type MarkInvoicePaidRequest struct {
-	AmountPaid string `json:"amount_paid" binding:"required"`
-}
-
 // IntegrationListQuery binds query parameters for listing integrations.
 type IntegrationListQuery struct {
 	Page     int    `form:"page"`

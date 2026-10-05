@@ -313,9 +313,6 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.CRMQuotationHandler != nil {
 		deps.CRMQuotationHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
 	}
-	if deps.CRMInvoiceHandler != nil {
-		deps.CRMInvoiceHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
-	}
 	if deps.CRMIntegrationHandler != nil {
 		deps.CRMIntegrationHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
 	}

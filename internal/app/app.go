@@ -469,9 +469,7 @@ func New(ctx context.Context) (*App, error) {
 	crmActivityRepo := crmrepo.NewActivityRepository(db)
 	crmActivitySvc := crmservice.NewActivityService(crmActivityRepo, crmLeadRepo, crmContactRepo, crmCompanyRepo, crmDealRepo)
 	crmQuotationRepo := crmrepo.NewQuotationRepository(db)
-	crmInvoiceRepo := crmrepo.NewInvoiceRepository(db)
 	crmDocumentCounterRepo := crmrepo.NewDocumentCounterRepository(db)
-	crmInvoiceSvc := crmservice.NewInvoiceService(crmInvoiceRepo, crmQuotationRepo, crmDocumentCounterRepo)
 	crmIntegrationRepo := crmrepo.NewIntegrationRepository(db)
 	crmIntegrationSvc := crmservice.NewIntegrationService(crmIntegrationRepo, cfg.App.Secret)
 	crmCompanyHandler := crmhandler.NewCompanyHandler(crmCompanySvc)
@@ -509,7 +507,6 @@ func New(ctx context.Context) (*App, error) {
 	crmPipelineHandler := crmhandler.NewPipelineHandler(crmPipelineSvc)
 	crmDealHandler := crmhandler.NewDealHandler(crmDealSvc)
 	crmActivityHandler := crmhandler.NewActivityHandler(crmActivitySvc)
-	crmInvoiceHandler := crmhandler.NewInvoiceHandler(crmInvoiceSvc)
 	crmIntegrationHandler := crmhandler.NewIntegrationHandler(crmIntegrationSvc)
 
 	whatsappSessionSvc := NewWhatsAppSessionService(cfg, db, subscriptionGuardService, log)
@@ -640,7 +637,6 @@ func New(ctx context.Context) (*App, error) {
 		CRMActivityHandler:               crmActivityHandler,
 		CRMQuotationHandler:              crmQuotationHandler,
 		CRMPublicQuotationHandler:        crmPublicQuotationHandler,
-		CRMInvoiceHandler:                crmInvoiceHandler,
 		ReceivableAccountHandler:         receivableModule.AccountHandler,
 		ReceivableInvoiceHandler:         receivableModule.InvoiceHandler,
 		ReceivablePaymentHandler:         receivableModule.PaymentHandler,

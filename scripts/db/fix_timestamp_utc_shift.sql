@@ -61,8 +61,6 @@ DECLARE
         ['crm_deals', 'created_at'], ['crm_deals', 'updated_at'], ['crm_deals', 'deleted_at'], ['crm_deals', 'discount_approved_at'],
         ['crm_document_counters', 'created_at'], ['crm_document_counters', 'updated_at'],
         ['crm_integrations', 'created_at'], ['crm_integrations', 'updated_at'], ['crm_integrations', 'deleted_at'], ['crm_integrations', 'connected_at'],
-        ['crm_invoice_items', 'created_at'], ['crm_invoice_items', 'updated_at'],
-        ['crm_invoices', 'created_at'], ['crm_invoices', 'updated_at'], ['crm_invoices', 'deleted_at'], ['crm_invoices', 'paid_at'],
         ['crm_lead_attachments', 'created_at'],
         ['crm_lead_events', 'created_at'],
         ['crm_leads', 'created_at'], ['crm_leads', 'updated_at'], ['crm_leads', 'deleted_at'], ['crm_leads', 'converted_at'],
