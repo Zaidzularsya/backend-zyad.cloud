@@ -125,6 +125,12 @@ func defaultNotificationRules() map[string]NotificationRule {
 			Channel:      domain.ChannelEmail,
 			Locale:       defaultRuleLocale,
 		},
+		"receivable.invoice_send_failed": {
+			EventType:    "receivable.invoice_send_failed",
+			TemplateCode: "receivable.invoice_send_failed",
+			Channel:      domain.ChannelEmail,
+			Locale:       defaultRuleLocale,
+		},
 	}
 }
 

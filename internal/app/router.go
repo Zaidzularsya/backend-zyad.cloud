@@ -118,6 +118,9 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.CRMPublicQuotationHandler != nil {
 		deps.CRMPublicQuotationHandler.RegisterRoutes(api)
 	}
+	if deps.ReceivablePublicInvoiceHandler != nil {
+		deps.ReceivablePublicInvoiceHandler.RegisterRoutes(api)
+	}
 
 	protected := api.Group("")
 	protected.Use(
@@ -315,6 +318,21 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	}
 	if deps.CRMIntegrationHandler != nil {
 		deps.CRMIntegrationHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	}
+
+	// Receivable: penagihan tenant ke pelanggannya. Aturan tenant sama dengan CRM (tenant customer atau
+	// organisasi platform), digerbang receivable.enabled (organisasi platform bypass lewat checker).
+	if deps.ReceivableInvoiceHandler != nil {
+		receivableGroup := protected.Group("/app/receivable")
+		receivableGroup.Use(
+			middleware.RequireActiveTenant(),
+			middleware.RequireCustomerOrPlatformTenant(),
+			middleware.RequireEntitlement(deps.CRMEntitlementChecker, "receivable.enabled"),
+		)
+		deps.ReceivableAccountHandler.RegisterRoutes(receivableGroup, deps.PermissionChecker)
+		deps.ReceivableInvoiceHandler.RegisterRoutes(receivableGroup, deps.PermissionChecker)
+		deps.ReceivablePaymentHandler.RegisterRoutes(receivableGroup, deps.PermissionChecker)
+		deps.ReceivableSettingsHandler.RegisterRoutes(receivableGroup, deps.PermissionChecker)
 	}
 
 	// Katalog produk tenant (dipakai quotation CRM dan invoice receivable). Aturan tenant sama

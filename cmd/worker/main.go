@@ -20,6 +20,7 @@ import (
 	mailboxservice "zyad.cloud/internal/modules/mailbox/service"
 	organizationrepo "zyad.cloud/internal/modules/organization/repository"
 	organizationservice "zyad.cloud/internal/modules/organization/service"
+	receivableservice "zyad.cloud/internal/modules/receivable/service"
 	whatsapprealtime "zyad.cloud/internal/modules/whatsapp/realtime"
 	whatsapprepo "zyad.cloud/internal/modules/whatsapp/repository"
 	whatsappservice "zyad.cloud/internal/modules/whatsapp/service"
@@ -66,6 +67,7 @@ func main() {
 	}
 	inbound := app.NewWhatsAppInboundProcessor(cfg, db, whatsappBus, log)
 	mailSync := app.NewMailSyncService(cfg, db, log)
+	overdue := app.NewReceivableOverdueRunner(db)
 
 	if *once {
 		if err := runBatch(ctx, log, worker, notificationService, batchSize); err != nil && !errors.Is(err, context.Canceled) {
@@ -81,6 +83,7 @@ func main() {
 		if mailSync != nil {
 			runMailSync(ctx, log, mailSync)
 		}
+		runReceivableOverdue(ctx, log, overdue)
 		return
 	}
 
@@ -110,6 +113,9 @@ func main() {
 		log.Info("starting mail sync", "interval", syncInterval.String())
 		go runEvery(ctx, syncInterval, func() { runMailSync(ctx, log, mailSync) })
 	}
+
+	log.Info("starting receivable overdue job", "interval", receivableOverdueInterval.String())
+	go runEvery(ctx, receivableOverdueInterval, func() { runReceivableOverdue(ctx, log, overdue) })
 
 	interval := time.Duration(cfg.Notification.WorkerIntervalSeconds) * time.Second
 	if interval <= 0 {
@@ -226,6 +232,20 @@ func runWhatsAppInbound(ctx context.Context, log *slog.Logger, processor *whatsa
 	}
 	if result.Claimed > 0 {
 		log.Info("processed whatsapp webhook events", "claimed", result.Claimed, "processed", result.Processed, "failed", result.Failed)
+	}
+}
+
+// receivableOverdueInterval: jatuh tempo dihitung per hari WIB, jadi cek per jam sudah cukup.
+const receivableOverdueInterval = time.Hour
+
+func runReceivableOverdue(ctx context.Context, log *slog.Logger, runner *receivableservice.OverdueRunner) {
+	result, err := runner.RunOnce(ctx)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		log.Error("receivable overdue run failed", "error", err)
+		return
+	}
+	if result.Marked > 0 || result.Failed > 0 {
+		log.Info("marked overdue invoices", "organizations", result.Checked, "marked", result.Marked, "failed", result.Failed)
 	}
 }
 

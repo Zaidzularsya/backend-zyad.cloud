@@ -8529,6 +8529,751 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/receivable/accounts:
+    get:
+      summary: List billing accounts
+      operationId: listReceivableAccounts
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Customers that can be invoiced. Permission: `invoice.read`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: search
+        in: query
+        schema: {type: string}
+      - name: page
+        in: query
+        schema: {type: integer}
+      - name: per_page
+        in: query
+        schema: {type: integer}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableAccountListEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    post:
+      summary: Create a manual billing account
+      operationId: createReceivableAccount
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Accounts created over HTTP are always manual; accounts linked to a CRM contact are created internally. Permission: `invoice.create`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReceivableAccountRequest'}
+      responses:
+        '201':
+          description: "Created"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableAccountEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/receivable/accounts/{id}:
+    get:
+      summary: Get a billing account
+      operationId: getReceivableAccount
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Permission: `invoice.read`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableAccountEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "ACCOUNT_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    put:
+      summary: Update a billing account
+      operationId: updateReceivableAccount
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Name and contact details only; the source (CRM contact) never changes. Permission: `invoice.update`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReceivableAccountRequest'}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableAccountEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "ACCOUNT_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/receivable/invoices:
+    get:
+      summary: List invoices
+      operationId: listReceivableInvoices
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Each row carries `last_send`. `send_failed=true` keeps invoices with a failed delivery that no later successful delivery on the same channel has resolved. Permission: `invoice.read`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: status
+        in: query
+        schema: {type: string}
+      - name: account_id
+        in: query
+        schema: {type: string}
+      - name: source_type
+        in: query
+        schema: {type: string}
+      - name: source_id
+        in: query
+        schema: {type: string}
+      - name: contract_id
+        in: query
+        schema: {type: string}
+      - name: send_failed
+        in: query
+        schema: {type: boolean}
+      - name: search
+        in: query
+        schema: {type: string}
+      - name: page
+        in: query
+        schema: {type: integer}
+      - name: per_page
+        in: query
+        schema: {type: integer}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableInvoiceListEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    post:
+      summary: Create a draft invoice
+      operationId: createReceivableInvoice
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Always a manual invoice. Prices are computed server side (per-line half-up rounding). `pic_user_id` must be an active member. Permission: `invoice.create`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReceivableInvoiceRequest'}
+      responses:
+        '201':
+          description: "Created"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableInvoiceEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "ACCOUNT_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/receivable/invoices/{id}:
+    get:
+      summary: Get an invoice with items and last delivery
+      operationId: getReceivableInvoice
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Permission: `invoice.read`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableInvoiceEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "INVOICE_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    put:
+      summary: Replace a draft invoice
+      operationId: updateReceivableInvoice
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Draft only. Permission: `invoice.update`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReceivableInvoiceRequest'}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableInvoiceEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "INVOICE_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: "INVOICE_NOT_DRAFT"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/receivable/invoices/{id}/issue:
+    post:
+      summary: Issue an invoice (number, PDF, public link, automatic delivery)
+      operationId: issueReceivableInvoice
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Idempotent: issuing an already issued invoice returns it unchanged without numbering or sending again. Delivery failures never undo the issue; they are logged and notified. Permission: `invoice.send`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableInvoiceEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "INVOICE_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: "INVOICE_NOT_DRAFT (void invoice)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/receivable/invoices/{id}/void:
+    post:
+      summary: Void an invoice
+      operationId: voidReceivableInvoice
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Draft, issued or overdue invoices without payments. Revokes the public link. Permission: `invoice.void`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReceivableVoidRequest'}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableInvoiceEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "INVOICE_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: "INVOICE_HAS_PAYMENTS or INVOICE_NOT_PAYABLE"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/receivable/invoices/{id}/pdf:
+    get:
+      summary: Invoice PDF
+      operationId: getReceivableInvoicePdf
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Draft: rendered on demand with a DRAFT stamp. Otherwise the stored snapshot (LUNAS / DIBATALKAN stamps follow the status). `Cache-Control: no-store`. Permission: `invoice.read`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "PDF document"
+          content:
+            application/pdf:
+              schema: {type: string, format: binary}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "INVOICE_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: "INVOICE_PDF_FAILED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/receivable/invoices/{id}/link:
+    post:
+      summary: Get the public link of an issued invoice
+      operationId: linkReceivableInvoice
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Issued, overdue or paid invoices. Permission: `invoice.send`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableLinkEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "INVOICE_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: "INVOICE_NOT_SENDABLE"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: "INVOICE_PDF_FAILED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/receivable/invoices/{id}/send:
+    post:
+      summary: Send an invoice by email or WhatsApp (also used for Retry)
+      operationId: sendReceivableInvoice
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Requires `invoice.send` plus `email.send` / `whatsapp.message.send`. `client_request_id` is required: the same id returns the first result without sending again. A delivery failure is logged and returned as a send with `status=failed` (HTTP 200); an unusable channel (`CHANNEL_UNAVAILABLE`, e.g. WhatsApp for an account without a CRM contact) is returned as 422 and not logged. Sender order: invoice PIC, then the acting user, then the default sender. Permission: `invoice.send`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReceivableSendRequest'}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableSendEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "INVOICE_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: "INVOICE_NOT_SENDABLE"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/receivable/invoices/{id}/sends:
+    get:
+      summary: Delivery log of an invoice
+      operationId: listReceivableInvoiceSends
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Newest first. Permission: `invoice.read`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableSendListEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "INVOICE_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/receivable/invoices/{id}/payments:
+    get:
+      summary: Payments of an invoice
+      operationId: listReceivableInvoicePayments
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Permission: `invoice.read`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivablePaymentListEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "INVOICE_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    post:
+      summary: Record a manual payment
+      operationId: recordReceivablePayment
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Partial payments keep the status; the payment that settles the balance sets `paid`. Concurrent payments are serialized so the total can never exceed the invoice. Permission: `invoice.mark_paid`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReceivablePaymentRequest'}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableRecordPaymentEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR or PAYMENT_EXCEEDS_BALANCE"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "INVOICE_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: "INVOICE_NOT_PAYABLE"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/receivable/payments:
+    get:
+      summary: List all payments
+      operationId: listReceivablePayments
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "With invoice number and account name. Permission: `invoice.read`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: page
+        in: query
+        schema: {type: integer}
+      - name: per_page
+        in: query
+        schema: {type: integer}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivablePaymentListEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/receivable/settings:
+    get:
+      summary: Get billing settings
+      operationId: getReceivableSettings
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Defaults when never saved: lead 7 days, terms 7 days, channels [email]. Permission: `invoice.read`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableSettingsEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    put:
+      summary: Update billing settings
+      operationId: updateReceivableSettings
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "`invoice_lead_days` 0-60, `payment_terms_days` 0-90, `default_sender_user_id` must be an active member. Permission: `receivable.settings`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReceivableSettingsRequest'}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableSettingsEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/receivable/members/senders:
+    get:
+      summary: Active members for default sender and PIC pickers
+      operationId: listReceivableSenders
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Requires `receivable.settings` or `invoice.create`. Permission: `receivable.settings or invoice.create`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableSenderListEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/public/invoices/{token}:
+    get:
+      summary: Public invoice view for a customer link
+      operationId: getPublicInvoice
+      tags:
+      - Receivable
+      description: "Public endpoint (no bearer token, no tenant host): the tenant is derived from the link row. Rate limited to 30 requests/minute per IP. Unknown, expired or non-invoice tokens all return the same `404 LINK_INVALID`. `state`: `open` (issued/overdue), `paid`, `void` (a voided invoice stays viewable as cancelled even though its link is revoked). `can_pay` is true only for `open` invoices of organizations with `receivable.online_payment` (checkout arrives with a later release)."
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema: {type: string, minLength: 43, maxLength: 43}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivablePublicInvoiceEnvelope'}
+        '404':
+          description: "Link invalid (LINK_INVALID)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429':
+          description: "Rate limited (RATE_LIMITED)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/public/invoices/{token}/pdf:
+    get:
+      summary: Public invoice PDF (inline)
+      operationId: getPublicInvoicePdf
+      tags:
+      - Receivable
+      description: "Public endpoint (no bearer token, no tenant host): the tenant is derived from the link row. Rate limited to 30 requests/minute per IP. Unknown, expired or non-invoice tokens all return the same `404 LINK_INVALID`. Served inline with `Cache-Control: no-store` and `X-Robots-Tag: noindex`."
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema: {type: string, minLength: 43, maxLength: 43}
+      responses:
+        '200':
+          description: "PDF document"
+          content:
+            application/pdf:
+              schema: {type: string, format: binary}
+        '404':
+          description: "Link invalid (LINK_INVALID)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429':
+          description: "Rate limited (RATE_LIMITED)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
 components:
   parameters:
     OrganizationID:
@@ -12799,3 +13544,299 @@ components:
         success: {type: boolean}
         message: {type: string}
         data: {$ref: "#/components/schemas/FinanceTaxSummary"}
+    ReceivableAccountRequest:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 200}
+        company_name: {type: string, maxLength: 200}
+        email: {type: string, format: email, maxLength: 255}
+        phone: {type: string, maxLength: 50}
+        address: {type: string}
+    ReceivableAccount:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        company_name: {type: string}
+        email: {type: string}
+        phone: {type: string}
+        address: {type: string}
+        contact_id: {type: string, format: uuid, nullable: true, description: 'CRM contact the account is linked to; WhatsApp delivery needs it'}
+        created_at: {type: string, format: date-time}
+    ReceivableAccountEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/ReceivableAccount'}
+    ReceivableAccountListEnvelope:
+      type: object
+      required: [success, message, data, meta]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: '#/components/schemas/ReceivableAccount'}}
+        meta: {$ref: '#/components/schemas/PaginationMeta'}
+    ReceivableInvoiceItemRequest:
+      type: object
+      required: [description]
+      properties:
+        product_id: {type: string, format: uuid}
+        sku: {type: string}
+        description: {type: string, minLength: 1, maxLength: 500}
+        quantity: {type: string, example: '1'}
+        unit: {type: string, maxLength: 30}
+        unit_price: {type: string, example: '300000'}
+        discount_percent: {type: string}
+        tax_percent: {type: string}
+        charge_type: {type: string, enum: [one_time, recurring]}
+        billing_frequency: {type: string, enum: [daily, weekly, monthly, quarterly, semiannual, annual]}
+        payment_timing: {type: string, enum: [prepaid, postpaid]}
+        period_start: {type: string, format: date}
+        period_end: {type: string, format: date}
+    ReceivableInvoiceRequest:
+      type: object
+      required: [account_id, items]
+      properties:
+        account_id: {type: string, format: uuid}
+        channels: {type: array, items: {type: string, enum: [email, whatsapp]}, description: 'Empty = default channels from settings'}
+        pic_user_id: {type: string, format: uuid}
+        notes: {type: string}
+        currency: {type: string, example: IDR}
+        period_start: {type: string, format: date}
+        period_end: {type: string, format: date}
+        items: {type: array, minItems: 1, items: {$ref: '#/components/schemas/ReceivableInvoiceItemRequest'}}
+    ReceivableInvoiceItem:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        description: {type: string}
+        quantity: {type: string}
+        unit: {type: string}
+        unit_price: {type: string}
+        discount_percent: {type: string, nullable: true}
+        tax_percent: {type: string}
+        tax_amount: {type: string}
+        line_total: {type: string}
+        product_id: {type: string, nullable: true}
+        sku: {type: string}
+        charge_type: {type: string}
+        billing_frequency: {type: string, nullable: true}
+        payment_timing: {type: string}
+        period_start: {type: string, format: date, nullable: true}
+        period_end: {type: string, format: date, nullable: true}
+        position: {type: integer}
+    ReceivableInvoiceSend:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        invoice_id: {type: string, format: uuid}
+        channel: {type: string, enum: [email, whatsapp]}
+        recipient: {type: string}
+        status: {type: string, enum: [sent, failed]}
+        error: {type: string, description: 'Readable reason, never provider internals'}
+        trigger: {type: string, enum: [auto, manual]}
+        sent_by: {type: string, format: uuid, nullable: true}
+        sent_by_name: {type: string}
+        sent_at: {type: string, format: date-time}
+    ReceivableInvoice:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        invoice_number: {type: string, nullable: true, description: 'INV-YYYY-NNNN, assigned on issue'}
+        status: {type: string, enum: [draft, issued, paid, overdue, void]}
+        account: {$ref: '#/components/schemas/ReceivableAccount'}
+        source_type: {type: string, enum: [sales_order, contract, manual]}
+        source_id: {type: string, nullable: true}
+        contract_id: {type: string, nullable: true}
+        period_start: {type: string, format: date, nullable: true}
+        period_end: {type: string, format: date, nullable: true}
+        issue_date: {type: string, format: date, nullable: true}
+        due_date: {type: string, format: date, nullable: true}
+        currency: {type: string}
+        subtotal: {type: string}
+        discount_total: {type: string}
+        tax_total: {type: string}
+        grand_total: {type: string}
+        amount_paid: {type: string}
+        balance: {type: string}
+        channels: {type: array, items: {type: string}}
+        pic_user_id: {type: string, nullable: true}
+        notes: {type: string}
+        void_reason: {type: string}
+        paid_at: {type: string, format: date-time, nullable: true}
+        voided_at: {type: string, format: date-time, nullable: true}
+        items: {type: array, items: {$ref: '#/components/schemas/ReceivableInvoiceItem'}, description: 'Empty in list responses'}
+        last_send: {allOf: [{$ref: '#/components/schemas/ReceivableInvoiceSend'}], nullable: true}
+        created_at: {type: string, format: date-time}
+    ReceivableInvoiceEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/ReceivableInvoice'}
+    ReceivableInvoiceListEnvelope:
+      type: object
+      required: [success, message, data, meta]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: '#/components/schemas/ReceivableInvoice'}}
+        meta: {$ref: '#/components/schemas/PaginationMeta'}
+    ReceivableVoidRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, maxLength: 500}
+    ReceivableSendRequest:
+      type: object
+      required: [channel, client_request_id]
+      properties:
+        channel: {type: string, enum: [email, whatsapp]}
+        recipient: {type: string, maxLength: 255, description: 'Email only; defaults to the account email'}
+        message: {type: string, maxLength: 2000, description: 'Opening message; empty = default'}
+        client_request_id: {type: string, maxLength: 100}
+    ReceivableSendEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/ReceivableInvoiceSend'}
+    ReceivableSendListEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: '#/components/schemas/ReceivableInvoiceSend'}}
+    ReceivableLink:
+      type: object
+      properties:
+        url: {type: string}
+        expires_at: {type: string, format: date-time}
+    ReceivableLinkEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/ReceivableLink'}
+    ReceivablePaymentRequest:
+      type: object
+      required: [amount]
+      properties:
+        amount: {type: string, example: '100000', description: 'Greater than 0, at most 2 decimals, not above the balance'}
+        paid_at: {type: string, description: 'RFC3339 or YYYY-MM-DD (start of that day in WIB); empty = now; never in the future'}
+        reference: {type: string, maxLength: 150}
+        note: {type: string, maxLength: 500}
+    ReceivablePayment:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        invoice_id: {type: string, format: uuid}
+        invoice_number: {type: string}
+        account_name: {type: string}
+        amount: {type: string}
+        method: {type: string, enum: [manual, doku]}
+        reference: {type: string}
+        note: {type: string}
+        recorded_by: {type: string, nullable: true}
+        paid_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+    ReceivableRecordPaymentResult:
+      type: object
+      properties:
+        invoice: {$ref: '#/components/schemas/ReceivableInvoice'}
+        payment: {$ref: '#/components/schemas/ReceivablePayment'}
+    ReceivableRecordPaymentEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/ReceivableRecordPaymentResult'}
+    ReceivablePaymentListEnvelope:
+      type: object
+      required: [success, message, data, meta]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: '#/components/schemas/ReceivablePayment'}}
+        meta: {$ref: '#/components/schemas/PaginationMeta'}
+    ReceivableSettingsRequest:
+      type: object
+      required: [invoice_lead_days, payment_terms_days, default_channels]
+      properties:
+        invoice_lead_days: {type: integer, minimum: 0, maximum: 60}
+        payment_terms_days: {type: integer, minimum: 0, maximum: 90}
+        default_channels: {type: array, minItems: 1, items: {type: string, enum: [email, whatsapp]}}
+        default_sender_user_id: {type: string, format: uuid}
+    ReceivableSettings:
+      type: object
+      properties:
+        invoice_lead_days: {type: integer}
+        payment_terms_days: {type: integer}
+        default_channels: {type: array, items: {type: string}}
+        default_sender_user_id: {type: string, nullable: true}
+    ReceivableSettingsEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/ReceivableSettings'}
+    ReceivableSender:
+      type: object
+      properties:
+        user_id: {type: string, format: uuid}
+        name: {type: string}
+        email: {type: string}
+    ReceivableSenderListEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: '#/components/schemas/ReceivableSender'}}
+    ReceivablePublicInvoiceItem:
+      type: object
+      properties:
+        description: {type: string}
+        quantity: {type: string}
+        unit: {type: string}
+        unit_price: {type: string}
+        line_total: {type: string}
+        charge_type: {type: string}
+        billing_frequency: {type: string, nullable: true}
+        payment_timing: {type: string}
+        period_start: {type: string, format: date, nullable: true}
+        period_end: {type: string, format: date, nullable: true}
+    ReceivablePublicInvoice:
+      type: object
+      description: "No internal ids."
+      properties:
+        tenant_name: {type: string}
+        invoice_number: {type: string}
+        status: {type: string, enum: [issued, paid, overdue, void]}
+        state: {type: string, enum: [open, paid, void]}
+        issue_date: {type: string, format: date, nullable: true}
+        due_date: {type: string, format: date, nullable: true}
+        period_start: {type: string, format: date, nullable: true}
+        period_end: {type: string, format: date, nullable: true}
+        currency: {type: string}
+        grand_total: {type: string}
+        amount_paid: {type: string}
+        balance: {type: string}
+        items: {type: array, items: {$ref: '#/components/schemas/ReceivablePublicInvoiceItem'}}
+        can_pay: {type: boolean}
+    ReceivablePublicInvoiceEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/ReceivablePublicInvoice'}
