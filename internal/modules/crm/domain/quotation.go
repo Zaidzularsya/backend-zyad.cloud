@@ -1,6 +1,10 @@
 package domain
 
-import "time"
+import (
+	"time"
+
+	"zyad.cloud/internal/shared/pricing"
+)
 
 type QuotationStatus string
 
@@ -39,6 +43,8 @@ type QuotationItem struct {
 	Unit       string
 	TaxPercent string
 	TaxAmount  string
+	// Pricing: snapshot atribut harga baris (default one_time + prepaid).
+	Pricing pricing.Attributes
 }
 
 // Quotation money fields (Subtotal/DiscountTotal/TaxTotal/GrandTotal) are
@@ -60,19 +66,24 @@ type Quotation struct {
 	DiscountTotal   string
 	TaxTotal        string
 	GrandTotal      string
-	Currency        string
-	Notes           string
-	SentAt          *time.Time
-	ApprovedAt      *time.Time
-	RejectedAt      *time.Time
-	Items           []QuotationItem
-	CreatedBy       string
-	UpdatedBy       string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	DeletedAt       *time.Time
-	RevisionOfID    *string
-	RevisionNo      int
-	PDFAssetID      *string
-	PDFGeneratedAt  *time.Time
+	// Rincian turunan dari item (line_total + pajak per baris). RecurringTotals
+	// kosong = tidak ada baris berulang.
+	OneTimeTotal      string
+	FirstInvoiceTotal string
+	RecurringTotals   map[pricing.Frequency]string
+	Currency          string
+	Notes             string
+	SentAt            *time.Time
+	ApprovedAt        *time.Time
+	RejectedAt        *time.Time
+	Items             []QuotationItem
+	CreatedBy         string
+	UpdatedBy         string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	DeletedAt         *time.Time
+	RevisionOfID      *string
+	RevisionNo        int
+	PDFAssetID        *string
+	PDFGeneratedAt    *time.Time
 }

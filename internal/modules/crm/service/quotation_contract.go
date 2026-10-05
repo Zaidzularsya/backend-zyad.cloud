@@ -12,6 +12,7 @@ import (
 	"zyad.cloud/internal/modules/crm/domain"
 	"zyad.cloud/internal/modules/crm/quotationpdf"
 	"zyad.cloud/internal/modules/crm/repository"
+	"zyad.cloud/internal/shared/pricing"
 )
 
 // QuotationLineInput is the raw line item a caller submits. priceQuotationLines
@@ -24,7 +25,8 @@ type QuotationLineInput struct {
 	DiscountPercent string
 	TaxPercent      string
 	Unit            string
-	SKU             string // diisi service dari katalog; klien tidak mengirim
+	SKU             string             // diisi service dari katalog; klien tidak mengirim
+	Pricing         pricing.Attributes // nilai nol = belum diisi (katalog/default)
 }
 
 type CreateQuotationInput struct {

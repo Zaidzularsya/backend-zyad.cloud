@@ -15,6 +15,7 @@ import (
 	crmmodule "zyad.cloud/internal/modules/crm"
 	"zyad.cloud/internal/modules/crm/domain"
 	"zyad.cloud/internal/modules/crm/repository"
+	"zyad.cloud/internal/shared/pricing"
 )
 
 var (
@@ -111,6 +112,9 @@ func (s *quotationService) applyCatalog(ctx context.Context, scope coretenant.Sc
 		if strings.TrimSpace(l.Unit) == "" {
 			out[i].Unit = p.Unit
 		}
+		if l.Pricing == (pricing.Attributes{}) {
+			out[i].Pricing = p.Pricing
+		}
 		out[i].SKU = p.SKU
 	}
 	return out, nil
@@ -181,6 +185,7 @@ func (s *quotationService) Create(ctx context.Context, scope coretenant.Scope, i
 		DealID: input.DealID, ContactID: input.ContactID, CompanyID: input.CompanyID, QuotationNumber: number,
 		ValidUntil: input.ValidUntil, Subtotal: totals.Subtotal, DiscountTotal: totals.DiscountTotal,
 		TaxTotal: totals.TaxTotal, GrandTotal: totals.GrandTotal, Currency: input.Currency, Notes: input.Notes,
+		OneTimeTotal: totals.OneTimeTotal, FirstInvoiceTotal: totals.FirstInvoiceTotal, RecurringTotals: totals.RecurringTotals,
 		Items: items, CreatedBy: input.CreatedBy,
 	})
 }
@@ -212,6 +217,7 @@ func (s *quotationService) Update(ctx context.Context, scope coretenant.Scope, i
 		if _, err := s.repo.ReplaceItems(ctx, scope, id, repository.ReplaceQuotationItemsParams{
 			Items: items, Subtotal: totals.Subtotal, DiscountTotal: totals.DiscountTotal,
 			TaxTotal: totals.TaxTotal, GrandTotal: totals.GrandTotal, UpdatedBy: input.UpdatedBy,
+			OneTimeTotal: totals.OneTimeTotal, FirstInvoiceTotal: totals.FirstInvoiceTotal, RecurringTotals: totals.RecurringTotals,
 		}); err != nil {
 			return domain.Quotation{}, crmmodule.MapNotFound(err, "QUOTATION_NOT_FOUND", "quotation not found or already deleted")
 		}
@@ -234,7 +240,7 @@ func (s *quotationService) Revise(ctx context.Context, scope coretenant.Scope, i
 	lines := make([]QuotationLineInput, 0, len(old.Items))
 	for _, it := range old.Items {
 		l := QuotationLineInput{Description: it.Description, Quantity: it.Quantity, UnitPrice: it.UnitPrice,
-			TaxPercent: it.TaxPercent, Unit: it.Unit, SKU: it.SKU}
+			TaxPercent: it.TaxPercent, Unit: it.Unit, SKU: it.SKU, Pricing: it.Pricing}
 		if it.DiscountPercent != nil {
 			l.DiscountPercent = *it.DiscountPercent
 		}
@@ -259,6 +265,7 @@ func (s *quotationService) Revise(ctx context.Context, scope coretenant.Scope, i
 		QuotationNumber: fmt.Sprintf("%s-R%d", rootQuotationNumber(old.QuotationNumber), next), RevisionNo: next,
 		ValidUntil: old.ValidUntil, Subtotal: totals.Subtotal, DiscountTotal: totals.DiscountTotal,
 		TaxTotal: totals.TaxTotal, GrandTotal: totals.GrandTotal, Currency: old.Currency, Notes: old.Notes,
+		OneTimeTotal: totals.OneTimeTotal, FirstInvoiceTotal: totals.FirstInvoiceTotal, RecurringTotals: totals.RecurringTotals,
 		Items: items, CreatedBy: userID,
 	})
 	if err != nil {

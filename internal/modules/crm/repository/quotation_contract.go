@@ -7,6 +7,7 @@ import (
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/crm/domain"
+	"zyad.cloud/internal/shared/pricing"
 )
 
 var (
@@ -23,6 +24,10 @@ type ReplaceQuotationItemsParams struct {
 	TaxTotal      string
 	GrandTotal    string
 	UpdatedBy     string
+
+	OneTimeTotal      string
+	FirstInvoiceTotal string
+	RecurringTotals   map[pricing.Frequency]string
 }
 
 type QuotationListFilter struct {
@@ -50,6 +55,7 @@ type QuotationItemInput struct {
 	Unit       string
 	TaxPercent string
 	TaxAmount  string
+	Pricing    pricing.Attributes
 }
 
 // CreateQuotationParams intentionally excludes OrganizationID. Implementations
@@ -67,10 +73,14 @@ type CreateQuotationParams struct {
 	GrandTotal      string
 	Currency        string
 	Notes           string
-	Items           []QuotationItemInput
-	CreatedBy       string
-	RevisionOfID    string
-	RevisionNo      int
+	// Rincian total (lihat domain.Quotation).
+	OneTimeTotal      string
+	FirstInvoiceTotal string
+	RecurringTotals   map[pricing.Frequency]string
+	Items             []QuotationItemInput
+	CreatedBy         string
+	RevisionOfID      string
+	RevisionNo        int
 }
 
 type UpdateQuotationParams struct {

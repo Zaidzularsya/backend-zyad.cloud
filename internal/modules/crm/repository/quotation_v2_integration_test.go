@@ -12,6 +12,7 @@ import (
 	"zyad.cloud/internal/modules/crm/domain"
 	"zyad.cloud/internal/modules/crm/repository"
 	"zyad.cloud/internal/platform/database/testutil"
+	"zyad.cloud/internal/shared/pricing"
 )
 
 func TestQuotationItemSnapshotColumnsRoundTrip(t *testing.T) {
@@ -196,5 +197,63 @@ func TestQuotationIssuerPrefersBrandingName(t *testing.T) {
 	}
 	if issuer.Name != orgName || orgName == "" {
 		t.Fatalf("issuer = %+v", issuer)
+	}
+}
+
+func TestQuotationPricingAttributesRoundTripAndLegacyDefaults(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+	setupCRMOrganizations(t, db, tenants)
+	repo := repository.NewQuotationRepository(db)
+	q := newDraft(t, repo, tenants.A.Scope, "QUO-T-0201")
+	if q.Items[0].Pricing != (pricing.Attributes{ChargeType: pricing.OneTime, PaymentTiming: pricing.Prepaid}) {
+		t.Fatalf("default item pricing = %+v", q.Items[0].Pricing)
+	}
+
+	monthly := pricing.Attributes{ChargeType: pricing.Recurring, Frequency: pricing.Monthly, PaymentTiming: pricing.Prepaid}
+	got, err := repo.ReplaceItems(ctx, tenants.A.Scope, q.ID, repository.ReplaceQuotationItemsParams{
+		Items:    []repository.QuotationItemInput{{Description: "Internet", Quantity: "1.00", UnitPrice: "300000.00", LineTotal: "300000.00", TaxPercent: "11", TaxAmount: "33000.00", Pricing: monthly}},
+		Subtotal: "300000.00", DiscountTotal: "0.00", TaxTotal: "33000.00", GrandTotal: "333000.00",
+		OneTimeTotal: "0.00", FirstInvoiceTotal: "333000.00", RecurringTotals: map[pricing.Frequency]string{pricing.Monthly: "333000.00"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Items[0].Pricing != monthly || got.RecurringTotals[pricing.Monthly] != "333000.00" || len(got.RecurringTotals) != 1 || got.FirstInvoiceTotal != "333000.00" {
+		t.Fatalf("round trip = %+v items=%+v", got, got.Items)
+	}
+	reread, err := repo.FindByID(ctx, tenants.A.Scope, q.ID)
+	if err != nil || reread.Items[0].Pricing != monthly || reread.RecurringTotals[pricing.Monthly] != "333000.00" {
+		t.Fatalf("reread = %+v err=%v", reread, err)
+	}
+
+	// Quotation lama (kolom baru tidak diisi) terbaca one_time + prepaid, tanpa rincian berulang.
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", tenants.A.Scope.OrganizationID()); err != nil {
+		t.Fatal(err)
+	}
+	var legacyID string
+	if err := tx.QueryRow(ctx, `INSERT INTO crm_quotations (organization_id, quotation_number, subtotal, discount_total, tax_total, grand_total)
+		VALUES ($1, 'QUO-T-0202', 100, 0, 0, 100) RETURNING id`, tenants.A.Scope.OrganizationID()).Scan(&legacyID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO crm_quotation_items (organization_id, quotation_id, description, quantity, unit_price, line_total, position)
+		VALUES ($1, $2, 'Lama', 1, 100, 100, 0)`, tenants.A.Scope.OrganizationID(), legacyID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := repo.FindByID(ctx, tenants.A.Scope, legacyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy.Items[0].Pricing != (pricing.Attributes{ChargeType: pricing.OneTime, PaymentTiming: pricing.Prepaid}) || len(legacy.RecurringTotals) != 0 {
+		t.Fatalf("legacy = %+v items=%+v", legacy, legacy.Items)
 	}
 }
