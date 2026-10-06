@@ -122,9 +122,9 @@ func insertCompanyTx(ctx context.Context, tx pgx.Tx, scope coretenant.Scope, par
 	return scanCompany(tx.QueryRow(ctx, `
 		INSERT INTO crm_companies (
 			organization_id, name, industry, website, phone, email, address,
-			size_range, notes, tags, owner_user_id, created_by
+			size_range, notes, tags, owner_user_id, created_by, tenant_organization_id
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 		) RETURNING `+companyColumns,
 		scope.OrganizationID(),
 		params.Name,
@@ -138,6 +138,7 @@ func insertCompanyTx(ctx context.Context, tx pgx.Tx, scope coretenant.Scope, par
 		tags,
 		nullableString(params.OwnerUserID),
 		nullableString(params.CreatedBy),
+		nullableString(params.TenantOrganizationID),
 	))
 }
 

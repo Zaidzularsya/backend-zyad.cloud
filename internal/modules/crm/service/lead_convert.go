@@ -136,6 +136,7 @@ func (s *leadService) applyCompanyInput(ctx context.Context, scope coretenant.Sc
 		tx.NewCompany = &repository.CreateCompanyParams{
 			Name: name, Industry: strings.TrimSpace(in.Industry), Website: strings.TrimSpace(in.Website),
 			Phone: strings.TrimSpace(in.Phone), OwnerUserID: params.OwnerUserID, CreatedBy: params.ConvertedBy,
+			TenantOrganizationID: in.TenantOrganizationID,
 		}
 		return nil
 	default:

@@ -30,6 +30,8 @@ type CreateCompanyParams struct {
 	Tags        []string
 	OwnerUserID string
 	CreatedBy   string
+	// TenantOrganizationID menautkan company ke workspace saat dibuat (atomik dengan insert).
+	TenantOrganizationID string
 }
 
 type UpdateCompanyParams struct {

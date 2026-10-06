@@ -190,3 +190,28 @@ func TestListOpenDealsByCompanyAndPipeline(t *testing.T) {
 		t.Fatal("tenant B must not see deals")
 	}
 }
+
+func TestConvertLeadNewCompanyLinkedToWorkspace(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+	setupCRMOrganizations(t, db, tenants)
+	disablePlaybook(t, db, tenants.A.Scope)
+	leads := repository.NewLeadRepository(db)
+	lead, _ := leads.Create(ctx, tenants.A.Scope, repository.CreateLeadParams{ContactName: "Rina"})
+
+	res, err := leads.ConvertLead(ctx, tenants.A.Scope, lead.ID, repository.ConvertLeadTxParams{
+		NewCompany: &repository.CreateCompanyParams{Name: "Studio Rina", TenantOrganizationID: tenants.B.OrganizationID},
+		Contact:    repository.CreateContactParams{FirstName: "Rina"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Company == nil || res.Company.TenantOrganizationID == nil || *res.Company.TenantOrganizationID != tenants.B.OrganizationID {
+		t.Fatalf("company = %+v", res.Company)
+	}
+	found, err := repository.NewCompanyRepository(db).FindByTenantOrganization(ctx, tenants.A.Scope, tenants.B.OrganizationID)
+	if err != nil || found.ID != res.Company.ID {
+		t.Fatalf("find: %+v err=%v", found, err)
+	}
+}

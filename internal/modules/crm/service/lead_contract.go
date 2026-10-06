@@ -48,6 +48,8 @@ type ConvertCompanyInput struct {
 	Mode                           string // "none" | "existing" | "new"
 	CompanyID                      string
 	Name, Industry, Website, Phone string
+	// TenantOrganizationID (mode "new"): workspace yang ditautkan saat company dibuat; hanya diisi service internal.
+	TenantOrganizationID string
 }
 
 // ConvertContactInput: contact hasil convert. Mode "existing" memakai contact
