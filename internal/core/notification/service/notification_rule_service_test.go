@@ -121,3 +121,22 @@ func TestNotificationRuleServiceUnknownEvent(t *testing.T) {
 		t.Fatalf("error code = %q, want NOTIFICATION_RULE_NOT_FOUND", appErr.Code)
 	}
 }
+
+func TestNotificationRuleServiceBuildReceivableSendFailedNotification(t *testing.T) {
+	service := NewNotificationRuleService()
+
+	notification, err := service.BuildNotification(context.Background(), NotificationEvent{
+		ID:             "event-1",
+		Type:           "receivable.invoice_send_failed",
+		OrganizationID: "org-1",
+		UserID:         "user-1",
+		Recipient:      domain.NotificationRecipient{Type: "user", UserID: "user-1", Name: "Sari", Email: "sari@example.test"},
+		Payload:        map[string]any{"user_name": "Sari", "invoice_number": "INV-2026-0001"},
+	})
+	if err != nil {
+		t.Fatalf("BuildNotification() error = %v", err)
+	}
+	if notification.TemplateCode != "receivable.invoice_send_failed" || notification.Channel != domain.ChannelEmail || notification.Locale != "id-ID" {
+		t.Fatalf("notification = %#v", notification)
+	}
+}

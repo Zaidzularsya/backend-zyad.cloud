@@ -1,4 +1,4 @@
-package quotationpdf
+package docpdf
 
 import (
 	"math/big"

@@ -112,6 +112,15 @@ func defaultVariables() map[string][]domain.NotificationVariable {
 			{Key: "occurred_at", Description: "When the disconnect was observed", Required: true, Example: "2026-09-24 10:00 WIB"},
 			{Key: "connections_url", Description: "WhatsApp connections page URL", Required: true, Example: "https://app.example.test/app/whatsapp"},
 		},
+		"receivable.invoice_send_failed": {
+			{Key: "app_name", Description: "Application name", Required: true, Example: "Zyad Cloud"},
+			{Key: "user_name", Description: "Recipient user name", Required: true, Example: "Sari"},
+			{Key: "invoice_number", Description: "Invoice number", Required: true, Example: "INV-2026-0001"},
+			{Key: "recipient", Description: "Intended recipient (email or phone)", Required: true, Example: "budi@example.test"},
+			{Key: "channel", Description: "Channel label (Email or WhatsApp)", Required: true, Example: "Email"},
+			{Key: "reason", Description: "Failure reason (no provider internals)", Required: true, Example: "Belum ada pengirim."},
+			{Key: "invoice_url", Description: "Invoice page URL", Required: true, Example: "https://app.example.test/app/billing/invoices/1"},
+		},
 		"permission.updated": {
 			{Key: "app_name", Description: "Application name", Required: true, Example: "Zyad Cloud"},
 			{Key: "user_name", Description: "Affected user name", Required: true, Example: "Admin"},

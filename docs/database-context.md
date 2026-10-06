@@ -38,6 +38,12 @@
 ### Billing — invoice & payment (migration 000052–000053, TIDAK berubah oleh refactor)
 `billing_invoices`, `billing_invoice_items`, `billing_payments`, `billing_payment_events`
 
+### Receivable — penagihan tenant ke pelanggannya (migration 000144, Rilis 3 S3)
+`receivable_settings`, `receivable_document_counters`, `receivable_accounts`, `receivable_invoices`,
+`receivable_invoice_items`, `receivable_invoice_sends`, `receivable_payments` — semua `organization_id NOT NULL`
+dengan `apply_organization_rls` (tidak termasuk hitungan "Total" di bawah, yang mencatat cakupan domain billing saja).
+Beda dari `billing_invoices` (tagihan platform ke tenant). Detail: `docs/reference-receivable.md`.
+
 **Total: 52 tabel** (jumlah tabel domain bisnis billing tidak berubah — hanya 6 tabel di-rename/dipecah
 menjadi domain Product/Subscription, 4 tabel invoice/payment tetap). Migration 000045–000049 berisi seed
 role (`member`, `organization_owner`) dan seed permission tambahan — bukan tabel baru (lihat bagian Seed).

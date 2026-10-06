@@ -17,6 +17,7 @@ import (
 	mailboxhandler "zyad.cloud/internal/modules/mailbox/handler"
 	organizationhandler "zyad.cloud/internal/modules/organization/handler"
 	producthandler "zyad.cloud/internal/modules/product/handler"
+	receivablehandler "zyad.cloud/internal/modules/receivable/handler"
 	subscriptionhandler "zyad.cloud/internal/modules/subscription/handler"
 	userhandler "zyad.cloud/internal/modules/user/handler"
 	whatsapphandler "zyad.cloud/internal/modules/whatsapp/handler"
@@ -84,7 +85,11 @@ type Dependencies struct {
 	CRMActivityHandler               *crmhandler.ActivityHandler
 	CRMQuotationHandler              *crmhandler.QuotationHandler
 	CRMPublicQuotationHandler        *crmhandler.PublicQuotationHandler
-	CRMInvoiceHandler                *crmhandler.InvoiceHandler
+	ReceivableAccountHandler         *receivablehandler.AccountHandler
+	ReceivableInvoiceHandler         *receivablehandler.InvoiceHandler
+	ReceivablePaymentHandler         *receivablehandler.PaymentHandler
+	ReceivableSettingsHandler        *receivablehandler.SettingsHandler
+	ReceivablePublicInvoiceHandler   *receivablehandler.PublicInvoiceHandler
 	CRMIntegrationHandler            *crmhandler.IntegrationHandler
 	WhatsAppEntitlementChecker       middleware.EntitlementChecker
 	WhatsAppSessionHandler           *whatsapphandler.SessionHandler

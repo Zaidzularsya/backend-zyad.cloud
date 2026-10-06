@@ -46,6 +46,7 @@ func TestVariableRegistryCodes(t *testing.T) {
 		"lead.created",
 		"payment.paid",
 		"permission.updated",
+		"receivable.invoice_send_failed",
 		"security.new_login",
 		"user.invitation",
 		"whatsapp.session_disconnected",

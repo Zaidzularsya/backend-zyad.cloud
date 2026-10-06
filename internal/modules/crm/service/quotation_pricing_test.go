@@ -2,21 +2,10 @@ package service
 
 import (
 	"errors"
-	"math/big"
 	"testing"
 
 	"zyad.cloud/internal/shared/pricing"
 )
-
-func TestRoundHalfUp2(t *testing.T) {
-	cases := map[string]string{"1.005": "1.01", "1.004": "1.00", "2.675": "2.68", "0": "0.00", "99999.995": "100000.00"}
-	for in, want := range cases {
-		r, _ := new(big.Rat).SetString(in)
-		if got := roundHalfUp2(r).FloatString(2); got != want {
-			t.Errorf("roundHalfUp2(%s) = %s, want %s", in, got, want)
-		}
-	}
-}
 
 func TestPriceQuotationLinesPerLineRounding(t *testing.T) {
 	totals, items, err := priceQuotationLines([]QuotationLineInput{

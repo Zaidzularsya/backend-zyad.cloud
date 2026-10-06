@@ -469,9 +469,7 @@ func New(ctx context.Context) (*App, error) {
 	crmActivityRepo := crmrepo.NewActivityRepository(db)
 	crmActivitySvc := crmservice.NewActivityService(crmActivityRepo, crmLeadRepo, crmContactRepo, crmCompanyRepo, crmDealRepo)
 	crmQuotationRepo := crmrepo.NewQuotationRepository(db)
-	crmInvoiceRepo := crmrepo.NewInvoiceRepository(db)
 	crmDocumentCounterRepo := crmrepo.NewDocumentCounterRepository(db)
-	crmInvoiceSvc := crmservice.NewInvoiceService(crmInvoiceRepo, crmQuotationRepo, crmDocumentCounterRepo)
 	crmIntegrationRepo := crmrepo.NewIntegrationRepository(db)
 	crmIntegrationSvc := crmservice.NewIntegrationService(crmIntegrationRepo, cfg.App.Secret)
 	crmCompanyHandler := crmhandler.NewCompanyHandler(crmCompanySvc)
@@ -509,7 +507,6 @@ func New(ctx context.Context) (*App, error) {
 	crmPipelineHandler := crmhandler.NewPipelineHandler(crmPipelineSvc)
 	crmDealHandler := crmhandler.NewDealHandler(crmDealSvc)
 	crmActivityHandler := crmhandler.NewActivityHandler(crmActivitySvc)
-	crmInvoiceHandler := crmhandler.NewInvoiceHandler(crmInvoiceSvc)
 	crmIntegrationHandler := crmhandler.NewIntegrationHandler(crmIntegrationSvc)
 
 	whatsappSessionSvc := NewWhatsAppSessionService(cfg, db, subscriptionGuardService, log)
@@ -568,6 +565,17 @@ func New(ctx context.Context) (*App, error) {
 		time.Now,
 	)
 	crmPublicQuotationHandler := crmhandler.NewPublicQuotationHandler(crmPublicQuotationSvc, redisClient)
+
+	// Modul receivable (penagihan tenant). Hanya bergantung pada port; kanal kirim, link publik, dan
+	// notifikasi dirakit di sini. Service-nya dibagikan ke modul lain (S4: sales order) lewat receivableModule.
+	receivableModule := buildReceivable(receivableBuild{
+		DB: db, Assets: assetSvc, Links: publicLinkSvc, Mailboxes: mailboxSvc, Messages: mailMessageSvc,
+		WhatsApp: whatsappConversationSvc, Entitlements: crmEntitlementChecker, Permissions: permService,
+		Publisher: notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts),
+		Members:   crmMemberRepo, Issuers: crmrepo.NewQuotationIssuerRepository(db),
+		AppName: cfg.App.Name, FrontendURL: cfg.App.FrontendURL, NotificationLocale: cfg.Notification.DefaultLocale,
+		RateCounter: redisClient,
+	})
 
 	router, err := newRouter(Dependencies{
 		Config:                           cfg,
@@ -629,7 +637,11 @@ func New(ctx context.Context) (*App, error) {
 		CRMActivityHandler:               crmActivityHandler,
 		CRMQuotationHandler:              crmQuotationHandler,
 		CRMPublicQuotationHandler:        crmPublicQuotationHandler,
-		CRMInvoiceHandler:                crmInvoiceHandler,
+		ReceivableAccountHandler:         receivableModule.AccountHandler,
+		ReceivableInvoiceHandler:         receivableModule.InvoiceHandler,
+		ReceivablePaymentHandler:         receivableModule.PaymentHandler,
+		ReceivableSettingsHandler:        receivableModule.SettingsHandler,
+		ReceivablePublicInvoiceHandler:   receivableModule.PublicHandler,
 		CRMIntegrationHandler:            crmIntegrationHandler,
 		WhatsAppEntitlementChecker:       crmEntitlementChecker,
 		WhatsAppSessionHandler:           whatsappSessionHandler,
