@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"math/big"
 	"regexp"
 	"strings"
 	"time"
@@ -127,6 +128,9 @@ func (s *invoiceService) buildParams(ctx context.Context, scope coretenant.Scope
 	if err != nil {
 		return zero, invalidInvoice("Baris tidak valid: deskripsi 1–500 karakter, qty/harga ≥ 0, diskon & pajak 0–100, atribut harga valid.")
 	}
+	if !fitsMoneyColumns(totals, priced) {
+		return zero, invalidInvoice("Nilai terlalu besar: harga, qty, dan total harus kurang dari Rp 10 kuadriliun.")
+	}
 	items := make([]repository.InvoiceItemParams, len(priced))
 	for i, p := range priced {
 		l := in.Lines[i]
@@ -214,4 +218,29 @@ func (s *invoiceService) Void(ctx context.Context, scope coretenant.Scope, id, r
 		slog.WarnContext(ctx, "receivable: refresh void snapshot failed", "invoice_id", inv.ID, "error", err)
 	}
 	return s.Get(ctx, scope, inv.ID)
+}
+
+// maxMoney = nilai terbesar numeric(18,2): 9999999999999999.99.
+var maxMoney = func() *big.Rat {
+	r, _ := new(big.Rat).SetString("9999999999999999.99")
+	return r
+}()
+
+// fitsMoneyColumns memastikan semua angka hasil hitung muat di kolom numeric(18,2) supaya input yang
+// terlalu besar menjadi galat validasi, bukan luapan di database (500).
+func fitsMoneyColumns(totals pricing.Totals, lines []pricing.PricedLine) bool {
+	values := []string{totals.Subtotal, totals.DiscountTotal, totals.TaxTotal, totals.GrandTotal, totals.OneTimeTotal, totals.FirstInvoiceTotal}
+	for _, v := range totals.RecurringTotals {
+		values = append(values, v)
+	}
+	for _, l := range lines {
+		values = append(values, l.Quantity, l.UnitPrice, l.TaxAmount, l.LineTotal)
+	}
+	for _, v := range values {
+		r, ok := new(big.Rat).SetString(v)
+		if !ok || r.Cmp(maxMoney) > 0 {
+			return false
+		}
+	}
+	return true
 }

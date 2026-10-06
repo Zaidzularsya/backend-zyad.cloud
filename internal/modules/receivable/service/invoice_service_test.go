@@ -286,3 +286,29 @@ func TestValidationMessagesAreIndonesian(t *testing.T) {
 		t.Fatalf("pricing error must be Indonesian, got %v", err)
 	}
 }
+
+// Kolom uang adalah numeric(18,2): nilai yang meluap harus ditolak sebagai validasi (422),
+// bukan lolos ke database dan menjadi 500.
+func TestCreateDraftRejectsAmountsBeyondColumnRange(t *testing.T) {
+	h := newInvoiceHarness(t)
+	huge := "99999999999999999999" // 20 digit
+	cases := map[string]LineInput{
+		"unit price": line("x", huge),
+		"quantity":   {LineInput: pricing.LineInput{Description: "x", Quantity: huge, UnitPrice: "1"}},
+		"line total": {LineInput: pricing.LineInput{Description: "x", Quantity: "9999999999", UnitPrice: "9999999999"}},
+	}
+	for name, l := range cases {
+		if _, err := h.svc.CreateDraft(ctx, scope, InvoiceInput{AccountID: "a1", Lines: []LineInput{l}}, "u1"); !errors.Is(err, ErrInvalidInvoice) {
+			t.Errorf("%s: err = %v, want ErrInvalidInvoice", name, err)
+		}
+	}
+	// grand total is the sum of lines: two lines that fit individually but not together
+	two := []LineInput{line("a", "9000000000000000"), line("b", "9000000000000000")}
+	if _, err := h.svc.CreateDraft(ctx, scope, InvoiceInput{AccountID: "a1", Lines: two}, "u1"); !errors.Is(err, ErrInvalidInvoice) {
+		t.Errorf("sum overflow: err = %v, want ErrInvalidInvoice", err)
+	}
+	// the largest value the column can hold is still accepted
+	if _, err := h.svc.CreateDraft(ctx, scope, InvoiceInput{AccountID: "a1", Lines: []LineInput{line("max", "9999999999999999.99")}}, "u1"); err != nil {
+		t.Errorf("max value must be accepted: %v", err)
+	}
+}
