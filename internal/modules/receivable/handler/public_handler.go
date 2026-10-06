@@ -12,7 +12,9 @@ import (
 	coreerrors "zyad.cloud/internal/core/errors"
 	corehttp "zyad.cloud/internal/core/http"
 	"zyad.cloud/internal/core/middleware"
+	"zyad.cloud/internal/modules/receivable/domain"
 	"zyad.cloud/internal/modules/receivable/dto"
+	"zyad.cloud/internal/modules/receivable/repository"
 	"zyad.cloud/internal/modules/receivable/service"
 )
 
@@ -24,15 +26,28 @@ type PublicInvoiceService interface {
 	PDF(ctx context.Context, token string) (service.InvoicePDF, error)
 }
 
+// PublicPayments: pembayaran online dari halaman publik (hanya org dengan receivable.online_payment).
+type PublicPayments interface {
+	Checkout(ctx context.Context, token string) (paymentURL string, expiresAt time.Time, err error)
+	SyncStatus(ctx context.Context, token string) (domain.InvoiceStatus, error)
+}
+
 // PublicInvoiceHandler melayani link invoice tanpa login. Satu-satunya input yang
 // mengidentifikasi dokumen adalah token; tenant diturunkan dari baris link.
 type PublicInvoiceHandler struct {
-	svc     PublicInvoiceService
-	counter middleware.RateCounter
+	svc      PublicInvoiceService
+	payments PublicPayments
+	counter  middleware.RateCounter
 }
 
 func NewPublicInvoiceHandler(svc PublicInvoiceService, counter middleware.RateCounter) *PublicInvoiceHandler {
 	return &PublicInvoiceHandler{svc: svc, counter: counter}
+}
+
+// WithPayments mengaktifkan endpoint checkout & status.
+func (h *PublicInvoiceHandler) WithPayments(p PublicPayments) *PublicInvoiceHandler {
+	h.payments = p
+	return h
 }
 
 // RegisterRoutes dipasang langsung pada api (di luar grup auth & tenant).
@@ -44,11 +59,28 @@ func (h *PublicInvoiceHandler) RegisterRoutes(api *gin.RouterGroup) {
 	)
 	group.GET("/:token", h.View)
 	group.GET("/:token/pdf", h.PDF)
+	if h.payments != nil {
+		group.POST("/:token/checkout", h.Checkout)
+		group.GET("/:token/status", h.Status)
+	}
 }
 
 func failPublicInvoice(c *gin.Context, err error) {
 	if errors.Is(err, service.ErrLinkInvalid) {
 		corehttp.Fail(c, coreerrors.New("LINK_INVALID", "Link tidak valid atau sudah tidak berlaku.", http.StatusNotFound))
+		return
+	}
+	if errors.Is(err, service.ErrOnlinePaymentUnavailable) {
+		corehttp.Fail(c, coreerrors.New("ONLINE_PAYMENT_UNAVAILABLE", "Pembayaran online belum tersedia untuk invoice ini.", http.StatusForbidden))
+		return
+	}
+	if errors.Is(err, repository.ErrInvoiceNotPayable) {
+		corehttp.Fail(c, coreerrors.New("INVOICE_NOT_PAYABLE", "Invoice ini tidak dapat dibayar.", http.StatusConflict))
+		return
+	}
+	var appErr *coreerrors.AppError
+	if errors.As(err, &appErr) {
+		corehttp.Fail(c, appErr)
 		return
 	}
 	// Detail hanya di log; path berisi token sehingga jangan dicatat.
@@ -64,6 +96,26 @@ func (h *PublicInvoiceHandler) View(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	corehttp.OK(c, "success", publicInvoiceFromView(view))
+}
+
+func (h *PublicInvoiceHandler) Checkout(c *gin.Context) {
+	url, expiresAt, err := h.payments.Checkout(c.Request.Context(), c.Param("token"))
+	if err != nil {
+		failPublicInvoice(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	corehttp.OK(c, "success", gin.H{"payment_url": url, "expires_at": expiresAt.UTC().Format(time.RFC3339)})
+}
+
+func (h *PublicInvoiceHandler) Status(c *gin.Context) {
+	status, err := h.payments.SyncStatus(c.Request.Context(), c.Param("token"))
+	if err != nil {
+		failPublicInvoice(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	corehttp.OK(c, "success", gin.H{"status": string(status)})
 }
 
 func (h *PublicInvoiceHandler) PDF(c *gin.Context) {

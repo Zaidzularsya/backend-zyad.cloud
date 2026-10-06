@@ -9224,7 +9224,7 @@ paths:
       operationId: getPublicInvoice
       tags:
       - Receivable
-      description: "Public endpoint (no bearer token, no tenant host): the tenant is derived from the link row. Rate limited to 30 requests/minute per IP. Unknown, expired or non-invoice tokens all return the same `404 LINK_INVALID`. `state`: `open` (issued/overdue), `paid`, `void` (a voided invoice stays viewable as cancelled even though its link is revoked). `can_pay` is true only for `open` invoices of organizations with `receivable.online_payment` (checkout arrives with a later release)."
+      description: "Public endpoint (no bearer token, no tenant host): the tenant is derived from the link row. Rate limited to 30 requests/minute per IP. Unknown, expired or non-invoice tokens all return the same `404 LINK_INVALID`. `state`: `open` (issued/overdue), `paid`, `void` (a voided invoice stays viewable as cancelled even though its link is revoked). `can_pay` is true only for `open` invoices of organizations with `receivable.online_payment` (platform organization); see `POST .../checkout`."
       parameters:
       - name: token
         in: path
@@ -9264,6 +9264,98 @@ paths:
           content:
             application/pdf:
               schema: {type: string, format: binary}
+        '404':
+          description: "Link invalid (LINK_INVALID)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429':
+          description: "Rate limited (RATE_LIMITED)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/public/invoices/{token}/checkout:
+    post:
+      summary: Start a DOKU checkout for the invoice balance
+      operationId: createPublicInvoiceCheckout
+      tags:
+      - Receivable
+      description: "Public endpoint (rate limited like the invoice view). Only organizations with `receivable.online_payment` (the platform organization) may pay online; others get `403 ONLINE_PAYMENT_UNAVAILABLE` and no DOKU session is created. The amount is the remaining balance rounded up to whole rupiah. Clicking again while the session is pending and unexpired returns the same `payment_url`. DOKU notifications settle the invoice via the shared `POST /api/v1/webhooks/doku` webhook (invoice numbers prefixed `RCV-`)."
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema: {type: string, minLength: 43, maxLength: 43}
+      responses:
+        '200':
+          description: "Checkout session"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, message, data]
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  data:
+                    type: object
+                    required: [payment_url, expires_at]
+                    properties:
+                      payment_url: {type: string, format: uri}
+                      expires_at: {type: string, format: date-time}
+        '403':
+          description: "Online payment unavailable (ONLINE_PAYMENT_UNAVAILABLE)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "Link invalid (LINK_INVALID)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: "Invoice not payable (INVOICE_NOT_PAYABLE)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429':
+          description: "Rate limited (RATE_LIMITED)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: "DOKU session could not be created (PAYMENT_CHECKOUT_FAILED)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/public/invoices/{token}/status:
+    get:
+      summary: Current invoice status (DOKU fallback sync)
+      operationId: getPublicInvoiceStatus
+      tags:
+      - Receivable
+      description: "Public endpoint. When the invoice is still open and has a pending DOKU checkout, asks DOKU for the transaction status (at most once per 10 seconds per invoice) so the page can show the result before the webhook arrives."
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema: {type: string, minLength: 43, maxLength: 43}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, message, data]
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  data:
+                    type: object
+                    required: [status]
+                    properties:
+                      status: {type: string, enum: [issued, overdue, paid, void]}
         '404':
           description: "Link invalid (LINK_INVALID)"
           content:

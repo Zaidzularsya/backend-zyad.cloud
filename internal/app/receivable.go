@@ -14,6 +14,7 @@ import (
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	coretenant "zyad.cloud/internal/core/tenant"
 	assetservice "zyad.cloud/internal/modules/asset/service"
+	billinghandler "zyad.cloud/internal/modules/billing/handler"
 	crmrepo "zyad.cloud/internal/modules/crm/repository"
 	mailboxservice "zyad.cloud/internal/modules/mailbox/service"
 	organizationrepo "zyad.cloud/internal/modules/organization/repository"
@@ -23,6 +24,7 @@ import (
 	receivableservice "zyad.cloud/internal/modules/receivable/service"
 	whatsappservice "zyad.cloud/internal/modules/whatsapp/service"
 	"zyad.cloud/internal/platform/database"
+	"zyad.cloud/internal/platform/doku"
 	"zyad.cloud/internal/shared/docpdf"
 	"zyad.cloud/internal/shared/publiclink"
 )
@@ -166,6 +168,9 @@ type receivableBuild struct {
 	FrontendURL        string
 	NotificationLocale string
 	RateCounter        middleware.RateCounter
+	// Doku & DokuNotificationURL: klien dan URL webhook yang sama dengan billing (S6).
+	Doku                doku.Client
+	DokuNotificationURL string
 }
 
 // receivableModule menampung handler untuk router dan service yang dibagikan ke modul lain
@@ -176,6 +181,7 @@ type receivableModule struct {
 	PaymentHandler  *receivablehandler.PaymentHandler
 	SettingsHandler *receivablehandler.SettingsHandler
 	PublicHandler   *receivablehandler.PublicInvoiceHandler
+	OnlinePayment   *receivableservice.OnlinePayment
 	ContractHandler *receivablehandler.ContractHandler
 	OverviewHandler *receivablehandler.OverviewHandler
 
@@ -233,12 +239,19 @@ func buildReceivable(b receivableBuild) receivableModule {
 		invoiceSvc, issuer, b.Entitlements, nil,
 	)
 
+	workerResolver := organizationservice.NewWorkerResolver(organizationrepo.NewOrganizationRepository(db), receivableservice.PublicLinkIdentity)
+	onlinePayment := receivableservice.NewOnlinePayment(
+		receivableservice.OnlinePaymentConfig{FrontendURL: b.FrontendURL, NotificationURL: b.DokuNotificationURL},
+		b.Doku, receivablerepo.NewCheckoutRepository(db), invoiceSvc, paymentSvc, b.Links, workerResolver, b.Entitlements, nil,
+	)
+
 	return receivableModule{
 		AccountHandler:  receivablehandler.NewAccountHandler(accountSvc),
 		InvoiceHandler:  receivablehandler.NewInvoiceHandler(invoiceSvc, sendSvc),
 		PaymentHandler:  receivablehandler.NewPaymentHandler(paymentSvc),
 		SettingsHandler: receivablehandler.NewSettingsHandler(settingsSvc),
-		PublicHandler:   receivablehandler.NewPublicInvoiceHandler(publicSvc, b.RateCounter),
+		PublicHandler:   receivablehandler.NewPublicInvoiceHandler(publicSvc, b.RateCounter).WithPayments(onlinePayment),
+		OnlinePayment:   onlinePayment,
 		ContractHandler: receivablehandler.NewContractHandler(contractSvc).WithUpcoming(overviewSvc),
 		OverviewHandler: receivablehandler.NewOverviewHandler(overviewSvc),
 		Invoices:        invoiceSvc, Accounts: accountSvc, Payments: paymentSvc, Listeners: listeners,
@@ -290,4 +303,16 @@ func (r crmReceivableReader) ContractInfo(ctx context.Context, scope coretenant.
 		return "", "", err
 	}
 	return string(c.Status), c.ContractNumber, nil
+}
+
+// receivableDokuProcessor menjembatani webhook billing ke receivable tanpa import silang antar modul.
+type receivableDokuProcessor struct {
+	svc *receivableservice.OnlinePayment
+}
+
+func (p receivableDokuProcessor) HandleNotification(ctx context.Context, n billinghandler.DokuNotificationEvent) (bool, error) {
+	return p.svc.HandleNotification(ctx, receivableservice.DokuNotification{
+		InvoiceNumber: n.InvoiceNumber, Status: n.Status, Amount: n.Amount, ProviderReference: n.ProviderReference,
+		PaymentMethod: n.PaymentMethod, PaidAt: n.PaidAt, Payload: n.Payload,
+	})
 }

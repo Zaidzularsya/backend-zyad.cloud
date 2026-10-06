@@ -129,7 +129,31 @@ S -> N : receivable.invoice_send_failed\nke PIC, atau pemegang invoice.send
 `WorkerResolver` identitas `public-document-link` (sama dengan penawaran). Link berlaku sampai jatuh tempo + 90 hari
 (23:59:59 WIB); token tidak dikenal/kedaluwarsa/bukan invoice → `404 LINK_INVALID` yang sama.
 `state`: `open` (issued/overdue), `paid`, `void` — invoice void tetap tampil "Dibatalkan" walau linknya dicabut.
-`can_pay` hanya untuk `open` + `receivable.online_payment` (checkout menyusul di S6).
+`can_pay` hanya untuk `open` + `receivable.online_payment`.
+
+### Pembayaran online DOKU (S6)
+
+Hanya org **platform** (bypass `SubscriptionGuardService` untuk `receivable.online_payment`); tenant lain tidak melihat tombol Bayar.
+
+- `POST /public/invoices/:token/checkout` → `{payment_url, expires_at}`. Jumlah = **sisa** tagihan, pecahan dibulatkan ke atas ke rupiah.
+  Nomor DOKU `RCV-<uuid invoice>`. Sesi `pending` yang belum kedaluwarsa (60 menit) dipakai ulang → URL sama.
+  Galat: `403 ONLINE_PAYMENT_UNAVAILABLE` (tanpa sesi DOKU dibuat), `409 INVOICE_NOT_PAYABLE`, `502 PAYMENT_CHECKOUT_FAILED`.
+- `GET /public/invoices/:token/status` → `{status}`; menjalankan `CheckStatus` DOKU bila ada sesi pending (maks 1×/10 detik per invoice, in-memory).
+- Callback DOKU → `/i/<token>?paid=1`.
+- Sesi disimpan di `receivable_checkouts` (directory tanpa RLS, migration `000149`) supaya webhook menemukan organisasi dari nomor DOKU.
+
+### Webhook
+
+Satu route `POST /api/v1/webhooks/doku`. Setelah verifikasi signature, nomor ber-prefix `RCV-` diteruskan ke
+`ReceivableDokuProcessor` (adapter di `internal/app`; `billing` tidak mengimpor `receivable`), sedangkan nomor lain tetap diproses `billing`.
+
+| Kondisi | Hasil |
+|---|---|
+| Nomor `RCV-` tak dikenal | 200 (DOKU berhenti retry), log warn |
+| Status bukan sukses | 200, tidak ada pembayaran, sesi tetap `pending` |
+| Sukses | `RecordProvider` method `doku`, reference = `transaction.original_request_id` (atau nomor+tanggal); idempoten; jumlah dibatasi sisa |
+| Invoice sudah void/lunas atau melebihi sisa | 200 + log error "perlu refund manual"; **tidak** ada pembayaran tercatat |
+| Galat tak terduga | 500 agar DOKU mengirim ulang |
 
 ## Listener (modul lain)
 

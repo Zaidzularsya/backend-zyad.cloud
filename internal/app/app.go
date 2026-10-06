@@ -531,8 +531,10 @@ func New(ctx context.Context) (*App, error) {
 		Publisher: notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts),
 		Members:   crmMemberRepo, Issuers: crmrepo.NewQuotationIssuerRepository(db),
 		AppName: cfg.App.Name, FrontendURL: cfg.App.FrontendURL, NotificationLocale: cfg.Notification.DefaultLocale,
-		RateCounter: redisClient,
+		RateCounter: redisClient, Doku: dokuClient, DokuNotificationURL: dokuNotificationURL,
 	})
+	// Webhook DOKU yang sama melayani invoice billing dan receivable; nomor RCV- diteruskan ke sini.
+	dokuWebhookHandler.SetReceivableProcessor(receivableDokuProcessor{svc: receivableModule.OnlinePayment})
 
 	// Sales order (S4): dirakit setelah receivable (penagihan) dan sebelum quotation service karena hook
 	// approve menunjuk ke SalesOrderService.

@@ -46,7 +46,7 @@ type PublicInvoiceView struct {
 	TenantName string
 	Invoice    domain.Invoice
 	State      PublicInvoiceState
-	// CanPay: state open dan org punya receivable.online_payment (checkout baru ada di S6).
+	// CanPay: state open dan org punya receivable.online_payment.
 	CanPay bool
 }
 
@@ -79,14 +79,19 @@ type publicInvoice struct {
 // sama (tidak membocorkan keberadaan dokumen). Link dicabut karena void tetap dilayani agar
 // pembaca melihat "Dibatalkan".
 func (s *PublicInvoiceService) load(ctx context.Context, token string) (publicInvoice, error) {
-	link, err := s.links.Resolve(ctx, token)
+	return loadPublicInvoice(ctx, s.links, s.scopes, s.invoices, s.now(), token)
+}
+
+func loadPublicInvoice(ctx context.Context, links LinkResolver, scopes PublicScopeResolver, invoices PublicInvoices,
+	now time.Time, token string) (publicInvoice, error) {
+	link, err := links.Resolve(ctx, token)
 	if err != nil {
 		return publicInvoice{}, err
 	}
-	if link.DocumentType != publiclink.DocumentInvoice || s.now().After(link.ExpiresAt) {
+	if link.DocumentType != publiclink.DocumentInvoice || now.After(link.ExpiresAt) {
 		return publicInvoice{}, ErrLinkInvalid
 	}
-	tenantCtx, err := s.scopes.ResolveWorkerOrganization(ctx, link.OrganizationID, PublicLinkIdentity)
+	tenantCtx, err := scopes.ResolveWorkerOrganization(ctx, link.OrganizationID, PublicLinkIdentity)
 	if err != nil {
 		var appErr *coreerrors.AppError
 		if errors.As(err, &appErr) && (appErr.Code == "WORKER_ORGANIZATION_NOT_FOUND" || appErr.Code == "WORKER_ORGANIZATION_INACTIVE") {
@@ -98,7 +103,7 @@ func (s *PublicInvoiceService) load(ctx context.Context, token string) (publicIn
 	if err != nil {
 		return publicInvoice{}, err
 	}
-	inv, err := s.invoices.Get(ctx, scope, link.DocumentID)
+	inv, err := invoices.Get(ctx, scope, link.DocumentID)
 	if errors.Is(err, receivable.ErrInvoiceNotFound) {
 		return publicInvoice{}, ErrLinkInvalid
 	}
