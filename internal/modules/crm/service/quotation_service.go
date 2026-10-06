@@ -13,6 +13,7 @@ import (
 	"zyad.cloud/internal/core/businesstime"
 	coretenant "zyad.cloud/internal/core/tenant"
 	crmmodule "zyad.cloud/internal/modules/crm"
+	catalogdomain "zyad.cloud/internal/modules/catalog/domain"
 	"zyad.cloud/internal/modules/crm/domain"
 	"zyad.cloud/internal/modules/crm/repository"
 	"zyad.cloud/internal/shared/pricing"
@@ -80,7 +81,7 @@ func (s *quotationService) applyCatalog(ctx context.Context, scope coretenant.Sc
 		}
 	}
 	if len(ids) == 0 {
-		return lines, nil
+		return withoutClientFeatures(lines), nil
 	}
 	if s.catalog == nil {
 		return nil, ErrProductInactive
@@ -92,6 +93,7 @@ func (s *quotationService) applyCatalog(ctx context.Context, scope coretenant.Sc
 	out := make([]QuotationLineInput, len(lines))
 	for i, l := range lines {
 		out[i] = l
+		out[i].Features = nil // fitur hanya berasal dari katalog
 		if l.ProductID == "" {
 			continue
 		}
@@ -115,8 +117,26 @@ func (s *quotationService) applyCatalog(ctx context.Context, scope coretenant.Sc
 			out[i].Pricing = p.Pricing
 		}
 		out[i].SKU = p.SKU
+		out[i].Features = featureSnapshots(p.Features)
 	}
 	return out, nil
+}
+
+func withoutClientFeatures(lines []QuotationLineInput) []QuotationLineInput {
+	out := make([]QuotationLineInput, len(lines))
+	for i, l := range lines {
+		out[i] = l
+		out[i].Features = nil
+	}
+	return out
+}
+
+func featureSnapshots(in []catalogdomain.ProductFeature) []domain.FeatureSnapshot {
+	out := make([]domain.FeatureSnapshot, 0, len(in))
+	for _, f := range in {
+		out = append(out, domain.FeatureSnapshot{FeatureKey: f.FeatureKey, Value: f.Value, Label: f.Label})
+	}
+	return out
 }
 
 func (s *quotationService) expire(ctx context.Context, scope coretenant.Scope) {
@@ -239,7 +259,7 @@ func (s *quotationService) Revise(ctx context.Context, scope coretenant.Scope, i
 	lines := make([]QuotationLineInput, 0, len(old.Items))
 	for _, it := range old.Items {
 		l := QuotationLineInput{Description: it.Description, Quantity: it.Quantity, UnitPrice: it.UnitPrice,
-			TaxPercent: it.TaxPercent, Unit: it.Unit, SKU: it.SKU, Pricing: it.Pricing}
+			TaxPercent: it.TaxPercent, Unit: it.Unit, SKU: it.SKU, Pricing: it.Pricing, Features: it.Features}
 		if it.DiscountPercent != nil {
 			l.DiscountPercent = *it.DiscountPercent
 		}

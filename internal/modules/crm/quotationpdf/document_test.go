@@ -1,6 +1,7 @@
 package quotationpdf
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -28,5 +29,27 @@ func TestBuildDocument(t *testing.T) {
 	}
 	if doc.Lines[1].Discount != "-" || doc.GrandTotal != "Rp 1.053.500" {
 		t.Fatalf("doc = %+v", doc)
+	}
+}
+
+func TestBuildDocumentIncludesFeatureLabels(t *testing.T) {
+	q := crmdomain.Quotation{QuotationNumber: "QUO-1", Items: []crmdomain.QuotationItem{{
+		Description: "Freelancer", Quantity: "1.00", UnitPrice: "1.00", TaxPercent: "0.00", LineTotal: "1.00",
+		Features: []crmdomain.FeatureSnapshot{
+			{FeatureKey: "crm", Value: json.RawMessage(`true`), Label: "CRM"},
+			{FeatureKey: "wa", Value: json.RawMessage(`false`), Label: ""},
+			{FeatureKey: "users", Value: json.RawMessage(`5`), Label: "Hingga 5 user"},
+		},
+	}, {Description: "Bebas", Quantity: "1.00", UnitPrice: "1.00", TaxPercent: "0.00", LineTotal: "1.00"}}}
+	doc := BuildDocument(q, Issuer{}, Customer{}, time.Now())
+	if got := doc.Lines[0].Features; len(got) != 2 || got[0] != "CRM" || got[1] != "Hingga 5 user" {
+		t.Fatalf("features = %v", got)
+	}
+	if len(doc.Lines[1].Features) != 0 {
+		t.Fatalf("baris bebas = %v", doc.Lines[1].Features)
+	}
+	pdfLines := doc.PDF().Lines
+	if len(pdfLines[0].Details) != 2 || pdfLines[0].Details[1] != "Hingga 5 user" {
+		t.Fatalf("docpdf details = %v", pdfLines[0].Details)
 	}
 }

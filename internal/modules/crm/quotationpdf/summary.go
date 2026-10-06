@@ -52,6 +52,9 @@ func BuildSummary(doc Document, opening, link string) Summary {
 	t.WriteString(opening + "\n\n*Penawaran " + doc.Number + "*\n")
 	for _, l := range doc.Lines {
 		t.WriteString(itoa(l.No) + ". " + l.Description + "\n   " + lineDetail(l) + "\n")
+		for _, f := range l.Features {
+			t.WriteString("   • " + f + "\n")
+		}
 	}
 	t.WriteString("\nSubtotal: " + doc.Subtotal + "\n")
 	if doc.DiscountTotal != "Rp 0" {
@@ -83,7 +86,7 @@ func BuildSummary(doc Document, opening, link string) Summary {
 	h.WriteString(`<table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;font-size:14px">`)
 	h.WriteString("<tr><th>No</th><th>Deskripsi</th><th>Qty</th><th>Harga</th><th>Diskon</th><th>Pajak</th><th>Jumlah</th></tr>")
 	for _, l := range doc.Lines {
-		h.WriteString("<tr><td>" + itoa(l.No) + "</td><td>" + e(l.Description) + "</td><td>" + e(l.Quantity) + "</td><td>" +
+		h.WriteString("<tr><td>" + itoa(l.No) + "</td><td>" + e(l.Description) + featureListHTML(l.Features) + "</td><td>" + e(l.Quantity) + "</td><td>" +
 			e(l.UnitPrice) + "</td><td>" + e(l.Discount) + "</td><td>" + e(l.Tax) + `</td><td style="text-align:right">` + e(l.Total) + "</td></tr>")
 	}
 	h.WriteString("</table>")
@@ -105,4 +108,17 @@ func BuildSummary(doc Document, opening, link string) Summary {
 	h.WriteString("<p>" + e(doc.Issuer.Name) + "</p>")
 
 	return Summary{Subject: "Penawaran " + doc.Number + " – " + doc.Issuer.Name, Text: t.String(), HTML: h.String()}
+}
+
+func featureListHTML(features []string) string {
+	if len(features) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<ul style="margin:4px 0 0;padding-left:18px;font-size:12px;color:#555">`)
+	for _, f := range features {
+		b.WriteString("<li>" + html.EscapeString(f) + "</li>")
+	}
+	b.WriteString("</ul>")
+	return b.String()
 }

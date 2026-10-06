@@ -16,6 +16,8 @@ type Line struct {
 	Description, Quantity, Unit, UnitPrice, Discount, Tax, Total string
 	// Billing: "" untuk sekali bayar + prabayar (default); selain itu ringkasan atribut.
 	Billing string
+	// Features: label fitur yang terlihat (snapshot baris), urut seperti di katalog.
+	Features []string
 }
 
 // RecurringTotal adalah satu baris total berulang, mis. {"Bulanan", "Rp 333.000/bulan"}.
@@ -81,10 +83,20 @@ func BuildDocument(q crmdomain.Quotation, issuer Issuer, customer Customer, issu
 		doc.Lines = append(doc.Lines, Line{
 			No: i + 1, Description: it.Description, Quantity: qty, Unit: it.Unit,
 			UnitPrice: unitPrice, Discount: discount, Tax: docpdf.FormatPercent(it.TaxPercent),
-			Total: docpdf.FormatRupiah(it.LineTotal), Billing: billing,
+			Total: docpdf.FormatRupiah(it.LineTotal), Billing: billing, Features: visibleFeatures(it.Features),
 		})
 	}
 	return doc
+}
+
+func visibleFeatures(in []crmdomain.FeatureSnapshot) []string {
+	var out []string
+	for _, f := range in {
+		if f.Label != "" {
+			out = append(out, f.Label)
+		}
+	}
+	return out
 }
 
 // PDF memetakan view-model penawaran ke dokumen generik untuk docpdf.Renderer.
@@ -108,7 +120,7 @@ func (d Document) PDF() docpdf.Document {
 	for _, l := range d.Lines {
 		out.Lines = append(out.Lines, docpdf.Line{
 			No: l.No, Description: l.Description, Billing: l.Billing, Quantity: l.Quantity,
-			UnitPrice: l.UnitPrice, Discount: l.Discount, Tax: l.Tax, Total: l.Total,
+			UnitPrice: l.UnitPrice, Discount: l.Discount, Tax: l.Tax, Total: l.Total, Details: l.Features,
 		})
 	}
 	return out

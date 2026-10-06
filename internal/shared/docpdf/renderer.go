@@ -112,12 +112,15 @@ func (r *Renderer) Render(doc Document) ([]byte, error) {
 	drawHeader()
 	pdf.SetFont("Noto", "", 8.5)
 	const lineH = 4.5
+	// Detail 1pt lebih kecil dari deskripsi (8.5pt).
+	const detailH = 3.8
 	for _, l := range doc.Lines {
 		descLines := pdf.SplitText(l.Description, cols[1]-2)
 		rowH := float64(len(descLines))*lineH + 2
 		if l.Billing != "" {
 			rowH += 3.5
 		}
+		rowH += float64(len(l.Details)) * detailH
 		if pdf.GetY()+rowH > 297-20 {
 			pdf.AddPage()
 			drawHeader()
@@ -139,6 +142,14 @@ func (r *Renderer) Render(doc Document) ([]byte, error) {
 					pdf.SetX(cx + 1)
 					pdf.CellFormat(cols[1]-2, 3.5, l.Billing, "", 2, "L", false, 0, "")
 					pdf.SetTextColor(20, 20, 20)
+					pdf.SetFont("Noto", "", 8.5)
+				}
+				if len(l.Details) > 0 {
+					pdf.SetFont("Noto", "", 7.5)
+					for _, d := range l.Details {
+						pdf.SetX(cx + 1)
+						pdf.CellFormat(cols[1]-2, detailH, "• "+d, "", 2, "L", false, 0, "")
+					}
 					pdf.SetFont("Noto", "", 8.5)
 				}
 			} else {

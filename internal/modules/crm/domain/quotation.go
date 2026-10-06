@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"time"
 
 	"zyad.cloud/internal/shared/pricing"
@@ -30,6 +31,14 @@ func (s QuotationStatus) IsValid() bool {
 }
 
 // Item hanya bisa diganti selama quotation berstatus draft (QuotationRepository.ReplaceItems).
+// FeatureSnapshot adalah fitur produk yang disalin ke baris quotation saat baris
+// dibuat; berubahnya fitur di katalog tidak memengaruhi baris yang sudah ada.
+type FeatureSnapshot struct {
+	FeatureKey string          `json:"feature_key"`
+	Value      json.RawMessage `json:"value"`
+	Label      string          `json:"label"` // "" = tidak ditampilkan
+}
+
 type QuotationItem struct {
 	ID              string
 	Description     string
@@ -47,6 +56,8 @@ type QuotationItem struct {
 	TaxAmount  string
 	// Pricing: snapshot atribut harga baris (default one_time + prepaid).
 	Pricing pricing.Attributes
+	// Features: snapshot fitur produk (kosong untuk baris bebas); tidak pernah nil dari repository.
+	Features []FeatureSnapshot
 }
 
 // Quotation money fields (Subtotal/DiscountTotal/TaxTotal/GrandTotal) are

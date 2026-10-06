@@ -27,6 +27,8 @@ type QuotationLineInput struct {
 	Unit            string
 	SKU             string             // diisi service dari katalog; klien tidak mengirim
 	Pricing         pricing.Attributes // nilai nol = belum diisi (katalog/default)
+	// Features diisi service (applyCatalog atau revisi); nilai dari klien selalu diabaikan.
+	Features []domain.FeatureSnapshot
 }
 
 type CreateQuotationInput struct {

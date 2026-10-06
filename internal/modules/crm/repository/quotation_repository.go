@@ -53,7 +53,7 @@ const quotationColumns = `
 const quotationItemColumns = `
 	id, description, quantity::text, unit_price::text, discount_percent::text, line_total::text, position,
 	product_id, sku, unit, tax_percent::text, tax_amount::text,
-	charge_type, billing_frequency, payment_timing
+	charge_type, billing_frequency, payment_timing, features
 `
 
 func scanQuotation(row pgx.Row) (domain.Quotation, error) {
@@ -101,9 +101,19 @@ func scanQuotation(row pgx.Row) (domain.Quotation, error) {
 func scanQuotationItem(row pgx.Row) (domain.QuotationItem, error) {
 	var item domain.QuotationItem
 	var sku, unit, frequency *string
+	var featuresJSON []byte
 	err := row.Scan(&item.ID, &item.Description, &item.Quantity, &item.UnitPrice, &item.DiscountPercent, &item.LineTotal, &item.Position,
 		&item.ProductID, &sku, &unit, &item.TaxPercent, &item.TaxAmount,
-		&item.Pricing.ChargeType, &frequency, &item.Pricing.PaymentTiming)
+		&item.Pricing.ChargeType, &frequency, &item.Pricing.PaymentTiming, &featuresJSON)
+	if err != nil {
+		return item, err
+	}
+	item.Features = []domain.FeatureSnapshot{}
+	if len(featuresJSON) > 0 {
+		if err := json.Unmarshal(featuresJSON, &item.Features); err != nil {
+			return item, err
+		}
+	}
 	if frequency != nil {
 		item.Pricing.Frequency = pricing.Frequency(*frequency)
 	}
@@ -113,7 +123,7 @@ func scanQuotationItem(row pgx.Row) (domain.QuotationItem, error) {
 	if unit != nil {
 		item.Unit = *unit
 	}
-	return item, err
+	return item, nil
 }
 
 func insertQuotationItemsTx(ctx context.Context, tx pgx.Tx, scope coretenant.Scope, quotationID string, items []QuotationItemInput) error {
@@ -133,15 +143,23 @@ func insertQuotationItemsTx(ctx context.Context, tx pgx.Tx, scope coretenant.Sco
 		if taxAmount == "" {
 			taxAmount = "0"
 		}
+		features := item.Features
+		if features == nil {
+			features = []domain.FeatureSnapshot{}
+		}
+		featuresJSON, err := json.Marshal(features)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO crm_quotation_items (
 				organization_id, quotation_id, description, quantity, unit_price, discount_percent, line_total, position,
-				product_id, sku, unit, tax_percent, tax_amount, charge_type, billing_frequency, payment_timing
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+				product_id, sku, unit, tax_percent, tax_amount, charge_type, billing_frequency, payment_timing, features
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
 			scope.OrganizationID(), quotationID, item.Description, item.Quantity, item.UnitPrice,
 			nullableString(item.DiscountPercent), item.LineTotal, item.Position,
 			nullableString(item.ProductID), nullableString(item.SKU), nullableString(item.Unit), taxPercent, taxAmount,
-			attrs.ChargeType, nullableString(string(attrs.Frequency)), attrs.PaymentTiming); err != nil {
+			attrs.ChargeType, nullableString(string(attrs.Frequency)), attrs.PaymentTiming, featuresJSON); err != nil {
 			return err
 		}
 	}

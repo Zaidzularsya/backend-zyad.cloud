@@ -162,6 +162,11 @@ func publicQuotationFromView(v service.PublicQuotationView) dto.PublicQuotationR
 			item.BillingFrequency = &f
 		}
 		item.PaymentTiming = string(it.Pricing.PaymentTiming)
+		for _, f := range it.Features {
+			if f.Label != "" {
+				item.Features = append(item.Features, f.Label)
+			}
+		}
 		out.Items = append(out.Items, item)
 	}
 	if r := v.LastResponse; r != nil {

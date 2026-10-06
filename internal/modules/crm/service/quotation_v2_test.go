@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -84,6 +85,11 @@ func quotationFixture() (*quotationService, *fakeQuotationRepo) {
 			"p1": {ID: "p1", Name: "Internet 50 Mbps", SKU: "NET-50", Unit: "bulan", BasePrice: "350000.00", TaxPercent: "11.00", IsActive: true},
 			"p-net": {ID: "p-net", Name: "Internet langganan", Unit: "bulan", BasePrice: "300000.00", TaxPercent: "0.00", IsActive: true,
 				Pricing: pricing.Attributes{ChargeType: pricing.Recurring, Frequency: pricing.Monthly, PaymentTiming: pricing.Prepaid}},
+			"p-feat": {ID: "p-feat", Name: "Freelancer", Unit: "bulan", BasePrice: "150000.00", TaxPercent: "11.00", IsActive: true,
+				Features: []catalogdomain.ProductFeature{
+					{FeatureKey: "crm", Value: json.RawMessage(`true`), Label: "CRM", Position: 0},
+					{FeatureKey: "wa", Value: json.RawMessage(`false`), Label: "", Position: 1},
+				}},
 			"p-off": {ID: "p-off", Name: "Lama", Unit: "pcs", BasePrice: "1.00", TaxPercent: "0.00", IsActive: false},
 		}),
 		WithQuotationDeals(fakeDeals{deals: map[string]domain.Deal{"d1": {ID: "d1", ContactID: &contact, CompanyID: &company}}}),
@@ -216,5 +222,73 @@ func TestReviseCopiesPricing(t *testing.T) {
 	}
 	if got.RecurringTotals[pricing.Monthly] != "100.00" || got.FirstInvoiceTotal != "0.00" || got.OneTimeTotal != "0.00" {
 		t.Fatalf("totals revisi = %+v", got)
+	}
+}
+
+func TestApplyCatalogCopiesFeatures(t *testing.T) {
+	svc, repo := quotationFixture()
+	_, err := svc.Create(context.Background(), coretenant.Scope{}, CreateQuotationInput{
+		Items: []QuotationLineInput{{ProductID: "p-feat", Quantity: "1"}, {Description: "Bebas", Quantity: "1", UnitPrice: "10"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := repo.created[0].Items
+	if len(items[0].Features) != 2 || items[0].Features[0].FeatureKey != "crm" || items[0].Features[0].Label != "CRM" ||
+		string(items[0].Features[1].Value) != "false" || items[0].Features[1].Label != "" {
+		t.Fatalf("fitur katalog = %+v", items[0].Features)
+	}
+	if len(items[1].Features) != 0 {
+		t.Fatalf("baris bebas harus tanpa fitur: %+v", items[1].Features)
+	}
+}
+
+func TestApplyCatalogIgnoresClientFeatures(t *testing.T) {
+	svc, repo := quotationFixture()
+	fake := []domain.FeatureSnapshot{{FeatureKey: "palsu", Value: json.RawMessage(`true`), Label: "Palsu"}}
+	_, err := svc.Create(context.Background(), coretenant.Scope{}, CreateQuotationInput{
+		Items: []QuotationLineInput{
+			{ProductID: "p-feat", Quantity: "1", Features: fake},
+			{Description: "Bebas", Quantity: "1", UnitPrice: "10", Features: fake},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := repo.created[0].Items
+	if len(items[0].Features) != 2 || items[0].Features[0].FeatureKey != "crm" {
+		t.Fatalf("fitur klien harus ditimpa katalog: %+v", items[0].Features)
+	}
+	if len(items[1].Features) != 0 {
+		t.Fatalf("fitur klien pada baris bebas harus dikosongkan: %+v", items[1].Features)
+	}
+}
+
+func TestReviseKeepsFeatureSnapshot(t *testing.T) {
+	svc, repo := quotationFixture()
+	old := []domain.FeatureSnapshot{{FeatureKey: "lama", Value: json.RawMessage(`true`), Label: "Fitur lama"}}
+	pid := "p-feat"
+	repo.stored["r1"] = domain.Quotation{ID: "r1", QuotationNumber: "QUO-2026-0007", Status: domain.QuotationStatusSent,
+		Items: []domain.QuotationItem{{ProductID: &pid, Description: "Freelancer", Quantity: "1.00", UnitPrice: "100.00", TaxPercent: "0.00", LineTotal: "100.00", Features: old}}}
+	if _, err := svc.Revise(context.Background(), coretenant.Scope{}, "r1", "u1"); err != nil {
+		t.Fatal(err)
+	}
+	got := repo.revised[0].Items[0].Features
+	if len(got) != 1 || got[0].FeatureKey != "lama" {
+		t.Fatalf("revisi harus mempertahankan snapshot lama, bukan katalog sekarang: %+v", got)
+	}
+}
+
+func TestUpdateDraftRefreshesFeatures(t *testing.T) {
+	svc, repo := quotationFixture()
+	repo.stored["q1"] = domain.Quotation{ID: "q1", Status: domain.QuotationStatusDraft}
+	_, err := svc.Update(context.Background(), coretenant.Scope{}, "q1", UpdateQuotationInput{
+		Items: []QuotationLineInput{{ProductID: "p-feat", Quantity: "1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := repo.replaced[0].Items[0].Features; len(got) != 2 || got[0].FeatureKey != "crm" {
+		t.Fatalf("draft harus mengambil fitur katalog terbaru: %+v", got)
 	}
 }
