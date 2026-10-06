@@ -20,15 +20,16 @@ import (
 )
 
 type env struct {
-	ctx      context.Context
-	db       *database.Pool
-	tenants  testutil.TenantPair
-	accounts repository.AccountRepository
-	invoices repository.InvoiceRepository
-	payments repository.PaymentRepository
-	sends    repository.SendRepository
-	settings repository.SettingsRepository
-	counters repository.CounterRepository
+	ctx       context.Context
+	db        *database.Pool
+	tenants   testutil.TenantPair
+	accounts  repository.AccountRepository
+	invoices  repository.InvoiceRepository
+	payments  repository.PaymentRepository
+	sends     repository.SendRepository
+	settings  repository.SettingsRepository
+	counters  repository.CounterRepository
+	contracts repository.ContractRepository
 }
 
 func setup(t *testing.T) env {
@@ -54,6 +55,7 @@ func setup(t *testing.T) env {
 			_, _ = tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", orgID)
 			for _, table := range []string{
 				"receivable_payments", "receivable_invoice_sends", "receivable_invoice_items", "receivable_invoices",
+				"receivable_contract_items", "receivable_contracts",
 				"receivable_accounts", "receivable_document_counters", "receivable_settings",
 			} {
 				_, _ = tx.Exec(ctx, "DELETE FROM "+table+" WHERE organization_id = $1", orgID)
@@ -68,6 +70,7 @@ func setup(t *testing.T) env {
 		accounts: repository.NewAccountRepository(db), invoices: repository.NewInvoiceRepository(db),
 		payments: repository.NewPaymentRepository(db), sends: repository.NewSendRepository(db),
 		settings: repository.NewSettingsRepository(db), counters: repository.NewCounterRepository(db),
+		contracts: repository.NewContractRepository(db),
 	}
 }
 
@@ -264,7 +267,8 @@ func TestDuplicateSourceAndContractPeriod(t *testing.T) {
 		t.Fatalf("missing err = %v", err)
 	}
 
-	ci := "bbbbbbbb-0000-0000-0000-000000000001"
+	ct := e.contract(t, scope, acc.ID, "CTR-2026-0001", "aaaaaaaa-0000-0000-0000-000000000002")
+	ci := ct.Items[0].ID
 	withContractItem := func() repository.CreateInvoiceParams {
 		c := params(t, acc.ID, pricing.LineInput{Description: "Internet", UnitPrice: "1000"})
 		c.Items[0].ContractItemID, c.Items[0].PeriodStart, c.Items[0].PeriodEnd = ci, date("2026-11-01"), date("2026-11-30")
@@ -518,5 +522,84 @@ func TestLatestSendByInvoices(t *testing.T) {
 	}
 	if empty, err := e.sends.LatestByInvoices(e.ctx, scope, nil); err != nil || len(empty) != 0 {
 		t.Fatalf("empty input = %+v err=%v", empty, err)
+	}
+}
+
+func (e env) contract(t *testing.T, scope coretenant.Scope, accountID, number, sourceID string) domain.Contract {
+	t.Helper()
+	monthly := repository.ContractItemParams{
+		Description: "Internet", Quantity: "1", UnitPrice: "300000", TaxPercent: "11",
+		Frequency: pricing.Monthly, PaymentTiming: pricing.Prepaid, PeriodIndex: 1,
+		NextPeriodStart: *date("2026-11-05"), NextPeriodEnd: *date("2026-12-04"),
+	}
+	annual := repository.ContractItemParams{
+		Description: "Domain", Quantity: "1", UnitPrice: "200000", TaxPercent: "0",
+		Frequency: pricing.Annual, PaymentTiming: pricing.Postpaid, PeriodIndex: 0,
+		NextPeriodStart: *date("2026-10-05"), NextPeriodEnd: *date("2027-10-04"),
+	}
+	c, err := e.contracts.Create(e.ctx, scope, repository.CreateContractParams{
+		Number: number, AccountID: accountID, SourceType: "sales_order", SourceID: sourceID,
+		StartDate: *date("2026-10-05"), Channels: []string{"email"}, Items: []repository.ContractItemParams{monthly, annual},
+	})
+	if err != nil {
+		t.Fatalf("create contract: %v", err)
+	}
+	return c
+}
+
+func TestContractCreateUniqueAndEnd(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	acc := e.account(t, scope, "Budi")
+	so := "cccccccc-0000-0000-0000-000000000001"
+
+	c := e.contract(t, scope, acc.ID, "CTR-2026-0001", so)
+	if c.Status != domain.ContractActive || len(c.Items) != 2 || c.Items[0].PeriodIndex != 1 || c.Items[1].PaymentTiming != pricing.Postpaid ||
+		c.Items[0].NextPeriodStart.Format("2006-01-02") != "2026-11-05" || c.Account.Name != "Budi" {
+		t.Fatalf("contract = %+v", c)
+	}
+	_, err := e.contracts.Create(e.ctx, scope, repository.CreateContractParams{
+		Number: "CTR-2026-0002", AccountID: acc.ID, SourceType: "sales_order", SourceID: so, StartDate: *date("2026-10-05"),
+		Items: []repository.ContractItemParams{{Description: "x", Quantity: "1", UnitPrice: "1", TaxPercent: "0",
+			Frequency: pricing.Monthly, PaymentTiming: pricing.Prepaid, NextPeriodStart: *date("2026-10-05"), NextPeriodEnd: *date("2026-11-04")}},
+	})
+	if !errors.Is(err, repository.ErrDuplicateSource) {
+		t.Fatalf("duplicate err = %v", err)
+	}
+	found, err := e.contracts.FindBySource(e.ctx, scope, "sales_order", so)
+	if err != nil || found.ID != c.ID {
+		t.Fatalf("FindBySource = %+v err=%v", found, err)
+	}
+
+	withEnd, err := e.contracts.SetEndDate(e.ctx, scope, c.ID, date("2027-10-04"), "")
+	if err != nil || withEnd.EndDate == nil {
+		t.Fatalf("SetEndDate = %+v err=%v", withEnd, err)
+	}
+	ended, err := e.contracts.End(e.ctx, scope, c.ID, *date("2026-12-31"), "Pelanggan berhenti", "")
+	if err != nil || ended.Status != domain.ContractEnded || ended.EndReason != "Pelanggan berhenti" || ended.EndedAt == nil {
+		t.Fatalf("End = %+v err=%v", ended, err)
+	}
+	if _, err := e.contracts.End(e.ctx, scope, c.ID, *date("2026-12-31"), "lagi", ""); !errors.Is(err, repository.ErrContractNotActive) {
+		t.Fatalf("second End err = %v", err)
+	}
+	if _, err := e.contracts.SetEndDate(e.ctx, scope, c.ID, nil, ""); !errors.Is(err, repository.ErrContractNotActive) {
+		t.Fatalf("SetEndDate on ended err = %v", err)
+	}
+	if _, err := e.contracts.End(e.ctx, scope, "dddddddd-0000-0000-0000-000000000009", *date("2026-12-31"), "x", ""); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("missing err = %v", err)
+	}
+
+	list, total, err := e.contracts.List(e.ctx, scope, repository.ContractListFilter{Status: "ended", Search: "budi"})
+	if err != nil || total != 1 || len(list) != 1 {
+		t.Fatalf("list = %d/%d err=%v", len(list), total, err)
+	}
+
+	// Isolasi tenant B.
+	other := e.tenants.B.Scope
+	if _, err := e.contracts.FindByID(e.ctx, other, c.ID); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("tenant B FindByID err = %v", err)
+	}
+	if _, total, _ := e.contracts.List(e.ctx, other, repository.ContractListFilter{}); total != 0 {
+		t.Fatalf("tenant B sees %d contracts", total)
 	}
 }

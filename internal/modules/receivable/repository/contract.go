@@ -17,6 +17,7 @@ var (
 	ErrPaymentExceeds         = errors.New("payment exceeds remaining balance")
 	ErrDuplicateSource        = errors.New("invoice for this source and idempotency key already exists")
 	ErrDuplicateAccountSource = errors.New("account for this source already exists")
+	ErrContractNotActive      = domain.ErrContractNotActive
 )
 
 // Semua method ber-scope: organisasi diambil dari scope dan setiap query
@@ -118,4 +119,38 @@ type SettingsRepository interface {
 type CounterRepository interface {
 	// Next: INSERT … ON CONFLICT DO UPDATE last_number+1 RETURNING (atomik, per org/tipe/tahun).
 	Next(ctx context.Context, scope coretenant.Scope, documentType string, year int) (int, error)
+}
+
+type ContractItemParams struct {
+	Description, Quantity, Unit, UnitPrice, DiscountPercent, TaxPercent, ProductID, SKU, SourceLineID string
+	Frequency                                                                                         pricing.Frequency
+	PaymentTiming                                                                                     pricing.PaymentTiming
+	PeriodIndex                                                                                       int
+	NextPeriodStart, NextPeriodEnd                                                                    time.Time
+}
+
+type CreateContractParams struct {
+	Number, AccountID, SourceType, SourceID, Currency, Notes, PICUserID, CreatedBy string
+	StartDate                                                                      time.Time
+	Channels                                                                       []string
+	Items                                                                          []ContractItemParams
+}
+
+type ContractListFilter struct {
+	Status, AccountID, Search string
+	Limit, Offset             int
+}
+
+type ContractRepository interface {
+	// Create: unik (source_type, source_id) → ErrDuplicateSource (pemanggil membaca FindBySource).
+	Create(ctx context.Context, scope coretenant.Scope, p CreateContractParams) (domain.Contract, error)
+	// FindByID / FindBySource mengembalikan pgx.ErrNoRows bila tidak ada.
+	FindByID(ctx context.Context, scope coretenant.Scope, id string) (domain.Contract, error)
+	FindBySource(ctx context.Context, scope coretenant.Scope, sourceType, sourceID string) (domain.Contract, error)
+	// List tidak memuat Items.
+	List(ctx context.Context, scope coretenant.Scope, f ContractListFilter) ([]domain.Contract, int64, error)
+	// SetEndDate: hanya contract active (ErrContractNotActive); nil menghapus tanggal akhir.
+	SetEndDate(ctx context.Context, scope coretenant.Scope, id string, endDate *time.Time, by string) (domain.Contract, error)
+	// End: active → ended (ErrContractNotActive bila bukan active).
+	End(ctx context.Context, scope coretenant.Scope, id string, endDate time.Time, reason, by string) (domain.Contract, error)
 }
