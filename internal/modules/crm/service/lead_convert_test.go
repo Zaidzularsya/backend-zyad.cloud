@@ -148,3 +148,41 @@ func TestDealTitleFallback(t *testing.T) {
 		t.Errorf("title too long: %d", len([]rune(got)))
 	}
 }
+
+func TestConvertExistingContact(t *testing.T) {
+	svc, repo := convertFixture()
+	svc.contactRepo = &fakeContactRepo{contacts: map[string]domain.Contact{"c1": {ID: "c1"}}}
+
+	if _, err := svc.Convert(context.Background(), testScope(t), "l1", ConvertLeadParams{
+		Contact: &ConvertContactInput{Mode: "existing", ContactID: "c1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if repo.lastConvert.ExistingContactID != "c1" {
+		t.Fatalf("ExistingContactID = %q", repo.lastConvert.ExistingContactID)
+	}
+
+	// contact tidak ditemukan / bukan milik org → not found, repo tidak dipanggil
+	repo.lastConvert = repository.ConvertLeadTxParams{}
+	_, err := svc.Convert(context.Background(), testScope(t), "l1", ConvertLeadParams{
+		Contact: &ConvertContactInput{Mode: "existing", ContactID: "other-org"},
+	})
+	if err == nil || strings.Contains(err.Error(), "invalid") || repo.lastConvert.UpdatedBy != "" || repo.lastConvert.ExistingContactID != "" {
+		t.Fatalf("unknown contact: err=%v params=%+v", err, repo.lastConvert)
+	}
+
+	for _, bad := range []ConvertContactInput{{Mode: "existing"}, {Mode: "weird"}} {
+		bad := bad
+		if _, err := svc.Convert(context.Background(), testScope(t), "l1", ConvertLeadParams{Contact: &bad}); !errors.Is(err, ErrInvalidContactInput) {
+			t.Errorf("%+v: err = %v", bad, err)
+		}
+	}
+	// default / "new" tetap membuat contact baru
+	repo.lastConvert = repository.ConvertLeadTxParams{}
+	if _, err := svc.Convert(context.Background(), testScope(t), "l1", ConvertLeadParams{Contact: &ConvertContactInput{Mode: "new"}}); err != nil {
+		t.Fatal(err)
+	}
+	if repo.lastConvert.ExistingContactID != "" || repo.lastConvert.Contact.FirstName != "Budi" {
+		t.Fatalf("new mode params = %+v", repo.lastConvert)
+	}
+}

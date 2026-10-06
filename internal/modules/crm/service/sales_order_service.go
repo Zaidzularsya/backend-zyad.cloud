@@ -436,3 +436,67 @@ func (s *salesOrderService) ConfirmDelivery(ctx context.Context, scope coretenan
 
 // ErrBillingFailed membungkus galat penagihan konfirmasi diterima; pesan ramah ditampilkan handler.
 var ErrBillingFailed = errors.New("billing failed")
+
+// ---- batal sebelum dibayar ----
+
+const invoiceStatusVoid = "void"
+
+func (s *salesOrderService) CancelUnpaid(ctx context.Context, scope coretenant.Scope, id, reason, userID string) (domain.SalesOrder, error) {
+	so, err := s.repo.FindByID(ctx, scope, id)
+	if err != nil {
+		return domain.SalesOrder{}, notFound(err)
+	}
+	reason = strings.TrimSpace(reason)
+	switch so.Status {
+	case domain.SalesOrderCancelled:
+		return so, nil // idempoten
+	case domain.SalesOrderDraft:
+		so, err = s.repo.Cancel(ctx, scope, id, userID)
+		if err != nil {
+			return domain.SalesOrder{}, notFound(err)
+		}
+	case domain.SalesOrderConfirmed:
+		so, err = s.cancelConfirmed(ctx, scope, so, reason, userID)
+		if err != nil {
+			return domain.SalesOrder{}, err
+		}
+	default:
+		return domain.SalesOrder{}, ErrSalesOrderNotCancellable
+	}
+	s.activity(ctx, scope, so.DealID, userID, fmt.Sprintf("Sales order %s dibatalkan: %s", so.SONumber, reason))
+	return so, nil
+}
+
+// cancelConfirmed: periksa pembayaran dulu (tanpa efek samping), lalu void → end → cancelled.
+// Langkah yang sudah terjadi pada percobaan sebelumnya (invoice void, contract ended) dilewati.
+func (s *salesOrderService) cancelConfirmed(ctx context.Context, scope coretenant.Scope, so domain.SalesOrder, reason, userID string) (domain.SalesOrder, error) {
+	if s.deps.Canceller == nil {
+		return domain.SalesOrder{}, ErrSalesOrderNotCancellable
+	}
+	invoiceVoid := false
+	if so.InitialInvoiceID != "" {
+		status, paid, err := s.deps.Canceller.InvoiceState(ctx, scope, so.InitialInvoiceID)
+		if err != nil {
+			return domain.SalesOrder{}, err
+		}
+		if paid {
+			return domain.SalesOrder{}, ErrSalesOrderPaid
+		}
+		invoiceVoid = status == invoiceStatusVoid
+	}
+	if so.InitialInvoiceID != "" && !invoiceVoid {
+		if err := s.deps.Canceller.VoidInvoice(ctx, scope, so.InitialInvoiceID, reason, userID); err != nil {
+			return domain.SalesOrder{}, err
+		}
+	}
+	if so.ContractID != "" {
+		if err := s.deps.Canceller.EndContract(ctx, scope, so.ContractID, reason, userID); err != nil {
+			return domain.SalesOrder{}, err
+		}
+	}
+	cancelled, err := s.repo.MarkCancelled(ctx, scope, so.ID, userID)
+	if err != nil {
+		return domain.SalesOrder{}, notFound(err)
+	}
+	return cancelled, nil
+}

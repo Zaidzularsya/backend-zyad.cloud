@@ -234,6 +234,9 @@ func (r *salesOrderRepository) List(ctx context.Context, scope coretenant.Scope,
 	if f.DealID != "" {
 		add("so.deal_id = ?", f.DealID)
 	}
+	if f.CompanyID != "" {
+		add("so.company_id = ?", f.CompanyID)
+	}
 	if s := strings.TrimSpace(f.Search); s != "" {
 		add("(so.so_number ILIKE ? OR so.bill_to_name ILIKE ? OR so.bill_to_company ILIKE ? OR q.quotation_number ILIKE ?)", "%"+escapeLike(s)+"%")
 	}
@@ -395,5 +398,14 @@ func (r *salesOrderRepository) Cancel(ctx context.Context, scope coretenant.Scop
 		return conditionalUpdate(ctx, tx, scope.OrganizationID(), id, ErrSalesOrderNotDraft, `
 			UPDATE crm_sales_orders SET status = 'cancelled', cancelled_at = now(), updated_at = now()
 			WHERE id = $1 AND organization_id = $2 AND status = 'draft'`)
+	})
+}
+
+// MarkCancelled: confirmed → cancelled (SO yang belum dibayar; pemanggil sudah memeriksa invoice).
+func (r *salesOrderRepository) MarkCancelled(ctx context.Context, scope coretenant.Scope, id, by string) (domain.SalesOrder, error) {
+	return r.mutate(ctx, scope, id, func(tx pgx.Tx) error {
+		return conditionalUpdate(ctx, tx, scope.OrganizationID(), id, ErrSalesOrderNotConfirmed, `
+			UPDATE crm_sales_orders SET status = 'cancelled', cancelled_at = now(), updated_at = now()
+			WHERE id = $1 AND organization_id = $2 AND status = 'confirmed'`)
 	})
 }

@@ -99,4 +99,8 @@ type Quotation struct {
 	RevisionNo        int
 	PDFAssetID        *string
 	PDFGeneratedAt    *time.Time
+	// Channel: "" = dibuat sales; QuotationChannelSelfServe = checkout self-serve.
+	Channel string
 }
+
+const QuotationChannelSelfServe = "self_serve"

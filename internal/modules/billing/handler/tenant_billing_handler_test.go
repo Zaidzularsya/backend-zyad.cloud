@@ -156,31 +156,36 @@ func TestTenantBillingHandlerCancelSubscriptionUsesActor(t *testing.T) {
 	}
 }
 
-func TestTenantBillingHandlerUpgradeUsesActor(t *testing.T) {
-	service := &tenantBillingHandlerServiceStub{}
-	checker := &tenantBillingOrganizationCheckerStub{}
-	router := tenantBillingRouter(t, service, checker)
-
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(
-		http.MethodPost,
+func TestTenantBillingHandlerRetiredEndpointsReturnGone(t *testing.T) {
+	for _, path := range []string{
 		"/app/billing/upgrade",
-		bytes.NewBufferString(`{"plan_id":"plan-growth","billing_interval":"yearly","reason":"need more seats"}`),
-	)
-	request.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusCreated {
-		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+		"/app/billing/invoices/inv-1/checkout",
+		"/app/billing/invoices/inv-1/checkout/sync",
+	} {
+		service := &tenantBillingHandlerServiceStub{}
+		router := tenantBillingRouter(t, service, &tenantBillingOrganizationCheckerStub{})
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(`{"plan_id":"plan-growth"}`))
+		request.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusGone || !bytes.Contains(recorder.Body.Bytes(), []byte("ENDPOINT_RETIRED")) ||
+			!bytes.Contains(recorder.Body.Bytes(), []byte("Pembelian paket kini lewat halaman checkout baru")) {
+			t.Fatalf("%s: status = %d body=%s", path, recorder.Code, recorder.Body.String())
+		}
+		if service.upgradeActorID != "" {
+			t.Fatalf("%s: upgrade service must not be called", path)
+		}
 	}
-	if service.organizationID != tenantBillingOrganizationID ||
-		service.upgradeActorID != tenantBillingUserID ||
-		service.upgradeRequest.PlanID != "plan-growth" ||
-		service.upgradeRequest.BillingInterval == nil ||
-		*service.upgradeRequest.BillingInterval != "yearly" ||
-		service.upgradeRequest.Reason != "need more seats" ||
-		len(checker.permissions) != 1 ||
-		checker.permissions[0] != "organization.billing.manage" {
-		t.Fatalf("service=%#v checker=%#v", service, checker)
+}
+
+func TestTenantBillingHandlerReadEndpointsStillWork(t *testing.T) {
+	for _, path := range []string{"/app/billing/current-plan", "/app/billing/invoices"} {
+		router := tenantBillingRouter(t, &tenantBillingHandlerServiceStub{}, &tenantBillingOrganizationCheckerStub{})
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d body=%s", path, recorder.Code, recorder.Body.String())
+		}
 	}
 }
 

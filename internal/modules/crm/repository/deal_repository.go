@@ -449,3 +449,32 @@ func (r *dealRepository) ApproveDiscount(ctx context.Context, scope coretenant.S
 	}
 	return deal, nil
 }
+
+func (r *dealRepository) ListOpenByCompanyAndPipeline(ctx context.Context, scope coretenant.Scope, companyID, pipelineID string) ([]domain.Deal, error) {
+	if !scope.IsValid() {
+		return nil, coretenant.ErrInvalidScope
+	}
+	var deals []domain.Deal
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT `+dealColumns+` FROM crm_deals
+			WHERE organization_id = $1 AND company_id = $2 AND pipeline_id = $3
+				AND status = 'open' AND deleted_at IS NULL
+			ORDER BY created_at, id`, scope.OrganizationID(), companyID, pipelineID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			deal, err := scanDeal(rows)
+			if err != nil {
+				return err
+			}
+			deals = append(deals, deal)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return deals, nil
+}

@@ -82,6 +82,8 @@ type CreateQuotationParams struct {
 	CreatedBy         string
 	RevisionOfID      string
 	RevisionNo        int
+	// Channel "" = quotation sales; domain.QuotationChannelSelfServe untuk checkout self-serve.
+	Channel string
 }
 
 type UpdateQuotationParams struct {
@@ -114,4 +116,8 @@ type QuotationRepository interface {
 	ExpireDue(ctx context.Context, scope coretenant.Scope, today time.Time) (int64, error)
 	// SetPDFSnapshot menyimpan snapshot PDF final sekali; false bila sudah ada.
 	SetPDFSnapshot(ctx context.Context, scope coretenant.Scope, id, assetID string) (bool, error)
+	// FindSelfServeByDeal: quotation self-serve draft/approved milik deal, atau pgx.ErrNoRows.
+	FindSelfServeByDeal(ctx context.Context, scope coretenant.Scope, dealID string) (domain.Quotation, error)
+	// AcceptSelfServe: draft self-serve → approved; pgx.ErrNoRows bila bukan draft self-serve.
+	AcceptSelfServe(ctx context.Context, scope coretenant.Scope, id, updatedBy string) (domain.Quotation, error)
 }

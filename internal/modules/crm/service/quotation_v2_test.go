@@ -292,3 +292,61 @@ func TestUpdateDraftRefreshesFeatures(t *testing.T) {
 		t.Fatalf("draft harus mengambil fitur katalog terbaru: %+v", got)
 	}
 }
+
+type acceptRepoFake struct {
+	repository.QuotationRepository
+	q        domain.Quotation
+	accepted int
+}
+
+func (f *acceptRepoFake) FindByID(context.Context, coretenant.Scope, string) (domain.Quotation, error) {
+	return f.q, nil
+}
+func (f *acceptRepoFake) AcceptSelfServe(_ context.Context, _ coretenant.Scope, _, _ string) (domain.Quotation, error) {
+	f.accepted++
+	f.q.Status = domain.QuotationStatusApproved
+	return f.q, nil
+}
+
+type acceptActivities struct {
+	repository.ActivityRepository
+	subjects []string
+}
+
+func (a *acceptActivities) Create(_ context.Context, _ coretenant.Scope, p repository.CreateActivityParams) (domain.Activity, error) {
+	a.subjects = append(a.subjects, p.Subject)
+	return domain.Activity{}, nil
+}
+
+func TestAcceptOnline(t *testing.T) {
+	deal := "d1"
+	newSvc := func(q domain.Quotation) (QuotationService, *acceptRepoFake, *acceptActivities) {
+		repo := &acceptRepoFake{q: q}
+		acts := &acceptActivities{}
+		return NewQuotationService(repo, nil, WithQuotationDocuments(QuotationDocumentDeps{Activities: acts})), repo, acts
+	}
+
+	t.Run("draft self-serve diterima", func(t *testing.T) {
+		svc, repo, acts := newSvc(domain.Quotation{ID: "q1", Status: domain.QuotationStatusDraft, Channel: domain.QuotationChannelSelfServe, DealID: &deal})
+		got, err := svc.AcceptOnline(context.Background(), coretenant.Scope{}, "q1", "bot")
+		if err != nil || got.Status != domain.QuotationStatusApproved || repo.accepted != 1 {
+			t.Fatalf("got=%+v err=%v accepted=%d", got, err, repo.accepted)
+		}
+		if len(acts.subjects) != 1 || acts.subjects[0] != "Diterima online oleh customer" {
+			t.Fatalf("activities = %v", acts.subjects)
+		}
+	})
+	t.Run("quotation biasa ditolak", func(t *testing.T) {
+		svc, repo, _ := newSvc(domain.Quotation{ID: "q1", Status: domain.QuotationStatusDraft, DealID: &deal})
+		if _, err := svc.AcceptOnline(context.Background(), coretenant.Scope{}, "q1", "bot"); !errors.Is(err, ErrNotSelfServeQuotation) || repo.accepted != 0 {
+			t.Fatalf("err=%v accepted=%d", err, repo.accepted)
+		}
+	})
+	t.Run("sudah approved idempoten", func(t *testing.T) {
+		svc, repo, acts := newSvc(domain.Quotation{ID: "q1", Status: domain.QuotationStatusApproved, Channel: domain.QuotationChannelSelfServe, DealID: &deal})
+		got, err := svc.AcceptOnline(context.Background(), coretenant.Scope{}, "q1", "bot")
+		if err != nil || got.ID != "q1" || repo.accepted != 0 || len(acts.subjects) != 0 {
+			t.Fatalf("got=%+v err=%v accepted=%d activities=%v", got, err, repo.accepted, acts.subjects)
+		}
+	})
+}

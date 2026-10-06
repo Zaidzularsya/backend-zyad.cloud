@@ -82,6 +82,8 @@ type CreateLeadParams struct {
 	AnnualRevenue string
 	Address       map[string]any
 	CreatedBy     string
+	// SkipPlaybook true: lead tidak memulai playbook run (lead otomatis, mis. self-serve).
+	SkipPlaybook bool
 }
 
 type DisqualifyLeadParams struct {
@@ -133,6 +135,7 @@ type ConvertLeadTxParams struct {
 	NewCompany        *CreateCompanyParams // nil = tidak membuat company
 	ExistingCompanyID string               // dipakai bila NewCompany nil; "" = tanpa company
 	Contact           CreateContactParams  // CompanyID diisi otomatis
+	ExistingContactID string               // bila diisi: contact ini dipakai, Contact diabaikan, company contact tidak diubah
 	Deal              *CreateDealParams    // nil = tanpa deal; ContactID/CompanyID diisi otomatis
 	UpdatedBy         string
 }

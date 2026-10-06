@@ -196,6 +196,9 @@ func (r *leadRepository) Create(ctx context.Context, scope coretenant.Scope, par
 		if err := insertLeadEvent(ctx, tx, scope, lead.ID, domain.LeadEventCreated, "", string(lead.Status), params.CreatedBy); err != nil {
 			return err
 		}
+		if params.SkipPlaybook {
+			return nil
+		}
 		_, err := startLeadRunTx(ctx, tx, scope, lead, params.CreatedBy, time.Now())
 		return err
 	})

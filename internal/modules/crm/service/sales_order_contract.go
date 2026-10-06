@@ -45,6 +45,23 @@ type SalesOrderService interface {
 	RetryBilling(ctx context.Context, scope coretenant.Scope, id, userID string) (domain.SalesOrder, error)
 	ConfirmDelivery(ctx context.Context, scope coretenant.Scope, id string, in DeliveryInput, userID string) (domain.SalesOrder, error)
 	Cancel(ctx context.Context, scope coretenant.Scope, id, userID string) (domain.SalesOrder, error)
+	// CancelUnpaid membatalkan SO draft, atau SO confirmed yang invoice awalnya belum ada pembayaran
+	// (void invoice → akhiri contract → cancelled). Idempoten; sudah ada pembayaran → ErrSalesOrderPaid.
+	CancelUnpaid(ctx context.Context, scope coretenant.Scope, id, reason, actorUserID string) (domain.SalesOrder, error)
+}
+
+var (
+	ErrSalesOrderPaid           = errors.New("sales order already has a paid or partially paid invoice")
+	ErrSalesOrderNotCancellable = errors.New("sales order cannot be cancelled in its current status")
+)
+
+// OrderBillingCanceller: operasi receivable yang dibutuhkan CancelUnpaid (diadaptasi di internal/app).
+type OrderBillingCanceller interface {
+	// InvoiceState: status invoice dan apakah sudah ada pembayaran (lunas atau sebagian).
+	InvoiceState(ctx context.Context, scope coretenant.Scope, id string) (status string, hasPayment bool, err error)
+	VoidInvoice(ctx context.Context, scope coretenant.Scope, id, reason, userID string) error
+	// EndContract mengakhiri contract hari ini; no-op bila contract sudah tidak aktif.
+	EndContract(ctx context.Context, scope coretenant.Scope, id, reason, userID string) error
 }
 
 // DealWonEvaluator dipicu setelah konfirmasi SO, konfirmasi diterima, dan pembayaran/kontrak (lihat WonEvaluator).
@@ -71,6 +88,7 @@ type SalesOrderDeps struct {
 	Activities  repository.ActivityRepository
 	Invoices    InvoiceStatusReader
 	Contracts   ContractReader
+	Canceller   OrderBillingCanceller // nil = CancelUnpaid hanya untuk SO draft
 	Notifier    NotificationPublisher
 	AppName     string
 	FrontendURL string

@@ -47,9 +47,16 @@ func (r *leadRepository) ConvertLead(ctx context.Context, scope coretenant.Scope
 			result.Company = &company
 		}
 
-		contactParams := params.Contact
-		contactParams.CompanyID = companyID
-		contact, err := insertContactTx(ctx, tx, scope, contactParams)
+		var contact domain.Contact
+		if params.ExistingContactID != "" {
+			contact, err = scanContact(tx.QueryRow(ctx,
+				"SELECT "+contactColumns+" FROM crm_contacts WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL",
+				params.ExistingContactID, scope.OrganizationID()))
+		} else {
+			contactParams := params.Contact
+			contactParams.CompanyID = companyID
+			contact, err = insertContactTx(ctx, tx, scope, contactParams)
+		}
 		if err != nil {
 			return err
 		}

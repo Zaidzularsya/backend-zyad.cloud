@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"zyad.cloud/internal/config"
+	crmseeder "zyad.cloud/internal/modules/crm/seeder"
 	organizationseeder "zyad.cloud/internal/modules/organization/seeder"
 	userseeder "zyad.cloud/internal/modules/user/seeder"
 	"zyad.cloud/internal/platform/database"
@@ -68,6 +69,18 @@ func main() {
 			result.EntitlementID,
 			result.DomainIDs,
 		)
+	case "self-serve":
+		var platformID string
+		if err := db.QueryRow(ctx, `SELECT id FROM organizations WHERE type = 'platform' AND deleted_at IS NULL LIMIT 1`).Scan(&platformID); err != nil {
+			logger.Error("platform organization not found; run seed platform-organization first", "error", err)
+			os.Exit(1)
+		}
+		result, err := crmseeder.SeedSelfServe(ctx, db, platformID, cfg.SelfServe.BotEmail)
+		if err != nil {
+			logger.Error("seed failed", "name", *name, "error", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Seeded self-serve bot_user_id=%s pipeline_id=%s\n", result.BotUserID, result.PipelineID)
 	case "":
 		logger.Error("seed name is required")
 		os.Exit(1)

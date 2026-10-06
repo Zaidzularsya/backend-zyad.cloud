@@ -554,8 +554,9 @@ func New(ctx context.Context) (*App, error) {
 	crmSalesOrderSvc := crmservice.NewSalesOrderService(crmSalesOrderRepo, receivableModule.Billing, crmservice.SalesOrderDeps{
 		Counters: crmDocumentCounterRepo, Contacts: crmContactRepo, Companies: crmCompanyRepo, Deals: crmDealRepo,
 		Members: crmMemberRepo, Activities: crmActivityRepo, Invoices: crmReceivableDocs, Contracts: crmReceivableDocs,
-		Notifier: notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts),
-		AppName:  cfg.App.Name, FrontendURL: cfg.App.FrontendURL, Locale: cfg.Notification.DefaultLocale,
+		Canceller: crmReceivableDocs,
+		Notifier:  notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts),
+		AppName:   cfg.App.Name, FrontendURL: cfg.App.FrontendURL, Locale: cfg.Notification.DefaultLocale,
 	}, crmWonEvaluator, time.Now)
 	receivableModule.Listeners.Add(crmservice.NewReceivableListener(crmSalesOrderRepo, crmWonEvaluator, crmActivityRepo))
 	crmSalesOrderHandler := crmhandler.NewSalesOrderHandler(crmSalesOrderSvc, crmhandler.SalesOrderRefs{Invoices: crmReceivableDocs, Contracts: crmReceivableDocs})
@@ -604,6 +605,26 @@ func New(ctx context.Context) (*App, error) {
 		time.Now,
 	)
 	crmPublicQuotationHandler := crmhandler.NewPublicQuotationHandler(crmPublicQuotationSvc, redisClient)
+
+	// Checkout self-serve (R4-S2): bot/pipeline di-resolve lazily saat request pertama sehingga seeder
+	// boleh dijalankan setelah API hidup.
+	selfServePlatformScopes := newPlatformScopeResolver(organizationrepo.NewOrganizationRepository(db))
+	selfServeSvc := &selfServeResolver{
+		db: db, cfg: selfServeRuntimeConfig{BotEmail: cfg.SelfServe.BotEmail, DealOwnerEmail: cfg.SelfServe.DealOwnerEmail},
+		pipeline: crmPipelineRepo,
+		build: func(sc crmservice.SelfServeConfig) crmservice.SelfServeService {
+			return crmservice.NewSelfServeService(crmservice.SelfServeDeps{
+				Leads: crmLeadSvc, Companies: crmCompanyRepo, Contacts: crmContactRepo,
+				Deals:     selfServeDeals{repo: crmDealRepo, svc: crmDealSvc},
+				Pipelines: crmPipelineRepo, Quotations: crmQuotationSvc, Orders: crmSalesOrderSvc,
+				Invoices: receivableModule.Invoices, Products: catalogProductService,
+				Buyers:        selfServeBuyers{users: userRepo, orgs: organizationrepo.NewOrganizationRepository(db)},
+				Subscriptions: selfServeSubscriptions{orders: crmSalesOrderRepo, contracts: crmReceivableDocs, products: catalogProductService},
+				Locker:        crmrepo.NewAdvisoryLocker(db),
+			}, sc, time.Now)
+		},
+	}
+	crmSelfServeHandler := crmhandler.NewSelfServeHandler(selfServeSvc, selfServePlatformScopes, permService)
 
 	router, err := newRouter(Dependencies{
 		Config:                           cfg,
@@ -671,6 +692,7 @@ func New(ctx context.Context) (*App, error) {
 		ReceivableContractHandler:        receivableModule.ContractHandler,
 		ReceivableOverviewHandler:        receivableModule.OverviewHandler,
 		CRMPublicQuotationHandler:        crmPublicQuotationHandler,
+		CRMSelfServeHandler:              crmSelfServeHandler,
 		ReceivableAccountHandler:         receivableModule.AccountHandler,
 		ReceivableInvoiceHandler:         receivableModule.InvoiceHandler,
 		ReceivablePaymentHandler:         receivableModule.PaymentHandler,

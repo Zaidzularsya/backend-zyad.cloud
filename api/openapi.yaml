@@ -4669,9 +4669,85 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/app/self-serve/checkout:
+    post:
+      summary: Siapkan pembayaran paket (self-serve) dari produk katalog platform
+      description: |
+        Membuat/melanjutkan rantai company → lead → deal → quotation → sales order → invoice di CRM org platform,
+        lalu mengembalikan link invoice untuk dibayar via DOKU. Idempoten: memanggil ulang untuk produk yang sama
+        mengembalikan link yang sama; produk berbeda sebelum bayar membatalkan pilihan lama (deal lama Lost).
+        Hanya untuk organisasi customer aktif dengan permission organization.billing.manage.
+      operationId: selfServeCheckout
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [product_id]
+              properties:
+                product_id:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Link invoice siap
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      invoice_url:
+                        type: string
+                        format: uri
+                      deal_id:
+                        type: string
+                        format: uuid
+        "403":
+          description: Bukan organisasi customer, atau tanpa permission organization.billing.manage
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: SELF_SERVE_ALREADY_SUBSCRIBED (workspace sudah berlangganan / invoice sudah dibayar) atau SELF_SERVE_IN_PROGRESS (checkout lain sedang berjalan)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: product_id kosong, atau SELF_SERVE_PRODUCT_UNAVAILABLE (produk tidak publik/aktif/berlangganan prabayar/berharga/berfitur)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: SELF_SERVE_STEP_FAILED; `data.step` adalah salah satu dari company, lead, deal, quotation, sales_order, invoice. Aman dicoba ulang.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: SELF_SERVE_NOT_CONFIGURED (bot/pipeline Self-Serve belum di-seed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/app/billing/upgrade:
     post:
-      summary: Create a billing upgrade invoice for the current organization
+      deprecated: true
+      summary: RETIRED (selalu 410) - Create a billing upgrade invoice for the current organization
       operationId: requestBillingUpgrade
       tags:
         - Billing
@@ -4684,6 +4760,12 @@ paths:
             schema:
               $ref: "#/components/schemas/UpgradeCustomerSubscriptionRequest"
       responses:
+        "410":
+          description: Endpoint dipensiunkan (ENDPOINT_RETIRED). Pembelian paket kini lewat POST /api/v1/app/self-serve/checkout.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "201":
           description: Billing upgrade invoice created successfully
           content:
@@ -4743,7 +4825,8 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
   /api/v1/app/billing/invoices/{id}/checkout:
     post:
-      summary: Create a hosted payment checkout session for an open invoice
+      deprecated: true
+      summary: RETIRED (selalu 410) - Create a hosted payment checkout session for an open invoice
       operationId: createBillingInvoiceCheckout
       tags:
         - Billing
@@ -4758,6 +4841,12 @@ paths:
             format: uuid
           description: Billing invoice ID
       responses:
+        "410":
+          description: Endpoint dipensiunkan (ENDPOINT_RETIRED). Pembelian paket kini lewat POST /api/v1/app/self-serve/checkout.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "201":
           description: Billing invoice checkout created successfully
           content:

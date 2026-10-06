@@ -424,6 +424,37 @@ membuat **SO draft** (`SO-YYYY-NNNN`, idempoten per quotation; aktivitas `order`
 - Galat: `SALES_ORDER_NOT_DRAFT`, `DELIVERY_NOT_PENDING`, `SALES_ORDER_NOT_CONFIRMED`, `BILLING_NOT_RETRYABLE` 409;
   `SALES_ORDER_INCOMPLETE`, `VALIDATION_ERROR` 422; `BILLING_FAILED` 502; `SALES_ORDER_NOT_FOUND` 404.
 
+## Self-serve checkout (Rilis 4 S2)
+
+Pembeli (tenant customer) memilih produk di pricing page → `POST /api/v1/app/self-serve/checkout {product_id}` →
+`{invoice_url, deal_id}`. Handler berjalan di konteks tenant pembeli (`RequireActiveTenant` + `RequireCustomerTenant` +
+`organization.billing.manage`); `SelfServeService` bekerja di scope **org platform**.
+
+- **Rantai** (cari-dulu-baru-buat, konsistensi lewat indeks unik + advisory lock `self_serve:<workspace_id>`, tanpa tabel status):
+  company (tertaut workspace, `crm_companies.tenant_organization_id`, dibuat atomik dengan convert) → contact → lead `landing_page`
+  tanpa playbook → deal di pipeline **Self-Serve** (`crm_pipelines.system_key='self_serve'`) → quote `channel='self_serve'`
+  (diterima online: `AcceptOnline`) → SO draft→confirmed (`UpdateDraft` + `Confirm`, PIC bot) → contract + invoice awal →
+  `InvoiceService.Link`. Stage deal diambil lewat **posisi** (0 "Checkout dimulai", 1 "Menunggu pembayaran"), bukan nama.
+  Deal pindah ke Won otomatis lewat evaluator R3 saat invoice lunas.
+- **Idempoten & resume:** klik ulang untuk produk sama mengembalikan link yang sama; proses yang terhenti di tengah dilanjutkan
+  (kegagalan langkah → 502 `SELF_SERVE_STEP_FAILED`, `data.step` ∈ company|lead|deal|quotation|sales_order|invoice).
+  Checkout paralel untuk workspace sama → 409 `SELF_SERVE_IN_PROGRESS`.
+- **Ganti pilihan (K14):** produk lain sebelum bayar → validasi produk baru dulu, lalu `SalesOrderService.CancelUnpaid`
+  (void invoice → akhiri contract → SO cancelled) dan deal lama Lost "Ganti pilihan ke <SKU>". Sudah ada pembayaran →
+  409 `SELF_SERVE_ALREADY_SUBSCRIBED`, tidak ada yang diubah.
+- **Produk layak (R1):** publik, aktif, langganan (`recurring`) prabayar, harga > 0, ≥ 1 fitur; selain itu 422
+  `SELF_SERVE_PRODUCT_UNAVAILABLE`. Workspace yang sudah punya SO berkontrak aktif memuat produk berfitur → 409
+  `SELF_SERVE_ALREADY_SUBSCRIBED` (K13).
+- **Tidak ada penggabungan otomatis:** company tak tertaut dengan nama sama dan contact dengan email sama milik company lain
+  tidak diambil alih; company+contact baru dibuat. Company tertaut dipakai ulang (+ contact berdasarkan email di company itu).
+- **Aktor bot:** user `SELF_SERVE_BOT_EMAIL` (default `self-serve-bot@zyad.cloud`, seed `cmd/seed -name self-serve`, anggota
+  aktif org platform) menjadi `created_by`, PIC SO, dan owner deal (kecuali `SELF_SERVE_DEAL_OWNER_EMAIL` diisi; owner itu
+  wajib anggota aktif org platform). Konfigurasi di-resolve lazily; belum di-seed → 503 `SELF_SERVE_NOT_CONFIGURED`.
+- **Endpoint lama** `POST /app/billing/upgrade`, `/app/billing/invoices/:id/checkout`, `.../checkout/sync` → 410 `ENDPOINT_RETIRED`.
+- **Checklist deploy:** (1) migration `000151`; (2) `go run ./cmd/seed -name self-serve`; (3) env `SELF_SERVE_*`;
+  (4) `receivable_settings.default_sender` org platform terisi (PIC bot tidak punya mailbox, pengiriman invoice butuh pengirim
+  default); (5) **produksi: S2 dan S3 harus naik bersamaan** — tanpa S3, pembeli membayar tetapi belum mendapat fitur.
+
 ## Non-Goals
 
 - Tidak menggantikan atau berinteraksi langsung dengan `billing_invoices`/`billing_payments` (modul

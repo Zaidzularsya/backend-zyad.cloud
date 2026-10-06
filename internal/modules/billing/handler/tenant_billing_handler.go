@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	coreerrors "zyad.cloud/internal/core/errors"
 	corehttp "zyad.cloud/internal/core/http"
 	"zyad.cloud/internal/core/middleware"
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
@@ -88,28 +89,16 @@ func (h *TenantBillingHandler) RegisterRoutes(router *gin.RouterGroup) {
 		permissionmiddleware.RequireOrganization(h.checker, "organization.billing.read"),
 		h.CheckUsage,
 	)
-	group.POST(
-		"/upgrade",
-		permissionmiddleware.RequireOrganization(h.checker, "organization.billing.manage"),
-		h.RequestUpgrade,
-	)
+	// Pembelian paket kini lewat checkout self-serve (CRM): endpoint lama dipensiunkan, bukan dihapus,
+	// supaya klien lama mendapat 410 yang jelas alih-alih 404.
+	group.POST("/upgrade", h.Retired)
+	group.POST("/invoices/:id/checkout", h.Retired)
+	group.POST("/invoices/:id/checkout/sync", h.Retired)
 	group.POST(
 		"/cancel",
 		permissionmiddleware.RequireOrganization(h.checker, "organization.billing.manage"),
 		h.CancelSubscription,
 	)
-	if h.checkout != nil {
-		group.POST(
-			"/invoices/:id/checkout",
-			permissionmiddleware.RequireOrganization(h.checker, "organization.billing.manage"),
-			h.CreateInvoiceCheckout,
-		)
-		group.POST(
-			"/invoices/:id/checkout/sync",
-			permissionmiddleware.RequireOrganization(h.checker, "organization.billing.read"),
-			h.SyncInvoiceCheckoutStatus,
-		)
-	}
 }
 
 func (h *TenantBillingHandler) CurrentPlan(c *gin.Context) {
@@ -164,69 +153,6 @@ func (h *TenantBillingHandler) CheckUsage(c *gin.Context) {
 	corehttp.OK(c, "billing usage retrieved successfully", result)
 }
 
-func (h *TenantBillingHandler) RequestUpgrade(c *gin.Context) {
-	var request dto.UpgradeSubscriptionRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		corehttp.Fail(c, validationHandlerError(err))
-		return
-	}
-	tenantContext, err := middleware.RequireTenantContext(c)
-	if err != nil {
-		corehttp.Fail(c, err)
-		return
-	}
-	result, err := h.service.RequestUpgrade(
-		c.Request.Context(),
-		tenantContext.OrganizationID(),
-		permissionmiddleware.UserID(c),
-		request,
-	)
-	if err != nil {
-		corehttp.Fail(c, err)
-		return
-	}
-	corehttp.Created(c, "billing upgrade invoice created successfully", result)
-}
-
-func (h *TenantBillingHandler) CreateInvoiceCheckout(c *gin.Context) {
-	tenantContext, err := middleware.RequireTenantContext(c)
-	if err != nil {
-		corehttp.Fail(c, err)
-		return
-	}
-	result, err := h.checkout.CreateCheckout(
-		c.Request.Context(),
-		tenantContext.OrganizationID(),
-		c.Param("id"),
-	)
-	if err != nil {
-		corehttp.Fail(c, err)
-		return
-	}
-	corehttp.Created(c, "billing invoice checkout created successfully", result)
-}
-
-// SyncInvoiceCheckoutStatus reconciles an invoice's payment state directly
-// against the provider — polled by the checkout status page as a fallback
-// when webhook notifications don't arrive.
-func (h *TenantBillingHandler) SyncInvoiceCheckoutStatus(c *gin.Context) {
-	tenantContext, err := middleware.RequireTenantContext(c)
-	if err != nil {
-		corehttp.Fail(c, err)
-		return
-	}
-	result, err := h.checkout.SyncCheckoutStatus(
-		c.Request.Context(),
-		tenantContext.OrganizationID(),
-		c.Param("id"),
-	)
-	if err != nil {
-		corehttp.Fail(c, err)
-		return
-	}
-	corehttp.OK(c, "billing invoice checkout status synced", result)
-}
-
 func (h *TenantBillingHandler) CancelSubscription(c *gin.Context) {
 	var request dto.CancelSubscriptionRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -249,4 +175,13 @@ func (h *TenantBillingHandler) CancelSubscription(c *gin.Context) {
 		return
 	}
 	corehttp.OK(c, "billing subscription scheduled for cancellation successfully", result)
+}
+
+// Retired membalas 410 untuk endpoint pembelian paket lama.
+func (h *TenantBillingHandler) Retired(c *gin.Context) {
+	corehttp.Fail(c, coreerrors.New(
+		"ENDPOINT_RETIRED",
+		"Pembelian paket kini lewat halaman checkout baru",
+		http.StatusGone,
+	))
 }

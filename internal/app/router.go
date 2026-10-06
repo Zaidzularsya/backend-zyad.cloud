@@ -172,6 +172,9 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.TenantBillingHandler != nil {
 		deps.TenantBillingHandler.RegisterRoutes(protected)
 	}
+	if deps.CRMSelfServeHandler != nil {
+		deps.CRMSelfServeHandler.RegisterRoutes(protected)
+	}
 	if deps.NotificationTemplateHandler != nil {
 		deps.NotificationTemplateHandler.RegisterRoutes(protected)
 	}
