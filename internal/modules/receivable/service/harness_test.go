@@ -70,7 +70,7 @@ func (s *fakeStore) Create(_ context.Context, _ coretenant.Scope, p repository.C
 		Channels: p.Channels, PICUserID: p.PICUserID, Notes: p.Notes, CreatedBy: p.CreatedBy,
 	}
 	for i, it := range p.Items {
-		inv.Items = append(inv.Items, domain.InvoiceItem{Description: it.Line.Description, LineTotal: it.Line.LineTotal, Pricing: it.Line.Attrs, PeriodStart: it.PeriodStart, PeriodEnd: it.PeriodEnd, Position: i})
+		inv.Items = append(inv.Items, domain.InvoiceItem{ContractItemID: it.ContractItemID, Description: it.Line.Description, LineTotal: it.Line.LineTotal, Pricing: it.Line.Attrs, PeriodStart: it.PeriodStart, PeriodEnd: it.PeriodEnd, Position: i})
 	}
 	s.invoices[inv.ID] = inv
 	return inv, nil

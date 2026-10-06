@@ -23,3 +23,7 @@ func invalidAccount(format string, args ...any) error {
 func invalidSettings(format string, args ...any) error {
 	return &validationError{kind: ErrInvalidSettings, detail: fmt.Sprintf(format, args...)}
 }
+
+func invalidContract(format string, args ...any) error {
+	return &validationError{kind: ErrInvalidContractInput, detail: fmt.Sprintf(format, args...)}
+}

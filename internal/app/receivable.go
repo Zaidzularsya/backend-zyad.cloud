@@ -176,8 +176,11 @@ type receivableModule struct {
 	PaymentHandler  *receivablehandler.PaymentHandler
 	SettingsHandler *receivablehandler.SettingsHandler
 	PublicHandler   *receivablehandler.PublicInvoiceHandler
+	ContractHandler *receivablehandler.ContractHandler
 
 	Invoices  receivableservice.InvoiceService
+	Contracts receivableservice.ContractService
+	Billing   receivableservice.OrderBilling
 	Accounts  receivableservice.AccountService
 	Payments  receivableservice.PaymentService
 	Listeners *receivableservice.Registry
@@ -191,6 +194,7 @@ func buildReceivable(b receivableBuild) receivableModule {
 	sendRepo := receivablerepo.NewSendRepository(db)
 	settingsRepo := receivablerepo.NewSettingsRepository(db)
 	counterRepo := receivablerepo.NewCounterRepository(db)
+	contractRepo := receivablerepo.NewContractRepository(db)
 
 	issuer := receivableIssuer{repo: b.Issuers}
 	members := receivableMembers{members: b.Members, perms: b.Permissions}
@@ -216,6 +220,8 @@ func buildReceivable(b receivableBuild) receivableModule {
 		Payments: paymentRepo, Invoices: invoiceSvc, Listeners: listeners,
 	})
 	settingsSvc := receivableservice.NewSettingsService(settingsRepo, members)
+	contractSvc := receivableservice.NewContractService(contractRepo, nil)
+	orderBilling := receivableservice.NewOrderBilling(accountRepo, invoiceSvc, contractRepo, counterRepo, listeners)
 
 	// Halaman publik: scope tenant dibangun dari baris link lewat resolver worker (identitas
 	// public-document-link, sama dengan penawaran), lalu query berjalan di bawah RLS.
@@ -231,7 +237,9 @@ func buildReceivable(b receivableBuild) receivableModule {
 		PaymentHandler:  receivablehandler.NewPaymentHandler(paymentSvc),
 		SettingsHandler: receivablehandler.NewSettingsHandler(settingsSvc),
 		PublicHandler:   receivablehandler.NewPublicInvoiceHandler(publicSvc, b.RateCounter),
+		ContractHandler: receivablehandler.NewContractHandler(contractSvc),
 		Invoices:        invoiceSvc, Accounts: accountSvc, Payments: paymentSvc, Listeners: listeners,
+		Contracts: contractSvc, Billing: orderBilling,
 	}
 }
 
@@ -248,4 +256,35 @@ func NewReceivableOverdueRunner(db *database.Pool) *receivableservice.OverdueRun
 		receivablerepo.NewInvoiceRepository(db),
 		nil,
 	)
+}
+
+// crmReceivableReader menjadi adapter tipis CRM → receivable (status invoice, nomor/status kontrak) supaya
+// evaluator Won dan respons SO tidak mengakses repository receivable langsung.
+type crmReceivableReader struct {
+	invoices  receivableservice.InvoiceService
+	contracts receivableservice.ContractService
+}
+
+func (r crmReceivableReader) InvoiceStatus(ctx context.Context, scope coretenant.Scope, id string) (string, string, error) {
+	inv, err := r.invoices.Get(ctx, scope, id)
+	if err != nil {
+		return "", "", err
+	}
+	return string(inv.Status), inv.InvoiceNumber, nil
+}
+
+func (r crmReceivableReader) ContractNumber(ctx context.Context, scope coretenant.Scope, id string) (string, error) {
+	c, err := r.contracts.Get(ctx, scope, id)
+	if err != nil {
+		return "", err
+	}
+	return c.ContractNumber, nil
+}
+
+func (r crmReceivableReader) ContractInfo(ctx context.Context, scope coretenant.Scope, id string) (string, string, error) {
+	c, err := r.contracts.Get(ctx, scope, id)
+	if err != nil {
+		return "", "", err
+	}
+	return string(c.Status), c.ContractNumber, nil
 }

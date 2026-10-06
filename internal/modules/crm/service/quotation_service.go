@@ -65,12 +65,9 @@ var revisionSuffix = regexp.MustCompile(`-R\d+$`)
 
 func rootQuotationNumber(number string) string { return revisionSuffix.ReplaceAllString(number, "") }
 
-func SuggestDealStatusAfterApprove(q domain.Quotation) string {
-	if q.DealID != nil {
-		return string(domain.DealStatusWon)
-	}
-	return ""
-}
+// SuggestDealStatusAfterApprove selalu kosong sejak ada Sales Order: status Won ditentukan
+// WonEvaluator (atau Won manual), bukan oleh approve.
+func SuggestDealStatusAfterApprove(_ domain.Quotation) string { return "" }
 
 // applyCatalog mengisi baris ber-product_id dengan snapshot katalog sebagai
 // nilai awal; nilai yang dikirim klien (deskripsi, harga, pajak, satuan)
