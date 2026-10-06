@@ -57,6 +57,15 @@ func SeedSelfServe(ctx context.Context, db *database.Pool, platformOrganizationI
 	if err != nil {
 		return SelfServeSeedResult{}, err
 	}
+	// Bot menjadi PIC sales order dan (default) owner deal; keduanya mewajibkan anggota aktif org.
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO organization_memberships (organization_id, user_id, status, is_owner, accepted_at)
+		VALUES ($1, $2, 'active', false, now())
+		ON CONFLICT (user_id, organization_id) DO UPDATE
+		SET status = 'active', removed_at = NULL, suspended_at = NULL, updated_at = now()`,
+		platformOrganizationID, botID); err != nil {
+		return SelfServeSeedResult{}, fmt.Errorf("ensure bot membership: %w", err)
+	}
 	if _, err := tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", platformOrganizationID); err != nil {
 		return SelfServeSeedResult{}, err
 	}

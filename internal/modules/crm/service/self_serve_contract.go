@@ -114,6 +114,8 @@ var (
 	ErrSelfServeInProgress         = errors.New("another checkout for this workspace is in progress")
 	// ErrSelfServeBillingNotReady: SO terkonfirmasi tetapi invoice awal belum terbit (penagihan gagal/menunggu).
 	ErrSelfServeBillingNotReady = errors.New("initial invoice is not ready")
+	// ErrSelfServeNotConfigured: bot/pipeline Self-Serve belum di-seed.
+	ErrSelfServeNotConfigured = errors.New("self-serve checkout is not configured")
 )
 
 // Nama langkah untuk SelfServeStepError.Step.

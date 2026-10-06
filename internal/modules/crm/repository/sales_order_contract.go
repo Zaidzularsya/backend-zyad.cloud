@@ -23,7 +23,7 @@ type SalesOrderDraftFields struct {
 }
 
 type SalesOrderListFilter struct {
-	Status, BillingStatus, DealID, Search string
+	Status, BillingStatus, DealID, CompanyID, Search string
 	Limit, Offset                         int
 }
 

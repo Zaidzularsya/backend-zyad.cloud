@@ -234,6 +234,9 @@ func (r *salesOrderRepository) List(ctx context.Context, scope coretenant.Scope,
 	if f.DealID != "" {
 		add("so.deal_id = ?", f.DealID)
 	}
+	if f.CompanyID != "" {
+		add("so.company_id = ?", f.CompanyID)
+	}
 	if s := strings.TrimSpace(f.Search); s != "" {
 		add("(so.so_number ILIKE ? OR so.bill_to_name ILIKE ? OR so.bill_to_company ILIKE ? OR q.quotation_number ILIKE ?)", "%"+escapeLike(s)+"%")
 	}

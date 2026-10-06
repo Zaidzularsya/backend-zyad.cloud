@@ -31,6 +31,7 @@ func TestSeedSelfServeIdempotent(t *testing.T) {
 		_, _ = tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", orgID)
 		_, _ = tx.Exec(ctx, "DELETE FROM crm_pipeline_stages WHERE organization_id = $1", orgID)
 		_, _ = tx.Exec(ctx, "DELETE FROM crm_pipelines WHERE organization_id = $1", orgID)
+		_, _ = tx.Exec(ctx, "DELETE FROM organization_memberships WHERE organization_id = $1", orgID)
 		_, _ = tx.Exec(ctx, "DELETE FROM users WHERE email = $1", botEmail)
 		_ = tx.Commit(ctx)
 	})
@@ -55,6 +56,15 @@ func TestSeedSelfServeIdempotent(t *testing.T) {
 	}
 	if users != 1 || status != "active" || name != "Self-Serve Bot" {
 		t.Fatalf("bot user: n=%d status=%s name=%s", users, status, name)
+	}
+
+	var memberships int
+	if err := db.QueryRow(ctx, `SELECT count(*) FROM organization_memberships WHERE organization_id = $1 AND user_id = $2 AND status = 'active'`,
+		orgID, first.BotUserID).Scan(&memberships); err != nil {
+		t.Fatal(err)
+	}
+	if memberships != 1 {
+		t.Fatalf("bot active memberships = %d, want 1", memberships)
 	}
 
 	tx, err := db.Begin(ctx)
