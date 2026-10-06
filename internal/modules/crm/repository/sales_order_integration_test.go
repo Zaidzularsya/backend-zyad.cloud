@@ -4,6 +4,7 @@ package repository_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -164,5 +165,39 @@ func TestSalesOrderCompletionWaitsForPrepaidInvoice(t *testing.T) {
 	done, err := orders.SetBillingResult(ctx, scope, so.ID, domain.BillingDone, "", "", "22222222-2222-2222-2222-222222222222", "")
 	if err != nil || done.Status != domain.SalesOrderCompleted || done.InitialInvoiceID == "" {
 		t.Fatalf("after billing = %+v err=%v", done, err)
+	}
+}
+
+func TestCreateFromQuotationCopiesFeatures(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+	setupCRMOrganizations(t, db, tenants)
+	scope := tenants.A.Scope
+	quotations := repository.NewQuotationRepository(db)
+	orders := repository.NewSalesOrderRepository(db)
+
+	q, err := quotations.Create(ctx, scope, repository.CreateQuotationParams{
+		QuotationNumber: "QUO-T-0450", Subtotal: "300000.00", DiscountTotal: "0.00", TaxTotal: "0.00", GrandTotal: "300000.00",
+		FirstInvoiceTotal: "300000.00", Items: []repository.QuotationItemInput{
+			{Description: "Paket", Quantity: "1.00", UnitPrice: "200000.00", LineTotal: "200000.00",
+				Pricing:  pricing.Attributes{ChargeType: pricing.Recurring, Frequency: pricing.Monthly, PaymentTiming: pricing.Prepaid},
+				Features: []domain.FeatureSnapshot{{FeatureKey: "user.max", Value: json.RawMessage(`5`), Label: "5 user"}}},
+			{Description: "Lama", Quantity: "1.00", UnitPrice: "100000.00", LineTotal: "100000.00", Position: 1},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	so, _, err := orders.CreateFromQuotation(ctx, scope, q, "SO-T-0450", repository.SalesOrderDraftFields{}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(so.Items) != 2 || len(so.Items[0].Features) != 1 || so.Items[0].Features[0].FeatureKey != "user.max" ||
+		string(so.Items[0].Features[0].Value) != "5" || so.Items[0].Features[0].Label != "5 user" {
+		t.Fatalf("item 0 features = %+v", so.Items[0].Features)
+	}
+	if so.Items[1].Features == nil || len(so.Items[1].Features) != 0 {
+		t.Fatalf("item 1 features = %#v, want empty non-nil", so.Items[1].Features)
 	}
 }

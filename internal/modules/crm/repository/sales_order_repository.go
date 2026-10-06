@@ -62,7 +62,7 @@ func loadSalesOrderItems(ctx context.Context, tx pgx.Tx, orgID, soID string) ([]
 		SELECT id, description, quantity::text, unit, unit_price::text, COALESCE(discount_percent::text, ''),
 			tax_percent::text, tax_amount::text, line_total::text, COALESCE(product_id::text, ''), sku,
 			charge_type, COALESCE(billing_frequency, ''), payment_timing, delivery_status, delivered_at,
-			COALESCE(delivered_by::text, ''), delivery_note, COALESCE(invoice_id::text, ''), position
+			COALESCE(delivered_by::text, ''), delivery_note, COALESCE(invoice_id::text, ''), position, features
 		FROM crm_sales_order_items WHERE organization_id = $1 AND sales_order_id = $2
 		ORDER BY position, created_at, id`, orgID, soID)
 	if err != nil {
@@ -73,10 +73,17 @@ func loadSalesOrderItems(ctx context.Context, tx pgx.Tx, orgID, soID string) ([]
 	for rows.Next() {
 		var it domain.SalesOrderItem
 		var charge, freq, timing, delivery string
+		var featuresJSON []byte
 		if err := rows.Scan(&it.ID, &it.Description, &it.Quantity, &it.Unit, &it.UnitPrice, &it.DiscountPercent,
 			&it.TaxPercent, &it.TaxAmount, &it.LineTotal, &it.ProductID, &it.SKU,
-			&charge, &freq, &timing, &delivery, &it.DeliveredAt, &it.DeliveredBy, &it.DeliveryNote, &it.InvoiceID, &it.Position); err != nil {
+			&charge, &freq, &timing, &delivery, &it.DeliveredAt, &it.DeliveredBy, &it.DeliveryNote, &it.InvoiceID, &it.Position, &featuresJSON); err != nil {
 			return nil, err
+		}
+		it.Features = []domain.FeatureSnapshot{}
+		if len(featuresJSON) > 0 {
+			if err := json.Unmarshal(featuresJSON, &it.Features); err != nil {
+				return nil, err
+			}
 		}
 		it.Pricing = pricing.Attributes{ChargeType: pricing.ChargeType(charge), Frequency: pricing.Frequency(freq), PaymentTiming: pricing.PaymentTiming(timing)}
 		it.DeliveryStatus = domain.DeliveryStatus(delivery)
@@ -139,6 +146,14 @@ func (r *salesOrderRepository) CreateFromQuotation(ctx context.Context, scope co
 			if attrs.ChargeType == pricing.OneTime && attrs.PaymentTiming == pricing.Postpaid {
 				delivery = domain.DeliveryPending
 			}
+			features := it.Features
+			if features == nil {
+				features = []domain.FeatureSnapshot{}
+			}
+			featuresJSON, err := json.Marshal(features)
+			if err != nil {
+				return err
+			}
 			var discount any
 			if it.DiscountPercent != nil && *it.DiscountPercent != "" {
 				discount = *it.DiscountPercent
@@ -146,12 +161,12 @@ func (r *salesOrderRepository) CreateFromQuotation(ctx context.Context, scope co
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO crm_sales_order_items (organization_id, sales_order_id, description, quantity, unit, unit_price,
 					discount_percent, tax_percent, tax_amount, line_total, product_id, sku, charge_type, billing_frequency,
-					payment_timing, delivery_status, position)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+					payment_timing, delivery_status, position, features)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
 				scope.OrganizationID(), id, it.Description, it.Quantity, it.Unit, it.UnitPrice, discount,
 				totalOrZero(it.TaxPercent), totalOrZero(it.TaxAmount), it.LineTotal, it.ProductID, it.SKU,
 				string(attrs.ChargeType), nullableString(string(attrs.Frequency)), string(attrs.PaymentTiming),
-				string(delivery), i); err != nil {
+				string(delivery), i, featuresJSON); err != nil {
 				return err
 			}
 		}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -299,7 +300,9 @@ func (s *salesOrderService) RetryBilling(ctx context.Context, scope coretenant.S
 func orderLines(items []domain.SalesOrderItem) []receivableservice.OrderLine {
 	lines := make([]receivableservice.OrderLine, len(items))
 	for i, it := range items {
+		features, _ := json.Marshal(it.Features) // []FeatureSnapshot selalu bisa di-marshal
 		lines[i] = receivableservice.OrderLine{
+			Features:     features,
 			SourceLineID: it.ID, Description: it.Description, Quantity: it.Quantity, Unit: it.Unit, UnitPrice: it.UnitPrice,
 			DiscountPercent: it.DiscountPercent, TaxPercent: it.TaxPercent, ProductID: it.ProductID, SKU: it.SKU,
 			Attrs: pricing.Attributes{ChargeType: it.Pricing.ChargeType, Frequency: it.Pricing.Frequency, PaymentTiming: it.Pricing.PaymentTiming},

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -127,6 +128,7 @@ type ContractItemParams struct {
 	PaymentTiming                                                                                     pricing.PaymentTiming
 	PeriodIndex                                                                                       int
 	NextPeriodStart, NextPeriodEnd                                                                    time.Time
+	Features                                                                                          json.RawMessage
 }
 
 type CreateContractParams struct {
