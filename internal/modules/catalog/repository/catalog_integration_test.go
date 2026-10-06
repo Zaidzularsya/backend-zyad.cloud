@@ -143,3 +143,59 @@ func TestCategoryNameUnique(t *testing.T) {
 		t.Fatalf("other tenant same name: %v", err)
 	}
 }
+
+func TestCatalogListingConstraints(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+	setupOrgs(t, db, tenants)
+	categories := repository.NewCategoryRepository(db)
+	catA, err := categories.Create(ctx, tenants.A.Scope, "Zyad Cloud", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catB, err := categories.Create(ctx, tenants.B.Scope, "Zyad Cloud", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	insert := func(org string, category any, code any, public bool, freq string) error {
+		tx, err := db.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback(ctx)
+		if _, err := tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", org); err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO catalog_products (organization_id, category_id, name, unit, charge_type, billing_frequency, payment_timing, is_public, listing_code)
+			VALUES ($1, $2, 'P', 'bulan', 'recurring', $3, 'prepaid', $4, $5)`, org, category, freq, public, code)
+		if err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
+
+	orgA, orgB := tenants.A.OrganizationID, tenants.B.OrganizationID
+	if err := insert(orgA, catA.ID, nil, true, "monthly"); err == nil {
+		t.Error("public without listing_code must fail")
+	}
+	if err := insert(orgA, nil, "freelancer", true, "monthly"); err == nil {
+		t.Error("public without category must fail")
+	}
+	if err := insert(orgA, catA.ID, "Freelancer", true, "monthly"); err == nil {
+		t.Error("uppercase listing_code must fail")
+	}
+	if err := insert(orgA, catA.ID, "freelancer", true, "monthly"); err != nil {
+		t.Fatalf("first public product: %v", err)
+	}
+	if err := insert(orgA, catA.ID, "freelancer", true, "monthly"); err == nil {
+		t.Error("duplicate listing_code+frequency must fail")
+	}
+	if err := insert(orgA, catA.ID, "freelancer", true, "annual"); err != nil {
+		t.Errorf("other frequency must pass: %v", err)
+	}
+	if err := insert(orgB, catB.ID, "freelancer", true, "monthly"); err != nil {
+		t.Errorf("other org same listing must pass: %v", err)
+	}
+}
