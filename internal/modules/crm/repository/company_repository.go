@@ -2,10 +2,12 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/crm/domain"
@@ -42,7 +44,7 @@ func (r *companyRepository) withTx(ctx context.Context, scope coretenant.Scope, 
 const companyColumns = `
 	id, organization_id, name, industry, website, phone, email, address,
 	size_range, notes, tags, owner_user_id, created_by, updated_by,
-	created_at, updated_at, deleted_at
+	created_at, updated_at, deleted_at, tenant_organization_id
 `
 
 func scanCompany(row pgx.Row) (domain.Company, error) {
@@ -53,7 +55,7 @@ func scanCompany(row pgx.Row) (domain.Company, error) {
 	err := row.Scan(
 		&c.ID, &c.OrganizationID, &c.Name, &industry, &website, &phone, &email, &c.Address,
 		&sizeRange, &notes, &c.Tags, &ownerUserID, &createdBy, &updatedBy,
-		&c.CreatedAt, &c.UpdatedAt, &c.DeletedAt,
+		&c.CreatedAt, &c.UpdatedAt, &c.DeletedAt, &c.TenantOrganizationID,
 	)
 	if err != nil {
 		return domain.Company{}, err
@@ -367,4 +369,45 @@ func (r *companyRepository) FindCandidatesByName(ctx context.Context, scope core
 		return rows.Err()
 	})
 	return out, err
+}
+
+func (r *companyRepository) FindByTenantOrganization(ctx context.Context, scope coretenant.Scope, tenantOrgID string) (domain.Company, error) {
+	if !scope.IsValid() {
+		return domain.Company{}, coretenant.ErrInvalidScope
+	}
+	var company domain.Company
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var err error
+		company, err = scanCompany(tx.QueryRow(ctx, `SELECT `+companyColumns+` FROM crm_companies
+			WHERE organization_id = $1 AND tenant_organization_id = $2 AND deleted_at IS NULL`,
+			scope.OrganizationID(), tenantOrgID))
+		return err
+	})
+	if err != nil {
+		return domain.Company{}, err
+	}
+	return company, nil
+}
+
+func (r *companyRepository) SetTenantOrganization(ctx context.Context, scope coretenant.Scope, companyID, tenantOrgID, updatedBy string) (domain.Company, error) {
+	if !scope.IsValid() {
+		return domain.Company{}, coretenant.ErrInvalidScope
+	}
+	var company domain.Company
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var err error
+		company, err = scanCompany(tx.QueryRow(ctx, `UPDATE crm_companies
+			SET tenant_organization_id = $3, updated_by = $4, updated_at = NOW()
+			WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL
+			RETURNING `+companyColumns, companyID, scope.OrganizationID(), tenantOrgID, nullableString(updatedBy)))
+		return err
+	})
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "idx_crm_companies_tenant_org_unique" {
+		return domain.Company{}, ErrWorkspaceAlreadyLinked
+	}
+	if err != nil {
+		return domain.Company{}, err
+	}
+	return company, nil
 }

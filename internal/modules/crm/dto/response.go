@@ -40,27 +40,30 @@ type CompanyResponse struct {
 	Notes       string         `json:"notes,omitempty"`
 	Tags        []string       `json:"tags"`
 	OwnerUserID string         `json:"owner_user_id,omitempty"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	DeletedAt   *time.Time     `json:"deleted_at,omitempty"`
+	// TenantOrganizationID: workspace tertaut (checkout self-serve).
+	TenantOrganizationID *string    `json:"tenant_organization_id,omitempty"`
+	CreatedAt            time.Time  `json:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
+	DeletedAt            *time.Time `json:"deleted_at,omitempty"`
 }
 
 func CompanyFromDomain(c domain.Company) CompanyResponse {
 	return CompanyResponse{
-		ID:          c.ID,
-		Name:        c.Name,
-		Industry:    c.Industry,
-		Website:     c.Website,
-		Phone:       c.Phone,
-		Email:       c.Email,
-		Address:     c.Address,
-		SizeRange:   c.SizeRange,
-		Notes:       c.Notes,
-		Tags:        c.Tags,
-		OwnerUserID: c.OwnerUserID,
-		CreatedAt:   c.CreatedAt,
-		UpdatedAt:   c.UpdatedAt,
-		DeletedAt:   c.DeletedAt,
+		ID:                   c.ID,
+		Name:                 c.Name,
+		Industry:             c.Industry,
+		Website:              c.Website,
+		Phone:                c.Phone,
+		Email:                c.Email,
+		Address:              c.Address,
+		SizeRange:            c.SizeRange,
+		Notes:                c.Notes,
+		Tags:                 c.Tags,
+		OwnerUserID:          c.OwnerUserID,
+		TenantOrganizationID: c.TenantOrganizationID,
+		CreatedAt:            c.CreatedAt,
+		UpdatedAt:            c.UpdatedAt,
+		DeletedAt:            c.DeletedAt,
 	}
 }
 

@@ -25,6 +25,7 @@ var (
 	ErrInvalidPipelineStage = errors.New("pipeline or stage is not valid for a new deal")
 	ErrInvalidStartStage    = errors.New("a deal cannot start in a won or lost stage")
 	ErrInvalidDealInput     = errors.New("deal title is required (max 200), value must be a non-negative number with at most 2 decimals, expected_close_date must be YYYY-MM-DD")
+	ErrInvalidContactInput  = errors.New("contact mode must be new or existing (with contact_id)")
 	ErrInvalidCompanyInput  = errors.New("company mode must be none, existing (with company_id) or new (with name)")
 	ErrLeadNotConverted     = repository.ErrLeadNotConverted
 	ErrLeadDealExists       = repository.ErrLeadDealExists
@@ -49,6 +50,13 @@ type ConvertCompanyInput struct {
 	Name, Industry, Website, Phone string
 }
 
+// ConvertContactInput: contact hasil convert. Mode "existing" memakai contact
+// yang sudah ada (milik org yang sama) dan tidak membuat contact baru.
+type ConvertContactInput struct {
+	Mode      string // "new" (default) | "existing"
+	ContactID string
+}
+
 type ConvertDealInput struct {
 	PipelineID, StageID, Title, Value, ExpectedCloseDate string // date "YYYY-MM-DD" atau ""
 	Description, DecisionMaker, OwnerUserID              string
@@ -60,6 +68,7 @@ type ConvertLeadParams struct {
 	CreateCompany bool                 // kontrak lama: company baru dari lead.CompanyName
 	Company       *ConvertCompanyInput // nil = pakai CreateCompany
 	Deal          *ConvertDealInput    // nil = tanpa deal
+	Contact       *ConvertContactInput // nil = contact baru
 	OwnerUserID   string
 	ConvertedBy   string
 }

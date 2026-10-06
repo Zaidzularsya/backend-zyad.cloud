@@ -64,4 +64,7 @@ type DealRepository interface {
 	CloseWon(context.Context, coretenant.Scope, string, string) (domain.Deal, error)
 	CloseLost(context.Context, coretenant.Scope, string, string, string) (domain.Deal, error)
 	ApproveDiscount(context.Context, coretenant.Scope, string, string, string) (domain.Deal, error)
+	// ListOpenByCompanyAndPipeline: deal berstatus open milik company di pipeline,
+	// terlama dulu.
+	ListOpenByCompanyAndPipeline(ctx context.Context, scope coretenant.Scope, companyID, pipelineID string) ([]domain.Deal, error)
 }

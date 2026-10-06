@@ -57,4 +57,7 @@ type PipelineRepository interface {
 	// organization has — used by PipelineService to allow the first pipeline
 	// for free (RequireQuota only applies to additional ones).
 	CountActive(context.Context, coretenant.Scope) (int64, error)
+	// FindBySystemKey mengembalikan pipeline sistem (mis. "self_serve") beserta
+	// stage-nya, atau pgx.ErrNoRows.
+	FindBySystemKey(ctx context.Context, scope coretenant.Scope, key string) (domain.Pipeline, error)
 }

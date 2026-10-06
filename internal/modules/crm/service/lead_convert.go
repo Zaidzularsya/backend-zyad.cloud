@@ -55,6 +55,9 @@ func (s *leadService) Convert(ctx context.Context, scope coretenant.Scope, id st
 	if err := s.applyCompanyInput(ctx, scope, lead, params, &tx); err != nil {
 		return domain.LeadConversionResult{}, err
 	}
+	if err := s.applyContactInput(ctx, scope, params.Contact, &tx); err != nil {
+		return domain.LeadConversionResult{}, err
+	}
 	if params.Deal != nil {
 		dealInput := *params.Deal
 		if dealInput.OwnerUserID == "" {
@@ -70,8 +73,10 @@ func (s *leadService) Convert(ctx context.Context, scope coretenant.Scope, id st
 	if err := s.requireOwnerMember(ctx, scope, params.OwnerUserID); err != nil {
 		return domain.LeadConversionResult{}, err
 	}
-	if err := s.requireContactQuota(ctx, scope); err != nil {
-		return domain.LeadConversionResult{}, err
+	if tx.ExistingContactID == "" { // contact existing tidak menambah pemakaian kuota
+		if err := s.requireContactQuota(ctx, scope); err != nil {
+			return domain.LeadConversionResult{}, err
+		}
 	}
 
 	result, err := s.repo.ConvertLead(ctx, scope, id, tx)
@@ -85,6 +90,20 @@ func (s *leadService) Convert(ctx context.Context, scope coretenant.Scope, id st
 		}
 	}
 	return result, nil
+}
+
+func (s *leadService) applyContactInput(ctx context.Context, scope coretenant.Scope, in *ConvertContactInput, tx *repository.ConvertLeadTxParams) error {
+	if in == nil || in.Mode == "" || in.Mode == "new" {
+		return nil
+	}
+	if in.Mode != "existing" || in.ContactID == "" || s.contactRepo == nil {
+		return ErrInvalidContactInput
+	}
+	if _, err := s.contactRepo.FindByID(ctx, scope, in.ContactID); err != nil {
+		return crmmodule.MapNotFound(err, "CONTACT_NOT_FOUND", "contact not found or already deleted")
+	}
+	tx.ExistingContactID = in.ContactID
+	return nil
 }
 
 func (s *leadService) applyCompanyInput(ctx context.Context, scope coretenant.Scope, lead domain.Lead, params ConvertLeadParams, tx *repository.ConvertLeadTxParams) error {

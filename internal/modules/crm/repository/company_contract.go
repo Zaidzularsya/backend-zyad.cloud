@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/crm/domain"
@@ -57,4 +58,12 @@ type CompanyRepository interface {
 	Update(context.Context, coretenant.Scope, string, UpdateCompanyParams) (domain.Company, error)
 	Delete(context.Context, coretenant.Scope, string, string) error
 	Restore(context.Context, coretenant.Scope, string, string) error
+	// FindByTenantOrganization mengembalikan company yang tertaut ke workspace
+	// tenantOrgID, atau pgx.ErrNoRows.
+	FindByTenantOrganization(ctx context.Context, scope coretenant.Scope, tenantOrgID string) (domain.Company, error)
+	// SetTenantOrganization menautkan company ke workspace; ErrWorkspaceAlreadyLinked
+	// bila workspace itu sudah tertaut ke company lain di org yang sama.
+	SetTenantOrganization(ctx context.Context, scope coretenant.Scope, companyID, tenantOrgID, updatedBy string) (domain.Company, error)
 }
+
+var ErrWorkspaceAlreadyLinked = errors.New("workspace already linked to another company")
