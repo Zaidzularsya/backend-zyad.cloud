@@ -205,7 +205,7 @@ func (s *quotationService) Create(ctx context.Context, scope coretenant.Scope, i
 		ValidUntil: input.ValidUntil, Subtotal: totals.Subtotal, DiscountTotal: totals.DiscountTotal,
 		TaxTotal: totals.TaxTotal, GrandTotal: totals.GrandTotal, Currency: input.Currency, Notes: input.Notes,
 		OneTimeTotal: totals.OneTimeTotal, FirstInvoiceTotal: totals.FirstInvoiceTotal, RecurringTotals: totals.RecurringTotals,
-		Items: items, CreatedBy: input.CreatedBy,
+		Items: items, CreatedBy: input.CreatedBy, Channel: input.Channel,
 	})
 }
 
@@ -325,4 +325,30 @@ func (s *quotationService) Reject(ctx context.Context, scope coretenant.Scope, i
 		return domain.Quotation{}, crmmodule.MapNotFound(err, "QUOTATION_NOT_SENT", "quotation not found, already deleted, or not sent")
 	}
 	return quotation, nil
+}
+
+func (s *quotationService) FindSelfServeByDeal(ctx context.Context, scope coretenant.Scope, dealID string) (domain.Quotation, error) {
+	return s.repo.FindSelfServeByDeal(ctx, scope, dealID)
+}
+
+func (s *quotationService) AcceptOnline(ctx context.Context, scope coretenant.Scope, id, actorUserID string) (domain.Quotation, error) {
+	q, err := s.repo.FindByID(ctx, scope, id)
+	if err != nil {
+		return domain.Quotation{}, crmmodule.MapNotFound(err, "QUOTATION_NOT_FOUND", "quotation not found or already deleted")
+	}
+	if q.Channel != domain.QuotationChannelSelfServe {
+		return domain.Quotation{}, ErrNotSelfServeQuotation
+	}
+	if q.Status == domain.QuotationStatusApproved {
+		return q, nil
+	}
+	if q.Status != domain.QuotationStatusDraft {
+		return domain.Quotation{}, ErrNotSelfServeQuotation
+	}
+	accepted, err := s.repo.AcceptSelfServe(ctx, scope, id, actorUserID)
+	if err != nil {
+		return domain.Quotation{}, crmmodule.MapNotFound(err, "QUOTATION_NOT_FOUND", "quotation not found or already deleted")
+	}
+	s.recordDealActivity(ctx, scope, accepted, domain.ActivityTypeQuotationResponse, "Diterima online oleh customer", actorUserID)
+	return accepted, nil
 }

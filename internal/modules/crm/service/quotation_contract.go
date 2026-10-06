@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 
@@ -42,6 +43,8 @@ type CreateQuotationInput struct {
 	TaxTotal        string
 	Items           []QuotationLineInput
 	CreatedBy       string
+	// Channel diisi hanya oleh orkestrator self-serve; tidak diekspos handler.
+	Channel string
 }
 
 type UpdateQuotationInput struct {
@@ -134,4 +137,11 @@ type QuotationService interface {
 	// Link: URL publik untuk quotation berstatus sent (dibuat bila belum ada).
 	Link(ctx context.Context, scope coretenant.Scope, id, userID string) (QuotationLink, error)
 	Responses(ctx context.Context, scope coretenant.Scope, id string) ([]domain.QuotationResponse, error)
+	// FindSelfServeByDeal: quotation self-serve draft/approved milik deal, atau pgx.ErrNoRows.
+	FindSelfServeByDeal(ctx context.Context, scope coretenant.Scope, dealID string) (domain.Quotation, error)
+	// AcceptOnline: draft self-serve → approved (customer menyetujui lewat checkout). Idempoten
+	// untuk quotation self-serve yang sudah approved; quotation lain → ErrNotSelfServeQuotation.
+	AcceptOnline(ctx context.Context, scope coretenant.Scope, id, actorUserID string) (domain.Quotation, error)
 }
+
+var ErrNotSelfServeQuotation = errors.New("only draft self-serve quotations can be accepted online")

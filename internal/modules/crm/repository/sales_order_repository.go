@@ -397,3 +397,12 @@ func (r *salesOrderRepository) Cancel(ctx context.Context, scope coretenant.Scop
 			WHERE id = $1 AND organization_id = $2 AND status = 'draft'`)
 	})
 }
+
+// MarkCancelled: confirmed → cancelled (SO yang belum dibayar; pemanggil sudah memeriksa invoice).
+func (r *salesOrderRepository) MarkCancelled(ctx context.Context, scope coretenant.Scope, id, by string) (domain.SalesOrder, error) {
+	return r.mutate(ctx, scope, id, func(tx pgx.Tx) error {
+		return conditionalUpdate(ctx, tx, scope.OrganizationID(), id, ErrSalesOrderNotConfirmed, `
+			UPDATE crm_sales_orders SET status = 'cancelled', cancelled_at = now(), updated_at = now()
+			WHERE id = $1 AND organization_id = $2 AND status = 'confirmed'`)
+	})
+}

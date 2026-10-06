@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	coretenant "zyad.cloud/internal/core/tenant"
@@ -44,4 +45,8 @@ type SalesOrderRepository interface {
 	// SO → completed bila tak ada lagi item menunggu diterima dan semua baris one_time prabayar sudah ditagih.
 	MarkDelivered(ctx context.Context, scope coretenant.Scope, id string, itemIDs []string, at time.Time, note, invoiceID, by string) (domain.SalesOrder, error)
 	Cancel(ctx context.Context, scope coretenant.Scope, id, by string) (domain.SalesOrder, error) // draft saja
+	// MarkCancelled: confirmed → cancelled; ErrSalesOrderNotConfirmed bila status lain.
+	MarkCancelled(ctx context.Context, scope coretenant.Scope, id, by string) (domain.SalesOrder, error)
 }
+
+var ErrSalesOrderNotConfirmed = errors.New("sales order is not confirmed")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -137,8 +138,29 @@ func (r *soRepoFake) MarkDelivered(_ context.Context, _ coretenant.Scope, id str
 	r.byID[id] = so
 	return so, nil
 }
-func (r *soRepoFake) Cancel(context.Context, coretenant.Scope, string, string) (domain.SalesOrder, error) {
-	return domain.SalesOrder{}, nil
+func (r *soRepoFake) Cancel(_ context.Context, _ coretenant.Scope, id, _ string) (domain.SalesOrder, error) {
+	so, ok := r.byID[id]
+	if !ok {
+		return domain.SalesOrder{}, pgx.ErrNoRows
+	}
+	if so.Status != domain.SalesOrderDraft {
+		return domain.SalesOrder{}, repository.ErrSalesOrderNotDraft
+	}
+	so.Status = domain.SalesOrderCancelled
+	r.byID[id] = so
+	return so, nil
+}
+func (r *soRepoFake) MarkCancelled(_ context.Context, _ coretenant.Scope, id, _ string) (domain.SalesOrder, error) {
+	so, ok := r.byID[id]
+	if !ok {
+		return domain.SalesOrder{}, pgx.ErrNoRows
+	}
+	if so.Status != domain.SalesOrderConfirmed {
+		return domain.SalesOrder{}, repository.ErrSalesOrderNotConfirmed
+	}
+	so.Status = domain.SalesOrderCancelled
+	r.byID[id] = so
+	return so, nil
 }
 
 type soBillingFake struct {
@@ -177,11 +199,13 @@ func (c *soCounterFake) NextNumber(context.Context, coretenant.Scope, string) (i
 
 type soActivities struct {
 	repository.ActivityRepository
-	types []domain.ActivityType
+	types    []domain.ActivityType
+	subjects []string
 }
 
 func (a *soActivities) Create(_ context.Context, _ coretenant.Scope, p repository.CreateActivityParams) (domain.Activity, error) {
 	a.types = append(a.types, p.Type)
+	a.subjects = append(a.subjects, p.Subject)
 	return domain.Activity{}, nil
 }
 
@@ -364,5 +388,119 @@ func TestConfirmDeliveryRequiresPendingItems(t *testing.T) {
 func TestApproveNoLongerSuggestsWon(t *testing.T) {
 	if SuggestDealStatusAfterApprove(domain.Quotation{DealID: soPtr("d1")}) != "" {
 		t.Fatal("won is decided by the evaluator now")
+	}
+}
+
+// soCancellerFake mencatat urutan operasi receivable.
+type soCancellerFake struct {
+	invoiceStatus string
+	hasPayment    bool
+	calls         []string
+	contractEnded bool
+}
+
+func (c *soCancellerFake) InvoiceState(context.Context, coretenant.Scope, string) (string, bool, error) {
+	c.calls = append(c.calls, "state")
+	return c.invoiceStatus, c.hasPayment, nil
+}
+func (c *soCancellerFake) VoidInvoice(_ context.Context, _ coretenant.Scope, _, reason, _ string) error {
+	c.calls = append(c.calls, "void:"+reason)
+	c.invoiceStatus = "void"
+	return nil
+}
+func (c *soCancellerFake) EndContract(_ context.Context, _ coretenant.Scope, _, _, _ string) error {
+	c.calls = append(c.calls, "end")
+	c.contractEnded = true
+	return nil
+}
+
+func newCancelHarness(t *testing.T, canceller *soCancellerFake) *soHarness {
+	t.Helper()
+	h := newSOHarness(t)
+	h.svc = NewSalesOrderService(h.repo, h.billing, SalesOrderDeps{
+		Counters: &soCounterFake{}, Contacts: soContacts{}, Deals: soDeals{}, Members: soMembers{}, Activities: h.activities,
+		Canceller: canceller,
+	}, h.won, func() time.Time { return soNow })
+	return h
+}
+
+func (h *soHarness) confirmed(t *testing.T) domain.SalesOrder {
+	t.Helper()
+	so := h.draft(t)
+	h.fill(t, so.ID, "2026-10-05")
+	got, err := h.svc.Confirm(soCtx, soScope, so.ID, "u1")
+	if err != nil || got.InitialInvoiceID != "inv1" {
+		t.Fatalf("confirm: %+v err=%v", got, err)
+	}
+	return got
+}
+
+func TestCancelUnpaidDraftUsesCancel(t *testing.T) {
+	c := &soCancellerFake{}
+	h := newCancelHarness(t, c)
+	so := h.draft(t)
+	got, err := h.svc.CancelUnpaid(soCtx, soScope, so.ID, "Ganti pilihan ke SMALLBIZ-M", "bot")
+	if err != nil || got.Status != domain.SalesOrderCancelled {
+		t.Fatalf("got=%+v err=%v", got, err)
+	}
+	if len(c.calls) != 0 {
+		t.Fatalf("draft must not touch receivable: %v", c.calls)
+	}
+}
+
+func TestCancelUnpaidConfirmedVoidsEndsAndCancels(t *testing.T) {
+	c := &soCancellerFake{invoiceStatus: "issued"}
+	h := newCancelHarness(t, c)
+	so := h.confirmed(t)
+	before := len(h.activities.subjects)
+
+	got, err := h.svc.CancelUnpaid(soCtx, soScope, so.ID, "Ganti pilihan ke SMALLBIZ-M", "bot")
+	if err != nil || got.Status != domain.SalesOrderCancelled {
+		t.Fatalf("got=%+v err=%v", got, err)
+	}
+	want := []string{"state", "void:Ganti pilihan ke SMALLBIZ-M", "end"}
+	if fmt.Sprint(c.calls) != fmt.Sprint(want) {
+		t.Fatalf("calls = %v, want %v", c.calls, want)
+	}
+	subjects := h.activities.subjects[before:]
+	if len(subjects) != 1 || subjects[0] != "Sales order "+so.SONumber+" dibatalkan: Ganti pilihan ke SMALLBIZ-M" {
+		t.Fatalf("activities = %v", subjects)
+	}
+
+	// dipanggil ulang → idempoten: tanpa efek samping maupun activity baru
+	c.calls = nil
+	again, err := h.svc.CancelUnpaid(soCtx, soScope, so.ID, "x", "bot")
+	if err != nil || again.Status != domain.SalesOrderCancelled || len(c.calls) != 0 || len(h.activities.subjects) != before+1 {
+		t.Fatalf("repeat: %+v err=%v calls=%v", again, err, c.calls)
+	}
+}
+
+func TestCancelUnpaidRejectsPaidInvoiceWithoutSideEffects(t *testing.T) {
+	for _, status := range []string{"paid", "issued"} { // lunas, dan sebagian (masih issued tetapi ada pembayaran)
+		c := &soCancellerFake{invoiceStatus: status, hasPayment: true}
+		h := newCancelHarness(t, c)
+		so := h.confirmed(t)
+		if _, err := h.svc.CancelUnpaid(soCtx, soScope, so.ID, "x", "bot"); !errors.Is(err, ErrSalesOrderPaid) {
+			t.Fatalf("%s: err = %v", status, err)
+		}
+		if len(c.calls) != 1 || c.calls[0] != "state" || h.repo.byID[so.ID].Status != domain.SalesOrderConfirmed {
+			t.Fatalf("%s: side effects: calls=%v status=%s", status, c.calls, h.repo.byID[so.ID].Status)
+		}
+	}
+}
+
+func TestCancelUnpaidResumesAfterPartialFailure(t *testing.T) {
+	// percobaan sebelumnya sudah void invoice dan end contract tetapi gagal sebelum cancelled
+	c := &soCancellerFake{invoiceStatus: "void"}
+	h := newCancelHarness(t, c)
+	so := h.confirmed(t)
+	got, err := h.svc.CancelUnpaid(soCtx, soScope, so.ID, "x", "bot")
+	if err != nil || got.Status != domain.SalesOrderCancelled {
+		t.Fatalf("got=%+v err=%v", got, err)
+	}
+	for _, call := range c.calls {
+		if strings.HasPrefix(call, "void") {
+			t.Fatalf("invoice already void must be skipped: %v", c.calls)
+		}
 	}
 }

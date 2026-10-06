@@ -47,7 +47,7 @@ const quotationColumns = `
 	subtotal::text, discount_total::text, tax_total::text, grand_total::text, currency, notes,
 	sent_at, approved_at, rejected_at, created_by, updated_by, created_at, updated_at, deleted_at,
 	revision_of_id, revision_no, pdf_asset_id, pdf_generated_at,
-	one_time_total::text, first_invoice_total::text, recurring_totals
+	one_time_total::text, first_invoice_total::text, recurring_totals, channel
 `
 
 const quotationItemColumns = `
@@ -63,13 +63,14 @@ func scanQuotation(row pgx.Row) (domain.Quotation, error) {
 	var createdBy, updatedBy *string
 	var status string
 	var recurringJSON []byte
+	var channel *string
 
 	err := row.Scan(
 		&q.ID, &q.OrganizationID, &dealID, &contactID, &companyID, &q.QuotationNumber, &status, &q.ValidUntil,
 		&q.Subtotal, &q.DiscountTotal, &q.TaxTotal, &q.GrandTotal, &q.Currency, &notes,
 		&q.SentAt, &q.ApprovedAt, &q.RejectedAt, &createdBy, &updatedBy, &q.CreatedAt, &q.UpdatedAt, &q.DeletedAt,
 		&q.RevisionOfID, &q.RevisionNo, &q.PDFAssetID, &q.PDFGeneratedAt,
-		&q.OneTimeTotal, &q.FirstInvoiceTotal, &recurringJSON,
+		&q.OneTimeTotal, &q.FirstInvoiceTotal, &recurringJSON, &channel,
 	)
 	if err != nil {
 		return domain.Quotation{}, err
@@ -81,6 +82,9 @@ func scanQuotation(row pgx.Row) (domain.Quotation, error) {
 		}
 	}
 
+	if channel != nil {
+		q.Channel = *channel
+	}
 	q.Status = domain.QuotationStatus(status)
 	q.DealID = dealID
 	q.ContactID = contactID
@@ -218,9 +222,9 @@ func (r *quotationRepository) Create(ctx context.Context, scope coretenant.Scope
 		INSERT INTO crm_quotations (
 			organization_id, deal_id, contact_id, company_id, quotation_number, valid_until,
 			subtotal, discount_total, tax_total, grand_total, currency, notes, created_by,
-			revision_of_id, revision_no, one_time_total, first_invoice_total, recurring_totals
+			revision_of_id, revision_no, one_time_total, first_invoice_total, recurring_totals, channel
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
 		) RETURNING ` + quotationColumns
 
 	recurringJSON, err := recurringTotalsJSON(params.RecurringTotals)
@@ -249,6 +253,7 @@ func (r *quotationRepository) Create(ctx context.Context, scope coretenant.Scope
 			totalOrZero(params.OneTimeTotal),
 			totalOrZero(params.FirstInvoiceTotal),
 			recurringJSON,
+			nullableString(params.Channel),
 		))
 		if scanErr != nil {
 			return scanErr
@@ -647,4 +652,46 @@ func (r *quotationRepository) SetPDFSnapshot(ctx context.Context, scope coretena
 		return err
 	})
 	return ok, err
+}
+
+// FindSelfServeByDeal mengembalikan quotation self-serve aktif (draft/approved)
+// milik deal beserta item, atau pgx.ErrNoRows.
+func (r *quotationRepository) FindSelfServeByDeal(ctx context.Context, scope coretenant.Scope, dealID string) (domain.Quotation, error) {
+	if !scope.IsValid() {
+		return domain.Quotation{}, coretenant.ErrInvalidScope
+	}
+	var q domain.Quotation
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var err error
+		q, err = scanQuotation(tx.QueryRow(ctx, `SELECT `+quotationColumns+` FROM crm_quotations
+			WHERE organization_id = $1 AND deal_id = $2 AND channel = 'self_serve'
+				AND status IN ('draft', 'approved') AND deleted_at IS NULL`, scope.OrganizationID(), dealID))
+		if err != nil {
+			return err
+		}
+		q.Items, err = loadQuotationItems(ctx, tx, scope.OrganizationID(), q.ID)
+		return err
+	})
+	return q, err
+}
+
+// AcceptSelfServe: draft self-serve → approved (tanpa lewat sent). Selain itu pgx.ErrNoRows.
+func (r *quotationRepository) AcceptSelfServe(ctx context.Context, scope coretenant.Scope, id, updatedBy string) (domain.Quotation, error) {
+	if !scope.IsValid() {
+		return domain.Quotation{}, coretenant.ErrInvalidScope
+	}
+	var q domain.Quotation
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var err error
+		q, err = scanQuotation(tx.QueryRow(ctx, `UPDATE crm_quotations
+			SET status = 'approved', approved_at = NOW(), updated_by = $1, updated_at = NOW()
+			WHERE id = $2 AND organization_id = $3 AND deleted_at IS NULL AND status = 'draft' AND channel = 'self_serve'
+			RETURNING `+quotationColumns, nullableString(updatedBy), id, scope.OrganizationID()))
+		if err != nil {
+			return err
+		}
+		q.Items, err = loadQuotationItems(ctx, tx, scope.OrganizationID(), q.ID)
+		return err
+	})
+	return q, err
 }
