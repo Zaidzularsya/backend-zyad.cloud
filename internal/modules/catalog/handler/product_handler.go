@@ -82,6 +82,12 @@ func (h *ProductHandler) List(c *gin.Context) {
 	response.JSON(c, http.StatusOK, "success", items, dto.BuildMeta(page, perPage, total))
 }
 
+// isPlatformOrg: fitur & listing hanya untuk katalog org platform.
+func isPlatformOrg(c *gin.Context) bool {
+	tc, err := coretenant.RequireContext(c.Request.Context())
+	return err == nil && tc.OrganizationType() == coretenant.OrganizationTypePlatform
+}
+
 func (h *ProductHandler) Create(c *gin.Context) {
 	scope, err := coretenant.RequireScope(c.Request.Context())
 	if err != nil {
@@ -107,6 +113,9 @@ func (h *ProductHandler) Create(c *gin.Context) {
 			PaymentTiming: pricing.PaymentTiming(req.PaymentTiming),
 		},
 		IsActive: req.IsActive == nil || *req.IsActive,
+		Platform: isPlatformOrg(c),
+		Listing:  repository.ListingParams{IsPublic: req.IsPublic, ListingCode: req.ListingCode, ListingOrder: req.ListingOrder},
+		Features: dto.FeatureValues(req.Features),
 	}, permissionmiddleware.UserID(c))
 	if err != nil {
 		failCatalog(c, err)
@@ -132,6 +141,17 @@ func (h *ProductHandler) Update(c *gin.Context) {
 		validationError(c, err)
 		return
 	}
+	listing, err := req.Listing()
+	if err != nil {
+		validationError(c, err)
+		return
+	}
+	var features *[]repository.FeatureValue
+	if req.Features != nil {
+		v := dto.FeatureValues(*req.Features)
+		features = &v
+	}
+	platform := isPlatformOrg(c)
 	h.respond(c, func(scope coretenant.Scope) (domain.Product, error) {
 		return h.svc.Update(c.Request.Context(), scope, c.Param("id"), repository.UpdateProductParams{
 			CategoryID:  req.CategoryID,
@@ -144,7 +164,9 @@ func (h *ProductHandler) Update(c *gin.Context) {
 			Pricing:     attrs,
 			IsActive:    req.IsActive,
 			UpdatedBy:   permissionmiddleware.UserID(c),
-		})
+			Listing:     listing,
+			Features:    features,
+		}, platform)
 	})
 }
 

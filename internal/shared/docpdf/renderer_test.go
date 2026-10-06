@@ -67,3 +67,35 @@ func TestRenderStampAndMeta(t *testing.T) {
 		t.Fatal("not a pdf")
 	}
 }
+
+func TestRenderLineDetails(t *testing.T) {
+	r := NewRenderer()
+	plain, err := r.Render(sampleDoc("", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	with := sampleDoc("", 1)
+	with.Lines[0].Details = []string{"Hingga 5 user", "CRM"}
+	detailed, err := r.Render(with)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(plain, detailed) {
+		t.Fatal("details must change the output")
+	}
+	// Tinggi baris bertambah: banyak baris berdetail harus memakai lebih banyak halaman.
+	many, manyDetailed := sampleDoc("", 12), sampleDoc("", 12)
+	for i := range manyDetailed.Lines {
+		manyDetailed.Lines[i].Details = []string{"a", "b", "c", "d", "e"}
+	}
+	a, _ := r.Render(many)
+	b, _ := r.Render(manyDetailed)
+	if bytes.Count(a, []byte("/Type /Page\n")) >= bytes.Count(b, []byte("/Type /Page\n")) {
+		t.Fatal("details must add row height and pages")
+	}
+	// Tanpa details, keluaran identik dengan perilaku lama (invoice receivable).
+	again, _ := r.Render(sampleDoc("", 1))
+	if len(again) != len(plain) {
+		t.Fatalf("dokumen tanpa detail berubah: %d vs %d", len(again), len(plain))
+	}
+}

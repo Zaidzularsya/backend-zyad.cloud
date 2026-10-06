@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -115,5 +116,24 @@ func TestPublicQuotationViewPayloadAndPDFHeaders(t *testing.T) {
 	if pw.Code != http.StatusOK || !strings.HasPrefix(pw.Header().Get("Content-Disposition"), "inline") ||
 		pw.Header().Get("Cache-Control") != "no-store" || pw.Header().Get("X-Robots-Tag") != "noindex" {
 		t.Fatalf("pdf = %d %v", pw.Code, pw.Header())
+	}
+}
+
+func TestPublicQuotationViewFeatures(t *testing.T) {
+	view := service.PublicQuotationView{Quotation: domain.Quotation{Items: []domain.QuotationItem{{
+		Description: "Freelancer",
+		Features: []domain.FeatureSnapshot{
+			{FeatureKey: "crm", Value: json.RawMessage(`true`), Label: "CRM"},
+			{FeatureKey: "wa", Value: json.RawMessage(`false`), Label: ""},
+			{FeatureKey: "users", Value: json.RawMessage(`5`), Label: "Hingga 5 user"},
+		},
+	}, {Description: "Tanpa fitur"}}}}
+	out := publicQuotationFromView(view)
+	if got := out.Items[0].Features; len(got) != 2 || got[0] != "CRM" || got[1] != "Hingga 5 user" {
+		t.Fatalf("features = %v", got)
+	}
+	raw, _ := json.Marshal(out.Items[1])
+	if strings.Contains(string(raw), "features") {
+		t.Fatalf("item tanpa fitur tidak boleh memuat key features: %s", raw)
 	}
 }

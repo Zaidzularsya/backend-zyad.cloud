@@ -56,6 +56,7 @@ type QuotationItemInput struct {
 	TaxPercent string
 	TaxAmount  string
 	Pricing    pricing.Attributes
+	Features   []domain.FeatureSnapshot
 }
 
 // CreateQuotationParams intentionally excludes OrganizationID. Implementations

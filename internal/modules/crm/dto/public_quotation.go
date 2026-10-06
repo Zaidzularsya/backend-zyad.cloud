@@ -18,14 +18,15 @@ type PublicRevisionRequest struct {
 }
 
 type PublicQuotationItem struct {
-	Description      string  `json:"description"`
-	Quantity         string  `json:"quantity"`
-	Unit             string  `json:"unit,omitempty"`
-	UnitPrice        string  `json:"unit_price"`
-	LineTotal        string  `json:"line_total"`
-	ChargeType       string  `json:"charge_type,omitempty"`
-	BillingFrequency *string `json:"billing_frequency,omitempty"`
-	PaymentTiming    string  `json:"payment_timing,omitempty"`
+	Description      string   `json:"description"`
+	Quantity         string   `json:"quantity"`
+	Unit             string   `json:"unit,omitempty"`
+	UnitPrice        string   `json:"unit_price"`
+	LineTotal        string   `json:"line_total"`
+	ChargeType       string   `json:"charge_type,omitempty"`
+	BillingFrequency *string  `json:"billing_frequency,omitempty"`
+	PaymentTiming    string   `json:"payment_timing,omitempty"`
+	Features         []string `json:"features,omitempty"` // label terlihat dari snapshot baris
 }
 
 type PublicQuotationLastResponse struct {

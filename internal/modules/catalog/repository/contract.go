@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
 	coretenant "zyad.cloud/internal/core/tenant"
@@ -12,7 +13,22 @@ import (
 var (
 	ErrSKUExists          = errors.New("sku already used by another product")
 	ErrCategoryNameExists = errors.New("category name already exists")
+	ErrListingExists      = errors.New("listing_code already has a public product with this billing frequency")
 )
+
+// ListingParams adalah blok publikasi produk; dikirim utuh.
+type ListingParams struct {
+	IsPublic     bool
+	ListingCode  string
+	ListingOrder int
+}
+
+type FeatureValue struct {
+	FeatureKey   string
+	Value        json.RawMessage
+	DisplayLabel string
+	Position     int
+}
 
 type ProductListFilter struct {
 	Search     string // nama atau SKU
@@ -34,6 +50,8 @@ type CreateProductParams struct {
 	Pricing     pricing.Attributes
 	IsActive    bool
 	CreatedBy   string
+	Listing     ListingParams
+	Features    []FeatureValue
 }
 
 // UpdateProductParams: field nil tidak diubah; string kosong pada field
@@ -49,6 +67,8 @@ type UpdateProductParams struct {
 	Pricing     *pricing.Attributes // dikirim utuh (tiga field); nil = tidak diubah
 	IsActive    *bool
 	UpdatedBy   string
+	Listing     *ListingParams  // nil = tidak diubah
+	Features    *[]FeatureValue // nil = tidak diubah; slice kosong = hapus semua
 }
 
 type ProductRepository interface {
@@ -59,6 +79,8 @@ type ProductRepository interface {
 	List(ctx context.Context, scope coretenant.Scope, f ProductListFilter) ([]domain.Product, int64, error)
 	Update(ctx context.Context, scope coretenant.Scope, id string, p UpdateProductParams) (domain.Product, error)
 	Delete(ctx context.Context, scope coretenant.Scope, id, deletedBy string) error
+	// ListPublic mengembalikan produk is_public, aktif, belum dihapus, lengkap dengan fitur dan kategori.
+	ListPublic(ctx context.Context, scope coretenant.Scope) ([]domain.Product, error)
 }
 
 type CategoryRepository interface {

@@ -118,3 +118,19 @@ func TestSummaryIncludesLink(t *testing.T) {
 		t.Fatal("no link line expected when link is empty")
 	}
 }
+
+func TestBuildSummaryListsFeatures(t *testing.T) {
+	doc := summaryDoc()
+	doc.Lines[0].Features = []string{"Hingga 5 user", "<b>CRM</b>"}
+	s := BuildSummary(doc, "", "")
+	if !strings.Contains(s.Text, "   2 bulan × Rp 350.000 · diskon 10% · pajak 11% = Rp 630.000\n   • Hingga 5 user\n   • <b>CRM</b>\n2. Router") {
+		t.Errorf("text:\n%s", s.Text)
+	}
+	if !strings.Contains(s.HTML, "<ul") || !strings.Contains(s.HTML, "<li>Hingga 5 user</li>") || !strings.Contains(s.HTML, "<li>&lt;b&gt;CRM&lt;/b&gt;</li>") {
+		t.Errorf("html:\n%s", s.HTML)
+	}
+	// Baris tanpa fitur tidak mendapat <ul>.
+	if strings.Count(s.HTML, "<ul") != 1 {
+		t.Errorf("hanya baris berfitur yang punya <ul>: %s", s.HTML)
+	}
+}

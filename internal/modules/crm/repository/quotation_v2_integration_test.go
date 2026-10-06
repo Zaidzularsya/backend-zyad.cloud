@@ -4,6 +4,7 @@ package repository_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -255,5 +256,39 @@ func TestQuotationPricingAttributesRoundTripAndLegacyDefaults(t *testing.T) {
 	}
 	if legacy.Items[0].Pricing != (pricing.Attributes{ChargeType: pricing.OneTime, PaymentTiming: pricing.Prepaid}) || len(legacy.RecurringTotals) != 0 {
 		t.Fatalf("legacy = %+v items=%+v", legacy, legacy.Items)
+	}
+}
+
+func TestQuotationItemFeaturesRoundTrip(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+	setupCRMOrganizations(t, db, tenants)
+	repo := repository.NewQuotationRepository(db)
+
+	feats := []domain.FeatureSnapshot{
+		{FeatureKey: "crm", Value: json.RawMessage(`true`), Label: "CRM"},
+		{FeatureKey: "users", Value: json.RawMessage(`5`), Label: "Hingga 5 user"},
+	}
+	q, err := repo.Create(ctx, tenants.A.Scope, repository.CreateQuotationParams{
+		QuotationNumber: "QUO-F-0001", Subtotal: "200.00", DiscountTotal: "0.00", TaxTotal: "0.00", GrandTotal: "200.00",
+		Items: []repository.QuotationItemInput{
+			{Description: "Dengan fitur", Quantity: "1.00", UnitPrice: "100.00", LineTotal: "100.00", Features: feats},
+			{Description: "Tanpa fitur", Quantity: "1.00", UnitPrice: "100.00", LineTotal: "100.00", Position: 1},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := repo.FindByID(ctx, tenants.A.Scope, q.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := loaded.Items[0].Features
+	if len(got) != 2 || got[0].FeatureKey != "crm" || string(got[0].Value) != "true" || got[1].Label != "Hingga 5 user" || string(got[1].Value) != "5" {
+		t.Fatalf("features = %+v", got)
+	}
+	if loaded.Items[1].Features == nil || len(loaded.Items[1].Features) != 0 {
+		t.Fatalf("item tanpa fitur harus [] (bukan nil): %#v", loaded.Items[1].Features)
 	}
 }

@@ -42,7 +42,7 @@ func priceQuotationLines(lines []QuotationLineInput, legacyTaxTotal string) (Quo
 		items[i] = repository.QuotationItemInput{
 			ProductID: lines[i].ProductID, Description: p.Description, SKU: strings.TrimSpace(lines[i].SKU), Unit: strings.TrimSpace(lines[i].Unit),
 			Quantity: p.Quantity, UnitPrice: p.UnitPrice, DiscountPercent: p.DiscountPercent,
-			TaxPercent: p.TaxPercent, TaxAmount: p.TaxAmount, LineTotal: p.LineTotal, Position: i, Pricing: p.Attrs,
+			TaxPercent: p.TaxPercent, TaxAmount: p.TaxAmount, LineTotal: p.LineTotal, Position: i, Pricing: p.Attrs, Features: lines[i].Features,
 		}
 	}
 	if !anyLineTax && strings.TrimSpace(legacyTaxTotal) != "" {

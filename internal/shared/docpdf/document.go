@@ -8,6 +8,8 @@ type Line struct {
 	No                                                  int
 	Description, Billing, Quantity, UnitPrice, Discount string
 	Tax, Total                                          string
+	// Details dirender di bawah deskripsi, satu baris per elemen dengan awalan "• ".
+	Details []string
 }
 
 type Row struct {
