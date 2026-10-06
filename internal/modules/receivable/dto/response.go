@@ -1,6 +1,10 @@
 package dto
 
-import "time"
+import (
+	"time"
+
+	"zyad.cloud/internal/modules/receivable/domain"
+)
 
 const dateLayout = "2006-01-02"
 
@@ -169,4 +173,78 @@ type SenderResponse struct {
 	UserID string `json:"user_id"`
 	Name   string `json:"name"`
 	Email  string `json:"email"`
+}
+
+type ContractItemResponse struct {
+	ID              string `json:"id"`
+	Description     string `json:"description"`
+	Quantity        string `json:"quantity"`
+	Unit            string `json:"unit"`
+	UnitPrice       string `json:"unit_price"`
+	DiscountPercent string `json:"discount_percent"`
+	TaxPercent      string `json:"tax_percent"`
+	Frequency       string `json:"billing_frequency"`
+	PaymentTiming   string `json:"payment_timing"`
+	PeriodIndex     int    `json:"period_index"`
+	NextPeriodStart string `json:"next_period_start"`
+	NextPeriodEnd   string `json:"next_period_end"`
+}
+
+type ContractResponse struct {
+	ID             string                 `json:"id"`
+	ContractNumber string                 `json:"contract_number"`
+	Status         string                 `json:"status"`
+	Account        AccountResponse        `json:"account"`
+	SourceType     string                 `json:"source_type"`
+	SourceID       string                 `json:"source_id"`
+	Currency       string                 `json:"currency"`
+	StartDate      string                 `json:"start_date"`
+	EndDate        *string                `json:"end_date"`
+	EndReason      string                 `json:"end_reason"`
+	EndedAt        *time.Time             `json:"ended_at"`
+	Channels       []string               `json:"channels"`
+	PICUserID      string                 `json:"pic_user_id"`
+	Notes          string                 `json:"notes"`
+	Items          []ContractItemResponse `json:"items"`
+	CreatedAt      time.Time              `json:"created_at"`
+}
+
+func ContractFromDomain(c domain.Contract) ContractResponse {
+	items := make([]ContractItemResponse, 0, len(c.Items))
+	for _, it := range c.Items {
+		items = append(items, ContractItemResponse{
+			ID: it.ID, Description: it.Description, Quantity: it.Quantity, Unit: it.Unit, UnitPrice: it.UnitPrice,
+			DiscountPercent: it.DiscountPercent, TaxPercent: it.TaxPercent, Frequency: string(it.Frequency),
+			PaymentTiming: string(it.PaymentTiming), PeriodIndex: it.PeriodIndex,
+			NextPeriodStart: it.NextPeriodStart.Format(dateLayout), NextPeriodEnd: it.NextPeriodEnd.Format(dateLayout),
+		})
+	}
+	channels := c.Channels
+	if channels == nil {
+		channels = []string{}
+	}
+	return ContractResponse{
+		ID: c.ID, ContractNumber: c.ContractNumber, Status: string(c.Status), Account: AccountFromDomain(c.Account),
+		SourceType: string(c.SourceType), SourceID: c.SourceID, Currency: c.Currency, StartDate: c.StartDate.Format(dateLayout),
+		EndDate: DateString(c.EndDate), EndReason: c.EndReason, EndedAt: c.EndedAt, Channels: channels, PICUserID: c.PICUserID,
+		Notes: c.Notes, Items: items, CreatedAt: c.CreatedAt,
+	}
+}
+
+type ContractListQuery struct {
+	Status    string `form:"status"`
+	AccountID string `form:"account_id"`
+	Search    string `form:"search"`
+	Page      int    `form:"page"`
+	PerPage   int    `form:"per_page"`
+}
+
+// ContractPatchRequest: end_date kosong/null menghapus tanggal akhir.
+type ContractPatchRequest struct {
+	EndDate *string `json:"end_date"`
+}
+
+type ContractEndRequest struct {
+	EndDate string `json:"end_date"`
+	Reason  string `json:"reason"`
 }

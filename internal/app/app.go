@@ -523,8 +523,35 @@ func New(ctx context.Context) (*App, error) {
 	publicLinkSvc := publiclink.NewService(publiclink.NewRepository(db), cfg.App.Secret)
 	crmQuotationResponseRepo := crmrepo.NewQuotationResponseRepository(db)
 
+	// Modul receivable (penagihan tenant). Hanya bergantung pada port; kanal kirim, link publik, dan
+	// notifikasi dirakit di sini. Service-nya dibagikan ke modul lain (S4: sales order) lewat receivableModule.
+	receivableModule := buildReceivable(receivableBuild{
+		DB: db, Assets: assetSvc, Links: publicLinkSvc, Mailboxes: mailboxSvc, Messages: mailMessageSvc,
+		WhatsApp: whatsappConversationSvc, Entitlements: crmEntitlementChecker, Permissions: permService,
+		Publisher: notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts),
+		Members:   crmMemberRepo, Issuers: crmrepo.NewQuotationIssuerRepository(db),
+		AppName: cfg.App.Name, FrontendURL: cfg.App.FrontendURL, NotificationLocale: cfg.Notification.DefaultLocale,
+		RateCounter: redisClient,
+	})
+
+	// Sales order (S4): dirakit setelah receivable (penagihan) dan sebelum quotation service karena hook
+	// approve menunjuk ke SalesOrderService.
+	crmReceivableDocs := crmReceivableReader{invoices: receivableModule.Invoices, contracts: receivableModule.Contracts}
+	crmSalesOrderRepo := crmrepo.NewSalesOrderRepository(db)
+	crmWonEvaluator := crmservice.NewWonEvaluator(crmSalesOrderRepo, crmDealSvc, crmReceivableDocs, crmReceivableDocs, crmActivityRepo)
+	crmSalesOrderSvc := crmservice.NewSalesOrderService(crmSalesOrderRepo, receivableModule.Billing, crmservice.SalesOrderDeps{
+		Counters: crmDocumentCounterRepo, Contacts: crmContactRepo, Companies: crmCompanyRepo, Deals: crmDealRepo,
+		Members: crmMemberRepo, Activities: crmActivityRepo, Invoices: crmReceivableDocs, Contracts: crmReceivableDocs,
+		Notifier: notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts),
+		AppName:  cfg.App.Name, FrontendURL: cfg.App.FrontendURL, Locale: cfg.Notification.DefaultLocale,
+	}, crmWonEvaluator, time.Now)
+	receivableModule.Listeners.Add(crmservice.NewReceivableListener(crmSalesOrderRepo, crmWonEvaluator, crmActivityRepo))
+	crmSalesOrderHandler := crmhandler.NewSalesOrderHandler(crmSalesOrderSvc, crmhandler.SalesOrderRefs{Invoices: crmReceivableDocs, Contracts: crmReceivableDocs})
+	crmDealOrdersHandler := crmhandler.NewDealOrdersHandler(crmSalesOrderHandler, crmWonEvaluator)
+
 	// Quotation service dibuat setelah mailbox & WhatsApp karena memakai keduanya sebagai kanal kirim.
 	crmQuotationSvc := crmservice.NewQuotationService(crmQuotationRepo, crmDocumentCounterRepo,
+		crmservice.WithQuotationApprovedHook(crmSalesOrderSvc),
 		crmservice.WithQuotationLinks(crmservice.QuotationLinkDeps{
 			Links:       publicLinkSvc,
 			FrontendURL: cfg.App.FrontendURL,
@@ -561,21 +588,10 @@ func New(ctx context.Context) (*App, error) {
 			notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts),
 			crmDealRepo, crmMemberRepo, cfg.App.Name, cfg.App.FrontendURL, cfg.Notification.DefaultLocale,
 		),
-		nil, // QuotationApprovedHook: diisi rilis sales order
+		crmSalesOrderSvc, // QuotationApprovedHook: buat SO draft
 		time.Now,
 	)
 	crmPublicQuotationHandler := crmhandler.NewPublicQuotationHandler(crmPublicQuotationSvc, redisClient)
-
-	// Modul receivable (penagihan tenant). Hanya bergantung pada port; kanal kirim, link publik, dan
-	// notifikasi dirakit di sini. Service-nya dibagikan ke modul lain (S4: sales order) lewat receivableModule.
-	receivableModule := buildReceivable(receivableBuild{
-		DB: db, Assets: assetSvc, Links: publicLinkSvc, Mailboxes: mailboxSvc, Messages: mailMessageSvc,
-		WhatsApp: whatsappConversationSvc, Entitlements: crmEntitlementChecker, Permissions: permService,
-		Publisher: notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts),
-		Members:   crmMemberRepo, Issuers: crmrepo.NewQuotationIssuerRepository(db),
-		AppName: cfg.App.Name, FrontendURL: cfg.App.FrontendURL, NotificationLocale: cfg.Notification.DefaultLocale,
-		RateCounter: redisClient,
-	})
 
 	router, err := newRouter(Dependencies{
 		Config:                           cfg,
@@ -636,6 +652,9 @@ func New(ctx context.Context) (*App, error) {
 		CRMDealHandler:                   crmDealHandler,
 		CRMActivityHandler:               crmActivityHandler,
 		CRMQuotationHandler:              crmQuotationHandler,
+		CRMSalesOrderHandler:             crmSalesOrderHandler,
+		CRMDealOrdersHandler:             crmDealOrdersHandler,
+		ReceivableContractHandler:        receivableModule.ContractHandler,
 		CRMPublicQuotationHandler:        crmPublicQuotationHandler,
 		ReceivableAccountHandler:         receivableModule.AccountHandler,
 		ReceivableInvoiceHandler:         receivableModule.InvoiceHandler,

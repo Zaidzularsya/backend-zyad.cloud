@@ -313,6 +313,12 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.CRMQuotationHandler != nil {
 		deps.CRMQuotationHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
 	}
+	if deps.CRMSalesOrderHandler != nil {
+		deps.CRMSalesOrderHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	}
+	if deps.CRMDealOrdersHandler != nil {
+		deps.CRMDealOrdersHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	}
 	if deps.CRMIntegrationHandler != nil {
 		deps.CRMIntegrationHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
 	}
@@ -330,6 +336,9 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		deps.ReceivableInvoiceHandler.RegisterRoutes(receivableGroup, deps.PermissionChecker)
 		deps.ReceivablePaymentHandler.RegisterRoutes(receivableGroup, deps.PermissionChecker)
 		deps.ReceivableSettingsHandler.RegisterRoutes(receivableGroup, deps.PermissionChecker)
+		if deps.ReceivableContractHandler != nil {
+			deps.ReceivableContractHandler.RegisterRoutes(receivableGroup, deps.PermissionChecker)
+		}
 	}
 
 	// Katalog produk tenant (dipakai quotation CRM dan invoice receivable). Aturan tenant sama

@@ -14,6 +14,7 @@ import (
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/receivable"
+	"zyad.cloud/internal/modules/receivable/domain"
 	"zyad.cloud/internal/modules/receivable/repository"
 	"zyad.cloud/internal/modules/receivable/service"
 )
@@ -91,7 +92,11 @@ func failReceivable(c *gin.Context, err error) {
 		validationFail(c, "Jumlah harus lebih dari 0 (maksimal 2 desimal) dan tanggal bayar tidak boleh di masa depan.")
 	case errors.Is(err, service.ErrVoidReasonRequired):
 		validationFail(c, "Alasan pembatalan wajib diisi (1–500 karakter).")
-	case errors.Is(err, service.ErrInvalidInvoice), errors.Is(err, service.ErrInvalidAccount), errors.Is(err, service.ErrInvalidSettings):
+	case errors.Is(err, domain.ErrContractNotActive):
+		corehttp.Fail(c, coreerrors.New("CONTRACT_NOT_ACTIVE", "Kontrak sudah tidak aktif.", http.StatusConflict))
+	case errors.Is(err, receivable.ErrContractNotFound):
+		corehttp.Fail(c, coreerrors.New("CONTRACT_NOT_FOUND", "Kontrak tidak ditemukan.", http.StatusNotFound))
+	case errors.Is(err, service.ErrInvalidInvoice), errors.Is(err, service.ErrInvalidAccount), errors.Is(err, service.ErrInvalidSettings), errors.Is(err, service.ErrInvalidContractInput):
 		validationFail(c, err.Error())
 	case errors.Is(err, receivable.ErrInvoiceNotFound):
 		corehttp.Fail(c, coreerrors.New("INVOICE_NOT_FOUND", "Invoice tidak ditemukan.", http.StatusNotFound))

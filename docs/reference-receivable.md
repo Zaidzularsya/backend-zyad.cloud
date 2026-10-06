@@ -155,6 +155,23 @@ Lihat `api/openapi.yaml` (tag `Receivable`). Ringkas, di bawah `/api/v1/app/rece
 `INVOICE_PDF_FAILED` 502. Id di path/body divalidasi sebagai UUID di handler; PIC dan pengirim default divalidasi
 sebagai anggota aktif organisasi.
 
+## Contract & penagihan order (Rilis 3 S4)
+
+`OrderBilling` (`BillOrder`, `BillDelivery`) dipakai CRM; semua langkah idempoten per `(SourceType, SourceID)` sehingga aman diulang
+setelah gagal di tengah. Urutan `BillOrder`: **account** (dari kontak CRM, diperbarui bila berubah) → **contract** (baris berulang;
+unik per sumber, nomor `CTR-YYYY-NNNN`, `ContractCreated` hanya saat dibuat) → **invoice awal** (baris prabayar, key `initial`,
+menautkan `contract_item_id` periode pertama).
+
+- **Periode:** `pricing.AddPeriod(start, freq, n)` dihitung dari `start_date` dengan clamp akhir bulan (31 Jan bulanan → 28/29 Feb → 31 Mar);
+  `PeriodRange(n) = [AddPeriod(n), AddPeriod(n+1) − 1 hari]`.
+- **Contract item:** prabayar mulai `period_index=1` (periode 1 sudah ditagih di invoice awal), pascabayar `period_index=0`;
+  `next_period_start/end` dipakai billing run (S5). Deskripsi baris periode: `"<deskripsi> (periode 5 Okt 2026 – 4 Nov 2026)"`.
+- **BillDelivery:** satu invoice per `batchKey` (`delivery:<batchKey>`) untuk baris sekali bayar pascabayar.
+- **Endpoint** (`/app/receivable/contracts`): `GET` list/detail, `PATCH /:id` (tanggal akhir ≥ hari ini WIB atau null), `POST /:id/end`
+  (alasan 1–500). Permission `contract.read|manage`. Galat `CONTRACT_NOT_FOUND` 404, `CONTRACT_NOT_ACTIVE` 409.
+- Migration `000146`: tabel `receivable_contracts`/`receivable_contract_items`, FK `receivable_invoices.contract_id` dan
+  `receivable_invoice_items.contract_item_id`.
+
 ## Catatan operasional
 
 - Route katalog (`/app/catalog`) dan mailbox (`/app/mailboxes`, `/app/emails`) terbuka untuk `crm.enabled` **atau**

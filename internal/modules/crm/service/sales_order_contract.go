@@ -80,3 +80,8 @@ type SalesOrderDeps struct {
 func (d SalesOrderDeps) soURL(id string) string {
 	return strings.TrimRight(d.FrontendURL, "/") + "/app/sales/orders/" + id
 }
+
+// ContractInfoReader: status & nomor kontrak untuk tautan di respons SO (diadaptasi di internal/app).
+type ContractInfoReader interface {
+	ContractInfo(ctx context.Context, scope coretenant.Scope, id string) (status, number string, err error)
+}

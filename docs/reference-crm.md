@@ -402,6 +402,28 @@ Aturan (R3–R5):
 - **Rate limit.** 30 request/menit per IP (semua endpoint publik) dan 10 aksi POST/jam per token → `429 RATE_LIMITED`. Redis mati → fail open.
 - **Catatan operasional.** Token juga muncul di path halaman frontend `/q/<token>`; log akses nginx perlu me-mask atau tidak menyimpan path tersebut.
 
+## Sales Order & aturan Won (Rilis 3 S4)
+
+Quotation yang di-approve (customer lewat link atau sales) memanggil `QuotationApprovedHook` → `SalesOrderService.QuotationApproved`
+membuat **SO draft** (`SO-YYYY-NNNN`, idempoten per quotation; aktivitas `order` + notifikasi `crm.sales_order_created` ke PIC).
+`suggest_deal_status` pada approve kini selalu kosong.
+
+- **Status:** `draft → confirmed → completed`, `draft → cancelled`. `billing_status`: `none · pending · done · failed`.
+- **Syarat Konfirmasi:** `start_date` ≥ hari ini (WIB) − 30 hari; `bill_to_name` 2–200; minimal satu kanal; email butuh
+  `bill_to_email` valid; WhatsApp butuh kontak CRM **dan** `bill_to_phone`. Gagal → 422 `SALES_ORDER_INCOMPLETE` `{data.fields}`.
+- **Konfirmasi** (`MarkConfirmed` kondisional; tab ganda → 409 `SALES_ORDER_NOT_DRAFT`) lalu `receivable.OrderBilling.BillOrder`:
+  invoice awal (baris prabayar, idempotency key `initial`) + Contract (baris berulang). Kegagalan penagihan **bukan error HTTP**:
+  SO `confirmed` dengan `billing_status=failed` dan `billing_error` ramah; `POST /:id/retry-billing` melanjutkan tanpa dobel.
+- **Konfirmasi diterima** (`POST /:id/deliveries`, `batch_key` wajib): baris `one_time+postpaid` → invoice per batch (idempoten).
+- **Aturan Won (R18)** — `WonEvaluator`: per baris SO `confirmed/completed` pada deal `open`: `one_time+prepaid` & `recurring+prepaid` →
+  invoice awal `paid`; `recurring+postpaid` → contract ada; `one_time+postpaid` → `delivered`. SO tanpa baris tidak memicu Won; deal
+  `won/lost` tidak disentuh. Dipicu: konfirmasi SO, konfirmasi diterima, listener receivable (`InvoicePaid` sumber `sales_order`,
+  `ContractCreated`), dan `GET /deals/:id/won-checklist` (pemulihan bila listener gagal; pembayaran tetap tercatat).
+- **Endpoint** (`/app/crm`): `sales-orders` (list/get/PATCH draft), `:id/confirm|retry-billing|cancel|deliveries`,
+  `deals/:id/sales-orders`, `deals/:id/won-checklist`. Permission: `sales_order.read|manage|confirm` (member hanya `read`).
+- Galat: `SALES_ORDER_NOT_DRAFT`, `DELIVERY_NOT_PENDING`, `SALES_ORDER_NOT_CONFIRMED`, `BILLING_NOT_RETRYABLE` 409;
+  `SALES_ORDER_INCOMPLETE`, `VALIDATION_ERROR` 422; `BILLING_FAILED` 502; `SALES_ORDER_NOT_FOUND` 404.
+
 ## Non-Goals
 
 - Tidak menggantikan atau berinteraksi langsung dengan `billing_invoices`/`billing_payments` (modul
