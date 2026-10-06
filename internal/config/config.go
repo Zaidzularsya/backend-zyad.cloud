@@ -48,6 +48,7 @@ func Load() Config {
 		Discord:      LoadDiscord(),
 		Security:     LoadSecurity(),
 		Storage:      LoadStorage(),
+		SelfServe:    LoadSelfServe(),
 	}
 }
 
