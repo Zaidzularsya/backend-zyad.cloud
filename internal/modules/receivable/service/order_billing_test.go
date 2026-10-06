@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"testing"
 	"time"
 
@@ -18,8 +19,9 @@ import (
 // ---- fakes khusus order billing ----
 
 type fakeContracts struct {
-	byID    map[string]domain.Contract
-	created int
+	byID            map[string]domain.Contract
+	created         int
+	failAdvanceOnce bool
 }
 
 func newFakeContracts() *fakeContracts { return &fakeContracts{byID: map[string]domain.Contract{}} }
@@ -86,6 +88,77 @@ func (f *fakeContracts) End(_ context.Context, _ coretenant.Scope, id string, en
 	c.Status, c.EndDate, c.EndReason = domain.ContractEnded, &end, reason
 	f.byID[id] = c
 	return c, nil
+}
+
+// DueItems meniru query repository: rumus BillOn, batas end_date, urut contract_id lalu next_period_start.
+func (f *fakeContracts) DueItems(_ context.Context, _ coretenant.Scope, today time.Time, lead, limit int) ([]repository.DueItem, error) {
+	out := []repository.DueItem{}
+	for _, c := range f.byID {
+		if c.Status != domain.ContractActive {
+			continue
+		}
+		for _, it := range c.Items {
+			billOn := it.NextPeriodEnd.AddDate(0, 0, 1)
+			if it.PaymentTiming == pricing.Prepaid {
+				billOn = it.NextPeriodStart.AddDate(0, 0, -lead)
+			}
+			if billOn.After(today) || (c.EndDate != nil && it.NextPeriodStart.After(*c.EndDate)) {
+				continue
+			}
+			header := c
+			header.Items = nil
+			out = append(out, repository.DueItem{ContractID: c.ID, ContractNumber: c.ContractNumber, AccountID: c.AccountID,
+				ItemID: it.ID, Contract: header, Item: it, BillOn: billOn})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ContractID != out[j].ContractID {
+			return out[i].ContractID < out[j].ContractID
+		}
+		return out[i].Item.NextPeriodStart.Before(out[j].Item.NextPeriodStart)
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (f *fakeContracts) Advance(_ context.Context, _ coretenant.Scope, itemID string, from int, nextStart, nextEnd time.Time) (bool, error) {
+	if f.failAdvanceOnce {
+		f.failAdvanceOnce = false
+		return false, errors.New("db down")
+	}
+	for _, c := range f.byID {
+		for i, it := range c.Items {
+			if it.ID == itemID {
+				if it.PeriodIndex != from {
+					return false, nil
+				}
+				c.Items[i].PeriodIndex, c.Items[i].NextPeriodStart, c.Items[i].NextPeriodEnd = from+1, nextStart, nextEnd
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func (f *fakeContracts) EndExpired(_ context.Context, _ coretenant.Scope, today time.Time) (int64, error) {
+	var n int64
+	for id, c := range f.byID {
+		if c.Status != domain.ContractActive || c.EndDate == nil || !c.EndDate.Before(today) {
+			continue
+		}
+		open := false
+		for _, it := range c.Items {
+			open = open || !it.NextPeriodStart.After(*c.EndDate)
+		}
+		if !open {
+			c.Status, c.EndReason = domain.ContractEnded, "Masa kontrak berakhir"
+			f.byID[id] = c
+			n++
+		}
+	}
+	return n, nil
 }
 
 // failingInvoices membungkus InvoiceService agar CreateAndIssue bisa digagalkan sekali.

@@ -18,14 +18,18 @@ type contractRepository struct{ db *database.Pool }
 
 func NewContractRepository(db *database.Pool) ContractRepository { return &contractRepository{db: db} }
 
-const contractSelect = `
-	SELECT c.id, c.account_id, c.contract_number, c.status, c.source_type, COALESCE(c.source_id::text, ''),
+const contractColumns = `
+	c.id, c.account_id, c.contract_number, c.status, c.source_type, COALESCE(c.source_id::text, ''),
 		c.currency, c.start_date, c.end_date, c.channels, COALESCE(c.pic_user_id::text, ''), c.notes,
 		c.end_reason, c.ended_at, COALESCE(c.created_by::text, ''), c.created_at, c.updated_at,
 		a.id, a.name, a.company_name, a.email, a.phone, a.address,
-		COALESCE(a.source_type, ''), COALESCE(a.source_id::text, ''), a.created_at, a.updated_at
+		COALESCE(a.source_type, ''), COALESCE(a.source_id::text, ''), a.created_at, a.updated_at`
+
+const contractFrom = `
 	FROM receivable_contracts c
 	JOIN receivable_accounts a ON a.organization_id = c.organization_id AND a.id = c.account_id`
+
+const contractSelect = `SELECT` + contractColumns + contractFrom
 
 func scanContract(row pgx.Row) (domain.Contract, error) {
 	var c domain.Contract
@@ -217,4 +221,78 @@ func (r *contractRepository) SetEndDate(ctx context.Context, scope coretenant.Sc
 func (r *contractRepository) End(ctx context.Context, scope coretenant.Scope, id string, endDate time.Time, reason, by string) (domain.Contract, error) {
 	return r.updateActive(ctx, scope, id,
 		`status = 'ended', end_date = $3, end_reason = $4, ended_at = now(), updated_by = $5`, endDate, reason, nullableString(by))
+}
+
+// billOnExpr: tanggal tagih item (alias i = receivable_contract_items; $2 = lead days).
+const billOnExpr = `CASE WHEN i.payment_timing = 'prepaid' THEN i.next_period_start - $2::int ELSE i.next_period_end + 1 END`
+
+func (r *contractRepository) DueItems(ctx context.Context, scope coretenant.Scope, today time.Time, leadDays, limit int) ([]DueItem, error) {
+	out := []DueItem{}
+	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT`+contractColumns+`,
+			i.id, i.description, i.quantity::text, i.unit, i.unit_price::text, COALESCE(i.discount_percent::text, ''),
+			i.tax_percent::text, COALESCE(i.product_id::text, ''), i.sku, COALESCE(i.source_line_id::text, ''),
+			i.billing_frequency, i.payment_timing, i.period_index, i.next_period_start, i.next_period_end, i.position,
+			`+billOnExpr+` AS bill_on`+contractFrom+`
+			JOIN receivable_contract_items i ON i.organization_id = c.organization_id AND i.contract_id = c.id
+			WHERE c.organization_id = $1 AND c.status = 'active'
+				AND (c.end_date IS NULL OR i.next_period_start <= c.end_date)
+				AND `+billOnExpr+` <= $3::date
+			ORDER BY c.id, i.next_period_start, i.position, i.id
+			LIMIT $4`, scope.OrganizationID(), leadDays, today, clampLimit(limit))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var d DueItem
+			var status, sourceType, freq, timing string
+			c, it := &d.Contract, &d.Item
+			if err := rows.Scan(&c.ID, &c.AccountID, &c.ContractNumber, &status, &sourceType, &c.SourceID,
+				&c.Currency, &c.StartDate, &c.EndDate, &c.Channels, &c.PICUserID, &c.Notes,
+				&c.EndReason, &c.EndedAt, &c.CreatedBy, &c.CreatedAt, &c.UpdatedAt,
+				&c.Account.ID, &c.Account.Name, &c.Account.CompanyName, &c.Account.Email, &c.Account.Phone, &c.Account.Address,
+				&c.Account.SourceType, &c.Account.SourceID, &c.Account.CreatedAt, &c.Account.UpdatedAt,
+				&it.ID, &it.Description, &it.Quantity, &it.Unit, &it.UnitPrice, &it.DiscountPercent,
+				&it.TaxPercent, &it.ProductID, &it.SKU, &it.SourceLineID, &freq, &timing,
+				&it.PeriodIndex, &it.NextPeriodStart, &it.NextPeriodEnd, &it.Position, &d.BillOn); err != nil {
+				return err
+			}
+			c.Status, c.SourceType = domain.ContractStatus(status), domain.SourceType(sourceType)
+			it.Frequency, it.PaymentTiming = pricing.Frequency(freq), pricing.PaymentTiming(timing)
+			d.ContractID, d.ContractNumber, d.AccountID, d.ItemID = c.ID, c.ContractNumber, c.AccountID, it.ID
+			out = append(out, d)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+func (r *contractRepository) Advance(ctx context.Context, scope coretenant.Scope, itemID string, from int, nextStart, nextEnd time.Time) (bool, error) {
+	var advanced bool
+	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE receivable_contract_items
+			SET period_index = period_index + 1, next_period_start = $4, next_period_end = $5
+			WHERE id = $1 AND organization_id = $2 AND period_index = $3`,
+			itemID, scope.OrganizationID(), from, nextStart, nextEnd)
+		advanced = tag.RowsAffected() == 1
+		return err
+	})
+	return advanced, err
+}
+
+func (r *contractRepository) EndExpired(ctx context.Context, scope coretenant.Scope, today time.Time) (int64, error) {
+	var n int64
+	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE receivable_contracts c
+			SET status = 'ended', end_reason = 'Masa kontrak berakhir', ended_at = now(), updated_at = now()
+			WHERE c.organization_id = $1 AND c.status = 'active' AND c.end_date < $2::date
+				AND NOT EXISTS (
+					SELECT 1 FROM receivable_contract_items i
+					WHERE i.organization_id = c.organization_id AND i.contract_id = c.id
+						AND i.next_period_start <= c.end_date)`, scope.OrganizationID(), today)
+		n = tag.RowsAffected()
+		return err
+	})
+	return n, err
 }

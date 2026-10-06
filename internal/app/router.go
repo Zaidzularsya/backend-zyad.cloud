@@ -339,6 +339,9 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		if deps.ReceivableContractHandler != nil {
 			deps.ReceivableContractHandler.RegisterRoutes(receivableGroup, deps.PermissionChecker)
 		}
+		if deps.ReceivableOverviewHandler != nil {
+			deps.ReceivableOverviewHandler.RegisterRoutes(receivableGroup, deps.PermissionChecker)
+		}
 	}
 
 	// Katalog produk tenant (dipakai quotation CRM dan invoice receivable). Aturan tenant sama

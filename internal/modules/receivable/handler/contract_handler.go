@@ -15,10 +15,19 @@ import (
 	"zyad.cloud/internal/shared/response"
 )
 
-type ContractHandler struct{ svc service.ContractService }
+type ContractHandler struct {
+	svc      service.ContractService
+	upcoming service.OverviewService // opsional: tanggal tagih berikutnya di detail
+}
 
 func NewContractHandler(svc service.ContractService) *ContractHandler {
 	return &ContractHandler{svc: svc}
+}
+
+// WithUpcoming mengaktifkan field `upcoming` pada detail contract.
+func (h *ContractHandler) WithUpcoming(o service.OverviewService) *ContractHandler {
+	h.upcoming = o
+	return h
 }
 
 func (h *ContractHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker) {
@@ -76,7 +85,16 @@ func (h *ContractHandler) Get(c *gin.Context) {
 		failReceivable(c, err)
 		return
 	}
-	corehttp.OK(c, "success", dto.ContractFromDomain(ct))
+	detail := dto.ContractDetailResponse{ContractResponse: dto.ContractFromDomain(ct), Upcoming: []dto.UpcomingBillingResponse{}}
+	if h.upcoming != nil {
+		list, err := h.upcoming.ContractUpcoming(c.Request.Context(), scope, ct, 3)
+		if err != nil {
+			failReceivable(c, err)
+			return
+		}
+		detail.Upcoming = dto.UpcomingFromDomain(list)
+	}
+	corehttp.OK(c, "success", detail)
 }
 
 func (h *ContractHandler) Patch(c *gin.Context) {

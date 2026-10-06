@@ -603,3 +603,162 @@ func TestContractCreateUniqueAndEnd(t *testing.T) {
 		t.Fatalf("tenant B sees %d contracts", total)
 	}
 }
+
+func TestDueItemsAndAdvance(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	acc := e.account(t, scope, "Budi")
+	c := e.contract(t, scope, acc.ID, "CTR-S5-1", "7f2f1c6e-0000-4000-8000-0000000000a1")
+	itemA, itemB := c.Items[0], c.Items[1]
+
+	due := func(today string, lead int) []repository.DueItem {
+		t.Helper()
+		got, err := e.contracts.DueItems(e.ctx, scope, *date(today), lead, 500)
+		if err != nil {
+			t.Fatalf("DueItems(%s): %v", today, err)
+		}
+		return got
+	}
+	if got := due("2026-10-28", 7); len(got) != 0 {
+		t.Fatalf("2026-10-28 lead 7 = %+v, want empty", got)
+	}
+	got := due("2026-10-29", 7)
+	if len(got) != 1 || got[0].ItemID != itemA.ID || got[0].BillOn.Format("2006-01-02") != "2026-10-29" ||
+		got[0].ContractID != c.ID || got[0].ContractNumber != "CTR-S5-1" || got[0].AccountID != acc.ID ||
+		got[0].Contract.Currency != "IDR" || len(got[0].Contract.Channels) != 1 || got[0].Item.Description != "Internet" {
+		t.Fatalf("2026-10-29 = %+v", got)
+	}
+	if got := due("2026-10-29", 14); len(got) != 1 {
+		t.Fatalf("lead 14 on 2026-10-29 = %d", len(got))
+	}
+	if got := due("2026-10-22", 14); len(got) != 1 {
+		t.Fatalf("lead 14 on 2026-10-22 = %d, want 1 (H-14)", len(got))
+	}
+	both := due("2027-10-05", 7)
+	// urut next_period_start: B (2026-10-05) lebih dulu dari A (2026-11-05).
+	if len(both) != 2 || both[0].ItemID != itemB.ID || both[0].BillOn.Format("2006-01-02") != "2027-10-05" || both[1].ItemID != itemA.ID {
+		t.Fatalf("2027-10-05 = %+v", both)
+	}
+
+	nextStart, nextEnd := *date("2026-12-05"), *date("2027-01-04")
+	if ok, err := e.contracts.Advance(e.ctx, scope, itemA.ID, 1, nextStart, nextEnd); err != nil || !ok {
+		t.Fatalf("advance = %v err=%v", ok, err)
+	}
+	if ok, err := e.contracts.Advance(e.ctx, scope, itemA.ID, 1, nextStart, nextEnd); err != nil || ok {
+		t.Fatalf("second advance with from=1 = %v err=%v, want false", ok, err)
+	}
+	after, _ := e.contracts.FindByID(e.ctx, scope, c.ID)
+	if after.Items[0].PeriodIndex != 2 || after.Items[0].NextPeriodStart.Format("2006-01-02") != "2026-12-05" ||
+		after.Items[0].NextPeriodEnd.Format("2006-01-02") != "2027-01-04" {
+		t.Fatalf("item after advance = %+v", after.Items[0])
+	}
+	if other, _ := e.contracts.DueItems(e.ctx, e.tenants.B.Scope, *date("2027-10-05"), 7, 500); len(other) != 0 {
+		t.Fatal("tenant B must not see tenant A due items")
+	}
+}
+
+func TestDueItemsRespectEndDateAndEndExpired(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	acc := e.account(t, scope, "Budi")
+	c := e.contract(t, scope, acc.ID, "CTR-S5-2", "7f2f1c6e-0000-4000-8000-0000000000a2")
+	end := *date("2026-11-04")
+	if _, err := e.contracts.SetEndDate(e.ctx, scope, c.ID, &end, ""); err != nil {
+		t.Fatal(err)
+	}
+	// A: periode berikutnya mulai 5 Nov > end_date → tidak ditagih; B (postpaid, mulai 5 Okt) masih bisa.
+	got, _ := e.contracts.DueItems(e.ctx, scope, *date("2026-10-29"), 7, 500)
+	if len(got) != 0 {
+		t.Fatalf("A after end_date must not be due: %+v", got)
+	}
+	// B: next_period_start 2026-10-05 <= end_date, BillOn 2027-10-05 → jatuh tempo, sehingga contract belum boleh ended.
+	if n, err := e.contracts.EndExpired(e.ctx, scope, *date("2026-11-05")); err != nil || n != 0 {
+		t.Fatalf("EndExpired with due-able item B = %d err=%v, want 0", n, err)
+	}
+	// Maju B melewati end_date → tidak ada item tersisa sebelum end_date.
+	if ok, err := e.contracts.Advance(e.ctx, scope, c.Items[1].ID, 0, *date("2027-10-05"), *date("2028-10-04")); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if n, err := e.contracts.EndExpired(e.ctx, scope, *date("2026-11-04")); err != nil || n != 0 {
+		t.Fatalf("EndExpired on end_date itself = %d err=%v, want 0 (end_date < today required)", n, err)
+	}
+	if n, err := e.contracts.EndExpired(e.ctx, scope, *date("2026-11-05")); err != nil || n != 1 {
+		t.Fatalf("EndExpired = %d err=%v, want 1", n, err)
+	}
+	ended, _ := e.contracts.FindByID(e.ctx, scope, c.ID)
+	if ended.Status != domain.ContractEnded || ended.EndReason != "Masa kontrak berakhir" || ended.EndedAt == nil {
+		t.Fatalf("ended = %+v", ended)
+	}
+	if got, _ := e.contracts.DueItems(e.ctx, scope, *date("2030-01-01"), 7, 500); len(got) != 0 {
+		t.Fatal("ended contract must not appear in DueItems")
+	}
+}
+
+func TestOverviewQueries(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	repo := repository.NewOverviewRepository(e.db)
+	acc := e.account(t, scope, "Budi")
+	e.contract(t, scope, acc.ID, "CTR-OV-1", "7f2f1c6e-0000-4000-8000-0000000000b1")
+	ended := e.contract(t, scope, acc.ID, "CTR-OV-2", "7f2f1c6e-0000-4000-8000-0000000000b2")
+	if _, err := e.contracts.End(e.ctx, scope, ended.ID, *date("2026-12-31"), "selesai", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := repo.ActiveItems(e.ctx, scope, 100)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("active items = %d err=%v (ended contract must be excluded)", len(items), err)
+	}
+	if items[0].ContractNumber != "CTR-OV-1" || items[0].AccountName != "Budi" || items[0].Item.Description != "Internet" ||
+		items[0].StartDate.Format("2006-01-02") != "2026-10-05" || items[1].Item.Frequency != pricing.Annual {
+		t.Fatalf("items = %+v", items)
+	}
+	if other, _ := repo.ActiveItems(e.ctx, e.tenants.B.Scope, 100); len(other) != 0 {
+		t.Fatal("tenant B must not see tenant A items")
+	}
+
+	// Unpaid: dua invoice issued (333.000), satu dibayar 1.000, satu void (tidak dihitung).
+	one := e.issued(t, scope, acc.ID, "INV-OV-1")
+	two := e.issued(t, scope, acc.ID, "INV-OV-2")
+	three := e.issued(t, scope, acc.ID, "INV-OV-3")
+	if _, _, _, err := e.payments.Record(e.ctx, scope, one.ID, repository.PaymentParams{Amount: "1000", Method: "manual", PaidAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.invoices.Void(e.ctx, scope, three.ID, "salah", ""); err != nil {
+		t.Fatal(err)
+	}
+	sum, err := repo.Unpaid(e.ctx, scope, *date("2026-10-20"))
+	if err != nil || sum.Count != 2 || sum.OverdueCount != 2 || sum.TotalBalance != "665000.00" {
+		t.Fatalf("unpaid = %+v err=%v", sum, err)
+	}
+	if early, _ := repo.Unpaid(e.ctx, scope, *date("2026-10-10")); early.OverdueCount != 0 {
+		t.Fatalf("overdue before due_date = %d", early.OverdueCount)
+	}
+
+	// Kiriman gagal: one gagal lalu sukses (hilang); two gagal WA (tampil); one gagal email dua kali di invoice lain → satu baris.
+	rec := func(inv, channel, status, msg string) {
+		t.Helper()
+		if _, err := e.sends.Record(e.ctx, scope, repository.RecordSendParams{InvoiceID: inv, Channel: channel, Status: status, Error: msg, Trigger: "auto"}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	rec(one.ID, "email", "failed", "smtp down")
+	rec(one.ID, "email", "sent", "")
+	rec(two.ID, "email", "failed", "pertama")
+	rec(two.ID, "email", "failed", "kedua")
+	rec(two.ID, "whatsapp", "failed", "wa down")
+	failed, err := repo.FailedSends(e.ctx, scope, 50)
+	if err != nil || len(failed) != 2 {
+		t.Fatalf("failed sends = %+v err=%v", failed, err)
+	}
+	if failed[0].InvoiceID != two.ID || failed[0].Channel != "whatsapp" || failed[0].Error != "wa down" || failed[0].InvoiceNumber != "INV-OV-2" || failed[0].AccountName != "Budi" {
+		t.Fatalf("failed[0] = %+v", failed[0])
+	}
+	if failed[1].Channel != "email" || failed[1].Error != "kedua" {
+		t.Fatalf("failed[1] = %+v (must be the latest failure of the pair)", failed[1])
+	}
+	if other, _ := repo.FailedSends(e.ctx, e.tenants.B.Scope, 50); len(other) != 0 {
+		t.Fatal("tenant B must not see tenant A failed sends")
+	}
+}
