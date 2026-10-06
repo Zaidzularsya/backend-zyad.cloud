@@ -58,7 +58,7 @@ func NewReceivableBillingRunner(cfg config.Config, db *database.Pool, log *slog.
 		AppName: cfg.App.Name, FrontendURL: cfg.App.FrontendURL, NotificationLocale: cfg.Notification.DefaultLocale,
 	})
 
-	run := receivableservice.NewBillingRun(receivablerepo.NewContractRepository(db), module.Invoices, receivablerepo.NewSettingsRepository(db), nil)
+	run := receivableservice.NewBillingRun(receivablerepo.NewContractRepository(db), module.Invoices, receivablerepo.NewSettingsRepository(db), module.Listeners, nil)
 	scopes := organizationservice.NewWorkerResolver(organizationrepo.NewOrganizationRepository(db), receivableservice.BillingRunWorkerIdentity)
 	return receivableservice.NewBillingRunner(receivableOrgLister{repo: organizationrepo.NewOrganizationRepository(db)}, scopes, run), nil
 }

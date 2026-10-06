@@ -11,7 +11,10 @@ import (
 func TestContractServiceValidation(t *testing.T) {
 	repo := newFakeContracts()
 	c, _ := repo.Create(ctx, scope, contractParamsForTest())
-	svc := NewContractService(repo, func() time.Time { return nowWIB })
+	listener := &recordingListener{}
+	registry := NewRegistry()
+	registry.Add(listener)
+	svc := NewContractService(repo, registry, func() time.Time { return nowWIB })
 
 	yesterday := date("2026-10-04")
 	if _, err := svc.SetEndDate(ctx, scope, c.ID, &yesterday, "u1"); !errors.Is(err, ErrInvalidContractInput) {
@@ -20,6 +23,9 @@ func TestContractServiceValidation(t *testing.T) {
 	today := date("2026-10-05")
 	if got, err := svc.SetEndDate(ctx, scope, c.ID, &today, "u1"); err != nil || got.EndDate == nil {
 		t.Fatalf("SetEndDate today = %+v err=%v", got, err)
+	}
+	if len(listener.ended) != 0 {
+		t.Fatalf("SetEndDate must not emit ContractEnded: %+v", listener.ended)
 	}
 	if _, err := svc.End(ctx, scope, c.ID, today, "  ", "u1"); !errors.Is(err, ErrInvalidContractInput) {
 		t.Fatalf("End without reason err = %v", err)
@@ -30,5 +36,19 @@ func TestContractServiceValidation(t *testing.T) {
 	}
 	if _, err := svc.End(ctx, scope, c.ID, today, "lagi", "u1"); !errors.Is(err, domain.ErrContractNotActive) {
 		t.Fatalf("second End err = %v", err)
+	}
+	if len(listener.ended) != 1 || listener.ended[0].ID != c.ID || listener.ended[0].Number != c.ContractNumber {
+		t.Fatalf("ContractEnded events = %+v, want exactly one", listener.ended)
+	}
+}
+
+func TestContractServiceEndSurvivesPanickingListener(t *testing.T) {
+	repo := newFakeContracts()
+	c, _ := repo.Create(ctx, scope, contractParamsForTest())
+	registry := NewRegistry()
+	registry.Add(panicListener{})
+	svc := NewContractService(repo, registry, func() time.Time { return nowWIB })
+	if ended, err := svc.End(ctx, scope, c.ID, date("2026-10-05"), "selesai", "u1"); err != nil || ended.Status != domain.ContractEnded {
+		t.Fatalf("End = %+v err=%v", ended, err)
 	}
 }

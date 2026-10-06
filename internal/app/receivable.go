@@ -227,7 +227,7 @@ func buildReceivable(b receivableBuild) receivableModule {
 		Payments: paymentRepo, Invoices: invoiceSvc, Listeners: listeners,
 	})
 	settingsSvc := receivableservice.NewSettingsService(settingsRepo, members)
-	contractSvc := receivableservice.NewContractService(contractRepo, nil)
+	contractSvc := receivableservice.NewContractService(contractRepo, listeners, nil)
 	overviewSvc := receivableservice.NewOverviewService(receivablerepo.NewOverviewRepository(db), settingsRepo, nil)
 	orderBilling := receivableservice.NewOrderBilling(accountRepo, invoiceSvc, contractRepo, counterRepo, listeners)
 

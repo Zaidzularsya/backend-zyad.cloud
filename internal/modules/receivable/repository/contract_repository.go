@@ -282,20 +282,33 @@ func (r *contractRepository) Advance(ctx context.Context, scope coretenant.Scope
 	return advanced, err
 }
 
-func (r *contractRepository) EndExpired(ctx context.Context, scope coretenant.Scope, today time.Time) (int64, error) {
-	var n int64
+func (r *contractRepository) EndExpired(ctx context.Context, scope coretenant.Scope, today time.Time) ([]domain.Contract, error) {
+	var ended []domain.Contract
 	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `UPDATE receivable_contracts c
+		rows, err := tx.Query(ctx, `UPDATE receivable_contracts c
 			SET status = 'ended', end_reason = 'Masa kontrak berakhir', ended_at = now(), updated_at = now()
 			WHERE c.organization_id = $1 AND c.status = 'active' AND c.end_date < $2::date
 				AND NOT EXISTS (
 					SELECT 1 FROM receivable_contract_items i
 					WHERE i.organization_id = c.organization_id AND i.contract_id = c.id
-						AND i.next_period_start <= c.end_date)`, scope.OrganizationID(), today)
-		n = tag.RowsAffected()
-		return err
+						AND i.next_period_start <= c.end_date)
+			RETURNING c.id, c.contract_number, c.source_type, COALESCE(c.source_id::text, '')`, scope.OrganizationID(), today)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var c domain.Contract
+			var sourceType string
+			if err := rows.Scan(&c.ID, &c.ContractNumber, &sourceType, &c.SourceID); err != nil {
+				return err
+			}
+			c.SourceType, c.Status = domain.SourceType(sourceType), domain.ContractEnded
+			ended = append(ended, c)
+		}
+		return rows.Err()
 	})
-	return n, err
+	return ended, err
 }
 
 // featuresOrEmpty: kolom features NOT NULL; baris tanpa fitur disimpan sebagai [].

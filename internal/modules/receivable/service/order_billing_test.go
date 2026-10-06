@@ -143,8 +143,8 @@ func (f *fakeContracts) Advance(_ context.Context, _ coretenant.Scope, itemID st
 	return false, nil
 }
 
-func (f *fakeContracts) EndExpired(_ context.Context, _ coretenant.Scope, today time.Time) (int64, error) {
-	var n int64
+func (f *fakeContracts) EndExpired(_ context.Context, _ coretenant.Scope, today time.Time) ([]domain.Contract, error) {
+	var ended []domain.Contract
 	for id, c := range f.byID {
 		if c.Status != domain.ContractActive || c.EndDate == nil || !c.EndDate.Before(today) {
 			continue
@@ -156,10 +156,10 @@ func (f *fakeContracts) EndExpired(_ context.Context, _ coretenant.Scope, today 
 		if !open {
 			c.Status, c.EndReason = domain.ContractEnded, "Masa kontrak berakhir"
 			f.byID[id] = c
-			n++
+			ended = append(ended, c)
 		}
 	}
-	return n, nil
+	return ended, nil
 }
 
 // failingInvoices membungkus InvoiceService agar CreateAndIssue bisa digagalkan sekali.

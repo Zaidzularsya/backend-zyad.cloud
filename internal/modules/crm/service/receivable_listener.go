@@ -60,6 +60,10 @@ func (l *ReceivableListener) InvoicePaid(ctx context.Context, scope coretenant.S
 	})
 }
 
+// ContractEnded: pencabutan akses workspace ditambahkan di Task 5.
+func (l *ReceivableListener) ContractEnded(_ context.Context, _ coretenant.Scope, _ receivableservice.ContractRef) {
+}
+
 func (l *ReceivableListener) ContractCreated(ctx context.Context, scope coretenant.Scope, c receivableservice.ContractRef) {
 	l.guard("contract created", func() {
 		if c.SourceType != receivabledomain.SourceSalesOrder {

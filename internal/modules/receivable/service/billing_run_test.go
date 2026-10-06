@@ -47,6 +47,7 @@ type runHarness struct {
 	invoices  *recordingInvoices
 	settings  *fakeSettings
 	store     *fakeStore
+	listener  *recordingListener
 }
 
 func newRunHarness(t *testing.T, nowUTC string) *runHarness {
@@ -56,12 +57,14 @@ func newRunHarness(t *testing.T, nowUTC string) *runHarness {
 		t.Fatal(err)
 	}
 	ih := newInvoiceHarness(t)
+	registry := NewRegistry()
+	registry.Add(ih.listener)
 	h := &runHarness{
-		t: t, contracts: newFakeContracts(), store: ih.store,
+		t: t, contracts: newFakeContracts(), store: ih.store, listener: ih.listener,
 		invoices: &recordingInvoices{InvoiceService: ih.svc, seen: map[string]bool{}},
 		settings: &fakeSettings{domain.Settings{InvoiceLeadDays: 7, PaymentTermsDays: 7, DefaultChannels: []string{"email"}}},
 	}
-	h.run = NewBillingRun(h.contracts, h.invoices, h.settings, func() time.Time { return now })
+	h.run = NewBillingRun(h.contracts, h.invoices, h.settings, registry, func() time.Time { return now })
 	return h
 }
 
@@ -177,6 +180,13 @@ func TestBillingRunEndsExpiredContracts(t *testing.T) {
 	res, _ := h.run.Run(ctx, scope)
 	if res.Invoices != 0 || res.Ended != 1 || h.contracts.byID["c1"].Status != domain.ContractEnded {
 		t.Fatalf("res=%+v status=%s", res, h.contracts.byID["c1"].Status)
+	}
+	if got := h.listener.ended; len(got) != 1 || got[0].ID != "c1" {
+		t.Fatalf("ContractEnded events = %+v, want one for c1", got)
+	}
+	h.run.Run(ctx, scope)
+	if len(h.listener.ended) != 1 {
+		t.Fatalf("second run re-emitted ContractEnded: %+v", h.listener.ended)
 	}
 }
 

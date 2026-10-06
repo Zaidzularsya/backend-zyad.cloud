@@ -335,6 +335,7 @@ func (r *fakeRenderer) Render(d docpdf.Document) ([]byte, error) {
 type recordingListener struct {
 	paid      []InvoiceRef
 	contracts []ContractRef
+	ended     []ContractRef
 }
 
 func (l *recordingListener) InvoicePaid(_ context.Context, _ coretenant.Scope, inv InvoiceRef) {
@@ -342,6 +343,10 @@ func (l *recordingListener) InvoicePaid(_ context.Context, _ coretenant.Scope, i
 }
 func (l *recordingListener) ContractCreated(_ context.Context, _ coretenant.Scope, c ContractRef) {
 	l.contracts = append(l.contracts, c)
+}
+
+func (l *recordingListener) ContractEnded(_ context.Context, _ coretenant.Scope, c ContractRef) {
+	l.ended = append(l.ended, c)
 }
 
 type invoiceHarness struct {

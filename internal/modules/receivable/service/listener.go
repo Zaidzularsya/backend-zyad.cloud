@@ -47,6 +47,12 @@ func (r *Registry) ContractCreated(ctx context.Context, scope coretenant.Scope, 
 	}
 }
 
+func (r *Registry) ContractEnded(ctx context.Context, scope coretenant.Scope, c ContractRef) {
+	for _, l := range r.snapshot() {
+		safely("contract ended", func() { l.ContractEnded(ctx, scope, c) })
+	}
+}
+
 func safely(what string, fn func()) {
 	defer func() {
 		if rec := recover(); rec != nil {
