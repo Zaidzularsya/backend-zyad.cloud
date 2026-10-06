@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"time"
 
@@ -165,4 +166,70 @@ func invoiceInputFor(g *billGroup) InvoiceInput {
 		in.PeriodStart, in.PeriodEnd = &start, &end
 	}
 	return in
+}
+
+type BillingRunnerResult struct {
+	Checked, Invoices, Advanced, Ended int
+	Failed                             int // organisasi gagal total atau punya error per kelompok
+}
+
+// BillingRunner menjalankan BillingRun untuk setiap organisasi aktif (job worker per jam).
+type BillingRunner struct {
+	orgs     OrganizationLister
+	scopes   PublicScopeResolver
+	run      *BillingRun
+	pageSize int
+}
+
+func NewBillingRunner(orgs OrganizationLister, scopes PublicScopeResolver, run *BillingRun) *BillingRunner {
+	return &BillingRunner{orgs: orgs, scopes: scopes, run: run, pageSize: overduePageSize}
+}
+
+// RunOnce satu putaran. Galat per organisasi dicatat lalu dilanjutkan; hanya pembatalan konteks atau
+// galat daftar organisasi yang menghentikan putaran.
+func (r *BillingRunner) RunOnce(ctx context.Context) (BillingRunnerResult, error) {
+	var res BillingRunnerResult
+	for offset := 0; ; offset += r.pageSize {
+		if err := ctx.Err(); err != nil {
+			return res, err
+		}
+		ids, err := r.orgs.ListActive(ctx, r.pageSize, offset)
+		if err != nil {
+			return res, err
+		}
+		for _, id := range ids {
+			if err := ctx.Err(); err != nil {
+				return res, err
+			}
+			res.Checked++
+			out, err := r.runOrganization(ctx, id)
+			res.Invoices += out.Invoices
+			res.Advanced += out.Advanced
+			res.Ended += out.Ended
+			if err != nil || len(out.Errors) > 0 {
+				res.Failed++
+				slog.WarnContext(ctx, "receivable: billing run failed for organization", "organization_id", id,
+					"error", err, "group_errors", out.Errors)
+			}
+			if out.Invoices > 0 || out.Advanced > 0 || out.Ended > 0 {
+				slog.InfoContext(ctx, "receivable: billing run", "organization_id", id,
+					"invoices", out.Invoices, "advanced", out.Advanced, "ended", out.Ended, "errors", len(out.Errors))
+			}
+		}
+		if len(ids) < r.pageSize {
+			return res, nil
+		}
+	}
+}
+
+func (r *BillingRunner) runOrganization(ctx context.Context, organizationID string) (BillingRunResult, error) {
+	tenantCtx, err := r.scopes.ResolveWorkerOrganization(ctx, organizationID, BillingRunWorkerIdentity)
+	if err != nil {
+		return BillingRunResult{}, err
+	}
+	scope, err := coretenant.NewScope(tenantCtx)
+	if err != nil {
+		return BillingRunResult{}, err
+	}
+	return r.run.Run(ctx, scope)
 }

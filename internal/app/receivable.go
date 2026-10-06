@@ -177,6 +177,7 @@ type receivableModule struct {
 	SettingsHandler *receivablehandler.SettingsHandler
 	PublicHandler   *receivablehandler.PublicInvoiceHandler
 	ContractHandler *receivablehandler.ContractHandler
+	OverviewHandler *receivablehandler.OverviewHandler
 
 	Invoices  receivableservice.InvoiceService
 	Contracts receivableservice.ContractService
@@ -221,6 +222,7 @@ func buildReceivable(b receivableBuild) receivableModule {
 	})
 	settingsSvc := receivableservice.NewSettingsService(settingsRepo, members)
 	contractSvc := receivableservice.NewContractService(contractRepo, nil)
+	overviewSvc := receivableservice.NewOverviewService(receivablerepo.NewOverviewRepository(db), settingsRepo, nil)
 	orderBilling := receivableservice.NewOrderBilling(accountRepo, invoiceSvc, contractRepo, counterRepo, listeners)
 
 	// Halaman publik: scope tenant dibangun dari baris link lewat resolver worker (identitas
@@ -237,7 +239,8 @@ func buildReceivable(b receivableBuild) receivableModule {
 		PaymentHandler:  receivablehandler.NewPaymentHandler(paymentSvc),
 		SettingsHandler: receivablehandler.NewSettingsHandler(settingsSvc),
 		PublicHandler:   receivablehandler.NewPublicInvoiceHandler(publicSvc, b.RateCounter),
-		ContractHandler: receivablehandler.NewContractHandler(contractSvc),
+		ContractHandler: receivablehandler.NewContractHandler(contractSvc).WithUpcoming(overviewSvc),
+		OverviewHandler: receivablehandler.NewOverviewHandler(overviewSvc),
 		Invoices:        invoiceSvc, Accounts: accountSvc, Payments: paymentSvc, Listeners: listeners,
 		Contracts: contractSvc, Billing: orderBilling,
 	}

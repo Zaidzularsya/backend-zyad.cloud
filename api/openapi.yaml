@@ -9664,6 +9664,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/receivable/overview:
+    get:
+      summary: Recurring billing monitor
+      operationId: getReceivableOverview
+      tags: [Receivable]
+      security:
+      - BearerAuth: []
+      description: 'Active contracts, recurring value per frequency, billings due in the next 30 days (max 100, billing-run formula incl. invoice lead days), unpaid invoices, and failed deliveries not yet resolved by a later successful delivery on the same channel (max 50). Permission: `contract.read`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`.'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  data: {$ref: '#/components/schemas/ReceivableOverview'}
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/app/receivable/contracts:
     get:
       summary: List contracts
@@ -9707,7 +9737,7 @@ paths:
       tags: [Receivable]
       security:
       - BearerAuth: []
-      description: 'Permission: `contract.read`. Tenant: customer or platform organization.'
+      description: 'Includes `upcoming`: the next 3 billing dates per item (active contracts only). Permission: `contract.read`. Tenant: customer or platform organization.'
       parameters:
       - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
@@ -9719,7 +9749,7 @@ paths:
                 type: object
                 properties:
                   success: {type: boolean}
-                  data: {$ref: '#/components/schemas/ReceivableContract'}
+                  data: {$ref: '#/components/schemas/ReceivableContractDetail'}
         '401':
           description: Unauthenticated
           content:
@@ -9990,6 +10020,60 @@ components:
               period_index: {type: integer}
               next_period_start: {type: string, format: date}
               next_period_end: {type: string, format: date}
+    ReceivableUpcomingBilling:
+      type: object
+      properties:
+        contract_id: {type: string, format: uuid}
+        contract_number: {type: string}
+        account_name: {type: string}
+        item_id: {type: string, format: uuid, description: Only on contract detail}
+        description: {type: string, description: Only on contract detail}
+        bill_on: {type: string, format: date}
+        period_start: {type: string, format: date}
+        period_end: {type: string, format: date}
+        amount: {type: string, description: 'Qty x price - discount + tax, 2 decimals'}
+        payment_timing: {type: string, enum: [prepaid, postpaid]}
+    ReceivableContractDetail:
+      allOf:
+      - $ref: '#/components/schemas/ReceivableContract'
+      - type: object
+        properties:
+          upcoming:
+            type: array
+            items: {$ref: '#/components/schemas/ReceivableUpcomingBilling'}
+    ReceivableOverview:
+      type: object
+      properties:
+        active_contracts: {type: integer}
+        recurring_by_frequency:
+          type: array
+          description: Ordered daily to annual; frequencies without items are omitted.
+          items:
+            type: object
+            properties:
+              frequency: {type: string}
+              label: {type: string}
+              amount: {type: string}
+        upcoming:
+          type: array
+          items: {$ref: '#/components/schemas/ReceivableUpcomingBilling'}
+        unpaid:
+          type: object
+          properties:
+            count: {type: integer}
+            total_balance: {type: string}
+            overdue_count: {type: integer}
+        failed_sends:
+          type: array
+          items:
+            type: object
+            properties:
+              invoice_id: {type: string, format: uuid}
+              invoice_number: {type: string}
+              account_name: {type: string}
+              channel: {type: string, enum: [email, whatsapp]}
+              error: {type: string}
+              sent_at: {type: string, format: date-time}
     WhatsAppSession:
       type: object
       description: The WAHA session name is internal and never returned.

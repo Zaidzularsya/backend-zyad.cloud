@@ -28,6 +28,10 @@ func (s runnerScopes) ResolveWorkerOrganization(_ context.Context, orgID, identi
 	if identity != OverdueWorkerIdentity {
 		return coretenant.Context{}, errors.New("wrong identity " + identity)
 	}
+	return s.resolve(orgID)
+}
+
+func (s runnerScopes) resolve(orgID string) (coretenant.Context, error) {
 	if s.failFor[orgID] {
 		return coretenant.Context{}, errors.New("organization inactive")
 	}

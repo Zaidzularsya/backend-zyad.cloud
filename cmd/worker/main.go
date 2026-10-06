@@ -68,6 +68,10 @@ func main() {
 	inbound := app.NewWhatsAppInboundProcessor(cfg, db, whatsappBus, log)
 	mailSync := app.NewMailSyncService(cfg, db, log)
 	overdue := app.NewReceivableOverdueRunner(db)
+	billingRun, err := app.NewReceivableBillingRunner(cfg, db, log)
+	if err != nil {
+		log.Warn("receivable billing run disabled", "error", err)
+	}
 
 	if *once {
 		if err := runBatch(ctx, log, worker, notificationService, batchSize); err != nil && !errors.Is(err, context.Canceled) {
@@ -84,6 +88,9 @@ func main() {
 			runMailSync(ctx, log, mailSync)
 		}
 		runReceivableOverdue(ctx, log, overdue)
+		if billingRun != nil {
+			runReceivableBillingRun(ctx, log, billingRun)
+		}
 		return
 	}
 
@@ -116,6 +123,11 @@ func main() {
 
 	log.Info("starting receivable overdue job", "interval", receivableOverdueInterval.String())
 	go runEvery(ctx, receivableOverdueInterval, func() { runReceivableOverdue(ctx, log, overdue) })
+
+	if billingRun != nil {
+		log.Info("starting receivable billing run job", "interval", receivableBillingRunInterval.String())
+		go runEvery(ctx, receivableBillingRunInterval, func() { runReceivableBillingRun(ctx, log, billingRun) })
+	}
 
 	interval := time.Duration(cfg.Notification.WorkerIntervalSeconds) * time.Second
 	if interval <= 0 {
@@ -247,6 +259,19 @@ func runReceivableOverdue(ctx context.Context, log *slog.Logger, runner *receiva
 	if result.Marked > 0 || result.Failed > 0 {
 		log.Info("marked overdue invoices", "organizations", result.Checked, "marked", result.Marked, "failed", result.Failed)
 	}
+}
+
+// receivableBillingRunInterval: tanggal tagih dihitung per hari WIB; per jam cukup, dan run idempoten.
+const receivableBillingRunInterval = time.Hour
+
+func runReceivableBillingRun(ctx context.Context, log *slog.Logger, runner *receivableservice.BillingRunner) {
+	result, err := runner.RunOnce(ctx)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		log.Error("receivable billing run failed", "error", err)
+		return
+	}
+	log.Info("receivable billing run", "organizations", result.Checked, "invoices", result.Invoices,
+		"advanced", result.Advanced, "ended", result.Ended, "failed", result.Failed)
 }
 
 func runMailSync(ctx context.Context, log *slog.Logger, sync *mailboxservice.SyncService) {

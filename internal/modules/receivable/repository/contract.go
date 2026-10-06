@@ -170,3 +170,32 @@ type DueItem struct {
 	Item                                          domain.ContractItem
 	BillOn                                        time.Time
 }
+
+// ActiveItem: item contract aktif beserta identitas contract dan nama account (bahan monitor Recurring Billing).
+type ActiveItem struct {
+	ContractID, ContractNumber, AccountName string
+	StartDate                               time.Time
+	EndDate                                 *time.Time
+	Item                                    domain.ContractItem
+}
+
+type UnpaidSummary struct {
+	Count, OverdueCount int
+	TotalBalance        string // Σ (grand_total − amount_paid) invoice issued|overdue
+}
+
+// FailedSend: kiriman gagal terakhir sebuah invoice yang belum disusul kiriman sukses pada kanal yang sama.
+type FailedSend struct {
+	InvoiceID, InvoiceNumber, AccountName, Channel, Error string
+	SentAt                                                time.Time
+}
+
+// OverviewRepository: query baca-saja untuk halaman Recurring Billing.
+type OverviewRepository interface {
+	// ActiveItems: item semua contract active, urut contract_id lalu position; dibatasi limit.
+	ActiveItems(ctx context.Context, scope coretenant.Scope, limit int) ([]ActiveItem, error)
+	// Unpaid: invoice issued|overdue; overdue = status overdue atau due_date < today.
+	Unpaid(ctx context.Context, scope coretenant.Scope, today time.Time) (UnpaidSummary, error)
+	// FailedSends: terbaru dulu, satu baris per (invoice, kanal), maks limit.
+	FailedSends(ctx context.Context, scope coretenant.Scope, limit int) ([]FailedSend, error)
+}

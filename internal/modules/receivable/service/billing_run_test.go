@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -188,5 +189,44 @@ func TestBillingRunFailedGroupDoesNotBlockOthers(t *testing.T) {
 	res, err := h.run.Run(ctx, scope)
 	if err != nil || res.Invoices != 1 || len(res.Errors) != 1 {
 		t.Fatalf("res=%+v err=%v", res, err)
+	}
+}
+
+type billingScopes struct{ failFor map[string]bool }
+
+func (s billingScopes) ResolveWorkerOrganization(c context.Context, orgID, identity string) (coretenant.Context, error) {
+	if identity != BillingRunWorkerIdentity {
+		return coretenant.Context{}, errors.New("wrong identity " + identity)
+	}
+	return runnerScopes{failFor: s.failFor}.resolve(orgID)
+}
+
+func TestBillingRunnerVisitsEveryOrganizationAndKeepsGoingAfterFailure(t *testing.T) {
+	h := newRunHarness(t, "2026-10-29T03:00:00Z")
+	h.contract("c1", "2026-10-05", item("A", pricing.Monthly, pricing.Prepaid, 1))
+	bad := "22222222-2222-2222-2222-222222222222"
+	orgs := &fakeOrgs{ids: []string{"11111111-1111-1111-1111-111111111111", bad, "33333333-3333-3333-3333-333333333333"}}
+	r := NewBillingRunner(orgs, billingScopes{failFor: map[string]bool{bad: true}}, h.run)
+	r.pageSize = 2
+	res, err := r.RunOnce(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// fake contract store tidak memisahkan organisasi: org pertama menagih, org ketiga tidak menemukan apa-apa.
+	if res.Checked != 3 || res.Failed != 1 || res.Invoices != 1 || res.Advanced != 1 {
+		t.Fatalf("result = %+v", res)
+	}
+	if len(orgs.calls) != 2 || orgs.calls[1] != [2]int{2, 2} {
+		t.Fatalf("paging calls = %v", orgs.calls)
+	}
+}
+
+func TestBillingRunnerStopsWhenContextIsCancelled(t *testing.T) {
+	h := newRunHarness(t, "2026-10-29T03:00:00Z")
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+	r := NewBillingRunner(&fakeOrgs{ids: []string{"11111111-1111-1111-1111-111111111111"}}, billingScopes{}, h.run)
+	if _, err := r.RunOnce(cctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }

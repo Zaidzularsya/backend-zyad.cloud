@@ -88,6 +88,7 @@ type Dependencies struct {
 	CRMSalesOrderHandler             *crmhandler.SalesOrderHandler
 	CRMDealOrdersHandler             *crmhandler.DealOrdersHandler
 	ReceivableContractHandler        *receivablehandler.ContractHandler
+	ReceivableOverviewHandler        *receivablehandler.OverviewHandler
 	ReceivableAccountHandler         *receivablehandler.AccountHandler
 	ReceivableInvoiceHandler         *receivablehandler.InvoiceHandler
 	ReceivablePaymentHandler         *receivablehandler.PaymentHandler

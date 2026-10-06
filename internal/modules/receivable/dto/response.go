@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"zyad.cloud/internal/modules/receivable/domain"
+	"zyad.cloud/internal/modules/receivable/service"
 )
 
 const dateLayout = "2006-01-02"
@@ -247,4 +248,82 @@ type ContractPatchRequest struct {
 type ContractEndRequest struct {
 	EndDate string `json:"end_date"`
 	Reason  string `json:"reason"`
+}
+
+type UpcomingBillingResponse struct {
+	ContractID     string `json:"contract_id,omitempty"`
+	ContractNumber string `json:"contract_number,omitempty"`
+	AccountName    string `json:"account_name,omitempty"`
+	ItemID         string `json:"item_id,omitempty"`
+	Description    string `json:"description,omitempty"`
+	BillOn         string `json:"bill_on"`
+	PeriodStart    string `json:"period_start"`
+	PeriodEnd      string `json:"period_end"`
+	Amount         string `json:"amount"`
+	PaymentTiming  string `json:"payment_timing"`
+}
+
+func UpcomingFromDomain(list []service.UpcomingBilling) []UpcomingBillingResponse {
+	out := make([]UpcomingBillingResponse, 0, len(list))
+	for _, u := range list {
+		out = append(out, UpcomingBillingResponse{
+			ContractID: u.ContractID, ContractNumber: u.ContractNumber, AccountName: u.AccountName,
+			ItemID: u.ItemID, Description: u.Description,
+			BillOn: u.BillOn.Format(dateLayout), PeriodStart: u.PeriodStart.Format(dateLayout), PeriodEnd: u.PeriodEnd.Format(dateLayout),
+			Amount: u.Amount, PaymentTiming: string(u.PaymentTiming),
+		})
+	}
+	return out
+}
+
+// ContractDetailResponse: detail contract + tanggal tagih berikutnya per item.
+type ContractDetailResponse struct {
+	ContractResponse
+	Upcoming []UpcomingBillingResponse `json:"upcoming"`
+}
+
+type RecurringTotalResponse struct {
+	Frequency string `json:"frequency"`
+	Label     string `json:"label"`
+	Amount    string `json:"amount"`
+}
+
+type UnpaidResponse struct {
+	Count        int    `json:"count"`
+	TotalBalance string `json:"total_balance"`
+	OverdueCount int    `json:"overdue_count"`
+}
+
+type FailedSendResponse struct {
+	InvoiceID     string    `json:"invoice_id"`
+	InvoiceNumber string    `json:"invoice_number"`
+	AccountName   string    `json:"account_name"`
+	Channel       string    `json:"channel"`
+	Error         string    `json:"error"`
+	SentAt        time.Time `json:"sent_at"`
+}
+
+type OverviewResponse struct {
+	ActiveContracts int                       `json:"active_contracts"`
+	Recurring       []RecurringTotalResponse  `json:"recurring_by_frequency"`
+	Upcoming        []UpcomingBillingResponse `json:"upcoming"`
+	Unpaid          UnpaidResponse            `json:"unpaid"`
+	FailedSends     []FailedSendResponse      `json:"failed_sends"`
+}
+
+func OverviewFromDomain(o service.Overview) OverviewResponse {
+	recurring := make([]RecurringTotalResponse, 0, len(o.Recurring))
+	for _, r := range o.Recurring {
+		recurring = append(recurring, RecurringTotalResponse{Frequency: string(r.Frequency), Label: r.Label, Amount: r.Amount})
+	}
+	failed := make([]FailedSendResponse, 0, len(o.FailedSends))
+	for _, f := range o.FailedSends {
+		failed = append(failed, FailedSendResponse{InvoiceID: f.InvoiceID, InvoiceNumber: f.InvoiceNumber, AccountName: f.AccountName,
+			Channel: f.Channel, Error: f.Error, SentAt: f.SentAt})
+	}
+	return OverviewResponse{
+		ActiveContracts: o.ActiveContracts, Recurring: recurring, Upcoming: UpcomingFromDomain(o.Upcoming),
+		Unpaid:      UnpaidResponse{Count: o.Unpaid.Count, TotalBalance: o.Unpaid.TotalBalance, OverdueCount: o.Unpaid.OverdueCount},
+		FailedSends: failed,
+	}
 }

@@ -693,3 +693,72 @@ func TestDueItemsRespectEndDateAndEndExpired(t *testing.T) {
 		t.Fatal("ended contract must not appear in DueItems")
 	}
 }
+
+func TestOverviewQueries(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	repo := repository.NewOverviewRepository(e.db)
+	acc := e.account(t, scope, "Budi")
+	e.contract(t, scope, acc.ID, "CTR-OV-1", "7f2f1c6e-0000-4000-8000-0000000000b1")
+	ended := e.contract(t, scope, acc.ID, "CTR-OV-2", "7f2f1c6e-0000-4000-8000-0000000000b2")
+	if _, err := e.contracts.End(e.ctx, scope, ended.ID, *date("2026-12-31"), "selesai", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := repo.ActiveItems(e.ctx, scope, 100)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("active items = %d err=%v (ended contract must be excluded)", len(items), err)
+	}
+	if items[0].ContractNumber != "CTR-OV-1" || items[0].AccountName != "Budi" || items[0].Item.Description != "Internet" ||
+		items[0].StartDate.Format("2006-01-02") != "2026-10-05" || items[1].Item.Frequency != pricing.Annual {
+		t.Fatalf("items = %+v", items)
+	}
+	if other, _ := repo.ActiveItems(e.ctx, e.tenants.B.Scope, 100); len(other) != 0 {
+		t.Fatal("tenant B must not see tenant A items")
+	}
+
+	// Unpaid: dua invoice issued (333.000), satu dibayar 1.000, satu void (tidak dihitung).
+	one := e.issued(t, scope, acc.ID, "INV-OV-1")
+	two := e.issued(t, scope, acc.ID, "INV-OV-2")
+	three := e.issued(t, scope, acc.ID, "INV-OV-3")
+	if _, _, _, err := e.payments.Record(e.ctx, scope, one.ID, repository.PaymentParams{Amount: "1000", Method: "manual", PaidAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.invoices.Void(e.ctx, scope, three.ID, "salah", ""); err != nil {
+		t.Fatal(err)
+	}
+	sum, err := repo.Unpaid(e.ctx, scope, *date("2026-10-20"))
+	if err != nil || sum.Count != 2 || sum.OverdueCount != 2 || sum.TotalBalance != "665000.00" {
+		t.Fatalf("unpaid = %+v err=%v", sum, err)
+	}
+	if early, _ := repo.Unpaid(e.ctx, scope, *date("2026-10-10")); early.OverdueCount != 0 {
+		t.Fatalf("overdue before due_date = %d", early.OverdueCount)
+	}
+
+	// Kiriman gagal: one gagal lalu sukses (hilang); two gagal WA (tampil); one gagal email dua kali di invoice lain → satu baris.
+	rec := func(inv, channel, status, msg string) {
+		t.Helper()
+		if _, err := e.sends.Record(e.ctx, scope, repository.RecordSendParams{InvoiceID: inv, Channel: channel, Status: status, Error: msg, Trigger: "auto"}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	rec(one.ID, "email", "failed", "smtp down")
+	rec(one.ID, "email", "sent", "")
+	rec(two.ID, "email", "failed", "pertama")
+	rec(two.ID, "email", "failed", "kedua")
+	rec(two.ID, "whatsapp", "failed", "wa down")
+	failed, err := repo.FailedSends(e.ctx, scope, 50)
+	if err != nil || len(failed) != 2 {
+		t.Fatalf("failed sends = %+v err=%v", failed, err)
+	}
+	if failed[0].InvoiceID != two.ID || failed[0].Channel != "whatsapp" || failed[0].Error != "wa down" || failed[0].InvoiceNumber != "INV-OV-2" || failed[0].AccountName != "Budi" {
+		t.Fatalf("failed[0] = %+v", failed[0])
+	}
+	if failed[1].Channel != "email" || failed[1].Error != "kedua" {
+		t.Fatalf("failed[1] = %+v (must be the latest failure of the pair)", failed[1])
+	}
+	if other, _ := repo.FailedSends(e.ctx, e.tenants.B.Scope, 50); len(other) != 0 {
+		t.Fatal("tenant B must not see tenant A failed sends")
+	}
+}

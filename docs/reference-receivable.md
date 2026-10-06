@@ -172,9 +172,29 @@ menautkan `contract_item_id` periode pertama).
 - Migration `000146`: tabel `receivable_contracts`/`receivable_contract_items`, FK `receivable_invoices.contract_id` dan
   `receivable_invoice_items.contract_item_id`.
 
+## Billing run & Recurring Billing (Rilis 3 S5)
+
+Worker (`cmd/worker`, job `receivable-billing-run`, **tiap 1 jam**; `-once` = satu putaran) menerbitkan dan mengirim invoice periode
+berikutnya untuk setiap contract aktif, per organisasi (`BillingRunner` → `BillingRun.Run`).
+
+- **Tanggal tagih** (hari ini = tanggal WIB): prabayar = `next_period_start − invoice_lead_days`; pascabayar = `next_period_end + 1 hari`.
+  Item jatuh tempo bila tanggal tagih ≤ hari ini **dan** (`end_date` kosong atau `next_period_start ≤ end_date`).
+- **Satu invoice per (contract, tanggal tagih)**: `source_type=contract`, `source_id=contract_id`, `idempotency_key=period:<YYYY-MM-DD>`;
+  baris membawa `contract_item_id` + periode, deskripsi `"<deskripsi> (periode 1 Nov 2026 – 30 Nov 2026)"`.
+- **Idempoten & aman paralel:** setelah terbit, item dimajukan kondisional (`WHERE period_index = <lama>`). Bila proses berhenti di antara
+  terbit dan maju, putaran berikut mendapat invoice yang sama dan tetap memajukan item. Kiriman otomatis **tidak** diulang untuk invoice yang
+  sudah ada, jadi kiriman gagal tidak memicu notifikasi tiap jam.
+- **Catch-up:** contract tertinggal ditagih satu invoice per periode, berurutan; maks 24 putaran per contract per run, 500 item per query.
+- Contract dengan `end_date < hari ini` tanpa item jatuh tempo tersisa → `ended`, alasan "Masa kontrak berakhir".
+- Migration `000148`: indeks query jatuh tempo.
+- **Endpoint:** `GET /app/receivable/overview` (`contract.read`): kontrak aktif, nilai berulang per frekuensi, tagihan 30 hari ke depan,
+  invoice belum lunas, kiriman gagal belum terselesaikan. `GET /contracts/:id` menambah `upcoming` (3 tanggal tagih berikutnya per item).
+- Catatan worker: tidak memiliki Redis, jadi pengiriman WhatsApp dari billing run berjalan tanpa rate limiter. Bila storage tenant belum
+  dikonfigurasi (PDF snapshot butuh asset store) job dinonaktifkan dengan peringatan log, seperti mail sync.
+
 ## Catatan operasional
 
 - Route katalog (`/app/catalog`) dan mailbox (`/app/mailboxes`, `/app/emails`) terbuka untuk `crm.enabled` **atau**
   `receivable.enabled` agar tenant non-CRM bisa memilih produk dan menghubungkan email.
 - Sebelum menjalankan `000145` di produksi: `SELECT count(*) FROM crm_invoices;` — bila > 0, ekspor dulu.
-- Belum ada: pembayaran online (S6), kontrak & billing run (S4/S5), pengingat jatuh tempo.
+- Belum ada: pembayaran online (S6), pengingat jatuh tempo.
