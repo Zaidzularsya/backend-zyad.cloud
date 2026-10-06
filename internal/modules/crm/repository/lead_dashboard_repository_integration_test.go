@@ -38,7 +38,7 @@ func setupCRMOrganizations(t *testing.T, db *database.Pool, tenants testutil.Ten
 			}
 			_, _ = tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", orgID)
 			for _, table := range []string{
-				"crm_quotation_sends", "crm_quotation_items", "crm_quotations",
+				"crm_sales_order_items", "crm_sales_orders", "crm_quotation_sends", "crm_quotation_items", "crm_quotations",
 				"crm_playbook_runs", "crm_activities", "crm_leads", "crm_deals",
 				"crm_contacts", "crm_companies", "crm_pipeline_stages", "crm_pipelines", "crm_settings",
 			} {

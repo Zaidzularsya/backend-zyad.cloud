@@ -34,11 +34,13 @@ const (
 	// ActivityTypeQuotationResponse dicatat sistem saat customer menyetujui /
 	// meminta revisi penawaran lewat link publik (detail di Metadata).
 	ActivityTypeQuotationResponse ActivityType = "quotation_response"
+	// ActivityTypeOrder dicatat sistem untuk siklus sales order (dibuat, dikonfirmasi, diterima, Won otomatis).
+	ActivityTypeOrder ActivityType = "order"
 )
 
 func (t ActivityType) IsValid() bool {
 	switch t {
-	case ActivityTypeCall, ActivityTypeEmail, ActivityTypeMeeting, ActivityTypeTask, ActivityTypeNote, ActivityTypeWhatsApp, ActivityTypeQuotationResponse:
+	case ActivityTypeCall, ActivityTypeEmail, ActivityTypeMeeting, ActivityTypeTask, ActivityTypeNote, ActivityTypeWhatsApp, ActivityTypeQuotationResponse, ActivityTypeOrder:
 		return true
 	default:
 		return false
