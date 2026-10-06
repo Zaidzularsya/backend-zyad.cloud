@@ -78,6 +78,7 @@ type Dependencies struct {
 	CatalogProductHandler            *cataloghandler.ProductHandler
 	CatalogCategoryHandler           *cataloghandler.CategoryHandler
 	CatalogFeatureHandler            *cataloghandler.FeatureHandler
+	CatalogPublicListingHandler      *cataloghandler.PublicListingHandler
 	CRMLeadDashboardHandler          *crmhandler.LeadDashboardHandler
 	CRMSettingsHandler               *crmhandler.CRMSettingsHandler
 	CRMMemberHandler                 *crmhandler.MemberHandler

@@ -102,6 +102,9 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.PublicProductHandler != nil {
 		deps.PublicProductHandler.RegisterRoutes(api)
 	}
+	if deps.CatalogPublicListingHandler != nil {
+		deps.CatalogPublicListingHandler.RegisterRoutes(api)
+	}
 	// DOKU payment notifications authenticate via HMAC signature headers, so
 	// the route lives outside both the JWT-protected and tenant-resolved
 	// groups.

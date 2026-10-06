@@ -3665,6 +3665,72 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PublicProductPlanListEnvelope"
+  /api/v1/public/catalog/listings:
+    get:
+      summary: List public platform products grouped by category
+      description: >-
+        Public products (`is_public`, active, not deleted) of the platform organization, grouped
+        category -> card (`listing_code`) -> variants ordered by billing frequency (daily to annual).
+        Card name/description/benefits come from the shortest-frequency variant. `price_with_tax` uses
+        the same calculator as quotations. `checkout_enabled` is true only for recurring, prepaid,
+        priced products with at least one feature. No authentication; `Cache-Control: public, max-age=60`.
+        The older `/public/catalog/plans` stays until the checkout migration completes.
+      operationId: listPublicCatalogListings
+      tags:
+        - Public Product Catalog
+      responses:
+        "200":
+          description: Public listings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      categories:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id: {type: string, format: uuid}
+                            name: {type: string}
+                            position: {type: integer}
+                            listings:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  code: {type: string}
+                                  name: {type: string}
+                                  description: {type: string}
+                                  order: {type: integer}
+                                  benefits:
+                                    type: array
+                                    items:
+                                      type: object
+                                      properties:
+                                        label: {type: string}
+                                  variants:
+                                    type: array
+                                    items:
+                                      type: object
+                                      properties:
+                                        product_id: {type: string, format: uuid}
+                                        sku: {type: string}
+                                        charge_type: {type: string}
+                                        billing_frequency: {type: string}
+                                        payment_timing: {type: string}
+                                        currency: {type: string}
+                                        base_price: {type: string}
+                                        tax_percent: {type: string}
+                                        price_with_tax: {type: string}
+                                        checkout_enabled: {type: boolean}
   /api/v1/platform/product/plans:
     get:
       summary: List billing plans

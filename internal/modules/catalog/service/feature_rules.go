@@ -93,9 +93,9 @@ func (s *productService) validateFeatures(ctx context.Context, features []reposi
 	return nil
 }
 
-// fillLabels mengisi Features[i].Label dengan satu panggilan registry. Key
+// fillFeatureLabels mengisi Features[i].Label dengan satu panggilan registry. Key
 // nonaktif tetap diberi label supaya produk lama tetap terbaca.
-func (s *productService) fillLabels(ctx context.Context, products []domain.Product) error {
+func fillFeatureLabels(ctx context.Context, registry FeatureRegistry, products []domain.Product) error {
 	var keys []string
 	seen := map[string]bool{}
 	for _, p := range products {
@@ -109,7 +109,7 @@ func (s *productService) fillLabels(ctx context.Context, products []domain.Produ
 	if len(keys) == 0 {
 		return nil
 	}
-	defs, err := s.features.FindByKeys(ctx, keys)
+	defs, err := registry.FindByKeys(ctx, keys)
 	if err != nil {
 		return err
 	}

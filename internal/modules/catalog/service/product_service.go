@@ -83,7 +83,7 @@ func (s *productService) withLabels(ctx context.Context, p domain.Product, err e
 		return p, err
 	}
 	list := []domain.Product{p}
-	if err := s.fillLabels(ctx, list); err != nil {
+	if err := fillFeatureLabels(ctx, s.features, list); err != nil {
 		return p, err
 	}
 	return list[0], nil
@@ -100,7 +100,7 @@ func (s *productService) List(ctx context.Context, scope coretenant.Scope, f rep
 	if err != nil {
 		return list, total, err
 	}
-	return list, total, s.fillLabels(ctx, list)
+	return list, total, fillFeatureLabels(ctx, s.features, list)
 }
 
 func (s *productService) FindByIDs(ctx context.Context, scope coretenant.Scope, ids []string) (map[string]domain.Product, error) {
@@ -112,7 +112,7 @@ func (s *productService) FindByIDs(ctx context.Context, scope coretenant.Scope, 
 	for _, p := range m {
 		list = append(list, p)
 	}
-	if err := s.fillLabels(ctx, list); err != nil {
+	if err := fillFeatureLabels(ctx, s.features, list); err != nil {
 		return m, err
 	}
 	for _, p := range list {

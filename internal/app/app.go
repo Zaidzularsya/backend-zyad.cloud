@@ -483,6 +483,11 @@ func New(ctx context.Context) (*App, error) {
 	)
 	catalogProductHandler := cataloghandler.NewProductHandler(catalogProductService)
 	catalogFeatureHandler := cataloghandler.NewFeatureHandler(catalogProductService)
+	catalogPublicListingHandler := cataloghandler.NewPublicListingHandler(catalogservice.NewPublicListingService(
+		catalogrepo.NewProductRepository(db),
+		catalogFeatureRegistry{features: productrepo.NewFeatureRepository(db)},
+		newPlatformScopeResolver(organizationrepo.NewOrganizationRepository(db)),
+	))
 	catalogCategoryHandler := cataloghandler.NewCategoryHandler(catalogservice.NewCategoryService(catalogrepo.NewCategoryRepository(db)))
 	mailboxRepo := mailboxrepo.NewMailboxRepository(db)
 	mailMessageRepo := mailboxrepo.NewMessageRepository(db)
@@ -653,6 +658,7 @@ func New(ctx context.Context) (*App, error) {
 		CatalogProductHandler:            catalogProductHandler,
 		CatalogCategoryHandler:           catalogCategoryHandler,
 		CatalogFeatureHandler:            catalogFeatureHandler,
+		CatalogPublicListingHandler:      catalogPublicListingHandler,
 		CRMLeadDashboardHandler:          crmLeadDashboardHandler,
 		CRMSettingsHandler:               crmSettingsHandler,
 		CRMMemberHandler:                 crmMemberHandler,

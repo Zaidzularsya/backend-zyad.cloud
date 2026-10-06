@@ -27,6 +27,7 @@ func newFakeRegistry() *fakeRegistry {
 	return &fakeRegistry{defs: map[string]domain.FeatureDef{
 		"crm":   {Key: "crm", Name: "CRM", ValueType: "boolean", IsActive: true},
 		"users": {Key: "users", Name: "Jumlah user", ValueType: "integer", Unit: "user", IsActive: true},
+		"wa":    {Key: "wa", Name: "WhatsApp", ValueType: "boolean", IsActive: true},
 		"old":   {Key: "old", Name: "Lama", ValueType: "boolean", IsActive: false},
 	}}
 }
