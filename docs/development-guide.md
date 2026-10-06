@@ -79,6 +79,7 @@ go run ./cmd/seed -name super-admin
 
 # 2. Baru seed platform organization
 go run ./cmd/seed -name platform-organization
+go run ./cmd/seed -name self-serve   # bot + pipeline Self-Serve (setelah platform-organization)
 ```
 
 Menjalankan `platform-organization` sebelum `super-admin` akan gagal karena `findPlatformOwner` tidak akan

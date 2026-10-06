@@ -99,6 +99,13 @@ func LoadSeedAdmin() SeedAdminConfig {
 	}
 }
 
+func LoadSelfServe() SelfServeConfig {
+	return SelfServeConfig{
+		BotEmail:       getEnv("SELF_SERVE_BOT_EMAIL", "self-serve-bot@zyad.cloud"),
+		DealOwnerEmail: getEnv("SELF_SERVE_DEAL_OWNER_EMAIL", ""),
+	}
+}
+
 func LoadHTTP() HTTPConfig {
 	return HTTPConfig{
 		ReadTimeoutSeconds:  getEnvInt("HTTP_READ_TIMEOUT_SECONDS", 15),

@@ -22,6 +22,7 @@ type Config struct {
 	Discord      DiscordConfig
 	Security     SecurityConfig
 	Storage      StorageConfig
+	SelfServe    SelfServeConfig
 }
 
 var loadEnvOnce sync.Once
@@ -112,6 +113,12 @@ type SeedAdminConfig struct {
 	Password string
 	WhatsApp string
 	Role     string
+}
+
+// SelfServeConfig: aktor otomatis checkout self-serve (modul CRM).
+type SelfServeConfig struct {
+	BotEmail       string
+	DealOwnerEmail string // kosong → bot
 }
 
 type HTTPConfig struct {
