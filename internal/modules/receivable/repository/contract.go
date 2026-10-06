@@ -153,4 +153,20 @@ type ContractRepository interface {
 	SetEndDate(ctx context.Context, scope coretenant.Scope, id string, endDate *time.Time, by string) (domain.Contract, error)
 	// End: active → ended (ErrContractNotActive bila bukan active).
 	End(ctx context.Context, scope coretenant.Scope, id string, endDate time.Time, reason, by string) (domain.Contract, error)
+	// DueItems: item contract active yang BillOn <= today, urut contract_id, next_period_start.
+	// BillOn: prabayar = next_period_start − leadDays; pascabayar = next_period_end + 1 hari.
+	// Item yang periodenya mulai setelah end_date contract tidak ikut.
+	DueItems(ctx context.Context, scope coretenant.Scope, today time.Time, leadDays, limit int) ([]DueItem, error)
+	// Advance: period_index+1 dan next_period_start/end baru, hanya bila period_index masih = from (false bila sudah dimajukan).
+	Advance(ctx context.Context, scope coretenant.Scope, itemID string, from int, nextStart, nextEnd time.Time) (bool, error)
+	// EndExpired: active dengan end_date < today dan tanpa item yang next_period_start <= end_date → ended.
+	EndExpired(ctx context.Context, scope coretenant.Scope, today time.Time) (int64, error)
+}
+
+// DueItem: satu item contract yang sudah waktunya ditagih. Contract adalah header tanpa Items.
+type DueItem struct {
+	ContractID, ContractNumber, AccountID, ItemID string
+	Contract                                      domain.Contract
+	Item                                          domain.ContractItem
+	BillOn                                        time.Time
 }
