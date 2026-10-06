@@ -20,6 +20,7 @@ var (
 	// ErrInvalidInvoice membungkus detail validasi (errors.Is(err, ErrInvalidInvoice)).
 	ErrInvalidInvoice       = errors.New("invalid invoice")
 	ErrInvalidAccount       = errors.New("invalid account")
+	ErrInvalidContractInput = errors.New("invalid contract")
 	ErrInvalidSettings      = errors.New("invalid receivable settings")
 	ErrInvalidPayment       = errors.New("amount must be > 0 with at most 2 decimals and paid_at must not be in the future")
 	ErrVoidReasonRequired   = errors.New("void reason is required (1-500 characters)")
