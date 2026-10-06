@@ -477,7 +477,12 @@ func New(ctx context.Context) (*App, error) {
 	crmLeadHandler := crmhandler.NewLeadHandler(crmLeadSvc)
 	crmLeadAttachmentHandler := crmhandler.NewLeadAttachmentHandler(crmLeadAttachmentSvc)
 	crmContactAttachmentHandler := crmhandler.NewContactAttachmentHandler(crmContactAttachmentSvc)
-	catalogProductHandler := cataloghandler.NewProductHandler(catalogservice.NewProductService(catalogrepo.NewProductRepository(db)))
+	catalogProductService := catalogservice.NewProductService(
+		catalogrepo.NewProductRepository(db),
+		catalogFeatureRegistry{features: productrepo.NewFeatureRepository(db)},
+	)
+	catalogProductHandler := cataloghandler.NewProductHandler(catalogProductService)
+	catalogFeatureHandler := cataloghandler.NewFeatureHandler(catalogProductService)
 	catalogCategoryHandler := cataloghandler.NewCategoryHandler(catalogservice.NewCategoryService(catalogrepo.NewCategoryRepository(db)))
 	mailboxRepo := mailboxrepo.NewMailboxRepository(db)
 	mailMessageRepo := mailboxrepo.NewMessageRepository(db)
@@ -559,7 +564,7 @@ func New(ctx context.Context) (*App, error) {
 			FrontendURL: cfg.App.FrontendURL,
 			Responses:   crmQuotationResponseRepo,
 		}),
-		crmservice.WithQuotationCatalog(catalogrepo.NewProductRepository(db)),
+		crmservice.WithQuotationCatalog(catalogProductService),
 		crmservice.WithQuotationDeals(crmDealRepo),
 		crmservice.WithQuotationDocuments(crmservice.QuotationDocumentDeps{
 			Issuers:    crmrepo.NewQuotationIssuerRepository(db),
@@ -647,6 +652,7 @@ func New(ctx context.Context) (*App, error) {
 		MailboxHandler:                   mailboxHandler,
 		CatalogProductHandler:            catalogProductHandler,
 		CatalogCategoryHandler:           catalogCategoryHandler,
+		CatalogFeatureHandler:            catalogFeatureHandler,
 		CRMLeadDashboardHandler:          crmLeadDashboardHandler,
 		CRMSettingsHandler:               crmSettingsHandler,
 		CRMMemberHandler:                 crmMemberHandler,

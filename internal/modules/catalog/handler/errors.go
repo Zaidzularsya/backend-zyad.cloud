@@ -14,10 +14,13 @@ import (
 
 func failCatalog(c *gin.Context, err error) {
 	switch {
-	case errors.Is(err, service.ErrInvalidProduct), errors.Is(err, service.ErrInvalidCategory):
+	case errors.Is(err, service.ErrInvalidProduct), errors.Is(err, service.ErrInvalidCategory),
+		errors.Is(err, service.ErrPlatformOnly), errors.Is(err, service.ErrInvalidListing), errors.Is(err, service.ErrInvalidFeature):
 		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
 	case errors.Is(err, repository.ErrSKUExists):
 		corehttp.Fail(c, coreerrors.New("PRODUCT_SKU_EXISTS", "SKU sudah dipakai produk lain", http.StatusConflict))
+	case errors.Is(err, repository.ErrListingExists):
+		corehttp.Fail(c, coreerrors.New("PRODUCT_LISTING_EXISTS", "Kode listing sudah punya produk publik dengan frekuensi ini", http.StatusConflict))
 	case errors.Is(err, repository.ErrCategoryNameExists):
 		corehttp.Fail(c, coreerrors.New("CATEGORY_NAME_EXISTS", "Nama kategori sudah ada", http.StatusConflict))
 	default:

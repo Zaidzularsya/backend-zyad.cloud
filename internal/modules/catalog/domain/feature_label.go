@@ -10,8 +10,8 @@ import (
 
 // FeatureDef adalah definisi fitur dari registry (modul product).
 type FeatureDef struct {
-	Key, Name, ValueType, Unit string
-	IsActive                   bool
+	Key, Name, Module, ValueType, Unit string
+	IsActive                           bool
 }
 
 // FeatureLabel menghasilkan teks tampilan sebuah fitur. visible=false berarti

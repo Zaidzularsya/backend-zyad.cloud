@@ -1,13 +1,27 @@
 package dto
 
 import (
+	"encoding/json"
 	"errors"
 
+	"zyad.cloud/internal/modules/catalog/repository"
 	"zyad.cloud/internal/shared/pricing"
 )
 
 // ErrPartialPricing: atribut harga pada update harus dikirim utuh.
 var ErrPartialPricing = errors.New("charge_type and payment_timing must be sent together (with billing_frequency when recurring)")
+
+// ErrPartialListing: blok publikasi pada update dikirim utuh (tiga field) atau tidak sama sekali.
+var ErrPartialListing = errors.New("is_public, listing_code, dan listing_order harus dikirim bersamaan")
+
+// FeatureRequest adalah satu fitur produk; Value dibiarkan mentah agar tipe JSON
+// (bool/angka/string) bisa divalidasi terhadap registry oleh service.
+type FeatureRequest struct {
+	FeatureKey   string          `json:"feature_key" binding:"required,max=100"`
+	Value        json.RawMessage `json:"value" binding:"required"`
+	DisplayLabel string          `json:"display_label"`
+	Position     int             `json:"position"`
+}
 
 type ProductListQuery struct {
 	Q          string `form:"q"`
@@ -31,6 +45,11 @@ type CreateProductRequest struct {
 	PaymentTiming    string `json:"payment_timing" binding:"omitempty,oneof=prepaid postpaid"`
 
 	IsActive *bool `json:"is_active"`
+
+	IsPublic     bool             `json:"is_public"`
+	ListingCode  string           `json:"listing_code"`
+	ListingOrder int              `json:"listing_order"`
+	Features     []FeatureRequest `json:"features" binding:"omitempty,dive"`
 }
 
 type UpdateProductRequest struct {
@@ -47,6 +66,31 @@ type UpdateProductRequest struct {
 	PaymentTiming    *string `json:"payment_timing" binding:"omitempty,oneof=prepaid postpaid"`
 
 	IsActive *bool `json:"is_active"`
+
+	IsPublic     *bool             `json:"is_public"`
+	ListingCode  *string           `json:"listing_code"`
+	ListingOrder *int              `json:"listing_order"`
+	Features     *[]FeatureRequest `json:"features" binding:"omitempty,dive"` // nil = tidak diubah; [] = hapus semua
+}
+
+// Listing mengembalikan blok publikasi utuh, atau nil bila tidak ada yang dikirim.
+func (r UpdateProductRequest) Listing() (*repository.ListingParams, error) {
+	if r.IsPublic == nil && r.ListingCode == nil && r.ListingOrder == nil {
+		return nil, nil
+	}
+	if r.IsPublic == nil || r.ListingCode == nil || r.ListingOrder == nil {
+		return nil, ErrPartialListing
+	}
+	return &repository.ListingParams{IsPublic: *r.IsPublic, ListingCode: *r.ListingCode, ListingOrder: *r.ListingOrder}, nil
+}
+
+// FeatureValues memetakan request fitur ke parameter repository; nil bila field tidak dikirim.
+func FeatureValues(in []FeatureRequest) []repository.FeatureValue {
+	out := make([]repository.FeatureValue, 0, len(in))
+	for _, f := range in {
+		out = append(out, repository.FeatureValue{FeatureKey: f.FeatureKey, Value: f.Value, DisplayLabel: f.DisplayLabel, Position: f.Position})
+	}
+	return out
 }
 
 // Pricing mengembalikan atribut harga utuh, atau nil bila tidak ada yang

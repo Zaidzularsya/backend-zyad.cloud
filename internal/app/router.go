@@ -355,6 +355,7 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		)
 		deps.CatalogProductHandler.RegisterRoutes(catalogGroup, deps.PermissionChecker)
 		deps.CatalogCategoryHandler.RegisterRoutes(catalogGroup, deps.PermissionChecker)
+		deps.CatalogFeatureHandler.RegisterRoutes(catalogGroup, deps.PermissionChecker)
 	}
 
 	// Email: each user's own mailboxes (CRM and receivable). Same tenant rules as CRM.

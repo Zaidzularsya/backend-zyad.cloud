@@ -86,3 +86,23 @@ Migration `000142` menambah tiga kolom pada `catalog_products`. Kosakata dan val
 - `POST`: field kosong → default; kombinasi tidak valid → `422 VALIDATION_ERROR`.
 - `PATCH`: atribut dikirim **utuh** — `charge_type` dan `payment_timing` bersamaan (+ `billing_frequency` bila `recurring`). Hanya sebagian → `422`. Tidak mengirim satu pun → tidak berubah.
 - Nilai ini menjadi default snapshot baris quotation; lihat `reference-crm.md` (Atribut harga).
+
+## Fitur & publikasi (khusus platform) (Rilis 4 S1)
+
+Migration `000150`. Hanya katalog org **platform** (`OrganizationTypePlatform`) yang boleh memakai field ini; org lain yang mengirim
+`is_public`, `listing_code`, `listing_order`, atau `features` mendapat `422 VALIDATION_ERROR` dan tidak ada yang tersimpan.
+
+| Field | Aturan |
+|---|---|
+| `is_public` | Tampil di `GET /public/catalog/listings`. Wajib punya kategori dan `listing_code` (CHECK di DB + service) |
+| `listing_code` | `^[a-z0-9][a-z0-9-]{0,49}$`. Unik per `(listing_code, billing_frequency)` di antara produk publik → `409 PRODUCT_LISTING_EXISTS` |
+| `listing_order` | Urutan kartu dalam kategori |
+| `features[]` | `{feature_key, value, display_label?, position}`, maks 30, key aktif di registry `product_features`, tanpa duplikat |
+
+Nilai fitur menurut `value_type`: `boolean` → JSON bool; `integer` → angka tanpa pecahan; `decimal` → angka; `string` → 1–200 karakter.
+
+- `PATCH`: blok listing (`is_public`+`listing_code`+`listing_order`) dikirim utuh atau tidak sama sekali. `features` absen/null = tidak diubah, `[]` = hapus semua.
+- Key yang dinonaktifkan setelah dipakai: produk tetap terbaca (label tetap tampil), tetapi menyimpan ulang `features` dengan key itu ditolak.
+- Label tampil (`features[].label`): `display_label` bila diisi; selain itu `boolean true` → nama fitur, `boolean false` → kosong (tidak ditampilkan), angka → `"<nama>: <nilai>[ <unit>]"`, string → `"<nama>: <nilai>"`.
+- `GET /app/catalog/features` (`catalog_product.update`, platform saja, selain itu `403 PLATFORM_ONLY`) → registry fitur aktif untuk form.
+- Fitur tersalin sebagai snapshot ke `crm_quotation_items.features` (lihat `reference-crm.md`).
