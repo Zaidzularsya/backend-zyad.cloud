@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+	coreerrors "zyad.cloud/internal/core/errors"
+	"zyad.cloud/internal/modules/receivable/repository"
 
 	"github.com/gin-gonic/gin"
 
@@ -112,5 +114,85 @@ func TestPublicInvoicePDFHeaders(t *testing.T) {
 	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "application/pdf" || !strings.HasPrefix(w.Header().Get("Content-Disposition"), "inline") ||
 		w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("X-Robots-Tag") != "noindex" {
 		t.Fatalf("pdf = %d %v", w.Code, w.Header())
+	}
+}
+
+type fakePublicPayments struct {
+	err       error
+	checkouts int
+}
+
+func (f *fakePublicPayments) Checkout(_ context.Context, token string) (string, time.Time, error) {
+	f.checkouts++
+	if f.err != nil {
+		return "", time.Time{}, f.err
+	}
+	if token != "good" {
+		return "", time.Time{}, service.ErrLinkInvalid
+	}
+	return "https://doku.test/pay", time.Date(2026, 10, 5, 4, 0, 0, 0, time.UTC), nil
+}
+
+func (f *fakePublicPayments) SyncStatus(_ context.Context, token string) (domain.InvoiceStatus, error) {
+	if token != "good" {
+		return "", service.ErrLinkInvalid
+	}
+	return domain.InvoicePaid, nil
+}
+
+func paymentRouter(p *fakePublicPayments) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	NewPublicInvoiceHandler(&fakePublicInvoices{view: openView()}, nil).WithPayments(p).RegisterRoutes(r.Group("/api/v1"))
+	return r
+}
+
+func post(r *gin.Engine, path string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, nil))
+	return w
+}
+
+func TestPublicInvoiceCheckout(t *testing.T) {
+	p := &fakePublicPayments{}
+	w := post(paymentRouter(p), "/api/v1/public/invoices/good/checkout")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"payment_url":"https://doku.test/pay"`) ||
+		!strings.Contains(w.Body.String(), `"expires_at":"2026-10-05T04:00:00Z"`) || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body)
+	}
+	if w := post(paymentRouter(p), "/api/v1/public/invoices/bad/checkout"); w.Code != http.StatusNotFound {
+		t.Fatalf("bad token status=%d", w.Code)
+	}
+}
+
+func TestPublicInvoiceCheckoutErrors(t *testing.T) {
+	cases := []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{service.ErrOnlinePaymentUnavailable, http.StatusForbidden, "ONLINE_PAYMENT_UNAVAILABLE"},
+		{repository.ErrInvoiceNotPayable, http.StatusConflict, "INVOICE_NOT_PAYABLE"},
+		{coreerrors.New("PAYMENT_CHECKOUT_FAILED", "failed", http.StatusBadGateway), http.StatusBadGateway, "PAYMENT_CHECKOUT_FAILED"},
+	}
+	for _, tc := range cases {
+		w := post(paymentRouter(&fakePublicPayments{err: tc.err}), "/api/v1/public/invoices/good/checkout")
+		if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.code) {
+			t.Errorf("%v: status=%d body=%s", tc.err, w.Code, w.Body)
+		}
+	}
+	w := post(paymentRouter(&fakePublicPayments{err: service.ErrOnlinePaymentUnavailable}), "/api/v1/public/invoices/good/checkout")
+	if !strings.Contains(w.Body.String(), "Pembayaran online belum tersedia untuk invoice ini.") {
+		t.Fatalf("message: %s", w.Body)
+	}
+}
+
+func TestPublicInvoiceStatus(t *testing.T) {
+	w := get(paymentRouter(&fakePublicPayments{}), "/api/v1/public/invoices/good/status")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"status":"paid"`) {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body)
+	}
+	if w := get(paymentRouter(&fakePublicPayments{}), "/api/v1/public/invoices/bad/status"); w.Code != http.StatusNotFound {
+		t.Fatalf("bad token status=%d", w.Code)
 	}
 }

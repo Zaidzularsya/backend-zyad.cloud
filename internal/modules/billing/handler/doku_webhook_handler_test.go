@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -184,5 +185,87 @@ func TestDokuWebhookRecordsNonSuccessWithoutSettling(t *testing.T) {
 	if len(payments.recordedEvents) != 1 || len(payments.paidInvoiceIDs) != 0 {
 		t.Fatalf("events = %d, paid = %d; want event recorded without settling",
 			len(payments.recordedEvents), len(payments.paidInvoiceIDs))
+	}
+}
+
+type receivableProcessorStub struct {
+	events    []DokuNotificationEvent
+	processed bool
+	err       error
+}
+
+func (s *receivableProcessorStub) HandleNotification(_ context.Context, n DokuNotificationEvent) (bool, error) {
+	s.events = append(s.events, n)
+	return s.processed, s.err
+}
+
+const dokuReceivableNotification = `{
+	"channel": {"id": "VIRTUAL_ACCOUNT_BCA"},
+	"order": {"invoice_number": "RCV-33333333-3333-3333-3333-333333333333", "amount": 833000},
+	"transaction": {"status": "SUCCESS", "original_request_id": "req-rcv-1", "date": "2026-07-09T01:02:00Z"}
+}`
+
+func newReceivableDispatchRouter(payments DokuWebhookPaymentService, processor ReceivableDokuProcessor) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	h := NewDokuWebhookHandler(payments, dokuTestClientID, dokuTestSecretKey, nil)
+	if processor != nil {
+		h.SetReceivableProcessor(processor)
+	}
+	h.RegisterRoutes(router.Group("/api/v1"))
+	return router
+}
+
+func TestDokuWebhookDispatchesReceivableNumbers(t *testing.T) {
+	payments := &dokuWebhookPaymentServiceStub{}
+	processor := &receivableProcessorStub{processed: true}
+	router := newReceivableDispatchRouter(payments, processor)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, signedDokuRequest(t, []byte(dokuReceivableNotification), dokuTestSecretKey))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if len(payments.recordedEvents) != 0 || len(payments.paidInvoiceIDs) != 0 {
+		t.Fatalf("billing must not handle RCV- numbers: events=%d paid=%d", len(payments.recordedEvents), len(payments.paidInvoiceIDs))
+	}
+	if len(processor.events) != 1 {
+		t.Fatalf("processor events = %#v", processor.events)
+	}
+	got := processor.events[0]
+	if got.InvoiceNumber != "RCV-33333333-3333-3333-3333-333333333333" || got.Status != "SUCCESS" || got.Amount != "833000" ||
+		got.ProviderReference != "req-rcv-1" || got.PaymentMethod != "VIRTUAL_ACCOUNT_BCA" || got.PaidAt == nil || got.Payload == nil {
+		t.Fatalf("event = %#v", got)
+	}
+}
+
+func TestDokuWebhookReceivableUnprocessedAndErrors(t *testing.T) {
+	payments := &dokuWebhookPaymentServiceStub{}
+	router := newReceivableDispatchRouter(payments, &receivableProcessorStub{processed: false})
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, signedDokuRequest(t, []byte(dokuReceivableNotification), dokuTestSecretKey))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("unprocessed must still be 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	router = newReceivableDispatchRouter(payments, &receivableProcessorStub{err: errors.New("db down")})
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, signedDokuRequest(t, []byte(dokuReceivableNotification), dokuTestSecretKey))
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("processor error must be 500 so DOKU retries, got %d", recorder.Code)
+	}
+}
+
+func TestDokuWebhookBillingNumbersStillGoToBilling(t *testing.T) {
+	payments := &dokuWebhookPaymentServiceStub{}
+	processor := &receivableProcessorStub{processed: true}
+	router := newReceivableDispatchRouter(payments, processor)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, signedDokuRequest(t, []byte(dokuSuccessNotification), dokuTestSecretKey))
+
+	if recorder.Code != http.StatusOK || len(processor.events) != 0 || len(payments.paidInvoiceIDs) != 1 {
+		t.Fatalf("status=%d processor=%d paid=%d", recorder.Code, len(processor.events), len(payments.paidInvoiceIDs))
 	}
 }

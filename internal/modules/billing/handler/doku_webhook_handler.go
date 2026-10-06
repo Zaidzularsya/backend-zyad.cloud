@@ -37,11 +37,28 @@ type DokuWebhookPaymentService interface {
 	) (dto.PaymentResponse, error)
 }
 
+// DokuNotificationEvent adalah tipe netral untuk meneruskan notifikasi ke modul lain;
+// billing TIDAK mengimpor receivable (adapter di internal/app).
+type DokuNotificationEvent struct {
+	InvoiceNumber, Status, Amount, ProviderReference, PaymentMethod string
+	PaidAt                                                          *time.Time
+	Payload                                                         map[string]any
+}
+
+// ReceivableDokuProcessor memproses notifikasi bernomor RCV- (invoice receivable).
+type ReceivableDokuProcessor interface {
+	HandleNotification(ctx context.Context, n DokuNotificationEvent) (bool, error)
+}
+
+// receivableInvoicePrefix harus sama dengan receivable/service.DokuNumberPrefix.
+const receivableInvoicePrefix = "RCV-"
+
 type DokuWebhookHandler struct {
-	payments  DokuWebhookPaymentService
-	clientID  string
-	secretKey string
-	logger    *slog.Logger
+	payments   DokuWebhookPaymentService
+	receivable ReceivableDokuProcessor
+	clientID   string
+	secretKey  string
+	logger     *slog.Logger
 }
 
 func NewDokuWebhookHandler(
@@ -60,6 +77,8 @@ func NewDokuWebhookHandler(
 		logger:    logger,
 	}
 }
+
+func (h *DokuWebhookHandler) SetReceivableProcessor(p ReceivableDokuProcessor) { h.receivable = p }
 
 func (h *DokuWebhookHandler) RegisterRoutes(router *gin.RouterGroup) {
 	router.POST("/webhooks/doku", h.HandleNotification)
@@ -148,6 +167,11 @@ func (h *DokuWebhookHandler) HandleNotification(c *gin.Context) {
 		return
 	}
 
+	if h.receivable != nil && strings.HasPrefix(notification.InvoiceNumber, receivableInvoicePrefix) {
+		h.dispatchReceivable(c, notification, payload)
+		return
+	}
+
 	status := strings.ToUpper(notification.Status)
 	eventType := "doku_notification_" + strings.ToLower(defaultString(status, "unknown"))
 	if _, err := h.payments.RecordProviderEvent(c.Request.Context(), dto.RecordPaymentProviderEventRequest{
@@ -209,6 +233,35 @@ func (h *DokuWebhookHandler) HandleNotification(c *gin.Context) {
 	corehttp.OK(c, "doku notification processed", gin.H{
 		"invoice_number": notification.InvoiceNumber,
 		"processed":      true,
+	})
+}
+
+// dispatchReceivable meneruskan notifikasi invoice receivable. Galat tak terduga → 500 agar
+// DOKU mengirim ulang; selain itu 200 supaya DOKU berhenti retry.
+func (h *DokuWebhookHandler) dispatchReceivable(c *gin.Context, n dokuNotification, payload map[string]any) {
+	event := DokuNotificationEvent{
+		InvoiceNumber: n.InvoiceNumber, Status: n.Status, Amount: n.Amount,
+		ProviderReference: n.ProviderReference, PaymentMethod: n.PaymentMethod, Payload: payload,
+	}
+	if n.PaidAt != nil {
+		if parsed, err := time.Parse(time.RFC3339, *n.PaidAt); err == nil {
+			event.PaidAt = &parsed
+		}
+	}
+	processed, err := h.receivable.HandleNotification(c.Request.Context(), event)
+	if err != nil {
+		h.logger.Error("process doku receivable notification failed", "error", err, "invoice", n.InvoiceNumber)
+		corehttp.Fail(c, err)
+		return
+	}
+	message := "doku notification recorded"
+	if processed {
+		message = "doku notification processed"
+	}
+	corehttp.OK(c, message, gin.H{
+		"invoice_number": n.InvoiceNumber,
+		"status":         strings.ToUpper(n.Status),
+		"processed":      processed,
 	})
 }
 
