@@ -162,6 +162,10 @@ type LeadRepository interface {
 	// non-converted lead whose phone_normalized matches (WhatsApp matching),
 	// or pgx.ErrNoRows.
 	FindActiveByPhone(ctx context.Context, scope coretenant.Scope, phoneNormalized string) (domain.Lead, error)
+	// FindOpenByEmail returns the newest non-deleted lead whose email matches
+	// case-insensitively and whose status is not converted/unqualified, or
+	// pgx.ErrNoRows.
+	FindOpenByEmail(ctx context.Context, scope coretenant.Scope, email string) (domain.Lead, error)
 }
 
 // LeadDashboardRepository reads the aggregates behind the Leads overview

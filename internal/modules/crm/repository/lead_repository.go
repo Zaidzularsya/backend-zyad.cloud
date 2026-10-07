@@ -249,6 +249,29 @@ func (r *leadRepository) FindActiveByPhone(ctx context.Context, scope coretenant
 	return lead, nil
 }
 
+func (r *leadRepository) FindOpenByEmail(ctx context.Context, scope coretenant.Scope, email string) (domain.Lead, error) {
+	if !scope.IsValid() {
+		return domain.Lead{}, coretenant.ErrInvalidScope
+	}
+
+	query := `SELECT ` + leadColumns + ` FROM crm_leads
+		WHERE organization_id = $1 AND lower(email) = lower($2)
+		AND status NOT IN ('converted', 'unqualified') AND deleted_at IS NULL
+		ORDER BY created_at DESC
+		LIMIT 1`
+
+	var lead domain.Lead
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var scanErr error
+		lead, scanErr = scanLead(tx.QueryRow(ctx, query, scope.OrganizationID(), strings.TrimSpace(email)))
+		return scanErr
+	})
+	if err != nil {
+		return domain.Lead{}, err
+	}
+	return lead, nil
+}
+
 func (r *leadRepository) List(ctx context.Context, scope coretenant.Scope, filter LeadListFilter) ([]domain.Lead, int64, error) {
 	if !scope.IsValid() {
 		return nil, 0, coretenant.ErrInvalidScope
