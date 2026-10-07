@@ -63,7 +63,7 @@ func TestPublicLandingResolveUsesTenantScopeFromMiddleware(t *testing.T) {
 			},
 		},
 	}
-	handler := NewPublicLandingHandler(resolver, nil, nil, nil)
+	handler := NewPublicLandingHandler(resolver, nil, nil, nil, nil)
 
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
@@ -123,7 +123,7 @@ func renderRouter(t *testing.T, resolver *publicResolverServiceStub) *gin.Engine
 		coremiddleware.SetTenantContext(c, tc)
 		c.Next()
 	})
-	NewPublicLandingHandler(resolver, nil, nil, nil).RegisterRoutes(router.Group(""))
+	NewPublicLandingHandler(resolver, nil, nil, nil, nil).RegisterRoutes(router.Group(""))
 	return router
 }
 
@@ -206,7 +206,7 @@ func orgTypeRouter(t *testing.T, resolver *publicResolverServiceStub, orgType co
 		coremiddleware.SetTenantContext(c, tc)
 		c.Next()
 	})
-	NewPublicLandingHandler(resolver, nil, nil, nil).RegisterRoutes(router.Group(""))
+	NewPublicLandingHandler(resolver, nil, nil, nil, nil).RegisterRoutes(router.Group(""))
 	return router
 }
 

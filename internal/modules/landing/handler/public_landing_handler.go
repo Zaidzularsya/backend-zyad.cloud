@@ -3,11 +3,14 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 
 	coreerrors "zyad.cloud/internal/core/errors"
 	corehttp "zyad.cloud/internal/core/http"
+	"zyad.cloud/internal/core/middleware"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/landing/domain"
 	"zyad.cloud/internal/modules/landing/dto"
@@ -20,6 +23,7 @@ type PublicLandingHandler struct {
 	visibilitySvc service.VisibilityService
 	submissionSvc service.SubmissionService
 	analyticsSvc  service.AnalyticsService
+	counter       middleware.RateCounter
 }
 
 func NewPublicLandingHandler(
@@ -27,12 +31,14 @@ func NewPublicLandingHandler(
 	visibilitySvc service.VisibilityService,
 	submissionSvc service.SubmissionService,
 	analyticsSvc service.AnalyticsService,
+	counter middleware.RateCounter,
 ) *PublicLandingHandler {
 	return &PublicLandingHandler{
 		resolverSvc:   resolverSvc,
 		visibilitySvc: visibilitySvc,
 		submissionSvc: submissionSvc,
 		analyticsSvc:  analyticsSvc,
+		counter:       counter,
 	}
 }
 
@@ -44,7 +50,11 @@ func (h *PublicLandingHandler) RegisterRoutes(router *gin.RouterGroup) {
 	group.GET("/render/:slug", h.RenderHTML)
 	group.GET("/preview/:token", h.Preview)
 	group.POST("/access/:publicPageId", h.RequestAccess)
-	group.POST("/forms/:formKey/submissions", h.SubmitForm)
+	// Public, unauthenticated and it can create CRM leads: throttle per client and form.
+	submitLimit := middleware.RateLimit(h.counter, "rl:lform:", 5, time.Minute, func(c *gin.Context) string {
+		return c.ClientIP() + ":" + c.Param("formKey")
+	})
+	group.POST("/forms/:formKey/submissions", submitLimit, h.SubmitForm)
 	group.POST("/forms/:formKey/uploads", h.UploadFile)
 	group.POST("/events", h.TrackEvent)
 }
@@ -258,15 +268,27 @@ func (h *PublicLandingHandler) SubmitForm(c *gin.Context) {
 		IdempotencyKey: idempotencyKey,
 	}
 
-	scope, err := coretenant.RequireScope(c.Request.Context())
+	tenantContext, err := coretenant.RequireContext(c.Request.Context())
 	if err != nil {
 		corehttp.Fail(c, err)
 		return
 	}
-	// TODO(R5-S4-T3): derive isPlatformOrg from the tenant context.
-	submission, err := h.submissionSvc.SubmitForm(c.Request.Context(), scope, params, false)
+	scope, err := coretenant.NewScope(tenantContext)
 	if err != nil {
-		corehttp.Fail(c, coreerrors.New("INTERNAL_ERROR", err.Error(), http.StatusInternalServerError))
+		corehttp.Fail(c, err)
+		return
+	}
+	isPlatformOrg := tenantContext.OrganizationType() == coretenant.OrganizationTypePlatform
+	submission, err := h.submissionSvc.SubmitForm(c.Request.Context(), scope, params, isPlatformOrg)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrFormNotActive), errors.Is(err, pgx.ErrNoRows):
+			corehttp.Fail(c, coreerrors.New("LANDING_FORM_NOT_FOUND", "form was not found", http.StatusNotFound))
+		case errors.Is(err, service.ErrSpamDetected):
+			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "invalid submission", http.StatusUnprocessableEntity))
+		default:
+			corehttp.Fail(c, coreerrors.New("INTERNAL_ERROR", err.Error(), http.StatusInternalServerError))
+		}
 		return
 	}
 
