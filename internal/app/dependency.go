@@ -42,7 +42,7 @@ type Dependencies struct {
 	PlatformSubscriptionHandler      *subscriptionhandler.PlatformSubscriptionHandler
 	PlatformBillingHandler           *billinghandler.PlatformBillingHandler
 	TenantBillingHandler             *billinghandler.TenantBillingHandler
-	DokuWebhookHandler               *billinghandler.DokuWebhookHandler
+	DokuWebhookHandler               *receivablehandler.DokuWebhookHandler
 	OrganizationDomainHandler        *organizationhandler.DomainHandler
 	OrganizationEntitlementHandler   *organizationhandler.EntitlementHandler
 	OrganizationImpersonationHandler *organizationhandler.ImpersonationHandler

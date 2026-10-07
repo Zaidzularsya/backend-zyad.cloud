@@ -49,6 +49,7 @@ import (
 	producthandler "zyad.cloud/internal/modules/product/handler"
 	productrepo "zyad.cloud/internal/modules/product/repository"
 	productservice "zyad.cloud/internal/modules/product/service"
+	receivablehandler "zyad.cloud/internal/modules/receivable/handler"
 	subscriptionhandler "zyad.cloud/internal/modules/subscription/handler"
 	subscriptionrepo "zyad.cloud/internal/modules/subscription/repository"
 	subscriptionservice "zyad.cloud/internal/modules/subscription/service"
@@ -137,12 +138,6 @@ func New(ctx context.Context) (*App, error) {
 		dokuNotificationURL = baseURL + "/api/v1/webhooks/doku"
 	}
 	billingPaymentService.SetDokuCheckout(dokuClient, cfg.App.FrontendURL, dokuNotificationURL)
-	dokuWebhookHandler := billinghandler.NewDokuWebhookHandler(
-		billingPaymentService,
-		cfg.Doku.ClientID,
-		cfg.Doku.SecretKey,
-		log,
-	)
 	platformProductHandler := producthandler.NewPlatformProductHandler(
 		productPlanService,
 		productFeatureService,
@@ -542,8 +537,10 @@ func New(ctx context.Context) (*App, error) {
 		AppName: cfg.App.Name, FrontendURL: cfg.App.FrontendURL, NotificationLocale: cfg.Notification.DefaultLocale,
 		RateCounter: redisClient, Doku: dokuClient, DokuNotificationURL: dokuNotificationURL,
 	})
-	// Webhook DOKU yang sama melayani invoice billing dan receivable; nomor RCV- diteruskan ke sini.
-	dokuWebhookHandler.SetReceivableProcessor(receivableDokuProcessor{svc: receivableModule.OnlinePayment})
+	// Webhook DOKU (URL tetap /webhooks/doku) hanya melayani invoice receivable (RCV-).
+	dokuWebhookHandler := receivablehandler.NewDokuWebhookHandler(
+		receivableModule.OnlinePayment, cfg.Doku.ClientID, cfg.Doku.SecretKey, log,
+	)
 
 	// Sales order (S4): dirakit setelah receivable (penagihan) dan sebelum quotation service karena hook
 	// approve menunjuk ke SalesOrderService.

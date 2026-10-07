@@ -14,7 +14,6 @@ import (
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	coretenant "zyad.cloud/internal/core/tenant"
 	assetservice "zyad.cloud/internal/modules/asset/service"
-	billinghandler "zyad.cloud/internal/modules/billing/handler"
 	crmrepo "zyad.cloud/internal/modules/crm/repository"
 	mailboxservice "zyad.cloud/internal/modules/mailbox/service"
 	organizationrepo "zyad.cloud/internal/modules/organization/repository"
@@ -303,16 +302,4 @@ func (r crmReceivableReader) ContractInfo(ctx context.Context, scope coretenant.
 		return "", "", err
 	}
 	return string(c.Status), c.ContractNumber, nil
-}
-
-// receivableDokuProcessor menjembatani webhook billing ke receivable tanpa import silang antar modul.
-type receivableDokuProcessor struct {
-	svc *receivableservice.OnlinePayment
-}
-
-func (p receivableDokuProcessor) HandleNotification(ctx context.Context, n billinghandler.DokuNotificationEvent) (bool, error) {
-	return p.svc.HandleNotification(ctx, receivableservice.DokuNotification{
-		InvoiceNumber: n.InvoiceNumber, Status: n.Status, Amount: n.Amount, ProviderReference: n.ProviderReference,
-		PaymentMethod: n.PaymentMethod, PaidAt: n.PaidAt, Payload: n.Payload,
-	})
 }
