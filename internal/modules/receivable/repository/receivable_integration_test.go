@@ -762,3 +762,42 @@ func TestOverviewQueries(t *testing.T) {
 		t.Fatal("tenant B must not see tenant A failed sends")
 	}
 }
+
+func TestInvoiceListDueBefore(t *testing.T) {
+	e := setup(t)
+	a, b := e.tenants.A.Scope, e.tenants.B.Scope
+	accA, accB := e.account(t, a, "Budi"), e.account(t, b, "Siti")
+
+	issueAt := func(scope coretenant.Scope, accountID, number, due string) domain.Invoice {
+		inv, err := e.invoices.Create(e.ctx, scope, threeThirtyThree(t, accountID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		inv, err = e.invoices.Issue(e.ctx, scope, inv.ID, number, *date("2026-09-01"), *date(due), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return inv
+	}
+	old := issueAt(a, accA.ID, "INV-2026-0101", "2026-09-10")
+	edge := issueAt(a, accA.ID, "INV-2026-0102", "2026-09-29") // tepat di batas: tidak ikut (due_date < X)
+	recent := issueAt(a, accA.ID, "INV-2026-0103", "2026-10-02")
+	notYet := issueAt(a, accA.ID, "INV-2026-0104", "2026-10-20") // belum jatuh tempo: tetap 'issued'
+	_ = issueAt(b, accB.ID, "INV-2026-0201", "2026-09-10")       // org lain
+	for _, s := range []coretenant.Scope{a, b} {
+		if _, err := e.invoices.MarkOverdue(e.ctx, s, *date("2026-10-06")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, total, err := e.invoices.List(e.ctx, a, repository.InvoiceListFilter{Status: "overdue", DueBefore: date("2026-09-29")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for _, inv := range got {
+		ids[inv.ID] = true
+	}
+	if total != 1 || !ids[old.ID] || ids[edge.ID] || ids[recent.ID] || ids[notYet.ID] {
+		t.Fatalf("due before = %d %+v", total, ids)
+	}
+}

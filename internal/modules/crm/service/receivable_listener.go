@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
+	"zyad.cloud/internal/core/businesstime"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/crm/domain"
 	"zyad.cloud/internal/modules/crm/repository"
@@ -20,6 +22,14 @@ type ReceivableListener struct {
 	won        DealWonEvaluator
 	activities repository.ActivityRepository
 	access     ContractSyncer // nil = tidak menyinkronkan akses workspace
+	reactivate SettlementReactivator
+	graceDays  int
+	now        func() time.Time
+}
+
+// SettlementReactivator mengaktifkan kembali workspace yang ditangguhkan karena tagihan setelah invoice lunas.
+type SettlementReactivator interface {
+	ReactivateIfSettled(ctx context.Context, platform coretenant.Scope, invoiceID string, today time.Time, graceDays int) error
 }
 
 var _ receivableservice.Listener = (*ReceivableListener)(nil)
@@ -32,6 +42,25 @@ func NewReceivableListener(orders repository.SalesOrderRepository, won DealWonEv
 func (l *ReceivableListener) WithTenantAccess(access ContractSyncer) *ReceivableListener {
 	l.access = access
 	return l
+}
+
+// WithReactivation mengaktifkan kembali workspace yang ditangguhkan karena tagihan saat invoice lunas.
+func (l *ReceivableListener) WithReactivation(r SettlementReactivator, graceDays int) *ReceivableListener {
+	l.reactivate, l.graceDays = r, graceDays
+	return l
+}
+
+func (l *ReceivableListener) reactivateAccess(ctx context.Context, scope coretenant.Scope, invoiceID string) {
+	if l.reactivate == nil || invoiceID == "" {
+		return
+	}
+	now := time.Now
+	if l.now != nil {
+		now = l.now
+	}
+	if err := l.reactivate.ReactivateIfSettled(ctx, scope, invoiceID, businesstime.DayOf(now()), l.graceDays); err != nil {
+		slog.Warn("listener: workspace reactivation failed", "invoice_id", invoiceID, "error", err)
+	}
 }
 
 func (l *ReceivableListener) syncAccess(ctx context.Context, scope coretenant.Scope, contractID string, reason SyncReason) {
@@ -55,6 +84,7 @@ func (l *ReceivableListener) guard(what string, fn func()) {
 func (l *ReceivableListener) InvoicePaid(ctx context.Context, scope coretenant.Scope, inv receivableservice.InvoiceRef) {
 	l.guard("invoice paid", func() {
 		l.syncAccess(ctx, scope, inv.ContractID, SyncInvoicePaid)
+		l.reactivateAccess(ctx, scope, inv.ID)
 		// Invoice berkala dari kontrak tidak memengaruhi syarat Won (kontrak ada = terpenuhi).
 		if inv.SourceType != receivabledomain.SourceSalesOrder {
 			return

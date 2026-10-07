@@ -48,6 +48,8 @@ func TestVariableRegistryCodes(t *testing.T) {
 		"permission.updated",
 		"receivable.invoice_send_failed",
 		"security.new_login",
+		"self_serve.workspace_reactivated",
+		"self_serve.workspace_suspended",
 		"user.invitation",
 		"whatsapp.session_disconnected",
 	}

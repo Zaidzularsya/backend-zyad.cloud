@@ -557,8 +557,9 @@ func New(ctx context.Context) (*App, error) {
 		Notifier:  notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts),
 		AppName:   cfg.App.Name, FrontendURL: cfg.App.FrontendURL, Locale: cfg.Notification.DefaultLocale,
 	}, crmWonEvaluator, time.Now)
-	crmTenantAccess := newCRMTenantAccess(db, receivableModule.Invoices, receivableModule.Contracts, defaultAccess)
-	receivableModule.Listeners.Add(crmservice.NewReceivableListener(crmSalesOrderRepo, crmWonEvaluator, crmActivityRepo).WithTenantAccess(crmTenantAccess))
+	crmTenantAccess := withBillingSuspend(newCRMTenantAccess(db, receivableModule.Invoices, receivableModule.Contracts, defaultAccess), cfg, db, receivableModule.Invoices)
+	receivableModule.Listeners.Add(crmservice.NewReceivableListener(crmSalesOrderRepo, crmWonEvaluator, crmActivityRepo).
+		WithTenantAccess(crmTenantAccess).WithReactivation(crmTenantAccess, cfg.SelfServe.GraceDays))
 	// Tautan company ↔ workspace (R4-S3): mengubah tautan memindahkan entitlement contract.
 	crmCompanySvc := crmservice.NewCompanyService(crmCompanyRepo,
 		crmservice.WithWorkspaceLinking(workspaceDirectory{orgs: organizationrepo.NewOrganizationRepository(db)}, crmTenantAccess))
@@ -628,7 +629,8 @@ func New(ctx context.Context) (*App, error) {
 			}, sc, time.Now)
 		},
 	}
-	crmSelfServeHandler := crmhandler.NewSelfServeHandler(selfServeSvc, selfServePlatformScopes, permService)
+	crmSelfServeHandler := crmhandler.NewSelfServeHandler(selfServeSvc, selfServePlatformScopes, permService).
+		WithSubscription(withSubscriptionView(crmTenantAccess, cfg, db, receivableModule.Invoices, receivableModule.Contracts, catalogProductService), cfg.SelfServe.GraceDays)
 
 	router, err := newRouter(Dependencies{
 		Config:                           cfg,

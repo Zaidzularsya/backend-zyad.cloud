@@ -30,9 +30,25 @@ import (
 // bedanya worker tidak punya Redis, sehingga WhatsApp berjalan tanpa rate limiter dan tanpa realtime bus.
 // Mengembalikan galat bila storage tenant belum dikonfigurasi (PDF snapshot butuh asset store).
 func NewReceivableBillingRunner(cfg config.Config, db *database.Pool, log *slog.Logger) (*receivableservice.BillingRunner, error) {
+	module, err := newWorkerReceivableModule(cfg, db, log)
+	if err != nil {
+		return nil, err
+	}
+
+	// Billing run mengakhiri contract; listener CRM mencabut akses workspace-nya.
+	access := withBillingSuspend(newCRMTenantAccess(db, module.Invoices, module.Contracts, workerDefaultAccess(cfg, db)), cfg, db, module.Invoices)
+	module.Listeners.Add(crmservice.NewReceivableListener(crmrepo.NewSalesOrderRepository(db), nil, nil).
+		WithTenantAccess(access).WithReactivation(access, cfg.SelfServe.GraceDays))
+	run := receivableservice.NewBillingRun(receivablerepo.NewContractRepository(db), module.Invoices, receivablerepo.NewSettingsRepository(db), module.Listeners, nil)
+	scopes := organizationservice.NewWorkerResolver(organizationrepo.NewOrganizationRepository(db), receivableservice.BillingRunWorkerIdentity)
+	return receivableservice.NewBillingRunner(receivableOrgLister{repo: organizationrepo.NewOrganizationRepository(db)}, scopes, run), nil
+}
+
+// newWorkerReceivableModule merakit modul receivable untuk worker (lihat NewReceivableBillingRunner).
+func newWorkerReceivableModule(cfg config.Config, db *database.Pool, log *slog.Logger) (receivableModule, error) {
 	assetSvc, err := NewAssetService(cfg, db, log)
 	if err != nil {
-		return nil, fmt.Errorf("receivable billing run: asset storage: %w", err)
+		return receivableModule{}, fmt.Errorf("receivable worker: asset storage: %w", err)
 	}
 
 	leadRepo, contactRepo, activityRepo := crmrepo.NewLeadRepository(db), crmrepo.NewContactRepository(db), crmrepo.NewActivityRepository(db)
@@ -61,12 +77,7 @@ func NewReceivableBillingRunner(cfg config.Config, db *database.Pool, log *slog.
 		AppName: cfg.App.Name, FrontendURL: cfg.App.FrontendURL, NotificationLocale: cfg.Notification.DefaultLocale,
 	})
 
-	// Billing run mengakhiri contract; listener CRM mencabut akses workspace-nya.
-	module.Listeners.Add(crmservice.NewReceivableListener(crmrepo.NewSalesOrderRepository(db), nil, nil).
-		WithTenantAccess(newCRMTenantAccess(db, module.Invoices, module.Contracts, workerDefaultAccess(cfg, db))))
-	run := receivableservice.NewBillingRun(receivablerepo.NewContractRepository(db), module.Invoices, receivablerepo.NewSettingsRepository(db), module.Listeners, nil)
-	scopes := organizationservice.NewWorkerResolver(organizationrepo.NewOrganizationRepository(db), receivableservice.BillingRunWorkerIdentity)
-	return receivableservice.NewBillingRunner(receivableOrgLister{repo: organizationrepo.NewOrganizationRepository(db)}, scopes, run), nil
+	return module, nil
 }
 
 // workerDefaultAccess mengembalikan paket gratis saat contract berakhir lewat billing run.

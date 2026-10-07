@@ -122,6 +122,10 @@ type SelfServeConfig struct {
 	DealOwnerEmail string // kosong → bot
 	// FreeProductSKU: SKU produk katalog platform yang fiturnya menjadi paket gratis workspace baru.
 	FreeProductSKU string
+	// GraceDays: masa tenggang setelah jatuh tempo sebelum workspace ditangguhkan (0–60).
+	GraceDays int
+	// GraceDaysInvalid: nilai SELF_SERVE_GRACE_DAYS di luar rentang/bukan angka, sehingga default dipakai.
+	GraceDaysInvalid bool
 }
 
 type HTTPConfig struct {
