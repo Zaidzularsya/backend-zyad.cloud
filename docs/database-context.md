@@ -134,6 +134,10 @@ sebelum repository landing dipanggil.
 - **`billing_payment_events`**: unique `(provider, provider_event_id)` — idempotency untuk webhook event.
 - **`landing_submissions`**: unique `(organization_id, idempotency_key)` untuk mencegah submission ganda
   dari form yang sama.
+- **Sinkron form → CRM (migration `000155`, R5-S4)**: `landing_forms.create_crm_lead boolean NOT NULL DEFAULT true` dan
+  `landing_forms.lead_owner_user_id uuid NULL REFERENCES users(id) ON DELETE SET NULL` (PIC lead);
+  `landing_submissions.crm_lead_id uuid NULL`, `crm_sync_status varchar(20) NOT NULL DEFAULT 'skipped'`
+  (CHECK `skipped|created|merged|failed`), `crm_sync_error text NULL`. Aditif; baris lama mendapat default aman.
 - **Soft delete**: pola `deleted_at IS NULL` dipakai konsisten di `users`, `organizations`,
   `organization_domains`, dan sebagian besar tabel `landing_*` — index unique banyak yang partial
   (`WHERE deleted_at IS NULL`) agar slug/identifier bisa dipakai ulang setelah soft-delete.

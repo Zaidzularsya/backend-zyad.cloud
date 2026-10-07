@@ -648,6 +648,18 @@ Response boleh memakai `ETag` dari published version. Draft update tidak menguba
 
 Field tambahan halaman GrapesJS (R5-S3): `OrganizationType` (`"platform"` | `"customer"`, nama field PascalCase seperti field `ResolvedPage` lainnya). Nilainya dari tenant context host, dipakai frontend untuk menggerbang slot khusus platform (`catalog-pricing`). Endpoint `GET /public/landing/preview/:token` dan SSR `GET /public/landing/render` memakai nilai yang sama. Nilai kosong atau tidak dikenal diperlakukan sebagai bukan platform (fail-closed).
 
+#### Form konsultasi & sinkron CRM (R5-S4)
+
+- Resolve halaman GrapesJS menyertakan `Forms` (hanya form aktif, dengan `Fields` terurut `SortOrder`). `LeadOwnerUserID` dan `CreateCRMLead` **tidak** disertakan di jalur publik.
+- `POST /public/landing/forms/:formKey/submissions` (`formKey` = ID form; lookup dibatasi organisasi dari host):
+  - Body: `fields` (maks 50 key, key ≤100 karakter, nilai string ≤5000), `consent` (wajib `true`), `website` (honeypot, harus kosong), `context` (`referrer`, `utm_source|medium|campaign|term|content`). Body maks 64 KiB. Header opsional `Idempotency-Key`.
+  - Sukses `200` hanya berisi `reference`, `success_message`, `redirect_url` (`redirect_url` divalidasi saat admin menyimpan form: kosong, `/path`, atau `http(s)://`).
+  - Error: `404 LANDING_FORM_NOT_FOUND` (form tidak ada/tidak aktif), `413`/`422 VALIDATION_ERROR` (consent, honeypot, batas input), `429 RATE_LIMITED`, `500 INTERNAL_ERROR` (pesan generik).
+  - Rate limit: 5 permintaan per menit per `ClientIP:formKey` (prefix Redis `rl:lform:`); fail-open bila Redis tidak tersedia.
+  - Idempotensi: `Idempotency-Key` klien atau kunci server (hash form+IP+payload, bucket 5 detik); duplikat mengembalikan hasil submission awal tanpa lead baru.
+- `POST /admin/landing-submissions/:id/crm-sync` (permission `landing.submission.update`): kirim ulang ke CRM; respons berbentuk sama dengan `GET /admin/landing-submissions/:id` (struct domain PascalCase: `CRMLeadID`, `CRMSyncStatus`, `CRMSyncError`). Tenant lain → `404 SUBMISSION_NOT_FOUND`.
+- Field baru form (admin): `create_crm_lead`, `lead_owner_user_id`; `GET /admin/landing-pages/:id/forms` kini menyertakan `Fields`.
+
 ### GET /public/landing/preview/:token
 
 Wajib mengirim:

@@ -3462,6 +3462,30 @@ paths:
       responses:
         "200":
           description: Submission status updated successfully
+  /api/v1/admin/landing-submissions/{id}/crm-sync:
+    post:
+      summary: Retry landing submission sync to CRM lead
+      description: >-
+        Mengirim ulang submission ke CRM (idempoten: bila crm_lead_id sudah terisi tidak ada lead baru).
+        Mengembalikan submission dengan crm_sync_status (skipped, created, merged, failed).
+        Submission milik tenant lain dijawab 404 SUBMISSION_NOT_FOUND.
+      operationId: retryLandingSubmissionCrmSync
+      tags:
+        - Landing Submissions
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Submission after CRM sync retry
+        "404":
+          description: SUBMISSION_NOT_FOUND
   /api/v1/admin/landing-submissions/{id}/notes:
     post:
       summary: Add landing submission note
@@ -3603,6 +3627,11 @@ paths:
           in: header
           schema:
             type: string
+      description: >-
+        Body: fields (maks 50 key, nilai string maks 5000 karakter), consent (wajib true),
+        website (honeypot, harus kosong), context (referrer, utm_*). Body maks 64 KiB.
+        Rate limit 5 permintaan per menit per IP dan form. Sukses mengembalikan reference,
+        success_message, redirect_url saja. Kiriman dapat menjadi lead CRM (lihat docs/reference-crm.md).
       requestBody:
         required: true
         content:
@@ -3612,6 +3641,14 @@ paths:
       responses:
         "200":
           description: Public landing form submitted successfully
+        "404":
+          description: LANDING_FORM_NOT_FOUND (form tidak ada atau tidak aktif)
+        "413":
+          description: Body melebihi 64 KiB
+        "422":
+          description: VALIDATION_ERROR (consent, honeypot, batas input)
+        "429":
+          description: RATE_LIMITED
   /api/v1/public/landing/forms/{formKey}/uploads:
     post:
       summary: Upload public landing form file
