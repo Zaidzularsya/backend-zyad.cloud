@@ -460,3 +460,15 @@ Keterbatasan yang diketahui:
 - `@font-face` tenant di-hoist ke `document.head` sehingga bersifat global; family yang sama dengan font SPA (mis. Inter) bisa menimpa font aplikasi selama halaman hidup.
 - Tanpa sandbox, inline `position:fixed; z-index` pada HTML tenant dapat menutupi UI SPA (terutama di preview).
 - `@container`/`@layer` pada CSS halaman tidak ditulis ulang; Back/Forward antar `#id` tidak melakukan scroll.
+
+## Slot Pricing Katalog (R5-S3)
+
+Blok GrapesJS "Pricing Katalog" menampilkan produk publik dari Sales → Produk di halaman marketing platform. Spec: `docs/superpowers/specs/2026-10-07-landing-marketing-v2-design.md` §6 (K1, K2).
+
+- **Sentinel:** `<div data-zyad-slot="catalog-pricing" data-zyad-config='{…}'>`. Harga dan fitur **tidak** disimpan di halaman; diambil saat render dari endpoint katalog publik. Sanitizer mengizinkan atribut `data-zyad-config`.
+- **Khusus org platform:** blok hanya terdaftar di editor bila `isPlatformOrganization`. Di halaman publik slot tidak merender apa pun dan tidak memanggil API bila `OrganizationType != "platform"` (juga di placeholder SSR).
+- **Config** (parse per field; nilai tidak valid jatuh ke default): `title` ≤120, `subtitle` ≤240, `categoryIds` (kosong = semua; kategori yang sudah dihapus diabaikan, jika hasil kosong dipakai semua), `defaultFrequency` (`monthly`|`annual` — nilai backend, bukan `yearly`), `featuredCode`, `showYearlySavings`, `enterpriseCard` (`points` ≤6×120), `contactHref` (lolos `safeHref`, bukan `#`; default `#konsultasi`).
+- **Hemat tahunan:** `round((1 − tahunan ÷ (bulanan × 12)) × 100)` dari `price_with_tax`; `null` bila salah satu varian tidak ada, harga 0, atau hasil ≤ 0.
+- **Tombol:** `checkout` → `/app/checkout?product=<id>` (tamu: lewat register dengan redirect); `free` → register atau dashboard; Hubungi sales / Enterprise → mengisi minat (`<listing> · <frekuensi>`) pada konteks halaman lalu scroll ke `contactHref` (`#id`), path internal, atau URL eksternal.
+- **SSR:** sentinel diganti placeholder statis (judul dari config + link "Lihat paket harga") hanya untuk org platform; judul di-escape.
+- **Catatan:** `#konsultasi` baru ada setelah form konsultasi (S4); sebelum itu klik "Hubungi sales" hanya mengisi minat.

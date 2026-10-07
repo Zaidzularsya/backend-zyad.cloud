@@ -646,6 +646,8 @@ Response:
 
 Response boleh memakai `ETag` dari published version. Draft update tidak mengubah public ETag.
 
+Field tambahan halaman GrapesJS (R5-S3): `OrganizationType` (`"platform"` | `"customer"`, nama field PascalCase seperti field `ResolvedPage` lainnya). Nilainya dari tenant context host, dipakai frontend untuk menggerbang slot khusus platform (`catalog-pricing`). Endpoint `GET /public/landing/preview/:token` dan SSR `GET /public/landing/render` memakai nilai yang sama. Nilai kosong atau tidak dikenal diperlakukan sebagai bukan platform (fail-closed).
+
 ### GET /public/landing/preview/:token
 
 Wajib mengirim:
