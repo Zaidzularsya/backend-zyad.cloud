@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -183,5 +184,65 @@ func TestPublicLandingRenderHTMLNotFoundForSectionsPage(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for a non-GrapesJS page, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func orgTypeRouter(t *testing.T, resolver *publicResolverServiceStub, orgType coretenant.OrganizationType) *gin.Engine {
+	t.Helper()
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		tc, err := coretenant.NewVerifiedContext(coretenant.VerifiedContextInput{
+			OrganizationID:     "11111111-1111-1111-1111-111111111111",
+			OrganizationSlug:   "zyad",
+			OrganizationType:   orgType,
+			OrganizationStatus: coretenant.OrganizationStatusActive,
+			ResolutionSource:   coretenant.ResolutionSourceCustomDomain,
+			DataPlacement:      coretenant.DataPlacementShared,
+			RequestHost:        "zyad.app.zyad.test",
+		})
+		if err != nil {
+			t.Fatalf("NewVerifiedContext() error = %v", err)
+		}
+		coremiddleware.SetTenantContext(c, tc)
+		c.Next()
+	})
+	NewPublicLandingHandler(resolver, nil, nil, nil).RegisterRoutes(router.Group(""))
+	return router
+}
+
+func TestPublicLandingResolveAndPreviewSetOrganizationType(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, orgType := range []coretenant.OrganizationType{
+		coretenant.OrganizationTypePlatform,
+		coretenant.OrganizationTypeCustomer,
+	} {
+		for _, path := range []string{
+			"/public/landing/resolve?slug=about",
+			"/public/landing/preview/tok?slug=about",
+		} {
+			resolver := &publicResolverServiceStub{
+				resolvedPage: service.ResolvedPage{Page: domain.LandingPage{Slug: "about"}},
+			}
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			rec := httptest.NewRecorder()
+			orgTypeRouter(t, resolver, orgType).ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s: status = %d body=%s", path, rec.Code, rec.Body.String())
+			}
+			var body struct {
+				Data struct {
+					OrganizationType string
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("%s: decode: %v body=%s", path, err, rec.Body.String())
+			}
+			if body.Data.OrganizationType != string(orgType) {
+				t.Fatalf("%s: OrganizationType = %q, want %q (body=%s)",
+					path, body.Data.OrganizationType, orgType, rec.Body.String())
+			}
+		}
 	}
 }

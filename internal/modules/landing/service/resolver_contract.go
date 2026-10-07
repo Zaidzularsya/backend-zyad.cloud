@@ -18,6 +18,11 @@ type ResolvedPage struct {
 	Snapshot     map[string]any
 	IsDraft      bool
 
+	// OrganizationType is "platform" or "customer", filled by the public
+	// handler from the verified tenant context (not by the resolver) so the
+	// renderer can gate platform-only slots such as catalog-pricing.
+	OrganizationType string
+
 	// Set only for pages authored with the GrapesJS builder. When Builder is
 	// "grapesjs" the renderer ignores Sections/Forms and uses HTML+CSS instead.
 	Builder string

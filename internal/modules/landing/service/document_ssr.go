@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"zyad.cloud/internal/modules/landing/domain"
 )
@@ -63,12 +64,14 @@ const ssrChromeCSS = `.zyad-tenant-header{padding:14px 24px;font-family:'Inter',
 .zyad-pricing-plans__card--featured .zyad-pricing-plans__cta{background:#2563eb}`
 
 var (
-	navSentinelRe     = regexp.MustCompile(`(?is)<div\b[^>]*\bdata-zyad-slot="tenant-nav"[^>]*>.*?</div>`)
-	footerSentinelRe  = regexp.MustCompile(`(?is)<div\b[^>]*\bdata-zyad-slot="tenant-footer"[^>]*>.*?</div>`)
-	pricingSentinelRe = regexp.MustCompile(`(?is)<div\b[^>]*\bdata-zyad-slot="pricing-plans"[^>]*>.*?</div>`)
-	sentinelOpenTagRe = regexp.MustCompile(`(?is)^<div\b[^>]*>`)
-	safeSSRHrefRe     = regexp.MustCompile(`^(#|/(?:[^/]|$)|https?://|mailto:|tel:)`)
-	dataZyadHeaderRe  = regexp.MustCompile(`(?is)\bdata-zyad-header\s*=\s*("([^"]*)"|'([^']*)')`)
+	navSentinelRe            = regexp.MustCompile(`(?is)<div\b[^>]*\bdata-zyad-slot="tenant-nav"[^>]*>.*?</div>`)
+	footerSentinelRe         = regexp.MustCompile(`(?is)<div\b[^>]*\bdata-zyad-slot="tenant-footer"[^>]*>.*?</div>`)
+	pricingSentinelRe        = regexp.MustCompile(`(?is)<div\b[^>]*\bdata-zyad-slot="pricing-plans"[^>]*>.*?</div>`)
+	catalogPricingSentinelRe = regexp.MustCompile(`(?is)<div\b[^>]*\bdata-zyad-slot="catalog-pricing"[^>]*>.*?</div>`)
+	sentinelOpenTagRe        = regexp.MustCompile(`(?is)^<div\b[^>]*>`)
+	safeSSRHrefRe            = regexp.MustCompile(`^(#|/(?:[^/]|$)|https?://|mailto:|tel:)`)
+	dataZyadHeaderRe         = regexp.MustCompile(`(?is)\bdata-zyad-header\s*=\s*("([^"]*)"|'([^']*)')`)
+	dataZyadConfigRe         = regexp.MustCompile(`(?is)\bdata-zyad-config\s*=\s*("([^"]*)"|'([^']*)')`)
 )
 
 // sentinelOpenTag returns the sentinel's original opening tag (e.g.
@@ -337,7 +340,57 @@ func fillGrapesSentinels(
 		return sentinelOpenTag(sentinel) + pricingMarkup + `</div>`
 	})
 
+	catalogFilled := false
+	markup = catalogPricingSentinelRe.ReplaceAllStringFunc(markup, func(sentinel string) string {
+		if catalogFilled {
+			return ""
+		}
+		catalogFilled = true
+		return sentinelOpenTag(sentinel) + buildCatalogPricingMarkup(parseSSRCatalogPricingTitle(sentinel)) + `</div>`
+	})
+
 	return markup
+}
+
+const (
+	defaultCatalogPricingTitle = "Pilih paket sesuai tahap bisnis Anda"
+	maxCatalogPricingTitleLen  = 120
+)
+
+// parseSSRCatalogPricingTitle reads only the title from the sentinel's
+// data-zyad-config JSON (bluemonday entity-encodes the value). Prices are
+// never stored in the page, so the crawler placeholder needs nothing else.
+// Broken JSON, a non-string, blank or over-long title all fall back to the
+// default, mirroring the FE parseCatalogPricingConfig per-field fallback.
+func parseSSRCatalogPricingTitle(sentinel string) string {
+	m := dataZyadConfigRe.FindStringSubmatch(sentinelOpenTag(sentinel))
+	if m == nil {
+		return defaultCatalogPricingTitle
+	}
+	raw := m[2]
+	if raw == "" {
+		raw = m[3]
+	}
+	var cfg struct {
+		Title any `json:"title"`
+	}
+	if err := json.Unmarshal([]byte(html.UnescapeString(raw)), &cfg); err != nil {
+		return defaultCatalogPricingTitle
+	}
+	title, ok := cfg.Title.(string)
+	title = strings.TrimSpace(title)
+	if !ok || title == "" || utf8.RuneCountInString(title) > maxCatalogPricingTitleLen {
+		return defaultCatalogPricingTitle
+	}
+	return title
+}
+
+// buildCatalogPricingMarkup is the static no-JS placeholder for the
+// catalog-pricing slot. The title was unescaped from an attribute, so it must
+// be re-escaped before landing in HTML.
+func buildCatalogPricingMarkup(title string) string {
+	return `<section class="zy-slot-catalog-pricing"><h2>` + html.EscapeString(title) +
+		`</h2><a href="/auth/register">Lihat paket harga</a></section>`
 }
 
 func buildPricingMarkup(plans []ResolvedPricingPlan) string {

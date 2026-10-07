@@ -277,3 +277,61 @@ func TestRenderGrapesDocumentRobotsNoindexForPrivate(t *testing.T) {
 		t.Fatalf("private page must be noindex: %s", doc)
 	}
 }
+
+func catalogPricingDoc(config string) string {
+	return RenderGrapesDocument(ResolvedPage{
+		Builder: string(domain.PageBuilderGrapesJS),
+		HTML:    `<div data-zyad-slot="catalog-pricing" data-zyad-config='` + config + `'></div>`,
+	})
+}
+
+func TestRenderGrapesDocumentCatalogPricingPlaceholder(t *testing.T) {
+	doc := catalogPricingDoc(`{"title":"Paket &lt;b&gt;"}`)
+	for _, want := range []string{`class="zy-slot-catalog-pricing"`, `href="/auth/register"`, `Lihat paket harga`, `Paket &lt;b&gt;`} {
+		if !strings.Contains(doc, want) {
+			t.Fatalf("missing %q:\n%s", want, doc)
+		}
+	}
+	if strings.Contains(doc, `<b>`) {
+		t.Fatalf("title not escaped:\n%s", doc)
+	}
+}
+
+func TestRenderGrapesDocumentCatalogPricingDefaultTitle(t *testing.T) {
+	const def = "Pilih paket sesuai tahap bisnis Anda"
+	for name, cfg := range map[string]string{
+		"empty object": `{}`,
+		"broken json":  `{not json`,
+		"wrong type":   `{"title":123}`,
+		"blank title":  `{"title":"   "}`,
+	} {
+		if doc := catalogPricingDoc(cfg); !strings.Contains(doc, "<h2>"+def+"</h2>") {
+			t.Fatalf("%s: default title missing:\n%s", name, doc)
+		}
+	}
+	doc := RenderGrapesDocument(ResolvedPage{
+		Builder: string(domain.PageBuilderGrapesJS),
+		HTML:    `<div data-zyad-slot="catalog-pricing"></div>`,
+	})
+	if !strings.Contains(doc, "<h2>"+def+"</h2>") {
+		t.Fatalf("no config attr: default title missing:\n%s", doc)
+	}
+}
+
+func TestRenderGrapesDocumentCatalogPricingEscapesInjectedHTML(t *testing.T) {
+	doc := catalogPricingDoc(`{"title":"</h2><script>alert(1)</script>"}`)
+	if strings.Contains(doc, "<script>alert(1)") || strings.Contains(doc, "</h2><script") {
+		t.Fatalf("HTML injection through config:\n%s", doc)
+	}
+}
+
+func TestRenderGrapesDocumentCatalogPricingOnlyFirstSentinel(t *testing.T) {
+	doc := RenderGrapesDocument(ResolvedPage{
+		Builder: string(domain.PageBuilderGrapesJS),
+		HTML: `<div data-zyad-slot="catalog-pricing"></div><p>x</p>` +
+			`<div data-zyad-slot="catalog-pricing"></div>`,
+	})
+	if n := strings.Count(doc, `class="zy-slot-catalog-pricing"`); n != 1 {
+		t.Fatalf("expected 1 placeholder, got %d", n)
+	}
+}

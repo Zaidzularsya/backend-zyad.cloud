@@ -84,6 +84,7 @@ func (h *PublicLandingHandler) Resolve(c *gin.Context) {
 		return
 	}
 
+	resolved.OrganizationType = string(tenantContext.OrganizationType())
 	corehttp.OK(c, "Page resolved successfully", resolved)
 }
 
@@ -183,6 +184,7 @@ func (h *PublicLandingHandler) Preview(c *gin.Context) {
 	c.Header("X-Robots-Tag", "noindex, nofollow")
 	c.Header("Cache-Control", "no-store")
 
+	resolved.OrganizationType = string(tenantContext.OrganizationType())
 	corehttp.OK(c, "Preview resolved successfully", resolved)
 }
 
