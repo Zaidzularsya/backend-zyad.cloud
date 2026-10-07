@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 	"zyad.cloud/internal/core/tenant"
@@ -79,7 +81,13 @@ func (s *resolverService) ResolveHomepage(ctx context.Context, scope tenant.Scop
 			return resolved, nil
 		}
 		if !errors.Is(resolveErr, ErrPageNotPublished) && !errors.Is(resolveErr, ErrPageNotFound) {
-			return ResolvedPage{}, resolveErr
+			// Unlike "not published", an unexpected error means a configured
+			// homepage is broken; falling back keeps "/" alive but must not be silent.
+			slog.Warn("landing homepage resolve failed, falling back to default page",
+				"page_id", page.ID,
+				"organization_id", scope.OrganizationID(),
+				"error_type", fmt.Sprintf("%T", resolveErr),
+			)
 		}
 	case !errors.Is(err, pgx.ErrNoRows):
 		return ResolvedPage{}, err

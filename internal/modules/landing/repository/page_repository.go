@@ -535,17 +535,16 @@ func (r *pageRepository) SetHomepage(ctx context.Context, scope coretenant.Scope
 			return err
 		}
 
-		var exists bool
+		var status string
 		if err := tx.QueryRow(ctx, `
-			SELECT EXISTS (
-				SELECT 1 FROM landing_pages
-				WHERE id = $1 AND organization_id = $2
-					AND deleted_at IS NULL AND is_template = false
-			)`, pageID, scope.OrganizationID()).Scan(&exists); err != nil {
-			return err
+			SELECT status FROM landing_pages
+			WHERE id = $1 AND organization_id = $2
+				AND deleted_at IS NULL AND is_template = false
+		`, pageID, scope.OrganizationID()).Scan(&status); err != nil {
+			return err // pgx.ErrNoRows when missing, deleted or a template
 		}
-		if !exists {
-			return pgx.ErrNoRows
+		if status == string(domain.PageStatusArchived) {
+			return ErrHomepageTargetArchived
 		}
 
 		if _, err := tx.Exec(ctx, `
@@ -562,6 +561,7 @@ func (r *pageRepository) SetHomepage(ctx context.Context, scope coretenant.Scope
 			SET is_homepage = true, updated_at = NOW()
 			WHERE organization_id = $1 AND id = $2
 				AND deleted_at IS NULL AND is_template = false
+				AND status <> 'archived'
 		`, scope.OrganizationID(), pageID)
 		return err
 	})

@@ -138,19 +138,61 @@ func (s *pageService) Update(ctx context.Context, scope coretenant.Scope, id str
 		params.Slug = &safeSlug
 	}
 	// The repo Update cannot move the homepage flag without tripping the unique
-	// index, so a "true" goes through the atomic SetHomepage first. Failing here
-	// (e.g. page not found) leaves the old homepage and all other fields intact.
+	// index, so a "true" goes through the atomic SetHomepage. Field updates run
+	// first: if they fail (e.g. slug conflict) the old homepage stays put. The
+	// target is validated up front so SetHomepage rarely fails after the update.
 	if params.IsHomepage != nil && *params.IsHomepage {
-		if err := s.pageRepo.SetHomepage(ctx, scope, id); err != nil {
-			return domain.LandingPage{}, mapPagePersistenceError(err)
-		}
-		params.IsHomepage = nil
+		return s.updateAsHomepage(ctx, scope, id, params)
 	}
 	page, err := s.pageRepo.Update(ctx, scope, id, params)
 	if err != nil {
 		return domain.LandingPage{}, mapPagePersistenceError(err)
 	}
 	return page, nil
+}
+
+func (s *pageService) updateAsHomepage(ctx context.Context, scope coretenant.Scope, id string, params repository.UpdatePageParams) (domain.LandingPage, error) {
+	current, err := s.pageRepo.FindByID(ctx, scope, id)
+	if err != nil {
+		return domain.LandingPage{}, mapPagePersistenceError(err)
+	}
+	status := current.Status
+	if params.Status != nil {
+		status = *params.Status
+	}
+	if status == domain.PageStatusArchived {
+		return domain.LandingPage{}, errHomepageTargetArchived()
+	}
+	isTemplate := current.IsTemplate
+	if params.IsTemplate != nil {
+		isTemplate = *params.IsTemplate
+	}
+	if isTemplate {
+		return domain.LandingPage{}, coreerrors.New(
+			"PAGE_HOMEPAGE_TEMPLATE_INVALID",
+			"a template page cannot be the homepage",
+			http.StatusUnprocessableEntity,
+		)
+	}
+
+	params.IsHomepage = nil
+	page, err := s.pageRepo.Update(ctx, scope, id, params)
+	if err != nil {
+		return domain.LandingPage{}, mapPagePersistenceError(err)
+	}
+	if err := s.pageRepo.SetHomepage(ctx, scope, id); err != nil {
+		return domain.LandingPage{}, mapPagePersistenceError(err)
+	}
+	page.IsHomepage = true
+	return page, nil
+}
+
+func errHomepageTargetArchived() error {
+	return coreerrors.New(
+		"PAGE_HOMEPAGE_TARGET_ARCHIVED",
+		"an archived page cannot be the homepage; restore the page first",
+		http.StatusConflict,
+	)
 }
 
 func (s *pageService) Delete(ctx context.Context, scope coretenant.Scope, id string) error {
@@ -379,6 +421,9 @@ func generateSafeSlug(slug string, title string) string {
 func mapPagePersistenceError(err error) error {
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, repository.ErrHomepageTargetArchived) {
+		return errHomepageTargetArchived()
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return coreerrors.New(

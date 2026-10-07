@@ -2,10 +2,16 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/landing/domain"
 )
+
+// ErrHomepageTargetArchived is returned by SetHomepage when the target page is
+// archived: archived pages are never resolved publicly, so promoting one would
+// silently leave the organization without a working homepage.
+var ErrHomepageTargetArchived = errors.New("landing homepage target is archived")
 
 type PageListFilter struct {
 	Status         domain.PageStatus
@@ -63,7 +69,8 @@ type PageRepository interface {
 	Delete(context.Context, coretenant.Scope, string) error
 	// SetHomepage makes pageID the organization's only homepage in a single
 	// transaction. pgx.ErrNoRows when the page does not exist in the scope,
-	// is deleted, or is a template; the previous homepage is then untouched.
+	// is deleted, or is a template, and ErrHomepageTargetArchived when it is
+	// archived; the previous homepage is then untouched.
 	SetHomepage(context.Context, coretenant.Scope, string) error
 }
 

@@ -7,12 +7,14 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 
+	coreerrors "zyad.cloud/internal/core/errors"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/landing/domain"
 	"zyad.cloud/internal/modules/landing/repository"
@@ -645,5 +647,78 @@ func TestResolveHomepage_ScopeNeverReturnsAnotherOrganizationsHomepage(t *testin
 	empty := newHomepageTenant(t, env.db, coretenant.OrganizationTypeCustomer)
 	if _, err := env.resolver.ResolveHomepage(ctx, empty); err == nil {
 		t.Fatal("tenant without homepage must not resolve another organization's page")
+	}
+}
+
+func TestSetHomepage_ArchivedTargetRejectedOldHomepageIntact(t *testing.T) {
+	env := newHomepageEnv(t)
+	ctx := context.Background()
+	scope := newHomepageTenant(t, env.db, coretenant.OrganizationTypeCustomer)
+
+	home := env.newPage(t, scope, "home", domain.PageStatusPublished, true)
+	archived := env.newPage(t, scope, "archived", domain.PageStatusArchived, false)
+
+	if err := env.pageRepo.SetHomepage(ctx, scope, archived.ID); !errors.Is(err, repository.ErrHomepageTargetArchived) {
+		t.Fatalf("repo err = %v, want ErrHomepageTargetArchived", err)
+	}
+
+	yes := true
+	_, err := env.pageSvc.Update(ctx, scope, archived.ID, repository.UpdatePageParams{IsHomepage: &yes})
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Status != http.StatusConflict || appErr.Code != "PAGE_HOMEPAGE_TARGET_ARCHIVED" {
+		t.Fatalf("service err = %v, want 409 PAGE_HOMEPAGE_TARGET_ARCHIVED", err)
+	}
+	if ids := env.homepageIDs(t, scope); len(ids) != 1 || ids[0] != home.ID {
+		t.Fatalf("homepages = %v, want only %s", ids, home.ID)
+	}
+}
+
+func TestPageUpdate_SlugConflictDoesNotMoveHomepage(t *testing.T) {
+	env := newHomepageEnv(t)
+	ctx := context.Background()
+	scope := newHomepageTenant(t, env.db, coretenant.OrganizationTypeCustomer)
+
+	home := env.newPage(t, scope, "home", domain.PageStatusPublished, true)
+	target := env.newPage(t, scope, "target", domain.PageStatusPublished, false)
+	env.newPage(t, scope, "taken", domain.PageStatusPublished, false)
+
+	yes := true
+	slug := "taken"
+	if _, err := env.pageSvc.Update(ctx, scope, target.ID, repository.UpdatePageParams{Slug: &slug, IsHomepage: &yes}); err == nil {
+		t.Fatal("expected slug conflict")
+	}
+	if ids := env.homepageIDs(t, scope); len(ids) != 1 || ids[0] != home.ID {
+		t.Fatalf("homepage moved despite failed update: %v", ids)
+	}
+
+	title := "Beranda Baru"
+	updated, err := env.pageSvc.Update(ctx, scope, target.ID, repository.UpdatePageParams{Title: &title, IsHomepage: &yes})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.Title != title || !updated.IsHomepage {
+		t.Fatalf("updated = %+v", updated)
+	}
+	if ids := env.homepageIDs(t, scope); len(ids) != 1 || ids[0] != target.ID {
+		t.Fatalf("homepages = %v, want only %s", ids, target.ID)
+	}
+}
+
+func TestPageUpdate_HomepageWithTemplateRejected(t *testing.T) {
+	env := newHomepageEnv(t)
+	ctx := context.Background()
+	scope := newHomepageTenant(t, env.db, coretenant.OrganizationTypeCustomer)
+
+	home := env.newPage(t, scope, "home", domain.PageStatusPublished, true)
+	page := env.newPage(t, scope, "page", domain.PageStatusDraft, false)
+
+	yes := true
+	_, err := env.pageSvc.Update(ctx, scope, page.ID, repository.UpdatePageParams{IsHomepage: &yes, IsTemplate: &yes})
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Status != http.StatusUnprocessableEntity {
+		t.Fatalf("err = %v, want 422", err)
+	}
+	if ids := env.homepageIDs(t, scope); len(ids) != 1 || ids[0] != home.ID {
+		t.Fatalf("homepages = %v", ids)
 	}
 }

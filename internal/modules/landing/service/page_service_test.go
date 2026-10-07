@@ -26,6 +26,7 @@ type pageServicePageRepoStub struct {
 
 	setHomepageCalls []string
 	setHomepageErr   error
+	updateErr        error
 	// calls records the order of SetHomepage/Update so tests can assert it.
 	calls []string
 }
@@ -82,6 +83,9 @@ func (s *pageServicePageRepoStub) Update(
 	s.updateCalled = true
 	s.receivedUpdate = params
 	s.calls = append(s.calls, "update")
+	if s.updateErr != nil {
+		return landingdomain.LandingPage{}, s.updateErr
+	}
 	page := landingdomain.LandingPage{ID: "page-1", Slug: "test-page"}
 	if params.SEO != nil {
 		page.SEO = params.SEO
@@ -544,23 +548,24 @@ func mustLandingScope(t *testing.T) coretenant.Scope {
 	return scope
 }
 
-func TestPageServiceUpdateIsHomepageTrueUsesSetHomepageFirst(t *testing.T) {
+func TestPageServiceUpdateIsHomepageTrueUpdatesFieldsBeforeSetHomepage(t *testing.T) {
 	pageRepo := &pageServicePageRepoStub{}
 	svc := NewPageService(pageRepo, &pageServiceSectionRepoStub{})
 	yes := true
 	title := "Beranda"
 
-	if _, err := svc.Update(context.Background(), mustLandingScope(t), "page-9", repository.UpdatePageParams{
+	page, err := svc.Update(context.Background(), mustLandingScope(t), "page-9", repository.UpdatePageParams{
 		Title:      &title,
 		IsHomepage: &yes,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("Update() error = %v", err)
 	}
 
 	if len(pageRepo.setHomepageCalls) != 1 || pageRepo.setHomepageCalls[0] != "page-9" {
 		t.Fatalf("SetHomepage calls = %v", pageRepo.setHomepageCalls)
 	}
-	if len(pageRepo.calls) != 2 || pageRepo.calls[0] != "set-homepage" || pageRepo.calls[1] != "update" {
+	if len(pageRepo.calls) != 2 || pageRepo.calls[0] != "update" || pageRepo.calls[1] != "set-homepage" {
 		t.Fatalf("call order = %v", pageRepo.calls)
 	}
 	if pageRepo.receivedUpdate.IsHomepage != nil {
@@ -568,6 +573,79 @@ func TestPageServiceUpdateIsHomepageTrueUsesSetHomepageFirst(t *testing.T) {
 	}
 	if pageRepo.receivedUpdate.Title == nil || *pageRepo.receivedUpdate.Title != "Beranda" {
 		t.Fatalf("other fields must still be updated: %+v", pageRepo.receivedUpdate)
+	}
+	if !page.IsHomepage {
+		t.Fatal("returned page must report is_homepage=true")
+	}
+}
+
+func TestPageServiceUpdateFieldFailureDoesNotMoveHomepage(t *testing.T) {
+	pageRepo := &pageServicePageRepoStub{updateErr: &pgconn.PgError{
+		Code:           "23505",
+		ConstraintName: "idx_landing_pages_organization_slug_active_unique",
+	}}
+	svc := NewPageService(pageRepo, &pageServiceSectionRepoStub{})
+	yes := true
+	slug := "dipakai"
+
+	_, err := svc.Update(context.Background(), mustLandingScope(t), "page-9", repository.UpdatePageParams{
+		Slug:       &slug,
+		IsHomepage: &yes,
+	})
+
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Status != http.StatusConflict {
+		t.Fatalf("error = %v, want 409 AppError", err)
+	}
+	if len(pageRepo.setHomepageCalls) != 0 {
+		t.Fatalf("homepage must not move when field update fails, calls = %v", pageRepo.setHomepageCalls)
+	}
+}
+
+func TestPageServiceUpdateIsHomepageRejectsArchivedAndTemplateBeforeAnyWrite(t *testing.T) {
+	yes := true
+	archived := landingdomain.PageStatusArchived
+	draft := landingdomain.PageStatusDraft
+	tests := []struct {
+		name       string
+		current    landingdomain.LandingPage
+		params     repository.UpdatePageParams
+		wantStatus int
+		wantCode   string
+	}{
+		{"archived page", landingdomain.LandingPage{Status: archived}, repository.UpdatePageParams{IsHomepage: &yes}, http.StatusConflict, "PAGE_HOMEPAGE_TARGET_ARCHIVED"},
+		{"archiving in same request", landingdomain.LandingPage{Status: draft}, repository.UpdatePageParams{IsHomepage: &yes, Status: &archived}, http.StatusConflict, "PAGE_HOMEPAGE_TARGET_ARCHIVED"},
+		{"template page", landingdomain.LandingPage{Status: draft, IsTemplate: true}, repository.UpdatePageParams{IsHomepage: &yes}, http.StatusUnprocessableEntity, "PAGE_HOMEPAGE_TEMPLATE_INVALID"},
+		{"template in same request", landingdomain.LandingPage{Status: draft}, repository.UpdatePageParams{IsHomepage: &yes, IsTemplate: &yes}, http.StatusUnprocessableEntity, "PAGE_HOMEPAGE_TEMPLATE_INVALID"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pageRepo := &pageServicePageRepoStub{findByIDPage: tt.current}
+			svc := NewPageService(pageRepo, &pageServiceSectionRepoStub{})
+
+			_, err := svc.Update(context.Background(), mustLandingScope(t), "page-9", tt.params)
+
+			var appErr *coreerrors.AppError
+			if !errors.As(err, &appErr) || appErr.Status != tt.wantStatus || appErr.Code != tt.wantCode {
+				t.Fatalf("error = %v, want %d %s", err, tt.wantStatus, tt.wantCode)
+			}
+			if len(pageRepo.calls) != 0 {
+				t.Fatalf("no write expected, calls = %v", pageRepo.calls)
+			}
+		})
+	}
+}
+
+func TestPageServiceUpdateSetHomepageArchivedRaceMapsConflict(t *testing.T) {
+	pageRepo := &pageServicePageRepoStub{setHomepageErr: repository.ErrHomepageTargetArchived}
+	svc := NewPageService(pageRepo, &pageServiceSectionRepoStub{})
+	yes := true
+
+	_, err := svc.Update(context.Background(), mustLandingScope(t), "page-9", repository.UpdatePageParams{IsHomepage: &yes})
+
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Status != http.StatusConflict || appErr.Code != "PAGE_HOMEPAGE_TARGET_ARCHIVED" {
+		t.Fatalf("error = %v, want 409 PAGE_HOMEPAGE_TARGET_ARCHIVED", err)
 	}
 }
 
@@ -589,7 +667,7 @@ func TestPageServiceUpdateIsHomepageFalseSkipsSetHomepage(t *testing.T) {
 	}
 }
 
-func TestPageServiceUpdateSetHomepageErrorStopsUpdateAndMapsNotFound(t *testing.T) {
+func TestPageServiceUpdateSetHomepageNotFoundMaps404(t *testing.T) {
 	pageRepo := &pageServicePageRepoStub{setHomepageErr: pgx.ErrNoRows}
 	svc := NewPageService(pageRepo, &pageServiceSectionRepoStub{})
 	yes := true
@@ -599,8 +677,5 @@ func TestPageServiceUpdateSetHomepageErrorStopsUpdateAndMapsNotFound(t *testing.
 	var appErr *coreerrors.AppError
 	if !errors.As(err, &appErr) || appErr.Status != http.StatusNotFound {
 		t.Fatalf("error = %v, want 404 AppError", err)
-	}
-	if pageRepo.updateCalled {
-		t.Fatal("Update must not run after SetHomepage failed")
 	}
 }
