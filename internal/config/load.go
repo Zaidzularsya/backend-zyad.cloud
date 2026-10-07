@@ -99,12 +99,30 @@ func LoadSeedAdmin() SeedAdminConfig {
 	}
 }
 
+const defaultSelfServeGraceDays = 7
+
 func LoadSelfServe() SelfServeConfig {
+	grace, invalid := parseGraceDays(os.Getenv("SELF_SERVE_GRACE_DAYS"))
 	return SelfServeConfig{
-		BotEmail:       getEnv("SELF_SERVE_BOT_EMAIL", "self-serve-bot@zyad.cloud"),
-		DealOwnerEmail: getEnv("SELF_SERVE_DEAL_OWNER_EMAIL", ""),
-		FreeProductSKU: getEnv("SELF_SERVE_FREE_PRODUCT_SKU", "FREE"),
+		BotEmail:         getEnv("SELF_SERVE_BOT_EMAIL", "self-serve-bot@zyad.cloud"),
+		DealOwnerEmail:   getEnv("SELF_SERVE_DEAL_OWNER_EMAIL", ""),
+		FreeProductSKU:   getEnv("SELF_SERVE_FREE_PRODUCT_SKU", "FREE"),
+		GraceDays:        grace,
+		GraceDaysInvalid: invalid,
 	}
+}
+
+// parseGraceDays: kosong → default; bukan angka atau di luar 0–60 → default dan invalid=true.
+func parseGraceDays(raw string) (days int, invalid bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultSelfServeGraceDays, false
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 || n > 60 {
+		return defaultSelfServeGraceDays, true
+	}
+	return n, false
 }
 
 func LoadHTTP() HTTPConfig {

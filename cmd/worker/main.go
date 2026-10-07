@@ -73,6 +73,11 @@ func main() {
 		log.Warn("receivable billing run disabled", "error", err)
 	}
 
+	selfServeSuspend, err := app.NewSelfServeSuspendRunner(cfg, db, log)
+	if err != nil {
+		log.Warn("self-serve suspend job disabled", "error", err)
+	}
+
 	if *once {
 		if err := runBatch(ctx, log, worker, notificationService, batchSize); err != nil && !errors.Is(err, context.Canceled) {
 			log.Error("worker batch failed", "error", err)
@@ -90,6 +95,9 @@ func main() {
 		runReceivableOverdue(ctx, log, overdue)
 		if billingRun != nil {
 			runReceivableBillingRun(ctx, log, billingRun)
+		}
+		if selfServeSuspend != nil {
+			runSelfServeSuspend(ctx, log, selfServeSuspend)
 		}
 		return
 	}
@@ -127,6 +135,11 @@ func main() {
 	if billingRun != nil {
 		log.Info("starting receivable billing run job", "interval", receivableBillingRunInterval.String())
 		go runEvery(ctx, receivableBillingRunInterval, func() { runReceivableBillingRun(ctx, log, billingRun) })
+	}
+
+	if selfServeSuspend != nil {
+		log.Info("starting self-serve suspend job", "interval", selfServeSuspendInterval.String())
+		go runEvery(ctx, selfServeSuspendInterval, func() { runSelfServeSuspend(ctx, log, selfServeSuspend) })
 	}
 
 	interval := time.Duration(cfg.Notification.WorkerIntervalSeconds) * time.Second
@@ -272,6 +285,17 @@ func runReceivableBillingRun(ctx context.Context, log *slog.Logger, runner *rece
 	}
 	log.Info("receivable billing run", "organizations", result.Checked, "invoices", result.Invoices,
 		"advanced", result.Advanced, "ended", result.Ended, "failed", result.Failed)
+}
+
+// selfServeSuspendInterval: batas grace dihitung per hari WIB; per jam cukup, dan run idempoten.
+const selfServeSuspendInterval = time.Hour
+
+func runSelfServeSuspend(ctx context.Context, log *slog.Logger, runner *app.SelfServeSuspendRunner) {
+	result, err := runner.RunOnce(ctx)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		log.Error("self-serve suspend run failed", "error", err)
+	}
+	log.Info("self-serve suspend", "checked", result.Checked, "suspended", result.Suspended, "skipped", result.Skipped)
 }
 
 func runMailSync(ctx context.Context, log *slog.Logger, sync *mailboxservice.SyncService) {

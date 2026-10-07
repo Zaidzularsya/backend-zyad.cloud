@@ -65,6 +65,12 @@ type TenantAccess struct {
 	contracts ContractAccessReader
 	invoices  InvoiceStatusReader
 	writer    TenantEntitlementWriter
+
+	// Suspend/aktif kembali karena tagihan (WithSuspend); nil = fitur nonaktif.
+	billing  BillingInvoiceReader
+	status   WorkspaceStatusPort
+	notifier AccessNotifier
+	actor    func(ctx context.Context) (string, error)
 }
 
 var _ ContractSyncer = (*TenantAccess)(nil)
