@@ -82,6 +82,11 @@ type ResolverService interface {
 	// ResolveBySlug finds a published page (or draft if preview token valid) by its slug
 	ResolveBySlug(ctx context.Context, scope tenant.Scope, slug string, previewToken string) (ResolvedPage, error)
 
+	// ResolveHomepage serves the organization's published is_homepage page, or
+	// the "public-marketing" page when there is none (or it is not published).
+	// Never serves drafts: no preview token is accepted.
+	ResolveHomepage(ctx context.Context, scope tenant.Scope) (ResolvedPage, error)
+
 	// ResolveByDomain finds a published page by a custom domain
 	ResolveByDomain(ctx context.Context, scope tenant.Scope, customDomain string, previewToken string) (ResolvedPage, error)
 }

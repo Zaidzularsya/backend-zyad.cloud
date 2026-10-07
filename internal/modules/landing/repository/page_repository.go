@@ -512,6 +512,61 @@ func (r *pageRepository) Delete(ctx context.Context, scope coretenant.Scope, id 
 	return err
 }
 
+// SetHomepage moves the is_homepage flag to pageID atomically.
+//
+// Order matters: idx_landing_pages_organization_homepage_unique is checked per
+// statement, so the old flag must be cleared before the new one is set. The
+// flag is cleared on every other non-deleted page of the organization,
+// archived ones included: archived rows are outside the unique index, but
+// leaving the flag there would make a later Restore collide with this page.
+// Soft-deleted rows are never touched. A transaction-scoped advisory lock
+// serializes concurrent calls for the same organization, otherwise two
+// simultaneous calls would both clear and then fail on the unique index.
+func (r *pageRepository) SetHomepage(ctx context.Context, scope coretenant.Scope, pageID string) error {
+	if !scope.IsValid() {
+		return coretenant.ErrInvalidScope
+	}
+
+	return r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx,
+			"SELECT pg_advisory_xact_lock(hashtext('landing_homepage:' || $1))",
+			scope.OrganizationID(),
+		); err != nil {
+			return err
+		}
+
+		var exists bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM landing_pages
+				WHERE id = $1 AND organization_id = $2
+					AND deleted_at IS NULL AND is_template = false
+			)`, pageID, scope.OrganizationID()).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return pgx.ErrNoRows
+		}
+
+		if _, err := tx.Exec(ctx, `
+			UPDATE landing_pages
+			SET is_homepage = false, updated_at = NOW()
+			WHERE organization_id = $1 AND id <> $2
+				AND is_homepage = true AND deleted_at IS NULL
+		`, scope.OrganizationID(), pageID); err != nil {
+			return err
+		}
+
+		_, err := tx.Exec(ctx, `
+			UPDATE landing_pages
+			SET is_homepage = true, updated_at = NOW()
+			WHERE organization_id = $1 AND id = $2
+				AND deleted_at IS NULL AND is_template = false
+		`, scope.OrganizationID(), pageID)
+		return err
+	})
+}
+
 type platformPageStore struct {
 	db *database.Pool
 }

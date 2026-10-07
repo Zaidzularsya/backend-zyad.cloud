@@ -137,6 +137,15 @@ func (s *pageService) Update(ctx context.Context, scope coretenant.Scope, id str
 		safeSlug := generateSafeSlug(*params.Slug, "")
 		params.Slug = &safeSlug
 	}
+	// The repo Update cannot move the homepage flag without tripping the unique
+	// index, so a "true" goes through the atomic SetHomepage first. Failing here
+	// (e.g. page not found) leaves the old homepage and all other fields intact.
+	if params.IsHomepage != nil && *params.IsHomepage {
+		if err := s.pageRepo.SetHomepage(ctx, scope, id); err != nil {
+			return domain.LandingPage{}, mapPagePersistenceError(err)
+		}
+		params.IsHomepage = nil
+	}
 	page, err := s.pageRepo.Update(ctx, scope, id, params)
 	if err != nil {
 		return domain.LandingPage{}, mapPagePersistenceError(err)

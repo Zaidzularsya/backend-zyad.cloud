@@ -61,6 +61,10 @@ type PageRepository interface {
 	List(context.Context, coretenant.Scope, PageListFilter) ([]domain.LandingPage, int64, error)
 	Update(context.Context, coretenant.Scope, string, UpdatePageParams) (domain.LandingPage, error)
 	Delete(context.Context, coretenant.Scope, string) error
+	// SetHomepage makes pageID the organization's only homepage in a single
+	// transaction. pgx.ErrNoRows when the page does not exist in the scope,
+	// is deleted, or is a template; the previous homepage is then untouched.
+	SetHomepage(context.Context, coretenant.Scope, string) error
 }
 
 // PlatformPageRepository is the explicit cross-tenant boundary. Platform

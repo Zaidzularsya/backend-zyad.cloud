@@ -23,6 +23,17 @@ type pageServicePageRepoStub struct {
 	updateCalled   bool
 	receivedUpdate repository.UpdatePageParams
 	deleteCalled   bool
+
+	setHomepageCalls []string
+	setHomepageErr   error
+	// calls records the order of SetHomepage/Update so tests can assert it.
+	calls []string
+}
+
+func (s *pageServicePageRepoStub) SetHomepage(_ context.Context, _ coretenant.Scope, id string) error {
+	s.setHomepageCalls = append(s.setHomepageCalls, id)
+	s.calls = append(s.calls, "set-homepage")
+	return s.setHomepageErr
 }
 
 func (s *pageServicePageRepoStub) Create(
@@ -70,6 +81,7 @@ func (s *pageServicePageRepoStub) Update(
 ) (landingdomain.LandingPage, error) {
 	s.updateCalled = true
 	s.receivedUpdate = params
+	s.calls = append(s.calls, "update")
 	page := landingdomain.LandingPage{ID: "page-1", Slug: "test-page"}
 	if params.SEO != nil {
 		page.SEO = params.SEO
@@ -530,4 +542,65 @@ func mustLandingScope(t *testing.T) coretenant.Scope {
 		t.Fatalf("NewScope() error = %v", err)
 	}
 	return scope
+}
+
+func TestPageServiceUpdateIsHomepageTrueUsesSetHomepageFirst(t *testing.T) {
+	pageRepo := &pageServicePageRepoStub{}
+	svc := NewPageService(pageRepo, &pageServiceSectionRepoStub{})
+	yes := true
+	title := "Beranda"
+
+	if _, err := svc.Update(context.Background(), mustLandingScope(t), "page-9", repository.UpdatePageParams{
+		Title:      &title,
+		IsHomepage: &yes,
+	}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	if len(pageRepo.setHomepageCalls) != 1 || pageRepo.setHomepageCalls[0] != "page-9" {
+		t.Fatalf("SetHomepage calls = %v", pageRepo.setHomepageCalls)
+	}
+	if len(pageRepo.calls) != 2 || pageRepo.calls[0] != "set-homepage" || pageRepo.calls[1] != "update" {
+		t.Fatalf("call order = %v", pageRepo.calls)
+	}
+	if pageRepo.receivedUpdate.IsHomepage != nil {
+		t.Fatalf("repo Update must not receive IsHomepage, got %v", *pageRepo.receivedUpdate.IsHomepage)
+	}
+	if pageRepo.receivedUpdate.Title == nil || *pageRepo.receivedUpdate.Title != "Beranda" {
+		t.Fatalf("other fields must still be updated: %+v", pageRepo.receivedUpdate)
+	}
+}
+
+func TestPageServiceUpdateIsHomepageFalseSkipsSetHomepage(t *testing.T) {
+	pageRepo := &pageServicePageRepoStub{}
+	svc := NewPageService(pageRepo, &pageServiceSectionRepoStub{})
+	no := false
+
+	if _, err := svc.Update(context.Background(), mustLandingScope(t), "page-9", repository.UpdatePageParams{
+		IsHomepage: &no,
+	}); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if len(pageRepo.setHomepageCalls) != 0 {
+		t.Fatalf("SetHomepage must not run for false, calls = %v", pageRepo.setHomepageCalls)
+	}
+	if pageRepo.receivedUpdate.IsHomepage == nil || *pageRepo.receivedUpdate.IsHomepage {
+		t.Fatalf("false must pass through to repo Update, got %v", pageRepo.receivedUpdate.IsHomepage)
+	}
+}
+
+func TestPageServiceUpdateSetHomepageErrorStopsUpdateAndMapsNotFound(t *testing.T) {
+	pageRepo := &pageServicePageRepoStub{setHomepageErr: pgx.ErrNoRows}
+	svc := NewPageService(pageRepo, &pageServiceSectionRepoStub{})
+	yes := true
+
+	_, err := svc.Update(context.Background(), mustLandingScope(t), "missing", repository.UpdatePageParams{IsHomepage: &yes})
+
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Status != http.StatusNotFound {
+		t.Fatalf("error = %v, want 404 AppError", err)
+	}
+	if pageRepo.updateCalled {
+		t.Fatal("Update must not run after SetHomepage failed")
+	}
 }

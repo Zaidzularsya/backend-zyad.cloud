@@ -11,6 +11,10 @@ type ResolverRepository interface {
 	// ResolveBySlug finds a page by its slug
 	ResolveBySlug(ctx context.Context, scope coretenant.Scope, slug string) (domain.LandingPage, error)
 
+	// ResolveHomepage finds the organization's published-or-not homepage
+	// (is_homepage, not deleted, not template, not archived); pgx.ErrNoRows if none.
+	ResolveHomepage(ctx context.Context, scope coretenant.Scope) (domain.LandingPage, error)
+
 	// ResolveByDomain finds a page by a custom domain
 	ResolveByDomain(ctx context.Context, scope coretenant.Scope, customDomain string) (domain.LandingPage, error)
 

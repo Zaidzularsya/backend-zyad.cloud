@@ -23,6 +23,18 @@ type publicResolverServiceStub struct {
 	customHost   string
 	usedDomain   bool
 	resolvedPage service.ResolvedPage
+
+	homepageCalled bool
+	homepageErr    error
+}
+
+func (s *publicResolverServiceStub) ResolveHomepage(
+	_ context.Context,
+	scope coretenant.Scope,
+) (service.ResolvedPage, error) {
+	s.scope = scope
+	s.homepageCalled = true
+	return s.resolvedPage, s.homepageErr
 }
 
 func (s *publicResolverServiceStub) ResolveBySlug(
@@ -272,5 +284,68 @@ func TestPublicLandingRenderHTMLSetsOrganizationType(t *testing.T) {
 		if got := strings.Contains(rec.Body.String(), "zy-slot-catalog-pricing"); got != wantPlaceholder {
 			t.Fatalf("%s: placeholder present = %v, want %v\n%s", orgType, got, wantPlaceholder, rec.Body.String())
 		}
+	}
+}
+
+func TestPublicLandingResolveHomeQueryUsesHomepageOfTenantContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	resolver := &publicResolverServiceStub{
+		resolvedPage: service.ResolvedPage{Page: domain.LandingPage{ID: "home-1", Status: domain.PageStatusPublished}},
+	}
+	router := renderRouter(t, resolver)
+
+	// slug and a foreign organization hint must not influence the homepage lookup.
+	req := httptest.NewRequest(http.MethodGet,
+		"/public/landing/resolve?home=1&slug=about&organization_id=22222222-2222-2222-2222-222222222222", nil)
+	req.Host = "budi.app.zyad.test"
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !resolver.homepageCalled || resolver.usedDomain || resolver.slug != "" {
+		t.Fatalf("homepage=%v usedDomain=%v slug=%q", resolver.homepageCalled, resolver.usedDomain, resolver.slug)
+	}
+	if resolver.scope.OrganizationID() != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("scope org = %q, want the tenant-context org", resolver.scope.OrganizationID())
+	}
+	var body struct {
+		Data struct {
+			OrganizationType string `json:"OrganizationType"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.Data.OrganizationType != "customer" {
+		t.Fatalf("OrganizationType = %q, body=%s", body.Data.OrganizationType, rec.Body.String())
+	}
+}
+
+func TestPublicLandingResolveHomeQueryNotFoundIs404(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	resolver := &publicResolverServiceStub{homepageErr: service.ErrPageNotFound}
+	router := renderRouter(t, resolver)
+
+	req := httptest.NewRequest(http.MethodGet, "/public/landing/resolve?home=1", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPublicLandingResolveWithoutHomeQueryDoesNotUseHomepage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	resolver := &publicResolverServiceStub{}
+	router := renderRouter(t, resolver)
+
+	req := httptest.NewRequest(http.MethodGet, "/public/landing/resolve?home=0", nil)
+	req.Host = "budi.app.zyad.test"
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if resolver.homepageCalled || !resolver.usedDomain {
+		t.Fatalf("homepage=%v usedDomain=%v: host tenant must resolve by domain", resolver.homepageCalled, resolver.usedDomain)
 	}
 }

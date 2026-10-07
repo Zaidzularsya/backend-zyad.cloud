@@ -79,10 +79,14 @@ func (h *PublicLandingHandler) Resolve(c *gin.Context) {
 	var resolved service.ResolvedPage
 	var resolveErr error
 
-	// Priority: explicit slug first, then custom domain.
+	// home=1 selects the homepage of the organization in the verified tenant
+	// context (scope), never one named by the request. It wins over slug.
+	// Priority otherwise: explicit slug first, then custom domain.
 	// Frontend API calls use the API host (e.g. zyad.local.test:3000). If we resolve
 	// domain first, a slug request can accidentally return the page bound to that host.
-	if slug != "" {
+	if c.Query("home") == "1" {
+		resolved, resolveErr = h.resolverSvc.ResolveHomepage(c.Request.Context(), scope)
+	} else if slug != "" {
 		resolved, resolveErr = h.resolverSvc.ResolveBySlug(c.Request.Context(), scope, slug, "")
 	} else if customDomain != "" && customDomain != "localhost" && customDomain != "localhost:8080" { // simple check
 		resolved, resolveErr = h.resolverSvc.ResolveByDomain(c.Request.Context(), scope, customDomain, "")
