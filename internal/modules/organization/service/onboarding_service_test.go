@@ -89,12 +89,12 @@ func TestOnboardingServiceCreateWorkspaceRejectsInvalidSlug(t *testing.T) {
 	}
 }
 
-type fakeDefaultSubscriptionProvisioner struct {
+type fakeDefaultAccessProvisioner struct {
 	organizationIDs []string
 	err             error
 }
 
-func (p *fakeDefaultSubscriptionProvisioner) ProvisionDefaultSubscription(
+func (p *fakeDefaultAccessProvisioner) ProvisionDefaultAccess(
 	_ context.Context,
 	organizationID string,
 ) error {
@@ -102,15 +102,15 @@ func (p *fakeDefaultSubscriptionProvisioner) ProvisionDefaultSubscription(
 	return p.err
 }
 
-func TestOnboardingServiceCreateWorkspaceProvisionsDefaultSubscription(t *testing.T) {
+func TestOnboardingServiceCreateWorkspaceProvisionsDefaultAccess(t *testing.T) {
 	store := &fakeOnboardingStore{
 		result: repository.MembershipOrganization{
 			Organization: model.Organization{ID: "11111111-1111-1111-1111-111111111111"},
 		},
 	}
-	provisioner := &fakeDefaultSubscriptionProvisioner{}
+	provisioner := &fakeDefaultAccessProvisioner{}
 	service := NewOnboardingService(store)
-	service.SetDefaultSubscriptionProvisioner(provisioner)
+	service.SetDefaultAccessProvisioner(provisioner)
 
 	_, err := service.CreateWorkspace(
 		context.Background(),
@@ -134,9 +134,9 @@ func TestOnboardingServiceCreateWorkspaceProvisioningFailureIsNonFatal(t *testin
 			Organization: model.Organization{ID: "11111111-1111-1111-1111-111111111111"},
 		},
 	}
-	provisioner := &fakeDefaultSubscriptionProvisioner{err: errors.New("plan missing")}
+	provisioner := &fakeDefaultAccessProvisioner{err: errors.New("plan missing")}
 	service := NewOnboardingService(store)
-	service.SetDefaultSubscriptionProvisioner(provisioner)
+	service.SetDefaultAccessProvisioner(provisioner)
 
 	_, err := service.CreateWorkspace(
 		context.Background(),

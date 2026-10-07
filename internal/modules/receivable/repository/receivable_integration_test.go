@@ -672,18 +672,18 @@ func TestDueItemsRespectEndDateAndEndExpired(t *testing.T) {
 		t.Fatalf("A after end_date must not be due: %+v", got)
 	}
 	// B: next_period_start 2026-10-05 <= end_date, BillOn 2027-10-05 → jatuh tempo, sehingga contract belum boleh ended.
-	if n, err := e.contracts.EndExpired(e.ctx, scope, *date("2026-11-05")); err != nil || n != 0 {
-		t.Fatalf("EndExpired with due-able item B = %d err=%v, want 0", n, err)
+	if n, err := e.contracts.EndExpired(e.ctx, scope, *date("2026-11-05")); err != nil || len(n) != 0 {
+		t.Fatalf("EndExpired with due-able item B = %v err=%v, want 0", n, err)
 	}
 	// Maju B melewati end_date → tidak ada item tersisa sebelum end_date.
 	if ok, err := e.contracts.Advance(e.ctx, scope, c.Items[1].ID, 0, *date("2027-10-05"), *date("2028-10-04")); err != nil || !ok {
 		t.Fatal(ok, err)
 	}
-	if n, err := e.contracts.EndExpired(e.ctx, scope, *date("2026-11-04")); err != nil || n != 0 {
-		t.Fatalf("EndExpired on end_date itself = %d err=%v, want 0 (end_date < today required)", n, err)
+	if n, err := e.contracts.EndExpired(e.ctx, scope, *date("2026-11-04")); err != nil || len(n) != 0 {
+		t.Fatalf("EndExpired on end_date itself = %v err=%v, want 0 (end_date < today required)", n, err)
 	}
-	if n, err := e.contracts.EndExpired(e.ctx, scope, *date("2026-11-05")); err != nil || n != 1 {
-		t.Fatalf("EndExpired = %d err=%v, want 1", n, err)
+	if n, err := e.contracts.EndExpired(e.ctx, scope, *date("2026-11-05")); err != nil || len(n) != 1 || n[0].ID == "" || n[0].ContractNumber == "" {
+		t.Fatalf("EndExpired = %v err=%v, want 1", n, err)
 	}
 	ended, _ := e.contracts.FindByID(e.ctx, scope, c.ID)
 	if ended.Status != domain.ContractEnded || ended.EndReason != "Masa kontrak berakhir" || ended.EndedAt == nil {

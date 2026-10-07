@@ -107,7 +107,7 @@ func TestBillingRunParallelWorkersNoDuplicateInvoices(t *testing.T) {
 		Issuers: fakeIssuer{}, Files: &lockedFiles{}, Renderer: &fakeRenderer{}, Links: &fakeLinks{}, Sender: &fakeSender{},
 		Listeners: NewRegistry(), FrontendURL: "https://app.test/", Now: func() time.Time { return now },
 	})
-	run := NewBillingRun(contracts, svc, settings, func() time.Time { return now })
+	run := NewBillingRun(contracts, svc, settings, NewRegistry(), func() time.Time { return now })
 
 	var wg sync.WaitGroup
 	results := make([]BillingRunResult, 2)

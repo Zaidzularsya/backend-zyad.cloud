@@ -74,6 +74,8 @@ type UpdateProductParams struct {
 type ProductRepository interface {
 	Create(ctx context.Context, scope coretenant.Scope, p CreateProductParams) (domain.Product, error)
 	FindByID(ctx context.Context, scope coretenant.Scope, id string) (domain.Product, error)
+	// FindBySKU mengembalikan produk aktif dengan SKU persis itu (pgx.ErrNoRows bila tidak ada), lengkap dengan fitur.
+	FindBySKU(ctx context.Context, scope coretenant.Scope, sku string) (domain.Product, error)
 	// FindByIDs mengembalikan produk aktif maupun nonaktif, tetapi tidak yang terhapus.
 	FindByIDs(ctx context.Context, scope coretenant.Scope, ids []string) (map[string]domain.Product, error)
 	List(ctx context.Context, scope coretenant.Scope, f ProductListFilter) ([]domain.Product, int64, error)

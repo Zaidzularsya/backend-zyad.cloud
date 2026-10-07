@@ -26,15 +26,16 @@ type ContractService interface {
 }
 
 type contractService struct {
-	repo repository.ContractRepository
-	now  func() time.Time
+	repo      repository.ContractRepository
+	listeners *Registry
+	now       func() time.Time
 }
 
-func NewContractService(repo repository.ContractRepository, now func() time.Time) ContractService {
+func NewContractService(repo repository.ContractRepository, listeners *Registry, now func() time.Time) ContractService {
 	if now == nil {
 		now = time.Now
 	}
-	return &contractService{repo: repo, now: now}
+	return &contractService{repo: repo, listeners: listeners, now: now}
 }
 
 func (s *contractService) Get(ctx context.Context, scope coretenant.Scope, id string) (domain.Contract, error) {
@@ -84,7 +85,13 @@ func (s *contractService) End(ctx context.Context, scope coretenant.Scope, id st
 	if d.Before(c.StartDate) {
 		return domain.Contract{}, invalidContract("Tanggal akhir tidak boleh sebelum tanggal mulai.")
 	}
-	return s.mapNotFound(s.repo.End(ctx, scope, id, d, reason, userID))
+	ended, err := s.mapNotFound(s.repo.End(ctx, scope, id, d, reason, userID))
+	if err != nil {
+		return domain.Contract{}, err
+	}
+	// Repository hanya mengubah contract berstatus active, jadi event ini tepat sekali per contract.
+	s.listeners.ContractEnded(ctx, scope, contractRef(ended))
+	return ended, nil
 }
 
 func (s *contractService) mapNotFound(c domain.Contract, err error) (domain.Contract, error) {
@@ -97,4 +104,8 @@ func (s *contractService) mapNotFound(c domain.Contract, err error) (domain.Cont
 func pricingDay(t time.Time) time.Time {
 	y, m, d := t.Date()
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+}
+
+func contractRef(c domain.Contract) ContractRef {
+	return ContractRef{ID: c.ID, Number: c.ContractNumber, SourceID: c.SourceID, SourceType: c.SourceType}
 }

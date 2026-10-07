@@ -110,6 +110,9 @@ func TestListenerPanicDoesNotFailPayment(t *testing.T) {
 type panicListener struct{}
 
 func (panicListener) InvoicePaid(_ context.Context, _ coretenant.Scope, _ InvoiceRef) { panic("boom") }
+func (panicListener) ContractEnded(_ context.Context, _ coretenant.Scope, _ ContractRef) {
+	panic("boom")
+}
 func (panicListener) ContractCreated(_ context.Context, _ coretenant.Scope, _ ContractRef) {
 	panic("boom")
 }

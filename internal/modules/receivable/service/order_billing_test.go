@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -41,7 +42,7 @@ func (f *fakeContracts) Create(_ context.Context, _ coretenant.Scope, p reposito
 		c.Items = append(c.Items, domain.ContractItem{
 			ID: fmt.Sprintf("ci-%d-%d", f.created, i), Description: it.Description, Frequency: it.Frequency,
 			PaymentTiming: it.PaymentTiming, PeriodIndex: it.PeriodIndex, NextPeriodStart: it.NextPeriodStart,
-			NextPeriodEnd: it.NextPeriodEnd, SourceLineID: it.SourceLineID, Position: i,
+			NextPeriodEnd: it.NextPeriodEnd, SourceLineID: it.SourceLineID, Position: i, Features: it.Features,
 		})
 	}
 	f.byID[c.ID] = c
@@ -142,8 +143,8 @@ func (f *fakeContracts) Advance(_ context.Context, _ coretenant.Scope, itemID st
 	return false, nil
 }
 
-func (f *fakeContracts) EndExpired(_ context.Context, _ coretenant.Scope, today time.Time) (int64, error) {
-	var n int64
+func (f *fakeContracts) EndExpired(_ context.Context, _ coretenant.Scope, today time.Time) ([]domain.Contract, error) {
+	var ended []domain.Contract
 	for id, c := range f.byID {
 		if c.Status != domain.ContractActive || c.EndDate == nil || !c.EndDate.Before(today) {
 			continue
@@ -155,10 +156,10 @@ func (f *fakeContracts) EndExpired(_ context.Context, _ coretenant.Scope, today 
 		if !open {
 			c.Status, c.EndReason = domain.ContractEnded, "Masa kontrak berakhir"
 			f.byID[id] = c
-			n++
+			ended = append(ended, c)
 		}
 	}
-	return n, nil
+	return ended, nil
 }
 
 // failingInvoices membungkus InvoiceService agar CreateAndIssue bisa digagalkan sekali.
@@ -249,6 +250,21 @@ func TestBillOrderISPCase(t *testing.T) {
 	again, _ := h.billing.BillOrder(ctx, scope, req)
 	if again != res || len(h.store.invoices) != 1 || h.contracts.created != 1 || len(h.listener.contracts) != 1 {
 		t.Fatal("BillOrder must be idempotent")
+	}
+}
+
+func TestBillOrderStoresItemFeatures(t *testing.T) {
+	h := newOrderHarness(t)
+	req := ispRequest("so-feat", date("2026-10-05"))
+	features := json.RawMessage(`[{"feature_key":"user.max","value":5,"label":"5 user"}]`)
+	req.Lines[1].Features = features
+	res, err := h.billing.BillOrder(ctx, scope, req)
+	if err != nil || res.ContractID == "" {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	items := h.contracts.byID[res.ContractID].Items
+	if len(items) != 1 || string(items[0].Features) != string(features) {
+		t.Fatalf("contract item features = %s", items[0].Features)
 	}
 }
 

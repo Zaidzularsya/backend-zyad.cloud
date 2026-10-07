@@ -8183,6 +8183,103 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/crm/companies/{id}:
+    patch:
+      summary: Update a CRM company, including its linked customer workspace
+      operationId: updateCrmCompany
+      tags:
+      - CRM Company
+      security:
+      - BearerAuth: []
+      description: 'Updates the supplied company fields. `tenant_organization_id` links the company to a customer workspace (UUID), replaces the link, or clears it (`null`); omit it to leave the link untouched. Any link change requires permission `company.link_workspace` (organization_owner, super_admin), may only be made from the platform organization, and only customer workspaces can be linked. After a link change the entitlements granted by the company''s contracts move from the previous workspace (which falls back to the free default product) to the new one, according to payment state. Other fields: permission `company.update`. Requires entitlement `crm.enabled`.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                tenant_organization_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: Workspace to link; null clears the link; omitted keeps it.
+      responses:
+        '200':
+          description: Success. `tenant_organization` is populated for the platform organization only.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      name:
+                        type: string
+                      tenant_organization_id:
+                        type: string
+                        format: uuid
+                        nullable: true
+                      tenant_organization:
+                        type: object
+                        nullable: true
+                        properties:
+                          id:
+                            type: string
+                            format: uuid
+                          name:
+                            type: string
+                          slug:
+                            type: string
+                          status:
+                            type: string
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (permission `company.update`, `company.link_workspace` when the link changes, or entitlement)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found (COMPANY_NOT_FOUND)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Workspace already linked to another company (WORKSPACE_ALREADY_LINKED)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation (WORKSPACE_LINK_PLATFORM_ONLY, WORKSPACE_NOT_FOUND, WORKSPACE_NOT_CUSTOMER)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/app/crm/quotations/{id}/approve:
     post:
       summary: Approve a sent quotation

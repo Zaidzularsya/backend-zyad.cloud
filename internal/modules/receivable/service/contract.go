@@ -157,6 +157,8 @@ type ContractRef struct {
 type Listener interface {
 	InvoicePaid(ctx context.Context, scope coretenant.Scope, inv InvoiceRef)
 	ContractCreated(ctx context.Context, scope coretenant.Scope, c ContractRef) // dipanggil mulai S4
+	// ContractEnded: tepat sekali per contract, saat statusnya berubah menjadi ended (End atau billing run).
+	ContractEnded(ctx context.Context, scope coretenant.Scope, c ContractRef)
 }
 
 // SettingsService mengelola pengaturan penagihan organisasi.

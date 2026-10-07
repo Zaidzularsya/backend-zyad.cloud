@@ -34,14 +34,15 @@ type BillingRun struct {
 	contracts repository.ContractRepository
 	invoices  InvoiceService
 	settings  repository.SettingsRepository
+	listeners *Registry
 	now       func() time.Time
 }
 
-func NewBillingRun(contracts repository.ContractRepository, invoices InvoiceService, settings repository.SettingsRepository, now func() time.Time) *BillingRun {
+func NewBillingRun(contracts repository.ContractRepository, invoices InvoiceService, settings repository.SettingsRepository, listeners *Registry, now func() time.Time) *BillingRun {
 	if now == nil {
 		now = time.Now
 	}
-	return &BillingRun{contracts: contracts, invoices: invoices, settings: settings, now: now}
+	return &BillingRun{contracts: contracts, invoices: invoices, settings: settings, listeners: listeners, now: now}
 }
 
 type billGroup struct {
@@ -83,7 +84,10 @@ func (r *BillingRun) Run(ctx context.Context, scope coretenant.Scope) (BillingRu
 	if err != nil {
 		return res, err
 	}
-	res.Ended = int(ended)
+	res.Ended = len(ended)
+	for _, c := range ended {
+		r.listeners.ContractEnded(ctx, scope, contractRef(c))
+	}
 	return res, nil
 }
 

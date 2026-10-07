@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -47,7 +48,7 @@ func loadContractItems(ctx context.Context, tx pgx.Tx, orgID, contractID string)
 	rows, err := tx.Query(ctx, `
 		SELECT id, description, quantity::text, unit, unit_price::text, COALESCE(discount_percent::text, ''),
 			tax_percent::text, COALESCE(product_id::text, ''), sku, COALESCE(source_line_id::text, ''),
-			billing_frequency, payment_timing, period_index, next_period_start, next_period_end, position
+			billing_frequency, payment_timing, period_index, next_period_start, next_period_end, position, features
 		FROM receivable_contract_items
 		WHERE organization_id = $1 AND contract_id = $2 ORDER BY position, created_at, id`, orgID, contractID)
 	if err != nil {
@@ -60,7 +61,7 @@ func loadContractItems(ctx context.Context, tx pgx.Tx, orgID, contractID string)
 		var freq, timing string
 		if err := rows.Scan(&it.ID, &it.Description, &it.Quantity, &it.Unit, &it.UnitPrice, &it.DiscountPercent,
 			&it.TaxPercent, &it.ProductID, &it.SKU, &it.SourceLineID, &freq, &timing,
-			&it.PeriodIndex, &it.NextPeriodStart, &it.NextPeriodEnd, &it.Position); err != nil {
+			&it.PeriodIndex, &it.NextPeriodStart, &it.NextPeriodEnd, &it.Position, &it.Features); err != nil {
 			return nil, err
 		}
 		it.Frequency, it.PaymentTiming = pricing.Frequency(freq), pricing.PaymentTiming(timing)
@@ -104,12 +105,12 @@ func (r *contractRepository) Create(ctx context.Context, scope coretenant.Scope,
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO receivable_contract_items (organization_id, contract_id, description, quantity, unit, unit_price,
 					discount_percent, tax_percent, product_id, sku, source_line_id, billing_frequency, payment_timing,
-					period_index, next_period_start, next_period_end, position)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+					period_index, next_period_start, next_period_end, position, features)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
 				scope.OrganizationID(), id, it.Description, it.Quantity, it.Unit, it.UnitPrice,
 				nullableString(it.DiscountPercent), it.TaxPercent, nullableString(it.ProductID), it.SKU,
 				nullableString(it.SourceLineID), string(it.Frequency), string(it.PaymentTiming),
-				it.PeriodIndex, it.NextPeriodStart, it.NextPeriodEnd, i); err != nil {
+				it.PeriodIndex, it.NextPeriodStart, it.NextPeriodEnd, i, featuresOrEmpty(it.Features)); err != nil {
 				return err
 			}
 		}
@@ -281,18 +282,39 @@ func (r *contractRepository) Advance(ctx context.Context, scope coretenant.Scope
 	return advanced, err
 }
 
-func (r *contractRepository) EndExpired(ctx context.Context, scope coretenant.Scope, today time.Time) (int64, error) {
-	var n int64
+func (r *contractRepository) EndExpired(ctx context.Context, scope coretenant.Scope, today time.Time) ([]domain.Contract, error) {
+	var ended []domain.Contract
 	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `UPDATE receivable_contracts c
+		rows, err := tx.Query(ctx, `UPDATE receivable_contracts c
 			SET status = 'ended', end_reason = 'Masa kontrak berakhir', ended_at = now(), updated_at = now()
 			WHERE c.organization_id = $1 AND c.status = 'active' AND c.end_date < $2::date
 				AND NOT EXISTS (
 					SELECT 1 FROM receivable_contract_items i
 					WHERE i.organization_id = c.organization_id AND i.contract_id = c.id
-						AND i.next_period_start <= c.end_date)`, scope.OrganizationID(), today)
-		n = tag.RowsAffected()
-		return err
+						AND i.next_period_start <= c.end_date)
+			RETURNING c.id, c.contract_number, c.source_type, COALESCE(c.source_id::text, '')`, scope.OrganizationID(), today)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var c domain.Contract
+			var sourceType string
+			if err := rows.Scan(&c.ID, &c.ContractNumber, &sourceType, &c.SourceID); err != nil {
+				return err
+			}
+			c.SourceType, c.Status = domain.SourceType(sourceType), domain.ContractEnded
+			ended = append(ended, c)
+		}
+		return rows.Err()
 	})
-	return n, err
+	return ended, err
+}
+
+// featuresOrEmpty: kolom features NOT NULL; baris tanpa fitur disimpan sebagai [].
+func featuresOrEmpty(f json.RawMessage) []byte {
+	if len(f) == 0 {
+		return []byte("[]")
+	}
+	return f
 }

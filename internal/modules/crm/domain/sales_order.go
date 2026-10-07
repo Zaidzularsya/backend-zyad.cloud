@@ -39,6 +39,8 @@ type SalesOrderItem struct {
 	DeliveredAt                                                                                                   *time.Time
 	DeliveredBy, DeliveryNote, InvoiceID                                                                          string
 	Position                                                                                                      int
+	// Features: snapshot fitur produk dari baris quotation; tidak pernah nil dari repository.
+	Features []FeatureSnapshot
 }
 
 type SalesOrder struct {

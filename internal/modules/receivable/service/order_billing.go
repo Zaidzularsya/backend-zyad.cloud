@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -19,6 +20,8 @@ import (
 type OrderLine struct {
 	SourceLineID, Description, Quantity, Unit, UnitPrice, DiscountPercent, TaxPercent, ProductID, SKU string
 	Attrs                                                                                             pricing.Attributes
+	// Features: array JSON [{feature_key,value,label}] yang tidak ditafsirkan receivable; nil disimpan sebagai [].
+	Features json.RawMessage
 }
 
 type OrderBillingRequest struct {
@@ -269,7 +272,7 @@ func (b *orderBilling) ensureContract(ctx context.Context, scope coretenant.Scop
 			UnitPrice: orDefault(c.line.UnitPrice, "0"), DiscountPercent: c.line.DiscountPercent,
 			TaxPercent: orDefault(c.line.TaxPercent, "0"), ProductID: c.line.ProductID, SKU: c.line.SKU,
 			SourceLineID: c.line.SourceLineID, Frequency: c.attrs.Frequency, PaymentTiming: c.attrs.PaymentTiming,
-			PeriodIndex: index, NextPeriodStart: from, NextPeriodEnd: to,
+			PeriodIndex: index, NextPeriodStart: from, NextPeriodEnd: to, Features: c.line.Features,
 		}
 	}
 	number, err := b.nextContractNumber(ctx, scope)

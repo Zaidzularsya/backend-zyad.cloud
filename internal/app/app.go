@@ -219,11 +219,6 @@ func New(ctx context.Context) (*App, error) {
 	organizationOnboardingService := organizationservice.NewOnboardingService(
 		organizationrepo.NewOnboardingRepository(db),
 	)
-	defaultSubscriptions := defaultSubscriptionProvisioner{
-		plans:         productPlanService,
-		subscriptions: subscriptionService,
-	}
-	organizationOnboardingService.SetDefaultSubscriptionProvisioner(defaultSubscriptions)
 	authService.SetGoogleWorkspaceProvisioner(
 		googleWorkspaceProvisioner{onboarding: organizationOnboardingService},
 	)
@@ -259,7 +254,6 @@ func New(ctx context.Context) (*App, error) {
 		permService,
 	)
 	subscriptionGuardService := subscriptionservice.NewSubscriptionGuardService(
-		subscriptionRepo,
 		organizationEntitlementRuntimeService,
 		subscriptionservice.WithOrganizationTypeResolver(organizationrepo.NewOrganizationRepository(db)),
 	)
@@ -291,7 +285,6 @@ func New(ctx context.Context) (*App, error) {
 		billingInvoiceService,
 		organizationEntitlementService,
 	)
-	tenantBillingService.SetDefaultSubscriptionProvisioner(defaultSubscriptions)
 	tenantBillingHandler := billinghandler.NewTenantBillingHandler(
 		tenantBillingService,
 		permService,
@@ -428,7 +421,6 @@ func New(ctx context.Context) (*App, error) {
 	crmCompanyRepo := crmrepo.NewCompanyRepository(db)
 	crmContactRepo := crmrepo.NewContactRepository(db)
 	crmLeadRepo := crmrepo.NewLeadRepository(db)
-	crmCompanySvc := crmservice.NewCompanyService(crmCompanyRepo)
 	crmContactSvc := crmservice.NewContactService(
 		crmContactRepo,
 		crmservice.WithContactQuotaGuard(subscriptionGuardService),
@@ -472,7 +464,6 @@ func New(ctx context.Context) (*App, error) {
 	crmDocumentCounterRepo := crmrepo.NewDocumentCounterRepository(db)
 	crmIntegrationRepo := crmrepo.NewIntegrationRepository(db)
 	crmIntegrationSvc := crmservice.NewIntegrationService(crmIntegrationRepo, cfg.App.Secret)
-	crmCompanyHandler := crmhandler.NewCompanyHandler(crmCompanySvc)
 	crmContactHandler := crmhandler.NewContactHandler(crmContactSvc)
 	crmLeadHandler := crmhandler.NewLeadHandler(crmLeadSvc)
 	crmLeadAttachmentHandler := crmhandler.NewLeadAttachmentHandler(crmLeadAttachmentSvc)
@@ -481,6 +472,14 @@ func New(ctx context.Context) (*App, error) {
 		catalogrepo.NewProductRepository(db),
 		catalogFeatureRegistry{features: productrepo.NewFeatureRepository(db)},
 	)
+	// Paket gratis workspace = fitur produk FREE di katalog platform (R4-S3); tidak lagi customer_subscriptions.
+	defaultAccess := defaultAccessProvisioner{
+		scopes: newPlatformScopeResolver(organizationrepo.NewOrganizationRepository(db)), products: catalogProductService,
+		features: catalogFeatureRegistry{features: productrepo.NewFeatureRepository(db)},
+		writer:   organizationservice.NewContractEntitlementService(organizationrepo.NewEntitlementRepository(db)),
+		sku:      cfg.SelfServe.FreeProductSKU,
+	}
+	organizationOnboardingService.SetDefaultAccessProvisioner(defaultAccess)
 	catalogProductHandler := cataloghandler.NewProductHandler(catalogProductService)
 	catalogFeatureHandler := cataloghandler.NewFeatureHandler(catalogProductService)
 	catalogPublicListingHandler := cataloghandler.NewPublicListingHandler(catalogservice.NewPublicListingService(
@@ -558,7 +557,12 @@ func New(ctx context.Context) (*App, error) {
 		Notifier:  notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts),
 		AppName:   cfg.App.Name, FrontendURL: cfg.App.FrontendURL, Locale: cfg.Notification.DefaultLocale,
 	}, crmWonEvaluator, time.Now)
-	receivableModule.Listeners.Add(crmservice.NewReceivableListener(crmSalesOrderRepo, crmWonEvaluator, crmActivityRepo))
+	crmTenantAccess := newCRMTenantAccess(db, receivableModule.Invoices, receivableModule.Contracts, defaultAccess)
+	receivableModule.Listeners.Add(crmservice.NewReceivableListener(crmSalesOrderRepo, crmWonEvaluator, crmActivityRepo).WithTenantAccess(crmTenantAccess))
+	// Tautan company ↔ workspace (R4-S3): mengubah tautan memindahkan entitlement contract.
+	crmCompanySvc := crmservice.NewCompanyService(crmCompanyRepo,
+		crmservice.WithWorkspaceLinking(workspaceDirectory{orgs: organizationrepo.NewOrganizationRepository(db)}, crmTenantAccess))
+	crmCompanyHandler := crmhandler.NewCompanyHandler(crmCompanySvc)
 	crmSalesOrderHandler := crmhandler.NewSalesOrderHandler(crmSalesOrderSvc, crmhandler.SalesOrderRefs{Invoices: crmReceivableDocs, Contracts: crmReceivableDocs})
 	crmDealOrdersHandler := crmhandler.NewDealOrdersHandler(crmSalesOrderHandler, crmWonEvaluator)
 

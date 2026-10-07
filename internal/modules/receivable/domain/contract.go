@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -25,6 +26,8 @@ type ContractItem struct {
 	NextPeriodStart                                                                                       time.Time // awal periode yang belum ditagih
 	NextPeriodEnd                                                                                         time.Time // PeriodRange(start, f, PeriodIndex).to — dipakai billing run S5
 	Position                                                                                              int
+	// Features: snapshot fitur produk (JSON array), tidak ditafsirkan receivable; tidak pernah nil dari repository.
+	Features json.RawMessage
 }
 
 type Contract struct {

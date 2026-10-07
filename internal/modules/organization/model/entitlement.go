@@ -9,6 +9,9 @@ const (
 	EntitlementSourceAddon            EntitlementSource = "addon"
 	EntitlementSourceTrial            EntitlementSource = "trial"
 	EntitlementSourcePlatformOverride EntitlementSource = "platform_override"
+	// Contract: fitur produk dari contract workspace; Default: paket gratis dari produk FREE.
+	EntitlementSourceContract EntitlementSource = "contract"
+	EntitlementSourceDefault  EntitlementSource = "default"
 )
 
 func (s EntitlementSource) IsValid() bool {
@@ -16,7 +19,9 @@ func (s EntitlementSource) IsValid() bool {
 	case EntitlementSourcePlan,
 		EntitlementSourceAddon,
 		EntitlementSourceTrial,
-		EntitlementSourcePlatformOverride:
+		EntitlementSourcePlatformOverride,
+		EntitlementSourceContract,
+		EntitlementSourceDefault:
 		return true
 	default:
 		return false

@@ -9,6 +9,13 @@ func TestLoadIncludesSelfServeDefaults(t *testing.T) {
 	if cfg.SelfServe.BotEmail != "self-serve-bot@zyad.cloud" || cfg.SelfServe.DealOwnerEmail != "" {
 		t.Fatalf("SelfServe = %+v", cfg.SelfServe)
 	}
+	if cfg.SelfServe.FreeProductSKU != "FREE" {
+		t.Fatalf("FreeProductSKU = %q, want FREE", cfg.SelfServe.FreeProductSKU)
+	}
+	t.Setenv("SELF_SERVE_FREE_PRODUCT_SKU", "STARTER")
+	if got := Load().SelfServe.FreeProductSKU; got != "STARTER" {
+		t.Fatalf("FreeProductSKU = %q, want STARTER", got)
+	}
 	t.Setenv("SELF_SERVE_BOT_EMAIL", "bot@example.com")
 	t.Setenv("SELF_SERVE_DEAL_OWNER_EMAIL", "owner@example.com")
 	cfg = Load()

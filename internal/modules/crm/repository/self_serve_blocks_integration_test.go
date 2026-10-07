@@ -129,6 +129,14 @@ func TestCompanyTenantLink(t *testing.T) {
 	if _, err := companies.FindByTenantOrganization(ctx, tenants.B.Scope, workspace); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("other org err = %v", err)
 	}
+	// string kosong melepas tautan, dan workspace bisa ditautkan ke company lain
+	cleared, err := companies.SetTenantOrganization(ctx, tenants.A.Scope, a.ID, "", "")
+	if err != nil || cleared.TenantOrganizationID != nil {
+		t.Fatalf("clear: %+v err=%v", cleared, err)
+	}
+	if relinked, err := companies.SetTenantOrganization(ctx, tenants.A.Scope, b.ID, workspace, ""); err != nil || relinked.TenantOrganizationID == nil {
+		t.Fatalf("relink: %+v err=%v", relinked, err)
+	}
 }
 
 func TestFindPipelineBySystemKey(t *testing.T) {

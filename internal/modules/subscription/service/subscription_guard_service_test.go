@@ -5,13 +5,9 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-
 	coreerrors "zyad.cloud/internal/core/errors"
 	coretenant "zyad.cloud/internal/core/tenant"
 	organizationmodel "zyad.cloud/internal/modules/organization/model"
-	subscriptionmodel "zyad.cloud/internal/modules/subscription/model"
-	"zyad.cloud/internal/modules/subscription/repository"
 )
 
 type stubSubscriptionGuardOrganizationStore struct {
@@ -24,26 +20,6 @@ func (s stubSubscriptionGuardOrganizationStore) FindByID(
 	string,
 ) (organizationmodel.Organization, error) {
 	return s.organization, s.err
-}
-
-type stubSubscriptionGuardSubscriptionStore struct {
-	usableErr error
-	usable    subscriptionmodel.Subscription
-	latest    []subscriptionmodel.Subscription
-}
-
-func (s stubSubscriptionGuardSubscriptionStore) FindUsableByOrganization(
-	context.Context,
-	string,
-) (subscriptionmodel.Subscription, error) {
-	return s.usable, s.usableErr
-}
-
-func (s stubSubscriptionGuardSubscriptionStore) List(
-	context.Context,
-	repository.SubscriptionListFilter,
-) ([]subscriptionmodel.Subscription, int64, error) {
-	return s.latest, int64(len(s.latest)), nil
 }
 
 type stubSubscriptionGuardEntitlementEvaluator struct {
@@ -59,22 +35,8 @@ func (s stubSubscriptionGuardEntitlementEvaluator) RequireFeature(
 	return s.entitlement, s.err
 }
 
-func TestSubscriptionGuardBlocksSuspendedSubscription(t *testing.T) {
-	service := NewSubscriptionGuardService(stubSubscriptionGuardSubscriptionStore{
-		usableErr: pgx.ErrNoRows,
-		latest: []subscriptionmodel.Subscription{
-			{Status: subscriptionmodel.SubscriptionStatusSuspended},
-		},
-	}, stubSubscriptionGuardEntitlementEvaluator{})
-
-	_, err := service.RequireFeature(context.Background(), "organization-1", "landing.enabled")
-	assertAppErrorCode(t, err, "SUBSCRIPTION_SUSPENDED")
-}
-
 func TestSubscriptionGuardBlocksDisabledFeature(t *testing.T) {
-	service := NewSubscriptionGuardService(stubSubscriptionGuardSubscriptionStore{
-		usable: subscriptionmodel.Subscription{Status: subscriptionmodel.SubscriptionStatusActive},
-	}, stubSubscriptionGuardEntitlementEvaluator{
+	service := NewSubscriptionGuardService(stubSubscriptionGuardEntitlementEvaluator{
 		err: coreerrors.New(
 			"ORGANIZATION_FEATURE_NOT_ENTITLED",
 			"organization feature is not enabled",
@@ -87,9 +49,7 @@ func TestSubscriptionGuardBlocksDisabledFeature(t *testing.T) {
 }
 
 func TestSubscriptionGuardBlocksQuotaExceeded(t *testing.T) {
-	service := NewSubscriptionGuardService(stubSubscriptionGuardSubscriptionStore{
-		usable: subscriptionmodel.Subscription{Status: subscriptionmodel.SubscriptionStatusActive},
-	}, stubSubscriptionGuardEntitlementEvaluator{
+	service := NewSubscriptionGuardService(stubSubscriptionGuardEntitlementEvaluator{
 		entitlement: organizationmodel.Entitlement{
 			FeatureKey: "landing.max_pages",
 			Limits:     map[string]any{"limit": int64(3)},
@@ -107,9 +67,7 @@ func TestSubscriptionGuardBlocksQuotaExceeded(t *testing.T) {
 }
 
 func TestSubscriptionGuardAllowsFeatureAndQuota(t *testing.T) {
-	service := NewSubscriptionGuardService(stubSubscriptionGuardSubscriptionStore{
-		usable: subscriptionmodel.Subscription{Status: subscriptionmodel.SubscriptionStatusActive},
-	}, stubSubscriptionGuardEntitlementEvaluator{
+	service := NewSubscriptionGuardService(stubSubscriptionGuardEntitlementEvaluator{
 		entitlement: organizationmodel.Entitlement{
 			FeatureKey: "landing.max_pages",
 			Limits:     map[string]any{"limit": float64(5)},
@@ -132,12 +90,9 @@ func TestSubscriptionGuardAllowsFeatureAndQuota(t *testing.T) {
 }
 
 func TestSubscriptionGuardBypassesPlatformOrganization(t *testing.T) {
-	// The subscription store is set up to fail (no rows, no latest
-	// subscription) so that if the bypass didn't actually skip
-	// requireUsableSubscription, this test would fail with
-	// SUBSCRIPTION_NOT_FOUND instead of succeeding.
+	// The evaluator denies every feature, so the call can only succeed
+	// through the platform bypass.
 	service := NewSubscriptionGuardService(
-		stubSubscriptionGuardSubscriptionStore{usableErr: pgx.ErrNoRows},
 		stubSubscriptionGuardEntitlementEvaluator{
 			err: coreerrors.New("ORGANIZATION_FEATURE_NOT_ENTITLED", "not entitled", http.StatusForbidden),
 		},
@@ -157,15 +112,37 @@ func TestSubscriptionGuardBypassesPlatformOrganization(t *testing.T) {
 
 func TestSubscriptionGuardStillEnforcesCustomerOrganization(t *testing.T) {
 	service := NewSubscriptionGuardService(
-		stubSubscriptionGuardSubscriptionStore{usableErr: pgx.ErrNoRows},
-		stubSubscriptionGuardEntitlementEvaluator{},
+		stubSubscriptionGuardEntitlementEvaluator{
+			err: coreerrors.New("ORGANIZATION_FEATURE_NOT_ENTITLED", "not entitled", http.StatusForbidden),
+		},
 		WithOrganizationTypeResolver(stubSubscriptionGuardOrganizationStore{
 			organization: organizationmodel.Organization{Type: coretenant.OrganizationTypeCustomer},
 		}),
 	)
 
 	_, err := service.RequireFeature(context.Background(), "tenant-org", "crm.enabled")
-	assertAppErrorCode(t, err, "SUBSCRIPTION_NOT_FOUND")
+	assertAppErrorCode(t, err, "FEATURE_NOT_ENABLED")
+}
+
+// Workspace tanpa baris customer_subscriptions (paket gratis dari produk FREE, atau contract) harus lolos
+// selama entitlement-nya aktif: guard tidak lagi bergantung pada subscription.
+func TestSubscriptionGuardAllowsWorkspaceWithoutSubscription(t *testing.T) {
+	service := NewSubscriptionGuardService(
+		stubSubscriptionGuardEntitlementEvaluator{
+			entitlement: organizationmodel.Entitlement{
+				FeatureKey: "crm.enabled",
+				Source:     organizationmodel.EntitlementSourceDefault,
+			},
+		},
+		WithOrganizationTypeResolver(stubSubscriptionGuardOrganizationStore{
+			organization: organizationmodel.Organization{Type: coretenant.OrganizationTypeCustomer},
+		}),
+	)
+
+	entitlement, err := service.RequireFeature(context.Background(), "tenant-org", "crm.enabled")
+	if err != nil || entitlement.Source != organizationmodel.EntitlementSourceDefault {
+		t.Fatalf("RequireFeature() = %+v, %v; want default entitlement and no error", entitlement, err)
+	}
 }
 
 func assertAppErrorCode(t *testing.T, err error, code string) {

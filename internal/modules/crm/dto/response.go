@@ -41,10 +41,20 @@ type CompanyResponse struct {
 	Tags        []string       `json:"tags"`
 	OwnerUserID string         `json:"owner_user_id,omitempty"`
 	// TenantOrganizationID: workspace tertaut (checkout self-serve).
-	TenantOrganizationID *string    `json:"tenant_organization_id,omitempty"`
-	CreatedAt            time.Time  `json:"created_at"`
-	UpdatedAt            time.Time  `json:"updated_at"`
-	DeletedAt            *time.Time `json:"deleted_at,omitempty"`
+	TenantOrganizationID *string `json:"tenant_organization_id,omitempty"`
+	// TenantOrganization: ringkasan workspace tertaut; null bila tidak ada.
+	TenantOrganization *WorkspaceSummary `json:"tenant_organization"`
+	CreatedAt          time.Time         `json:"created_at"`
+	UpdatedAt          time.Time         `json:"updated_at"`
+	DeletedAt          *time.Time        `json:"deleted_at,omitempty"`
+}
+
+// WorkspaceSummary meringkas workspace pelanggan yang tertaut ke company.
+type WorkspaceSummary struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Slug   string `json:"slug"`
+	Status string `json:"status"`
 }
 
 func CompanyFromDomain(c domain.Company) CompanyResponse {

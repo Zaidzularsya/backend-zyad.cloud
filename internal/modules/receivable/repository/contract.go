@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -127,6 +128,7 @@ type ContractItemParams struct {
 	PaymentTiming                                                                                     pricing.PaymentTiming
 	PeriodIndex                                                                                       int
 	NextPeriodStart, NextPeriodEnd                                                                    time.Time
+	Features                                                                                          json.RawMessage
 }
 
 type CreateContractParams struct {
@@ -160,7 +162,8 @@ type ContractRepository interface {
 	// Advance: period_index+1 dan next_period_start/end baru, hanya bila period_index masih = from (false bila sudah dimajukan).
 	Advance(ctx context.Context, scope coretenant.Scope, itemID string, from int, nextStart, nextEnd time.Time) (bool, error)
 	// EndExpired: active dengan end_date < today dan tanpa item yang next_period_start <= end_date → ended.
-	EndExpired(ctx context.Context, scope coretenant.Scope, today time.Time) (int64, error)
+	// Mengembalikan contract yang baru diakhiri (hanya kolom header).
+	EndExpired(ctx context.Context, scope coretenant.Scope, today time.Time) ([]domain.Contract, error)
 }
 
 // DueItem: satu item contract yang sudah waktunya ditagih. Contract adalah header tanpa Items.
