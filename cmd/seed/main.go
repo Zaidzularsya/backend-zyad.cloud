@@ -62,11 +62,10 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf(
-			"Seeded platform-organization organization_id=%s owner_user_id=%s membership_id=%s entitlement_id=%s domain_ids=%v\n",
+			"Seeded platform-organization organization_id=%s owner_user_id=%s membership_id=%s domain_ids=%v\n",
 			result.OrganizationID,
 			result.OwnerUserID,
 			result.MembershipID,
-			result.EntitlementID,
 			result.DomainIDs,
 		)
 	case "self-serve":

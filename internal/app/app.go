@@ -253,15 +253,15 @@ func New(ctx context.Context) (*App, error) {
 		permService,
 		permService,
 	)
-	subscriptionGuardService := subscriptionservice.NewSubscriptionGuardService(
+	entitlementGuard := organizationservice.NewEntitlementGuard(
 		organizationEntitlementRuntimeService,
-		subscriptionservice.WithOrganizationTypeResolver(organizationrepo.NewOrganizationRepository(db)),
+		organizationservice.WithOrganizationTypeResolver(organizationrepo.NewOrganizationRepository(db)),
 	)
 	organizationSelfService := organizationservice.NewSelfService(
 		organizationrepo.NewSelfRepository(db),
 		organizationservice.NewMembershipService(
 			organizationMembershipRepository,
-			organizationservice.WithMembershipBillingGuard(subscriptionGuardService),
+			organizationservice.WithMembershipBillingGuard(entitlementGuard),
 		),
 		organizationMembershipRepository,
 	)
@@ -273,7 +273,7 @@ func New(ctx context.Context) (*App, error) {
 		organizationrepo.NewDomainRepository(db),
 		organizationservice.NewDNSDomainVerifier(nil),
 		cfg.MultiTenant.PlatformPrimaryDomain,
-		organizationservice.WithDomainBillingGuard(subscriptionGuardService),
+		organizationservice.WithDomainBillingGuard(entitlementGuard),
 	)
 	organizationDomainHandler := organizationhandler.NewDomainHandler(
 		organizationDomainService,
@@ -315,12 +315,12 @@ func New(ctx context.Context) (*App, error) {
 	landingPageSvc := landingservice.NewPageService(
 		landingPageRepo,
 		landingSectionRepo,
-		landingservice.WithLandingPageQuotaGuard(subscriptionGuardService),
+		landingservice.WithLandingPageQuotaGuard(entitlementGuard),
 		landingservice.WithLandingPageBrandingRepo(landingBrandingRepo),
 	)
 	landingSectionSvc := landingservice.NewSectionService(
 		landingSectionRepo,
-		landingservice.WithLandingSectionQuotaGuard(subscriptionGuardService),
+		landingservice.WithLandingSectionQuotaGuard(entitlementGuard),
 	)
 	landingDocumentSvc := landingservice.NewDocumentService(landingDocumentRepo, landingPageRepo)
 
@@ -329,7 +329,7 @@ func New(ctx context.Context) (*App, error) {
 		landingDomainRepo,
 		landingPageRepo,
 		db,
-		landingservice.WithLandingDomainFeatureGate(subscriptionGuardService),
+		landingservice.WithLandingDomainFeatureGate(entitlementGuard),
 	)
 	landingBrandingSvc := landingservice.NewBrandingService(landingBrandingRepo)
 	landingFormSvc := landingservice.NewFormService(landingFormRepo)
@@ -344,7 +344,7 @@ func New(ctx context.Context) (*App, error) {
 	landingTemplateSvc := landingservice.NewTemplateService(
 		landingReusableRepo,
 		landingSectionRepo,
-		landingservice.WithTemplateSectionQuotaGuard(subscriptionGuardService),
+		landingservice.WithTemplateSectionQuotaGuard(entitlementGuard),
 	)
 	mediaStorage, err := buildMediaStorage(cfg.Storage)
 	if err != nil {
@@ -417,13 +417,13 @@ func New(ctx context.Context) (*App, error) {
 	landingAnalyticsSvc := landingservice.NewAnalyticsService(landingAnalyticsRepo, landingPageRepo, db)
 	publicLandingHandler := landinghandler.NewPublicLandingHandler(landingResolverSvc, landingVisibilitySvc, landingSubmissionSvc, landingAnalyticsSvc)
 
-	crmEntitlementChecker := subscriptionEntitlementChecker{guard: subscriptionGuardService}
+	crmEntitlementChecker := entitlementChecker{guard: entitlementGuard}
 	crmCompanyRepo := crmrepo.NewCompanyRepository(db)
 	crmContactRepo := crmrepo.NewContactRepository(db)
 	crmLeadRepo := crmrepo.NewLeadRepository(db)
 	crmContactSvc := crmservice.NewContactService(
 		crmContactRepo,
-		crmservice.WithContactQuotaGuard(subscriptionGuardService),
+		crmservice.WithContactQuotaGuard(entitlementGuard),
 	)
 	crmMemberRepo := crmrepo.NewMemberRepository(db)
 	crmPipelineRepo := crmrepo.NewPipelineRepository(db)
@@ -431,7 +431,7 @@ func New(ctx context.Context) (*App, error) {
 		crmLeadRepo,
 		crmContactRepo,
 		crmCompanyRepo,
-		crmservice.WithLeadContactQuotaGuard(subscriptionGuardService),
+		crmservice.WithLeadContactQuotaGuard(entitlementGuard),
 		crmservice.WithLeadOwnerValidator(crmMemberRepo),
 		crmservice.WithLeadDealPipelines(crmPipelineRepo),
 		crmservice.WithLeadConvertedHook(whatsappservice.NewLeadConversionRelinker(whatsapprepo.NewConversationRepository(db))),
@@ -450,7 +450,7 @@ func New(ctx context.Context) (*App, error) {
 	crmDealRepo := crmrepo.NewDealRepository(db)
 	crmPipelineSvc := crmservice.NewPipelineService(
 		crmPipelineRepo,
-		crmservice.WithPipelineFeatureGate(subscriptionGuardService),
+		crmservice.WithPipelineFeatureGate(entitlementGuard),
 	)
 	crmDealSvc := crmservice.NewDealService(
 		crmDealRepo,
@@ -518,7 +518,7 @@ func New(ctx context.Context) (*App, error) {
 	crmActivityHandler := crmhandler.NewActivityHandler(crmActivitySvc)
 	crmIntegrationHandler := crmhandler.NewIntegrationHandler(crmIntegrationSvc)
 
-	whatsappSessionSvc := NewWhatsAppSessionService(cfg, db, subscriptionGuardService, log)
+	whatsappSessionSvc := NewWhatsAppSessionService(cfg, db, entitlementGuard, log)
 	whatsappSessionHandler := whatsapphandler.NewSessionHandler(whatsappSessionSvc)
 	whatsappWebhookHandler := NewWhatsAppWebhookHandler(cfg, db, log)
 	whatsappBus := NewWhatsAppRealtimeBus(redisClient, log)

@@ -272,7 +272,7 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	// own organization are allowed in — the platform uses the same CRM to
 	// track its own sales/leads to prospective tenants) and
 	// RequireEntitlement("crm.enabled") (bypassed entirely for the platform
-	// organization, see SubscriptionGuardService.RequireFeature — platform
+	// organization, see EntitlementGuard.RequireFeature — platform
 	// never subscribes to a plan). Access within CRM is differentiated by
 	// permission grants, not organization type — see migration
 	// 000119_seed_crm_super_admin_permissions and

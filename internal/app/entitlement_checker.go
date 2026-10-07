@@ -4,20 +4,20 @@ import (
 	"context"
 
 	"zyad.cloud/internal/core/middleware"
-	subscriptionservice "zyad.cloud/internal/modules/subscription/service"
+	organizationservice "zyad.cloud/internal/modules/organization/service"
 )
 
-// subscriptionEntitlementChecker adapts *subscriptionservice.SubscriptionGuardService
+// entitlementChecker adapts *organizationservice.EntitlementGuard
 // (which returns the full organization entitlement) to middleware.EntitlementChecker
 // (which only needs a pass/fail signal), keeping internal/core free of a
 // dependency on internal/modules.
-type subscriptionEntitlementChecker struct {
-	guard *subscriptionservice.SubscriptionGuardService
+type entitlementChecker struct {
+	guard *organizationservice.EntitlementGuard
 }
 
-func (a subscriptionEntitlementChecker) RequireFeature(ctx context.Context, organizationID string, featureKey string) error {
+func (a entitlementChecker) RequireFeature(ctx context.Context, organizationID string, featureKey string) error {
 	_, err := a.guard.RequireFeature(ctx, organizationID, featureKey)
 	return err
 }
 
-var _ middleware.EntitlementChecker = subscriptionEntitlementChecker{}
+var _ middleware.EntitlementChecker = entitlementChecker{}

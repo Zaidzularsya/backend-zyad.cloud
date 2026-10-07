@@ -20,7 +20,6 @@ import (
 	productrepo "zyad.cloud/internal/modules/product/repository"
 	receivablerepo "zyad.cloud/internal/modules/receivable/repository"
 	receivableservice "zyad.cloud/internal/modules/receivable/service"
-	subscriptionservice "zyad.cloud/internal/modules/subscription/service"
 	"zyad.cloud/internal/platform/database"
 	"zyad.cloud/internal/shared/publiclink"
 )
@@ -61,16 +60,16 @@ func newWorkerReceivableModule(cfg config.Config, db *database.Pool, log *slog.L
 		mailboxservice.MessageServiceOptions{SecretKey: cfg.App.Secret, AllowPrivateHosts: cfg.Mail.MailboxAllowPrivateHosts, Log: log})
 
 	entitlements := organizationservice.NewEntitlementService(organizationrepo.NewEntitlementRepository(db))
-	guard := subscriptionservice.NewSubscriptionGuardService(
+	guard := organizationservice.NewEntitlementGuard(
 		entitlements,
-		subscriptionservice.WithOrganizationTypeResolver(organizationrepo.NewOrganizationRepository(db)),
+		organizationservice.WithOrganizationTypeResolver(organizationrepo.NewOrganizationRepository(db)),
 	)
 
 	module := buildReceivable(receivableBuild{
 		DB: db, Assets: assetSvc, Links: publiclink.NewService(publiclink.NewRepository(db), cfg.App.Secret),
 		Mailboxes: mailboxSvc, Messages: messageSvc,
 		WhatsApp:     NewWhatsAppConversationService(cfg, db, nil, nil, log),
-		Entitlements: subscriptionEntitlementChecker{guard: guard},
+		Entitlements: entitlementChecker{guard: guard},
 		Permissions:  permissionservice.New(permissionrepo.New(db)),
 		Publisher:    notificationpublisher.NewOutboxPublisher(notificationrepo.NewOutboxRepository(db), cfg.Notification.MaxAttempts),
 		Members:      crmrepo.NewMemberRepository(db), Issuers: crmrepo.NewQuotationIssuerRepository(db),

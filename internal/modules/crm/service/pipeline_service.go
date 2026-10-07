@@ -11,7 +11,7 @@ import (
 )
 
 // PipelineFeatureGate mirrors internal/modules/landing/service.DomainFeatureGate
-// — a narrow interface over SubscriptionGuardService.RequireFeature.
+// — a narrow interface over EntitlementGuard.RequireFeature.
 type PipelineFeatureGate interface {
 	RequireFeature(ctx context.Context, organizationID string, featureKey string) (organizationmodel.Entitlement, error)
 }
