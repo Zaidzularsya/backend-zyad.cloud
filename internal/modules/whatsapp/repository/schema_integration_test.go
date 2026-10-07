@@ -174,30 +174,6 @@ func TestWhatsAppSeedsIntegration(t *testing.T) {
 		}
 	}
 
-	wantLimits := map[string]int64{"growth": 1, "business": 3, "enterprise": 10}
-	rows, err := db.Query(ctx, `
-		SELECT pp.code, e.value_int
-		FROM product_plan_entitlements e
-		JOIN product_features f ON f.id = e.feature_id
-		JOIN product_plans pp ON pp.id = e.plan_id
-		WHERE f.feature_key = $1
-	`, domain.FeatureWhatsAppMaxSessions)
-	if err != nil {
-		t.Fatalf("entitlements: %v", err)
-	}
-	defer rows.Close()
-	got := map[string]int64{}
-	for rows.Next() {
-		var code string
-		var value int64
-		if err := rows.Scan(&code, &value); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		got[code] = value
-	}
-	for code, want := range wantLimits {
-		if got[code] != want {
-			t.Errorf("%s max_sessions = %d, want %d", code, got[code], want)
-		}
-	}
+	// Batas max_sessions per plan dulu diperiksa di sini; plan dipensiunkan di R4-S5 (tabel dihapus),
+	// batas sekarang hidup di fitur produk katalog.
 }

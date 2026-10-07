@@ -9,7 +9,7 @@ import (
 	"zyad.cloud/internal/modules/crm/repository"
 )
 
-// ContactQuotaGuard is a narrow interface over SubscriptionGuardService,
+// ContactQuotaGuard is a narrow interface over EntitlementGuard,
 // mirroring the pattern in internal/modules/landing/service/page_service.go
 // (LandingPageQuotaGuard).
 type ContactQuotaGuard interface {

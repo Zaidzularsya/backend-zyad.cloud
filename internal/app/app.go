@@ -24,9 +24,6 @@ import (
 	assethandler "zyad.cloud/internal/modules/asset/handler"
 	assetrepo "zyad.cloud/internal/modules/asset/repository"
 	assetservice "zyad.cloud/internal/modules/asset/service"
-	billinghandler "zyad.cloud/internal/modules/billing/handler"
-	billingrepo "zyad.cloud/internal/modules/billing/repository"
-	billingservice "zyad.cloud/internal/modules/billing/service"
 	cataloghandler "zyad.cloud/internal/modules/catalog/handler"
 	catalogrepo "zyad.cloud/internal/modules/catalog/repository"
 	catalogservice "zyad.cloud/internal/modules/catalog/service"
@@ -49,9 +46,7 @@ import (
 	producthandler "zyad.cloud/internal/modules/product/handler"
 	productrepo "zyad.cloud/internal/modules/product/repository"
 	productservice "zyad.cloud/internal/modules/product/service"
-	subscriptionhandler "zyad.cloud/internal/modules/subscription/handler"
-	subscriptionrepo "zyad.cloud/internal/modules/subscription/repository"
-	subscriptionservice "zyad.cloud/internal/modules/subscription/service"
+	receivablehandler "zyad.cloud/internal/modules/receivable/handler"
 	userhandler "zyad.cloud/internal/modules/user/handler"
 	userrepo "zyad.cloud/internal/modules/user/repository"
 	userservice "zyad.cloud/internal/modules/user/service"
@@ -101,31 +96,8 @@ func New(ctx context.Context) (*App, error) {
 	permService := permissionservice.New(permRepo)
 	permHandler := permissionhandler.New(permService)
 
-	productPlanRepo := productrepo.NewPlanRepository(db)
 	productFeatureRepo := productrepo.NewFeatureRepository(db)
-	productPlanEntitlementRepo := productrepo.NewPlanEntitlementRepository(db)
-	subscriptionRepo := subscriptionrepo.NewSubscriptionRepository(db)
-	billingInvoiceRepo := billingrepo.NewInvoiceRepository(db)
-	billingPaymentRepo := billingrepo.NewPaymentRepository(db)
-	subscriptionEntitlementSink := subscriptionrepo.NewEntitlementSink(db)
-
-	productPlanService := productservice.NewPlanService(productPlanRepo, productPlanEntitlementRepo)
 	productFeatureService := productservice.NewFeatureService(productFeatureRepo)
-	productPlanEntitlementService := productservice.NewPlanEntitlementService(
-		productPlanEntitlementRepo,
-		productFeatureRepo,
-	)
-	subscriptionService := subscriptionservice.NewSubscriptionService(
-		subscriptionRepo,
-		productPlanEntitlementRepo,
-		subscriptionEntitlementSink,
-	)
-	billingInvoiceService := billingservice.NewInvoiceService(billingInvoiceRepo)
-	billingPaymentService := billingservice.NewPaymentService(
-		billingPaymentRepo,
-		billingInvoiceRepo,
-		subscriptionUpgradeActivatorAdapter{subscriptions: subscriptionService},
-	)
 	dokuClient := doku.NewClientFromConfig(doku.Config{
 		BaseURL:     cfg.Doku.BaseURL,
 		ClientID:    cfg.Doku.ClientID,
@@ -136,27 +108,8 @@ func New(ctx context.Context) (*App, error) {
 	if baseURL := strings.TrimRight(strings.TrimSpace(cfg.App.URL), "/"); baseURL != "" {
 		dokuNotificationURL = baseURL + "/api/v1/webhooks/doku"
 	}
-	billingPaymentService.SetDokuCheckout(dokuClient, cfg.App.FrontendURL, dokuNotificationURL)
-	dokuWebhookHandler := billinghandler.NewDokuWebhookHandler(
-		billingPaymentService,
-		cfg.Doku.ClientID,
-		cfg.Doku.SecretKey,
-		log,
-	)
 	platformProductHandler := producthandler.NewPlatformProductHandler(
-		productPlanService,
 		productFeatureService,
-		productPlanEntitlementService,
-		permService,
-	)
-	publicProductHandler := producthandler.NewPublicProductHandler(productPlanService)
-	platformSubscriptionHandler := subscriptionhandler.NewPlatformSubscriptionHandler(
-		subscriptionService,
-		permService,
-	)
-	platformBillingHandler := billinghandler.NewPlatformBillingHandler(
-		billingInvoiceService,
-		billingPaymentService,
 		permService,
 	)
 
@@ -253,15 +206,15 @@ func New(ctx context.Context) (*App, error) {
 		permService,
 		permService,
 	)
-	subscriptionGuardService := subscriptionservice.NewSubscriptionGuardService(
+	entitlementGuard := organizationservice.NewEntitlementGuard(
 		organizationEntitlementRuntimeService,
-		subscriptionservice.WithOrganizationTypeResolver(organizationrepo.NewOrganizationRepository(db)),
+		organizationservice.WithOrganizationTypeResolver(organizationrepo.NewOrganizationRepository(db)),
 	)
 	organizationSelfService := organizationservice.NewSelfService(
 		organizationrepo.NewSelfRepository(db),
 		organizationservice.NewMembershipService(
 			organizationMembershipRepository,
-			organizationservice.WithMembershipBillingGuard(subscriptionGuardService),
+			organizationservice.WithMembershipBillingGuard(entitlementGuard),
 		),
 		organizationMembershipRepository,
 	)
@@ -273,23 +226,12 @@ func New(ctx context.Context) (*App, error) {
 		organizationrepo.NewDomainRepository(db),
 		organizationservice.NewDNSDomainVerifier(nil),
 		cfg.MultiTenant.PlatformPrimaryDomain,
-		organizationservice.WithDomainBillingGuard(subscriptionGuardService),
+		organizationservice.WithDomainBillingGuard(entitlementGuard),
 	)
 	organizationDomainHandler := organizationhandler.NewDomainHandler(
 		organizationDomainService,
 		permService,
 	)
-	tenantBillingService := billingservice.NewTenantBillingService(
-		subscriptionService,
-		productPlanService,
-		billingInvoiceService,
-		organizationEntitlementService,
-	)
-	tenantBillingHandler := billinghandler.NewTenantBillingHandler(
-		tenantBillingService,
-		permService,
-	)
-	tenantBillingHandler.SetCheckoutService(billingPaymentService)
 	organizationImpersonationHandler := organizationhandler.NewImpersonationHandler(
 		organizationservice.NewImpersonationService(
 			organizationrepo.NewImpersonationRepository(db),
@@ -315,12 +257,12 @@ func New(ctx context.Context) (*App, error) {
 	landingPageSvc := landingservice.NewPageService(
 		landingPageRepo,
 		landingSectionRepo,
-		landingservice.WithLandingPageQuotaGuard(subscriptionGuardService),
+		landingservice.WithLandingPageQuotaGuard(entitlementGuard),
 		landingservice.WithLandingPageBrandingRepo(landingBrandingRepo),
 	)
 	landingSectionSvc := landingservice.NewSectionService(
 		landingSectionRepo,
-		landingservice.WithLandingSectionQuotaGuard(subscriptionGuardService),
+		landingservice.WithLandingSectionQuotaGuard(entitlementGuard),
 	)
 	landingDocumentSvc := landingservice.NewDocumentService(landingDocumentRepo, landingPageRepo)
 
@@ -329,7 +271,7 @@ func New(ctx context.Context) (*App, error) {
 		landingDomainRepo,
 		landingPageRepo,
 		db,
-		landingservice.WithLandingDomainFeatureGate(subscriptionGuardService),
+		landingservice.WithLandingDomainFeatureGate(entitlementGuard),
 	)
 	landingBrandingSvc := landingservice.NewBrandingService(landingBrandingRepo)
 	landingFormSvc := landingservice.NewFormService(landingFormRepo)
@@ -344,7 +286,7 @@ func New(ctx context.Context) (*App, error) {
 	landingTemplateSvc := landingservice.NewTemplateService(
 		landingReusableRepo,
 		landingSectionRepo,
-		landingservice.WithTemplateSectionQuotaGuard(subscriptionGuardService),
+		landingservice.WithTemplateSectionQuotaGuard(entitlementGuard),
 	)
 	mediaStorage, err := buildMediaStorage(cfg.Storage)
 	if err != nil {
@@ -417,13 +359,13 @@ func New(ctx context.Context) (*App, error) {
 	landingAnalyticsSvc := landingservice.NewAnalyticsService(landingAnalyticsRepo, landingPageRepo, db)
 	publicLandingHandler := landinghandler.NewPublicLandingHandler(landingResolverSvc, landingVisibilitySvc, landingSubmissionSvc, landingAnalyticsSvc)
 
-	crmEntitlementChecker := subscriptionEntitlementChecker{guard: subscriptionGuardService}
+	crmEntitlementChecker := entitlementChecker{guard: entitlementGuard}
 	crmCompanyRepo := crmrepo.NewCompanyRepository(db)
 	crmContactRepo := crmrepo.NewContactRepository(db)
 	crmLeadRepo := crmrepo.NewLeadRepository(db)
 	crmContactSvc := crmservice.NewContactService(
 		crmContactRepo,
-		crmservice.WithContactQuotaGuard(subscriptionGuardService),
+		crmservice.WithContactQuotaGuard(entitlementGuard),
 	)
 	crmMemberRepo := crmrepo.NewMemberRepository(db)
 	crmPipelineRepo := crmrepo.NewPipelineRepository(db)
@@ -431,7 +373,7 @@ func New(ctx context.Context) (*App, error) {
 		crmLeadRepo,
 		crmContactRepo,
 		crmCompanyRepo,
-		crmservice.WithLeadContactQuotaGuard(subscriptionGuardService),
+		crmservice.WithLeadContactQuotaGuard(entitlementGuard),
 		crmservice.WithLeadOwnerValidator(crmMemberRepo),
 		crmservice.WithLeadDealPipelines(crmPipelineRepo),
 		crmservice.WithLeadConvertedHook(whatsappservice.NewLeadConversionRelinker(whatsapprepo.NewConversationRepository(db))),
@@ -450,7 +392,7 @@ func New(ctx context.Context) (*App, error) {
 	crmDealRepo := crmrepo.NewDealRepository(db)
 	crmPipelineSvc := crmservice.NewPipelineService(
 		crmPipelineRepo,
-		crmservice.WithPipelineFeatureGate(subscriptionGuardService),
+		crmservice.WithPipelineFeatureGate(entitlementGuard),
 	)
 	crmDealSvc := crmservice.NewDealService(
 		crmDealRepo,
@@ -518,7 +460,7 @@ func New(ctx context.Context) (*App, error) {
 	crmActivityHandler := crmhandler.NewActivityHandler(crmActivitySvc)
 	crmIntegrationHandler := crmhandler.NewIntegrationHandler(crmIntegrationSvc)
 
-	whatsappSessionSvc := NewWhatsAppSessionService(cfg, db, subscriptionGuardService, log)
+	whatsappSessionSvc := NewWhatsAppSessionService(cfg, db, entitlementGuard, log)
 	whatsappSessionHandler := whatsapphandler.NewSessionHandler(whatsappSessionSvc)
 	whatsappWebhookHandler := NewWhatsAppWebhookHandler(cfg, db, log)
 	whatsappBus := NewWhatsAppRealtimeBus(redisClient, log)
@@ -542,8 +484,10 @@ func New(ctx context.Context) (*App, error) {
 		AppName: cfg.App.Name, FrontendURL: cfg.App.FrontendURL, NotificationLocale: cfg.Notification.DefaultLocale,
 		RateCounter: redisClient, Doku: dokuClient, DokuNotificationURL: dokuNotificationURL,
 	})
-	// Webhook DOKU yang sama melayani invoice billing dan receivable; nomor RCV- diteruskan ke sini.
-	dokuWebhookHandler.SetReceivableProcessor(receivableDokuProcessor{svc: receivableModule.OnlinePayment})
+	// Webhook DOKU (URL tetap /webhooks/doku) hanya melayani invoice receivable (RCV-).
+	dokuWebhookHandler := receivablehandler.NewDokuWebhookHandler(
+		receivableModule.OnlinePayment, cfg.Doku.ClientID, cfg.Doku.SecretKey, log,
+	)
 
 	// Sales order (S4): dirakit setelah receivable (penagihan) dan sebelum quotation service karena hook
 	// approve menunjuk ke SalesOrderService.
@@ -644,10 +588,6 @@ func New(ctx context.Context) (*App, error) {
 		NotificationVariableHandler:      variableHandler,
 		PermissionHandler:                permHandler,
 		PlatformProductHandler:           platformProductHandler,
-		PublicProductHandler:             publicProductHandler,
-		PlatformSubscriptionHandler:      platformSubscriptionHandler,
-		PlatformBillingHandler:           platformBillingHandler,
-		TenantBillingHandler:             tenantBillingHandler,
 		DokuWebhookHandler:               dokuWebhookHandler,
 		OrganizationDomainHandler:        organizationDomainHandler,
 		OrganizationEntitlementHandler:   organizationEntitlementHandler,

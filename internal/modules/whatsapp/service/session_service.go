@@ -13,7 +13,7 @@ import (
 
 	coreerrors "zyad.cloud/internal/core/errors"
 	coretenant "zyad.cloud/internal/core/tenant"
-	"zyad.cloud/internal/modules/subscription"
+	organization "zyad.cloud/internal/modules/organization"
 	whatsappmodule "zyad.cloud/internal/modules/whatsapp"
 	"zyad.cloud/internal/modules/whatsapp/domain"
 	"zyad.cloud/internal/modules/whatsapp/repository"
@@ -48,7 +48,7 @@ type SessionProvider interface {
 	RequestPairingCode(ctx context.Context, name, phone string) (string, error)
 }
 
-// SessionQuotaGuard is a narrow view of SubscriptionGuardService (pattern:
+// SessionQuotaGuard is a narrow view of EntitlementGuard (pattern:
 // crm/service/contact_service.go ContactQuotaGuard).
 type SessionQuotaGuard interface {
 	RequireQuotaValue(ctx context.Context, organizationID, featureKey, limitKey string, usedValue, delta int64) error
@@ -204,9 +204,9 @@ func (s *SessionService) requireSessionQuota(ctx context.Context, scope coretena
 	}
 	err := s.quota.RequireQuotaValue(ctx, scope.OrganizationID(), domain.FeatureWhatsAppMaxSessions, "limit", existing, 1)
 	var appErr *coreerrors.AppError
-	if errors.As(err, &appErr) && appErr.Code == subscription.ErrCodeFeatureNotEnabled {
+	if errors.As(err, &appErr) && appErr.Code == organization.ErrCodeFeatureNotEnabled {
 		if existing+1 > domain.DefaultMaxSessionsFallback {
-			return subscription.QuotaExceededError()
+			return organization.QuotaExceededError()
 		}
 		return nil
 	}

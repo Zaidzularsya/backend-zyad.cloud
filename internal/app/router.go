@@ -99,9 +99,6 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.UserAuthHandler != nil {
 		deps.UserAuthHandler.RegisterRoutes(api)
 	}
-	if deps.PublicProductHandler != nil {
-		deps.PublicProductHandler.RegisterRoutes(api)
-	}
 	if deps.CatalogPublicListingHandler != nil {
 		deps.CatalogPublicListingHandler.RegisterRoutes(api)
 	}
@@ -162,15 +159,6 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	}
 	if deps.PlatformProductHandler != nil {
 		deps.PlatformProductHandler.RegisterRoutes(protected)
-	}
-	if deps.PlatformSubscriptionHandler != nil {
-		deps.PlatformSubscriptionHandler.RegisterRoutes(protected)
-	}
-	if deps.PlatformBillingHandler != nil {
-		deps.PlatformBillingHandler.RegisterRoutes(protected)
-	}
-	if deps.TenantBillingHandler != nil {
-		deps.TenantBillingHandler.RegisterRoutes(protected)
 	}
 	if deps.CRMSelfServeHandler != nil {
 		deps.CRMSelfServeHandler.RegisterRoutes(protected)
@@ -272,7 +260,7 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	// own organization are allowed in — the platform uses the same CRM to
 	// track its own sales/leads to prospective tenants) and
 	// RequireEntitlement("crm.enabled") (bypassed entirely for the platform
-	// organization, see SubscriptionGuardService.RequireFeature — platform
+	// organization, see EntitlementGuard.RequireFeature — platform
 	// never subscribes to a plan). Access within CRM is differentiated by
 	// permission grants, not organization type — see migration
 	// 000119_seed_crm_super_admin_permissions and

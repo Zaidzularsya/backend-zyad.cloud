@@ -59,7 +59,7 @@ type LandingMediaSumRepository interface {
 // sebelum upload maupun untuk endpoint platform yang menampilkan limit ke
 // super admin.
 //
-// Storage TIDAK memakai pola AssetQuotaGuard/SubscriptionGuardService penuh
+// Storage TIDAK memakai pola AssetQuotaGuard/EntitlementGuard penuh
 // seperti landing.max_pages (yang mewajibkan subscription aktif + entitlement
 // row, gagal keras kalau tidak ada) — feature key storage.max_bytes ini baru,
 // belum ada di plan manapun, jadi kalau dipaksa lewat RequireQuotaValue,

@@ -10,24 +10,24 @@ import (
 	organizationmodel "zyad.cloud/internal/modules/organization/model"
 )
 
-type stubSubscriptionGuardOrganizationStore struct {
+type stubOrganizationTypeResolver struct {
 	organization organizationmodel.Organization
 	err          error
 }
 
-func (s stubSubscriptionGuardOrganizationStore) FindByID(
+func (s stubOrganizationTypeResolver) FindByID(
 	context.Context,
 	string,
 ) (organizationmodel.Organization, error) {
 	return s.organization, s.err
 }
 
-type stubSubscriptionGuardEntitlementEvaluator struct {
+type stubEntitlementEvaluator struct {
 	entitlement organizationmodel.Entitlement
 	err         error
 }
 
-func (s stubSubscriptionGuardEntitlementEvaluator) RequireFeature(
+func (s stubEntitlementEvaluator) RequireFeature(
 	context.Context,
 	string,
 	string,
@@ -35,8 +35,8 @@ func (s stubSubscriptionGuardEntitlementEvaluator) RequireFeature(
 	return s.entitlement, s.err
 }
 
-func TestSubscriptionGuardBlocksDisabledFeature(t *testing.T) {
-	service := NewSubscriptionGuardService(stubSubscriptionGuardEntitlementEvaluator{
+func TestEntitlementGuardBlocksDisabledFeature(t *testing.T) {
+	service := NewEntitlementGuard(stubEntitlementEvaluator{
 		err: coreerrors.New(
 			"ORGANIZATION_FEATURE_NOT_ENTITLED",
 			"organization feature is not enabled",
@@ -48,8 +48,8 @@ func TestSubscriptionGuardBlocksDisabledFeature(t *testing.T) {
 	assertAppErrorCode(t, err, "FEATURE_NOT_ENABLED")
 }
 
-func TestSubscriptionGuardBlocksQuotaExceeded(t *testing.T) {
-	service := NewSubscriptionGuardService(stubSubscriptionGuardEntitlementEvaluator{
+func TestEntitlementGuardBlocksQuotaExceeded(t *testing.T) {
+	service := NewEntitlementGuard(stubEntitlementEvaluator{
 		entitlement: organizationmodel.Entitlement{
 			FeatureKey: "landing.max_pages",
 			Limits:     map[string]any{"limit": int64(3)},
@@ -66,8 +66,8 @@ func TestSubscriptionGuardBlocksQuotaExceeded(t *testing.T) {
 	assertAppErrorCode(t, err, "QUOTA_EXCEEDED")
 }
 
-func TestSubscriptionGuardAllowsFeatureAndQuota(t *testing.T) {
-	service := NewSubscriptionGuardService(stubSubscriptionGuardEntitlementEvaluator{
+func TestEntitlementGuardAllowsFeatureAndQuota(t *testing.T) {
+	service := NewEntitlementGuard(stubEntitlementEvaluator{
 		entitlement: organizationmodel.Entitlement{
 			FeatureKey: "landing.max_pages",
 			Limits:     map[string]any{"limit": float64(5)},
@@ -89,14 +89,14 @@ func TestSubscriptionGuardAllowsFeatureAndQuota(t *testing.T) {
 	}
 }
 
-func TestSubscriptionGuardBypassesPlatformOrganization(t *testing.T) {
+func TestEntitlementGuardBypassesPlatformOrganization(t *testing.T) {
 	// The evaluator denies every feature, so the call can only succeed
 	// through the platform bypass.
-	service := NewSubscriptionGuardService(
-		stubSubscriptionGuardEntitlementEvaluator{
+	service := NewEntitlementGuard(
+		stubEntitlementEvaluator{
 			err: coreerrors.New("ORGANIZATION_FEATURE_NOT_ENTITLED", "not entitled", http.StatusForbidden),
 		},
-		WithOrganizationTypeResolver(stubSubscriptionGuardOrganizationStore{
+		WithOrganizationTypeResolver(stubOrganizationTypeResolver{
 			organization: organizationmodel.Organization{Type: coretenant.OrganizationTypePlatform},
 		}),
 	)
@@ -110,12 +110,12 @@ func TestSubscriptionGuardBypassesPlatformOrganization(t *testing.T) {
 	}
 }
 
-func TestSubscriptionGuardStillEnforcesCustomerOrganization(t *testing.T) {
-	service := NewSubscriptionGuardService(
-		stubSubscriptionGuardEntitlementEvaluator{
+func TestEntitlementGuardStillEnforcesCustomerOrganization(t *testing.T) {
+	service := NewEntitlementGuard(
+		stubEntitlementEvaluator{
 			err: coreerrors.New("ORGANIZATION_FEATURE_NOT_ENTITLED", "not entitled", http.StatusForbidden),
 		},
-		WithOrganizationTypeResolver(stubSubscriptionGuardOrganizationStore{
+		WithOrganizationTypeResolver(stubOrganizationTypeResolver{
 			organization: organizationmodel.Organization{Type: coretenant.OrganizationTypeCustomer},
 		}),
 	)
@@ -126,15 +126,15 @@ func TestSubscriptionGuardStillEnforcesCustomerOrganization(t *testing.T) {
 
 // Workspace tanpa baris customer_subscriptions (paket gratis dari produk FREE, atau contract) harus lolos
 // selama entitlement-nya aktif: guard tidak lagi bergantung pada subscription.
-func TestSubscriptionGuardAllowsWorkspaceWithoutSubscription(t *testing.T) {
-	service := NewSubscriptionGuardService(
-		stubSubscriptionGuardEntitlementEvaluator{
+func TestEntitlementGuardAllowsWorkspaceWithoutSubscription(t *testing.T) {
+	service := NewEntitlementGuard(
+		stubEntitlementEvaluator{
 			entitlement: organizationmodel.Entitlement{
 				FeatureKey: "crm.enabled",
 				Source:     organizationmodel.EntitlementSourceDefault,
 			},
 		},
-		WithOrganizationTypeResolver(stubSubscriptionGuardOrganizationStore{
+		WithOrganizationTypeResolver(stubOrganizationTypeResolver{
 			organization: organizationmodel.Organization{Type: coretenant.OrganizationTypeCustomer},
 		}),
 	)
@@ -142,19 +142,5 @@ func TestSubscriptionGuardAllowsWorkspaceWithoutSubscription(t *testing.T) {
 	entitlement, err := service.RequireFeature(context.Background(), "tenant-org", "crm.enabled")
 	if err != nil || entitlement.Source != organizationmodel.EntitlementSourceDefault {
 		t.Fatalf("RequireFeature() = %+v, %v; want default entitlement and no error", entitlement, err)
-	}
-}
-
-func assertAppErrorCode(t *testing.T, err error, code string) {
-	t.Helper()
-	if err == nil {
-		t.Fatalf("error = nil, want %s", code)
-	}
-	appErr, ok := err.(*coreerrors.AppError)
-	if !ok {
-		t.Fatalf("error type = %T, want *AppError", err)
-	}
-	if appErr.Code != code {
-		t.Fatalf("error code = %s, want %s", appErr.Code, code)
 	}
 }

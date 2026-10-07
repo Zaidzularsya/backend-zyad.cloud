@@ -11,7 +11,7 @@ import (
 
 	coreerrors "zyad.cloud/internal/core/errors"
 	coretenant "zyad.cloud/internal/core/tenant"
-	"zyad.cloud/internal/modules/subscription"
+	organization "zyad.cloud/internal/modules/organization"
 	whatsappmodule "zyad.cloud/internal/modules/whatsapp"
 	"zyad.cloud/internal/modules/whatsapp/domain"
 	"zyad.cloud/internal/modules/whatsapp/repository"
@@ -283,10 +283,10 @@ func TestCreateSessionRegistersOnProvider(t *testing.T) {
 
 func TestCreateSessionQuotaExceededSkipsProvider(t *testing.T) {
 	repo, provider := newFakeSessionRepo(), &fakeProvider{}
-	svc := newTestService(repo, provider, &fakeQuota{err: subscription.QuotaExceededError()})
+	svc := newTestService(repo, provider, &fakeQuota{err: organization.QuotaExceededError()})
 
 	_, err := svc.Create(context.Background(), testScope(t, testOrgID), CreateSessionInput{})
-	if appErrorCode(err) != subscription.ErrCodeQuotaExceeded {
+	if appErrorCode(err) != organization.ErrCodeQuotaExceeded {
 		t.Fatalf("error = %v, want quota exceeded", err)
 	}
 	if provider.calls != 0 || len(repo.sessions) != 0 {
@@ -296,7 +296,7 @@ func TestCreateSessionQuotaExceededSkipsProvider(t *testing.T) {
 
 func TestCreateSessionFallbackLimitWithoutEntitlementRow(t *testing.T) {
 	repo, provider := newFakeSessionRepo(), &fakeProvider{}
-	quota := &fakeQuota{err: subscription.FeatureNotEnabledError()}
+	quota := &fakeQuota{err: organization.FeatureNotEnabledError()}
 	svc := newTestService(repo, provider, quota)
 	scope := testScope(t, testOrgID)
 
@@ -307,7 +307,7 @@ func TestCreateSessionFallbackLimitWithoutEntitlementRow(t *testing.T) {
 		t.Fatalf("quota feature = %q", quota.featureOK)
 	}
 	_, err := svc.Create(context.Background(), scope, CreateSessionInput{})
-	if appErrorCode(err) != subscription.ErrCodeQuotaExceeded {
+	if appErrorCode(err) != organization.ErrCodeQuotaExceeded {
 		t.Fatalf("second Create() error = %v, want quota exceeded", err)
 	}
 }
