@@ -481,3 +481,24 @@ Blok GrapesJS "Form Konsultasi" (kategori Conversion, tersedia untuk semua org; 
 - **Perilaku:** validasi klien; honeypot `website`; tombol nonaktif saat kirim; `Idempotency-Key` dibuat per percobaan dan dipakai ulang untuk retry payload yang sama (key baru bila input berubah); `interest` terisi dari konteks halaman (mis. dari tombol "Hubungi sales" pricing katalog); `page_url` dan UTM ikut terkirim. BE selalu mewajibkan `consent=true`, jadi form tanpa field `consent` mendapat checkbox persetujuan bawaan.
 - **Redirect:** hanya `/path` internal atau `http(s)://`; selain itu diabaikan.
 - **Status sinkron CRM per submission:** `skipped | created | merged | failed`; lihat `docs/reference-crm.md` (Lead dari form landing). Admin melihat dan mengirim ulang di halaman **Submissions** (menu Landing; permission `landing.submission.read`/`update`). Keterbatasan BE: daftar tanpa total/pencarian (paginasi "Sebelumnya/Berikutnya").
+
+## Animasi (R5-S2)
+
+Sistem animasi halaman GrapesJS (MOTION 3). Spec: `docs/superpowers/specs/2026-10-07-landing-marketing-v2-design.md` §8. Murni frontend; backend tidak berubah (sanitizer sudah mengizinkan `class` dan `style`). Sumber: `frontend/src/features/landing/renderer/motion/` (`zy-motion.css`, `page-runtime.ts`) dan `builder/grapes/grapes.motion.ts`.
+
+- **Kelas** (satu kelompok = paling banyak satu kelas aktif lewat panel):
+  - Efek masuk: `zy-anim-fade-up|fade-in|zoom-in|slide-left|slide-right|blur-in|clip-reveal` (runtime menambah `is-in` sekali saat masuk viewport; geser 32 px, 16 px di bawah 768 px).
+  - Pengatur: `zy-delay-100` … `zy-delay-800`, `zy-dur-fast` (400 ms), `zy-dur-slow` (1200 ms; default 700 ms), `zy-stagger` (anak langsung +80 ms per indeks; hanya berlaku bila kontainer punya salah satu efek masuk di atas).
+  - Hero: `zy-anim-hero` (keyframes CSS saat load, tidak diamati runtime).
+  - Scroll: `zy-parallax-slow|med|fast` (×0.1/0.2/0.35), `zy-scale-in-scroll` (0,94 → 1), digerakkan `--zy-progress`.
+  - Interaksi: `zy-tilt` (maks 6°), `zy-hover-lift` (−4 px), `zy-hover-glow`.
+  - Ambient: `zy-aurora`, `zy-float`, `zy-text-shimmer`.
+  - Data: `zy-count`, `zy-marquee` + `zy-marquee__track`; blok mockup memakai `zy-flow` / `zy-flow__step` (siklus 8 s).
+- **Runtime** `createPageRuntime(contentRoot, env)` → `{ start, stop, replay, refresh }`, tanpa dependency: reveal (IntersectionObserver, threshold 0,15), stagger, counter (1,2 s, format angka Indonesia), marquee (isi digandakan sekali; klon `aria-hidden`, `inert`, tanpa `id`/`name`), serta parallax/scale-in (listener scroll ber-rAF) dan tilt (pointer). Parallax, tilt, dan scale-in hanya aktif bila `rich` = `(hover: hover) and (min-width: 768px)`.
+- **Kondisi `.zy-js`:** `start()` memasang kelas `zy-js` pada root konten. Semua state awal tersembunyi hanya berlaku di bawah `.zy-js` dan `:not(.is-in)`; tanpa runtime (JS gagal, crawler, SSR) konten tampil dalam state akhir. Tanpa `IntersectionObserver` semua elemen langsung `is-in`.
+- **Reduced motion:** `prefers-reduced-motion: reduce` → `start()` tidak memasang apa pun dan CSS mematikan animation/transition serta memaksa state akhir (termasuk hover-lift).
+- **Editor:** stylesheet disisipkan ke `<head>` kanvas dan runtime berjalan di `body` kanvas; semua kelas/atribut runtime ditulis langsung ke DOM kanvas sehingga tidak masuk `getHtml()`/`getCss()`/autosave (ekspor bersih). Kanvas aman diedit: elemen `zy-anim-*` (dan anak langsung `zy-stagger`) yang belum `is-in` dipaksa tampil lewat override CSS. Panel **Animasi** (sektor trait kustom) mengelola token kelas `zy-*` per kelompok. Tombol **▶ Putar animasi** memanggil `replay()` dan menyalakan `data-zy-replaying` pada body selama jendela 4 s (override dimatikan sementara agar efek masuk terlihat).
+- **Blok kategori "Animasi"** (enam, platform dan tenant): Hero Aurora, Marquee Logo / Integrasi, Statistik Counter, Bento Fitur, Langkah / Timeline, Mockup Alur Produk. Teks placeholder dalam kurung siku; tanpa angka, testimoni, atau nama merek karangan.
+- **Aturan kualitas:** satu `zy-aurora` per halaman (hanya blok Hero Aurora); headline LCP memakai `zy-anim-hero`, bukan efek masuk berbasis observer; hanya `transform`, `opacity`, `clip-path`, `filter` yang dianimasikan (pengecualian: `zy-text-shimmer` menganimasikan `background-position`); tanpa indigo/ungu.
+- **SSR:** tidak berubah. `GET /public/landing/render` menyajikan HTML tanpa kelas `zy-js`, jadi seluruh konten terlihat tanpa JS.
+- **Keterbatasan yang diketahui:** belum diuji di browser nyata (uji unit jsdom saja; QA Playwright di DEV menyusul); `zy-text-shimmer` non-compositor (6 s, hanya untuk frasa pendek); klon marquee dihapus saat `stop()` (mis. detach editor) dan dibuat ulang saat `start()`.
