@@ -21,10 +21,18 @@ Rujukan: spec `docs/superpowers/specs/2026-10-07-landing-marketing-v2-design.md`
   melepas flag dari halaman lain secara otomatis (termasuk yang archived), lalu menyetel
   flag pada halaman target. Indeks unik `idx_landing_pages_organization_homepage_unique`
   tidak terlanggar.
-- **Bukan satu transaksi dengan field lain.** Di `pageService.Update`, `SetHomepage` jalan
-  lebih dulu dan commit sendiri; baru `Update` field lain. Bila update field gagal (mis.
-  konflik slug), beranda **sudah pindah**. Karena itu: ubah slug/title/SEO dulu, setel
-  `is_homepage` sebagai langkah **terpisah dan terakhir**.
+- **Bukan satu transaksi dengan field lain, tetapi urutannya aman.** Di `pageService.Update`
+  (setelah perbaikan review), field lain di-update **dulu**, baru `SetHomepage`. Bila update
+  field gagal (mis. konflik slug 409), beranda **tidak pindah**. Target divalidasi sebelum
+  keduanya: halaman `archived` ditolak **409 `PAGE_HOMEPAGE_TARGET_ARCHIVED`** (pulihkan
+  halaman lebih dulu), dan halaman template (atau `is_homepage` bersama `is_template`)
+  ditolak 422 `PAGE_HOMEPAGE_TEMPLATE_INVALID`. Beranda lama tetap utuh pada semua
+  penolakan itu. Praktik tetap disarankan: setel `is_homepage` sebagai langkah terpisah dan
+  terakhir.
+- **Urutan rilis WAJIB BE dulu, baru FE.** FE baru memanggil `/resolve?home=1`; BE lama
+  mengabaikan `home`, sehingga beranda platform bisa rusak pada jendela deploy bila FE naik
+  lebih dulu. Konsekuensinya, rollback BE saja memutus FE baru: bila keduanya perlu
+  di-rollback, **rollback FE dulu**, baru BE.
 - Menyetel halaman yang masih draft sebagai beranda membuat `/` tetap jatuh ke
   `public-marketing` sampai halaman itu dipublish.
 - Host tenant (custom domain) tidak terpengaruh: tetap me-resolve halaman tenant lewat
@@ -134,7 +142,7 @@ sesuai tabel di pratinjau editor.
 4. Blok **Pricing Katalog** -> pilih **Kartu unggulan** (nilai = `listing_code` produk).
    Harga dan fitur diambil dari Sales -> Produk.
 
-Hasil: editor memuat 14 section, form terpilih dengan PIC, kartu unggulan terisi.
+Hasil: editor memuat 12 `<section>` + 2 slot (nav/footer), form terpilih dengan PIC, kartu unggulan terisi.
 
 ### 4. SEO halaman
 
@@ -146,8 +154,8 @@ Landing -> Pages -> aksi SEO pada `beranda`. Isi persis:
 
 ### 5. Publish dan QA singkat
 
-Publish `beranda` (aksi Publish di daftar Pages), lalu buka `/beranda`. QA singkat: 14
-section tampil berurutan (1440px dan 390px), menu header menggulir ke section,
+Publish `beranda` (aksi Publish di daftar Pages), lalu buka `/beranda`. QA singkat: 12
+`<section>` (plus slot nav/footer) tampil berurutan (1440px dan 390px), menu header menggulir ke section,
 `/beranda#harga` menggulir ke harga, "Hubungi sales" mengisi Minat di form konsultasi,
 animasi berjalan dan mati pada `prefers-reduced-motion`, console tanpa pelanggaran CSP.
 Detail QA lengkap ada di Task 5 plan.
@@ -161,6 +169,11 @@ catatan non-transaksional di atas).
   Catatan: form ini mengirim semua field sekaligus. Jangan ubah slug/title pada penyimpanan
   yang sama; bila `page_type` bernilai `homepage`, flag selalu dikirim `true` pada setiap
   simpan.
+  **PERINGATAN:** menyimpan `public-marketing` lewat form Pages (`page_type='homepage'`)
+  mengirim `is_homepage=true` dan **MENGAMBIL alih beranda**, termasuk dari `beranda`.
+  FE sedang diperbaiki agar tidak mengirim flag tanpa perubahan eksplisit; sampai rilis FE
+  terbaru terpasang, jangan menyimpan halaman `homepage` lewat form Pages kecuali memang
+  ingin memindah beranda. Halaman `archived` tidak bisa dijadikan beranda (409); pulihkan dulu.
 - **Lewat API** (alternatif, token diisi sendiri, jangan ditempel ke dokumen):
 
   ```bash
@@ -180,8 +193,10 @@ Tanpa deploy. Pilih salah satu:
   di atas dengan id halaman itu); atau
 - Unpublish `beranda` -> `/` jatuh ke `public-marketing` lewat fallback.
 
-Hasil: `/` kembali menampilkan halaman lama. Hati-hati: jangan menyimpan `public-marketing`
-lewat form Pages bila `page_type`-nya `homepage` tanpa maksud menjadikannya beranda lagi.
+Hasil: `/` kembali menampilkan halaman lama. **PERINGATAN:** menyimpan `public-marketing`
+lewat form Pages (`page_type='homepage'`) mengirim `is_homepage=true` dan MENGAMBIL beranda;
+lakukan hanya bila memang bermaksud menjadikannya beranda lagi (hati-hati sampai rilis FE
+terbaru yang tidak lagi mengirim flag tanpa perubahan eksplisit).
 
 ### 8. Satu rilis setelah stabil
 
@@ -200,10 +215,22 @@ stabil**, karena itu satu-satunya fallback bila `beranda` di-unpublish.
 
 ## Verifikasi pasca-cutover
 
+**Host untuk `curl`.** Konteks org publik diturunkan middleware `ResolvePublicOrganization`
+(`internal/core/middleware/public_tenant.go`) dari header `Host`, atau `X-Forwarded-Host`
+hanya bila `TrustForwardedHost` aktif **dan** peer berada di `TrustedProxyCIDRs` (mis. nginx
+lokal). `PublicHostResolver` memetakan org platform hanya bila host sama dengan domain primer
+platform (`zyad.cloud`; DEV `zyad.online`) atau domain `platform` terdaftar yang aktif. Host
+API yang tidak terdaftar (mis. `api.zyad.cloud` dipanggil langsung tanpa `X-Forwarded-Host`
+tepercaya) menghasilkan 404 `PUBLIC_HOST_NOT_FOUND`, bukan beranda platform. Karena itu
+`curl` harus ke host yang dipetakan ke org platform, misalnya
+`https://zyad.cloud/api/v1/public/landing/resolve?home=1` (lewat nginx yang meneruskan
+`/api/`), bukan ke host API polos. Header `X-Forwarded-Host` yang dikirim klien dari luar
+proxy tepercaya diabaikan.
+
 | Cek | Perintah / cara | Hasil yang diharapkan |
 |---|---|---|
 | Beranda | `curl -sS -o /dev/null -w '%{http_code}\n' https://<DOMAIN>/` dan `curl -sS https://<DOMAIN>/ \| grep -i '<title'` | `200`, judul sesuai §9.3 |
-| Resolve beranda | `curl -sS "https://<DOMAIN>/api/v1/public/landing/resolve?home=1"` | slug `beranda`, status published |
+| Resolve beranda | `curl -sS "https://zyad.cloud/api/v1/public/landing/resolve?home=1"` (DEV: `https://zyad.online/...`) | slug `beranda`, status published |
 | Header CSP | `curl -sSI https://<DOMAIN>/ \| grep -i content-security-policy` | header ada, `connect-src` memuat origin API |
 | Console | Buka `/` di browser, DevTools Console | tanpa pelanggaran CSP |
 | Health | `curl -sS https://<API_HOST>/healthz` | OK |
