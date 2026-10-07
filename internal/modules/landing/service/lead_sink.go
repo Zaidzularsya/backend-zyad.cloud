@@ -50,12 +50,19 @@ var leadNotesExcludedKeys = map[string]bool{
 	"name": true, "email": true, "phone": true, "company": true, "consent": true, "website": true,
 }
 
+// maxLeadNoteValueChars caps one note line so a long free-text answer cannot
+// bloat the lead notes.
+const maxLeadNoteValueChars = 1000
+
 // buildLeadNotes renders one "<Label>: <value>" line per form field (form
 // order), followed by the page URL and UTM values. Empty values are skipped.
 func buildLeadNotes(form domain.LandingForm, sub domain.LandingSubmission) string {
 	var lines []string
 	add := func(label, value string) {
 		if value = strings.TrimSpace(value); value != "" {
+			if r := []rune(value); len(r) > maxLeadNoteValueChars {
+				value = string(r[:maxLeadNoteValueChars]) + "..."
+			}
 			lines = append(lines, label+": "+value)
 		}
 	}

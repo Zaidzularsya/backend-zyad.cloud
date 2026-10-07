@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,11 +39,14 @@ type submissionServiceStub struct {
 	retryRes   domain.LandingSubmission
 }
 
-func (s *submissionServiceStub) SubmitForm(_ context.Context, _ coretenant.Scope, p repository.CreateSubmissionParams, isPlatformOrg bool) (domain.LandingSubmission, error) {
+func (s *submissionServiceStub) SubmitPublic(_ context.Context, _ coretenant.Scope, p repository.CreateSubmissionParams, isPlatformOrg bool) (service.PublicSubmitResult, error) {
 	s.submitCalls++
 	s.submitParams = p
 	s.submitPlat = isPlatformOrg
-	return domain.LandingSubmission{ID: "sub-1"}, s.submitErr
+	if s.submitErr != nil {
+		return service.PublicSubmitResult{}, s.submitErr
+	}
+	return service.PublicSubmitResult{Reference: "REF-1", SuccessMessage: "Terima kasih", RedirectURL: "/thanks"}, nil
 }
 
 func (s *submissionServiceStub) RetryCRMSync(_ context.Context, scope coretenant.Scope, id string, isPlatformOrg bool) (domain.LandingSubmission, error) {
@@ -151,6 +155,58 @@ func TestPublicSubmit_InactiveForm404(t *testing.T) {
 				t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestPublicSubmit_ResponseIsMinimal(t *testing.T) {
+	router := newSubmitRouter(t, &submissionServiceStub{}, nil, coretenant.OrganizationTypeCustomer)
+	rec := postSubmit(router, "form-1", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, k := range []string{"SubmittedData", "IPAddressHash", "UserAgent", "OrganizationID", "IdempotencyKey", "CRMLeadID", "CRMSyncError"} {
+		if strings.Contains(body, k) {
+			t.Fatalf("response leaks %s: %s", k, body)
+		}
+	}
+	for _, k := range []string{`"reference":"REF-1"`, `"success_message":"Terima kasih"`, `"redirect_url":"/thanks"`} {
+		if !strings.Contains(body, k) {
+			t.Fatalf("response missing %s: %s", k, body)
+		}
+	}
+}
+
+func TestPublicSubmit_InvalidSubmissionIs422(t *testing.T) {
+	err := fmt.Errorf("%w: too many fields", service.ErrInvalidSubmission)
+	router := newSubmitRouter(t, &submissionServiceStub{submitErr: err}, nil, coretenant.OrganizationTypeCustomer)
+	rec := postSubmit(router, "form-1", "")
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "VALIDATION_ERROR") {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPublicSubmit_InternalErrorIsGeneric(t *testing.T) {
+	router := newSubmitRouter(t, &submissionServiceStub{submitErr: errors.New("ERROR: duplicate key value violates unique constraint (SQLSTATE 23505) a@b.id")}, nil, coretenant.OrganizationTypeCustomer)
+	rec := postSubmit(router, "form-1", "")
+	if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), "SQLSTATE") || strings.Contains(rec.Body.String(), "a@b.id") {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "INTERNAL_ERROR") {
+		t.Fatalf("body=%s", rec.Body.String())
+	}
+}
+
+func TestPublicSubmit_OversizedBodyRejected(t *testing.T) {
+	router := newSubmitRouter(t, &submissionServiceStub{}, nil, coretenant.OrganizationTypeCustomer)
+	big := `{"fields":{"message":"` + strings.Repeat("a", 70*1024) + `"}}`
+	req := httptest.NewRequest(http.MethodPost, "/public/landing/forms/form-1/submissions", strings.NewReader(big))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = "203.0.113.9:1234"
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge || !strings.Contains(rec.Body.String(), "VALIDATION_ERROR") {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

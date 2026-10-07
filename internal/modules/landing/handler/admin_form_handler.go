@@ -68,10 +68,13 @@ func (h *AdminFormHandler) CreateForm(c *gin.Context) {
 		return
 	}
 
-	// Assuming redirect_url mapping
 	var redirectURL string
 	if req.RedirectURL != nil {
 		redirectURL = *req.RedirectURL
+		if err := dto.ValidateRedirectURL(redirectURL); err != nil {
+			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+			return
+		}
 	}
 
 	// SuccessMessage fallback
@@ -126,6 +129,13 @@ func (h *AdminFormHandler) UpdateForm(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
 		return
+	}
+
+	if req.RedirectURL != nil {
+		if err := dto.ValidateRedirectURL(*req.RedirectURL); err != nil {
+			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+			return
+		}
 	}
 
 	params := repository.UpdateFormParams{

@@ -2,6 +2,8 @@ package handler
 
 import (
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -236,12 +238,21 @@ func publicResolveError(err error) error {
 	}
 }
 
+// maxSubmitBodyBytes caps a public form submission body (64 KiB).
+const maxSubmitBodyBytes = 64 << 10
+
 func (h *PublicLandingHandler) SubmitForm(c *gin.Context) {
 	formKey := c.Param("formKey")
 
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxSubmitBodyBytes)
 	var req dto.PublicSubmissionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "request body too large", http.StatusRequestEntityTooLarge))
+			return
+		}
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "invalid request body", http.StatusUnprocessableEntity))
 		return
 	}
 	if req.Website != "" {
@@ -279,20 +290,29 @@ func (h *PublicLandingHandler) SubmitForm(c *gin.Context) {
 		return
 	}
 	isPlatformOrg := tenantContext.OrganizationType() == coretenant.OrganizationTypePlatform
-	submission, err := h.submissionSvc.SubmitForm(c.Request.Context(), scope, params, isPlatformOrg)
+	result, err := h.submissionSvc.SubmitPublic(c.Request.Context(), scope, params, isPlatformOrg)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrFormNotActive), errors.Is(err, pgx.ErrNoRows):
 			corehttp.Fail(c, coreerrors.New("LANDING_FORM_NOT_FOUND", "form was not found", http.StatusNotFound))
 		case errors.Is(err, service.ErrSpamDetected):
 			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "invalid submission", http.StatusUnprocessableEntity))
+		case errors.Is(err, service.ErrInvalidSubmission):
+			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
 		default:
-			corehttp.Fail(c, coreerrors.New("INTERNAL_ERROR", err.Error(), http.StatusInternalServerError))
+			// Never echo the raw error: it can carry driver text and PII.
+			slog.Error("landing: public form submit failed", "form_key", formKey, "error_type", fmt.Sprintf("%T", err))
+			corehttp.Fail(c, coreerrors.New("INTERNAL_ERROR", "internal server error", http.StatusInternalServerError))
 		}
 		return
 	}
 
-	corehttp.OK(c, "Form submitted successfully", submission)
+	resp := dto.PublicSubmissionResponse{Reference: result.Reference, SuccessMessage: result.SuccessMessage}
+	if result.RedirectURL != "" {
+		redirect := result.RedirectURL
+		resp.RedirectURL = &redirect
+	}
+	corehttp.OK(c, "Form submitted successfully", resp)
 }
 
 func (h *PublicLandingHandler) UploadFile(c *gin.Context) {

@@ -240,6 +240,12 @@ func (s *resolverService) resolveForms(ctx context.Context, scope tenant.Scope, 
 	if err != nil {
 		return []domain.LandingForm{}
 	}
+	// The public payload must not reveal the CRM routing config (PIC user id,
+	// lead flag); the admin API returns it from the form service instead.
+	for i := range forms {
+		forms[i].LeadOwnerUserID = ""
+		forms[i].CreateCRMLead = false
+	}
 	return forms
 }
 

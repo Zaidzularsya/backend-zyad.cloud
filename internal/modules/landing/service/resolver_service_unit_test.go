@@ -66,3 +66,21 @@ func TestResolveGrapesPage_IncludesActiveForms(t *testing.T) {
 		t.Fatalf("active form must carry its fields, got %+v", resolved.Forms[0].Fields)
 	}
 }
+
+func TestResolveGrapesPage_HidesCRMConfigFromPublicForms(t *testing.T) {
+	svc := &resolverService{
+		resolverRepo: &grapesResolverRepoStub{forms: []domain.LandingForm{
+			{ID: "f1", Key: "k", IsActive: true, CreateCRMLead: true, LeadOwnerUserID: "owner-uuid"},
+		}},
+		formRepo:     &grapesFormRepoStub{fields: map[string][]domain.LandingFormField{}},
+		documentRepo: grapesDocumentRepoStub{},
+	}
+	page := domain.LandingPage{ID: "p1", Builder: domain.PageBuilderGrapesJS}
+	resolved := svc.resolveGrapesPage(context.Background(), mustLandingScope(t), page, true)
+	if len(resolved.Forms) != 1 {
+		t.Fatalf("Forms = %+v", resolved.Forms)
+	}
+	if resolved.Forms[0].LeadOwnerUserID != "" || resolved.Forms[0].CreateCRMLead {
+		t.Fatalf("public form leaks CRM config: %+v", resolved.Forms[0])
+	}
+}

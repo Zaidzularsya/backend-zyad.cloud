@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -21,7 +22,30 @@ import (
 var (
 	ErrFormNotActive = errors.New("form is not active")
 	ErrSpamDetected  = errors.New("submission rejected as spam")
+	// ErrInvalidSubmission wraps input-limit violations; map it to 422.
+	ErrInvalidSubmission = errors.New("invalid submission")
 )
+
+const (
+	maxSubmissionFields     = 50
+	maxSubmissionKeyLen     = 100
+	maxSubmissionValueChars = 5000
+)
+
+func validateSubmittedData(data map[string]any) error {
+	if len(data) > maxSubmissionFields {
+		return fmt.Errorf("%w: too many fields", ErrInvalidSubmission)
+	}
+	for key, value := range data {
+		if key == "" || len([]rune(key)) > maxSubmissionKeyLen {
+			return fmt.Errorf("%w: invalid field key", ErrInvalidSubmission)
+		}
+		if str, ok := value.(string); ok && len([]rune(str)) > maxSubmissionValueChars {
+			return fmt.Errorf("%w: field value too long", ErrInvalidSubmission)
+		}
+	}
+	return nil
+}
 
 type submissionService struct {
 	submissionRepo repository.SubmissionRepository
@@ -50,13 +74,33 @@ func NewSubmissionService(
 }
 
 func (s *submissionService) SubmitForm(ctx context.Context, scope coretenant.Scope, params repository.CreateSubmissionParams, isPlatformOrg bool) (domain.LandingSubmission, error) {
+	sub, _, err := s.submit(ctx, scope, params, isPlatformOrg)
+	return sub, err
+}
+
+func (s *submissionService) SubmitPublic(ctx context.Context, scope coretenant.Scope, params repository.CreateSubmissionParams, isPlatformOrg bool) (PublicSubmitResult, error) {
+	sub, form, err := s.submit(ctx, scope, params, isPlatformOrg)
+	if err != nil {
+		return PublicSubmitResult{}, err
+	}
+	return PublicSubmitResult{
+		Reference:      sub.Reference,
+		SuccessMessage: form.SuccessMessage,
+		RedirectURL:    form.RedirectURL,
+	}, nil
+}
+
+func (s *submissionService) submit(ctx context.Context, scope coretenant.Scope, params repository.CreateSubmissionParams, isPlatformOrg bool) (domain.LandingSubmission, domain.LandingForm, error) {
 	// 1. Validate Form
 	form, err := s.formRepo.FindByID(ctx, scope, params.FormID)
 	if err != nil {
-		return domain.LandingSubmission{}, err
+		return domain.LandingSubmission{}, form, err
 	}
 	if !form.IsActive {
-		return domain.LandingSubmission{}, ErrFormNotActive
+		return domain.LandingSubmission{}, form, ErrFormNotActive
+	}
+	if err := validateSubmittedData(params.SubmittedData); err != nil {
+		return domain.LandingSubmission{}, form, err
 	}
 	params.LandingPageID = form.LandingPageID
 
@@ -64,7 +108,12 @@ func (s *submissionService) SubmitForm(ctx context.Context, scope coretenant.Sco
 	// Alternatively, just trust the client's IdempotencyKey if provided.
 	clientKey := params.IdempotencyKey != ""
 	if !clientKey {
-		hashStr := fmt.Sprintf("%s:%v:%v", params.FormID, params.IPAddressHash, time.Now().UnixMilli()/5000) // 5s bucket
+		// The payload hash keeps two different visitors behind one NAT apart,
+		// while an identical double-submit still collapses. json.Marshal sorts
+		// map keys, so the encoding is canonical.
+		payload, _ := json.Marshal(params.SubmittedData)
+		payloadHash := sha256.Sum256(payload)
+		hashStr := fmt.Sprintf("%s:%v:%v:%x", params.FormID, params.IPAddressHash, time.Now().UnixMilli()/5000, payloadHash) // 5s bucket
 		hash := sha256.Sum256([]byte(hashStr))
 		params.IdempotencyKey = hex.EncodeToString(hash[:])
 	}
@@ -72,7 +121,7 @@ func (s *submissionService) SubmitForm(ctx context.Context, scope coretenant.Sco
 	// 3. Spam Detection Logic (Honeypot)
 	// If the frontend sends a honeypot field (e.g. "_honey" or "website_url" that should be empty)
 	if val, ok := params.SubmittedData["_honey"]; ok && val != "" {
-		return domain.LandingSubmission{}, ErrSpamDetected
+		return domain.LandingSubmission{}, form, ErrSpamDetected
 	}
 
 	// 4. Set Initial Status
@@ -86,26 +135,27 @@ func (s *submissionService) SubmitForm(ctx context.Context, scope coretenant.Sco
 	// through RetryCRMSync.
 	if clientKey {
 		if existing, err := s.submissionRepo.FindByIdempotencyKey(ctx, scope, params.IdempotencyKey); err == nil {
-			return existing, nil
+			return existing, form, nil
 		} else if !errors.Is(err, pgx.ErrNoRows) {
-			return domain.LandingSubmission{}, err
+			return domain.LandingSubmission{}, form, err
 		}
 	}
 
 	// 6. Save Submission
 	sub, err := s.submissionRepo.Create(ctx, scope, params)
 	if err != nil {
-		if clientKey && isUniqueViolation(err) {
-			// Lost the race against a concurrent request with the same key.
+		if isUniqueViolation(err) {
+			// Lost the race against a concurrent request with the same key
+			// (client key or server fallback key).
 			if existing, findErr := s.submissionRepo.FindByIdempotencyKey(ctx, scope, params.IdempotencyKey); findErr == nil {
-				return existing, nil
+				return existing, form, nil
 			}
 		}
-		return domain.LandingSubmission{}, err
+		return domain.LandingSubmission{}, form, err
 	}
 
 	// 7. CRM sync never fails the visitor: the outcome is stored on the row.
-	return s.syncToCRM(ctx, scope, form, sub, isPlatformOrg), nil
+	return s.syncToCRM(ctx, scope, form, sub, isPlatformOrg), form, nil
 }
 
 // RetryCRMSync re-runs the CRM sync for a stored submission (for example after

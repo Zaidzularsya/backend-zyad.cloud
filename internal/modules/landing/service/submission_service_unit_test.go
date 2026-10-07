@@ -413,3 +413,119 @@ func TestRetryCRMSync_NotFound(t *testing.T) {
 		t.Fatalf("sink must not be called")
 	}
 }
+
+// ── hardening (R5-S4-T3) ───────────────────────────────────────────────────
+
+func TestSubmitPublic_ReturnsMinimalResultFromFormAndSubmission(t *testing.T) {
+	f := newSyncFixture()
+	f.forms.form.SuccessMessage = "Terima kasih"
+	f.forms.form.RedirectURL = "/thanks"
+	res, err := f.svc.SubmitPublic(context.Background(), mustLandingScope(t), submitParams("k1"), true)
+	if err != nil {
+		t.Fatalf("SubmitPublic() error = %v", err)
+	}
+	if res.SuccessMessage != "Terima kasih" || res.RedirectURL != "/thanks" {
+		t.Fatalf("res = %+v", res)
+	}
+}
+
+func TestSubmitForm_RejectsInvalidFields(t *testing.T) {
+	long := make([]byte, 5001)
+	for i := range long {
+		long[i] = 'a'
+	}
+	many := map[string]any{}
+	for i := 0; i < 51; i++ {
+		many[string(rune('a'+i%26))+string(rune('a'+i/26))] = "x"
+	}
+	cases := map[string]map[string]any{
+		"too many keys":  many,
+		"long value":     {"message": string(long)},
+		"empty key":      {"": "x"},
+		"too long key":   {string(make([]byte, 101)): "x"},
+		"long key ascii": {stringsRepeat("k", 101): "x"},
+	}
+	for name, data := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newSyncFixture()
+			p := submitParams("k1")
+			p.SubmittedData = data
+			_, err := f.svc.SubmitForm(context.Background(), mustLandingScope(t), p, true)
+			if !errors.Is(err, ErrInvalidSubmission) {
+				t.Fatalf("err = %v, want ErrInvalidSubmission", err)
+			}
+			if f.subs.createCalls != 0 {
+				t.Fatal("invalid submission must not be stored")
+			}
+		})
+	}
+}
+
+func stringsRepeat(s string, n int) string {
+	out := ""
+	for i := 0; i < n; i++ {
+		out += s
+	}
+	return out
+}
+
+func TestBuildLeadNotes_TruncatesLongValues(t *testing.T) {
+	form := domain.LandingForm{Fields: []domain.LandingFormField{{Key: "message", Label: "Pesan"}}}
+	sub := domain.LandingSubmission{SubmittedData: map[string]any{"message": stringsRepeat("x", 4000)}}
+	notes := buildLeadNotes(form, sub)
+	if len([]rune(notes)) > 1100 {
+		t.Fatalf("notes length = %d, want truncated", len([]rune(notes)))
+	}
+}
+
+func TestSubmitForm_ServerKeyDiffersByPayload(t *testing.T) {
+	f := newSyncFixture()
+	scope := mustLandingScope(t)
+	a := submitParams("")
+	a.IPAddressHash = "1.2.3.4"
+	b := submitParams("")
+	b.IPAddressHash = "1.2.3.4"
+	b.SubmittedData = map[string]any{"name": "Siti", "email": "siti@x.id"}
+	if _, err := f.svc.SubmitForm(context.Background(), scope, a, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.SubmitForm(context.Background(), scope, b, true); err != nil {
+		t.Fatal(err)
+	}
+	if f.subs.createCalls != 2 {
+		t.Fatalf("create calls = %d, want 2 distinct rows", f.subs.createCalls)
+	}
+	if len(f.subs.byKey) != 2 {
+		t.Fatalf("distinct keys = %d, want 2", len(f.subs.byKey))
+	}
+}
+
+func TestSubmitForm_ServerKeyIdenticalPayloadSameKey(t *testing.T) {
+	f := newSyncFixture()
+	scope := mustLandingScope(t)
+	a := submitParams("")
+	a.IPAddressHash = "1.2.3.4"
+	b := submitParams("")
+	b.IPAddressHash = "1.2.3.4"
+	f.svc.SubmitForm(context.Background(), scope, a, true)
+	f.svc.SubmitForm(context.Background(), scope, b, true)
+	if len(f.subs.byKey) != 1 {
+		t.Fatalf("distinct keys = %d, want 1 (same payload dedupes)", len(f.subs.byKey))
+	}
+}
+
+func TestSubmitForm_ServerKeyUniqueViolationReturnsExisting(t *testing.T) {
+	f := newSyncFixture()
+	f.subs.stored["sub-0"] = domain.LandingSubmission{ID: "sub-0"}
+	f.subs.createErr = &pgconn.PgError{Code: "23505"}
+	lookups := 1 // server key has no pre-check: the first lookup already happens after the failed insert
+	svc := NewSubmissionService(&raceSubmissionRepo{syncSubmissionRepoStub: f.subs, lookups: &lookups}, f.forms, f.pages, f.sink, f.features)
+	p := submitParams("")
+	sub, err := svc.SubmitForm(context.Background(), mustLandingScope(t), p, true)
+	if err != nil {
+		t.Fatalf("SubmitForm() error = %v", err)
+	}
+	if sub.ID != "sub-0" {
+		t.Fatalf("sub = %+v", sub)
+	}
+}
