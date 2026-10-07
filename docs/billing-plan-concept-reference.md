@@ -25,6 +25,11 @@ Sumber konteks:
 - Implementasi existing `internal/modules/organization`
 - Implementasi existing `internal/modules/landing`
 
+> **Catatan (Rilis 4 S3):** entitlement workspace kini bersumber dari **contract** (produk katalog platform → Sales Order → contract),
+> bukan dari `customer_subscriptions`. `organization_entitlements` mendapat source `contract` dan `default`; guard tidak lagi
+> memeriksa subscription. Konsep Plan/Subscription di dokumen ini berlaku untuk workspace lama sampai Rilis 4 S5. Lihat
+> `docs/reference-crm.md` bagian "Tautan workspace & akses dari contract".
+
 ## Overview
 
 Module ini mengatur monetisasi SaaS berbasis organization. Dalam konteks

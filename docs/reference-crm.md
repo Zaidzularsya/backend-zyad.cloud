@@ -455,6 +455,33 @@ Pembeli (tenant customer) memilih produk di pricing page → `POST /api/v1/app/s
   (4) `receivable_settings.default_sender` org platform terisi (PIC bot tidak punya mailbox, pengiriman invoice butuh pengirim
   default); (5) **produksi: S2 dan S3 harus naik bersamaan** — tanpa S3, pembeli membayar tetapi belum mendapat fitur.
 
+## Tautan workspace & akses dari contract (Rilis 4 S3)
+
+`crm_companies.tenant_organization_id` menautkan company ke workspace pelanggan. Dari tautan inilah fitur produk yang dibeli
+menjadi entitlement workspace.
+
+- **API:** `PATCH /app/crm/companies/:id` menerima `tenant_organization_id` (UUID = tautkan/ganti, `null` = lepas, tidak dikirim =
+  tidak diubah). Syarat: org pemanggil = **platform** (selain itu 422 `WORKSPACE_LINK_PLATFORM_ONLY`), permission
+  `company.link_workspace` (403; `organization_owner` & `super_admin`), workspace `type=customer` (422 `WORKSPACE_NOT_CUSTOMER` /
+  `WORKSPACE_NOT_FOUND`), belum tertaut ke company lain (409 `WORKSPACE_ALREADY_LINKED`). Respons company membawa
+  `tenant_organization {id,name,slug,status} | null` (hanya untuk org platform).
+- **Sinkronisasi:** setelah tautan berubah, `TenantAccess.OnWorkspaceLinkChanged` mencabut entitlement contract company itu dari
+  workspace lama (yang kembali ke paket gratis bila tak punya contract lain) lalu memberikannya ke workspace baru sesuai status bayar.
+- **Rantai fitur:** baris quote (snapshot S1) → item SO (`crm_sales_order_items.features`) → `OrderLine.Features` → item contract
+  (`receivable_contract_items.features`). Migration `000152`.
+- **Kapan diberikan (`TenantAccess.SyncContract`, dipicu `InvoicePaid` ber-`ContractID`, `ContractCreated`, `ContractEnded`,
+  perubahan tautan):** item **prabayar** setelah ada invoice contract yang lunas; item **pascabayar** sejak contract terbentuk.
+  Fitur seluruh item digabung per contract (angka/desimal → terbesar, boolean → `true` menang, string → item `position` terkecil).
+  Contract `ended`/`cancelled` → dicabut. Company tanpa tautan workspace tidak mengubah apa pun.
+- **Penyimpanan:** `organization_entitlements` `source='contract'`, `source_reference=<contract_id>`; dicabut dengan
+  `status='expired'` + `effective_until` (riwayat tetap ada). Prioritas `FindEffective`/`ListEffective`:
+  `platform_override`(5) > `addon`(4) > `contract`(3) > `trial`(2) > `plan`(1) > `default`(0). Baris `plan` lama dari
+  `customer_subscriptions` dibiarkan sampai S5.
+- **Paket gratis:** `source='default'` dari fitur produk platform ber-SKU `SELF_SERVE_FREE_PRODUCT_SKU` (default `FREE`), diberikan
+  saat onboarding workspace dan saat contract terakhir berakhir; dicabut begitu ada contract aktif. Produk belum ada →
+  `DEFAULT_PRODUCT_NOT_FOUND` dicatat di log (onboarding tetap sukses); membuat produknya lalu memanggil ulang provisioner memperbaiki.
+- **Guard:** `RequireFeature`/`RequireQuota` tidak lagi membaca `customer_subscriptions`; hanya entitlement (dan bypass org platform).
+
 ## Non-Goals
 
 - Tidak menggantikan atau berinteraksi langsung dengan `billing_invoices`/`billing_payments` (modul

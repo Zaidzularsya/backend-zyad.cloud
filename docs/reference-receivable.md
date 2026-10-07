@@ -164,6 +164,10 @@ registry.Add(listener) // Listener.InvoicePaid / ContractCreated
 Dipanggil **setelah commit**; panic listener ditelan dan dicatat, jadi pembayaran yang sudah sah tidak gagal karena
 efek samping. S4 mendaftar untuk `ContractCreated`; `InvoicePaid` membawa `SourceType/SourceID/ContractID`.
 
+`ContractEnded` (Rilis 4 S3) dipicu **tepat sekali** per contract, saat statusnya berubah menjadi `ended`: `ContractService.End` dan
+billing run (`EndExpired` mengembalikan contract yang baru diakhiri). Billing run di `cmd/worker` perlu listener CRM terdaftar agar
+akses workspace ikut dicabut. `SetEndDate` tidak memicu event karena status belum berubah.
+
 ## Job overdue
 
 `cmd/worker`: tiap jam `OverdueRunner.RunOnce` — per organisasi aktif (halaman 100), resolve scope dengan identitas
@@ -195,6 +199,8 @@ menautkan `contract_item_id` periode pertama).
   (alasan 1–500). Permission `contract.read|manage`. Galat `CONTRACT_NOT_FOUND` 404, `CONTRACT_NOT_ACTIVE` 409.
 - Migration `000146`: tabel `receivable_contracts`/`receivable_contract_items`, FK `receivable_invoices.contract_id` dan
   `receivable_invoice_items.contract_item_id`.
+- **Fitur item contract (Rilis 4 S3, migration `000152`):** `receivable_contract_items.features` (jsonb array `[{feature_key,value,label}]`)
+  menyimpan snapshot fitur produk dari `OrderLine.Features`; receivable tidak menafsirkannya (dibaca CRM untuk entitlement workspace).
 
 ## Billing run & Recurring Billing (Rilis 3 S5)
 
