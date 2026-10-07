@@ -482,6 +482,29 @@ menjadi entitlement workspace.
   `DEFAULT_PRODUCT_NOT_FOUND` dicatat di log (onboarding tetap sukses); membuat produknya lalu memanggil ulang provisioner memperbaiki.
 - **Guard:** `RequireFeature`/`RequireQuota` tidak lagi membaca `customer_subscriptions`; hanya entitlement (dan bypass org platform).
 
+## Suspend & aktif kembali otomatis (Rilis 4 S4)
+
+Workspace pelanggan yang punya invoice Zyad (org platform) lewat jatuh tempo melebihi masa tenggang ditangguhkan otomatis,
+dan aktif kembali setelah tagihan lunas.
+
+- **Job:** `cmd/worker` menjalankan `TenantAccess.SuspendOverdue` per jam (dan pada `-once`). Kondisi: `invoice.status='overdue'`
+  dan `due_date + SELF_SERVE_GRACE_DAYS < hari ini` (WIB; default 7, rentang 0–60, di luar rentang → default + log warn).
+  Hari ke-7 setelah jatuh tempo belum disuspend, hari ke-8 baru. Penelusuran invoice → SO (atau contract → SO) → company → workspace.
+- **Aksi:** `LifecycleService.ChangeStatus(suspended, "billing_overdue: <no>")` (sesi workspace dicabut) lalu metadata organisasi
+  `billing_suspended`, `billing_suspended_at`, `billing_suspended_invoice`; email ke semua `organization_owner` (template
+  `self_serve.workspace_suspended`, memuat link bayar invoice tertua). Aktor audit = bot self-serve.
+- **Idempoten:** workspace yang sudah bukan `active` (termasuk suspend manual admin) dilewati, jadi run berulang tidak mengirim email
+  ganda dan penanda billing tidak pernah ditulis di atas suspend manual.
+- **Aktif kembali:** listener `InvoicePaid` (setelah `SyncContract`) memanggil `ReactivateIfSettled`: hanya bila workspace
+  `suspended` **dengan** penanda billing dan tidak ada lagi invoice overdue lewat grace untuk workspace itu → status `active`,
+  metadata dihapus, email `self_serve.workspace_reactivated`. Suspend manual (tanpa penanda) tidak pernah dibuka otomatis.
+- **Aktivasi manual tanpa pelunasan bukan pengecualian permanen:** bila admin mengaktifkan workspace yang masih menunggak, job
+  berikutnya menangguhkannya lagi. Admin perlu memperpanjang jatuh tempo (atau melunasi invoice) bila ingin workspace tetap aktif.
+- **Gagal tulis metadata** setelah status berubah → error di log; workspace tetap `suspended` tanpa penanda sehingga tidak dibuka
+  otomatis (perlu penanganan manual).
+- **Endpoint:** `GET /app/self-serve/subscription` (`organization.billing.read`) → status `free|awaiting_payment|active|overdue`,
+  paket, fitur efektif, `suspend_in_days`, 12 invoice terbaru dengan link bayar. Migration `000153` (template + indeks parsial overdue).
+
 ## Non-Goals
 
 - Tidak menggantikan atau berinteraksi langsung dengan `billing_invoices`/`billing_payments` (modul
