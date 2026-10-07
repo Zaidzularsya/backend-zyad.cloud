@@ -56,8 +56,10 @@ type InvoiceListFilter struct {
 	// SendFailed: ada kiriman gagal tanpa kiriman sukses sesudahnya pada kanal yang sama.
 	SendFailed bool
 	Search     string // nomor invoice atau nama/perusahaan account
-	Limit      int
-	Offset     int
+	// DueBefore: hanya invoice dengan due_date < nilai ini (tanggal kalender).
+	DueBefore *time.Time
+	Limit     int
+	Offset    int
 }
 
 type InvoiceRepository interface {

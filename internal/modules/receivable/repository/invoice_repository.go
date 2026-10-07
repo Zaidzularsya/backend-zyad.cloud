@@ -188,6 +188,9 @@ func (r *invoiceRepository) List(ctx context.Context, scope coretenant.Scope, f 
 	if f.ContractID != "" {
 		add("i.contract_id = ?", f.ContractID)
 	}
+	if f.DueBefore != nil {
+		add("i.due_date < ?", *f.DueBefore)
+	}
 	if s := strings.TrimSpace(f.Search); s != "" {
 		add("(i.invoice_number ILIKE ? OR a.name ILIKE ? OR a.company_name ILIKE ?)", "%"+escapeLike(s)+"%")
 	}
