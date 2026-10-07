@@ -10,6 +10,7 @@ import (
 	permissionrepo "zyad.cloud/internal/core/permission/repository"
 	permissionservice "zyad.cloud/internal/core/permission/service"
 	crmrepo "zyad.cloud/internal/modules/crm/repository"
+	crmservice "zyad.cloud/internal/modules/crm/service"
 	mailboxrepo "zyad.cloud/internal/modules/mailbox/repository"
 	mailboxservice "zyad.cloud/internal/modules/mailbox/service"
 	organizationrepo "zyad.cloud/internal/modules/organization/repository"
@@ -58,6 +59,9 @@ func NewReceivableBillingRunner(cfg config.Config, db *database.Pool, log *slog.
 		AppName: cfg.App.Name, FrontendURL: cfg.App.FrontendURL, NotificationLocale: cfg.Notification.DefaultLocale,
 	})
 
+	// Billing run mengakhiri contract; listener CRM mencabut akses workspace-nya.
+	module.Listeners.Add(crmservice.NewReceivableListener(crmrepo.NewSalesOrderRepository(db), nil, nil).
+		WithTenantAccess(newCRMTenantAccess(db, module.Invoices, module.Contracts, nil)))
 	run := receivableservice.NewBillingRun(receivablerepo.NewContractRepository(db), module.Invoices, receivablerepo.NewSettingsRepository(db), module.Listeners, nil)
 	scopes := organizationservice.NewWorkerResolver(organizationrepo.NewOrganizationRepository(db), receivableservice.BillingRunWorkerIdentity)
 	return receivableservice.NewBillingRunner(receivableOrgLister{repo: organizationrepo.NewOrganizationRepository(db)}, scopes, run), nil

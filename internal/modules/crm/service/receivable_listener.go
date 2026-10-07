@@ -12,19 +12,35 @@ import (
 	receivableservice "zyad.cloud/internal/modules/receivable/service"
 )
 
-// ReceivableListener menghubungkan peristiwa receivable ke evaluator Won. Dipanggil setelah commit
+// ReceivableListener menghubungkan peristiwa receivable ke evaluator Won dan ke akses workspace (TenantAccess). Dipanggil setelah commit
 // pembayaran/kontrak: panic dan galat hanya di-log. Won tetap dipulihkan saat Deal Detail membuka
 // won-checklist (yang menjalankan Evaluate ulang).
 type ReceivableListener struct {
 	orders     repository.SalesOrderRepository
 	won        DealWonEvaluator
 	activities repository.ActivityRepository
+	access     ContractSyncer // nil = tidak menyinkronkan akses workspace
 }
 
 var _ receivableservice.Listener = (*ReceivableListener)(nil)
 
 func NewReceivableListener(orders repository.SalesOrderRepository, won DealWonEvaluator, activities repository.ActivityRepository) *ReceivableListener {
 	return &ReceivableListener{orders: orders, won: won, activities: activities}
+}
+
+// WithTenantAccess mengaktifkan sinkronisasi entitlement workspace dari peristiwa contract/invoice.
+func (l *ReceivableListener) WithTenantAccess(access ContractSyncer) *ReceivableListener {
+	l.access = access
+	return l
+}
+
+func (l *ReceivableListener) syncAccess(ctx context.Context, scope coretenant.Scope, contractID string, reason SyncReason) {
+	if l.access == nil || contractID == "" {
+		return
+	}
+	if err := l.access.SyncContract(ctx, scope, contractID, reason); err != nil {
+		slog.Warn("listener: tenant access sync failed", "contract_id", contractID, "reason", string(reason), "error", err)
+	}
 }
 
 func (l *ReceivableListener) guard(what string, fn func()) {
@@ -38,6 +54,7 @@ func (l *ReceivableListener) guard(what string, fn func()) {
 
 func (l *ReceivableListener) InvoicePaid(ctx context.Context, scope coretenant.Scope, inv receivableservice.InvoiceRef) {
 	l.guard("invoice paid", func() {
+		l.syncAccess(ctx, scope, inv.ContractID, SyncInvoicePaid)
 		// Invoice berkala dari kontrak tidak memengaruhi syarat Won (kontrak ada = terpenuhi).
 		if inv.SourceType != receivabledomain.SourceSalesOrder {
 			return
@@ -60,12 +77,13 @@ func (l *ReceivableListener) InvoicePaid(ctx context.Context, scope coretenant.S
 	})
 }
 
-// ContractEnded: pencabutan akses workspace ditambahkan di Task 5.
-func (l *ReceivableListener) ContractEnded(_ context.Context, _ coretenant.Scope, _ receivableservice.ContractRef) {
+func (l *ReceivableListener) ContractEnded(ctx context.Context, scope coretenant.Scope, c receivableservice.ContractRef) {
+	l.guard("contract ended", func() { l.syncAccess(ctx, scope, c.ID, SyncContractEnded) })
 }
 
 func (l *ReceivableListener) ContractCreated(ctx context.Context, scope coretenant.Scope, c receivableservice.ContractRef) {
 	l.guard("contract created", func() {
+		l.syncAccess(ctx, scope, c.ID, SyncContractCreated)
 		if c.SourceType != receivabledomain.SourceSalesOrder {
 			return
 		}
