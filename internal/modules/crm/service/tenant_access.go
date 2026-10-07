@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"time"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/crm/domain"
@@ -238,4 +239,33 @@ func (a *TenantAccess) OnWorkspaceLinkChanged(ctx context.Context, scope coreten
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// WorkspaceState adalah keadaan workspace pelanggan yang dibutuhkan job suspend.
+type WorkspaceState struct {
+	ID, Name, Status string // status: active|suspended|disabled|archived|...
+	// BillingSuspended: ditangguhkan oleh job tagihan (penanda metadata). Suspend manual admin tidak punya penanda.
+	BillingSuspended bool
+}
+
+// WorkspaceStatusPort mengubah status workspace (diimplementasikan di internal/app di atas LifecycleService).
+type WorkspaceStatusPort interface {
+	// Get mengembalikan pgx.ErrNoRows bila workspace tidak ada atau sudah dihapus/diarsipkan.
+	Get(ctx context.Context, organizationID string) (WorkspaceState, error)
+	// SuspendForBilling: ChangeStatus(suspended, "billing_overdue: <no>") lalu menulis metadata billing_suspended*.
+	SuspendForBilling(ctx context.Context, organizationID, invoiceNumber, actorUserID string) error
+	// ReactivateFromBilling: ChangeStatus(active, "billing_paid: <no>") lalu menghapus metadata billing_suspended*.
+	ReactivateFromBilling(ctx context.Context, organizationID, invoiceNumber, actorUserID string) error
+}
+
+type SuspendNotice struct {
+	WorkspaceName, InvoiceNumber, InvoiceURL, AmountDue string
+	DueDate                                             time.Time
+	GraceDays                                           int
+}
+
+// AccessNotifier memberi tahu owner workspace. Galat notifikasi tidak membatalkan perubahan status.
+type AccessNotifier interface {
+	WorkspaceSuspended(ctx context.Context, organizationID string, p SuspendNotice) error
+	WorkspaceReactivated(ctx context.Context, organizationID string, invoiceNumber string) error
 }

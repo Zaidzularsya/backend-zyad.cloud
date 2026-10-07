@@ -125,6 +125,18 @@ func defaultNotificationRules() map[string]NotificationRule {
 			Channel:      domain.ChannelEmail,
 			Locale:       defaultRuleLocale,
 		},
+		"self_serve.workspace_suspended": {
+			EventType:    "self_serve.workspace_suspended",
+			TemplateCode: "self_serve.workspace_suspended",
+			Channel:      domain.ChannelEmail,
+			Locale:       defaultRuleLocale,
+		},
+		"self_serve.workspace_reactivated": {
+			EventType:    "self_serve.workspace_reactivated",
+			TemplateCode: "self_serve.workspace_reactivated",
+			Channel:      domain.ChannelEmail,
+			Locale:       defaultRuleLocale,
+		},
 		"receivable.invoice_send_failed": {
 			EventType:    "receivable.invoice_send_failed",
 			TemplateCode: "receivable.invoice_send_failed",

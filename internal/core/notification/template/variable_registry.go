@@ -121,6 +121,22 @@ func defaultVariables() map[string][]domain.NotificationVariable {
 			{Key: "reason", Description: "Failure reason (no provider internals)", Required: true, Example: "Belum ada pengirim."},
 			{Key: "invoice_url", Description: "Invoice page URL", Required: true, Example: "https://app.example.test/app/billing/invoices/1"},
 		},
+		"self_serve.workspace_suspended": {
+			{Key: "app_name", Description: "Application name", Required: true, Example: "Zyad Cloud"},
+			{Key: "user_name", Description: "Recipient user name", Required: true, Example: "Sari"},
+			{Key: "workspace_name", Description: "Workspace name", Required: true, Example: "Toko Maju"},
+			{Key: "invoice_number", Description: "Overdue invoice number", Required: true, Example: "INV-2026-0377"},
+			{Key: "invoice_url", Description: "Public invoice payment link", Required: true, Example: "https://app.example.test/p/abc"},
+			{Key: "amount_due", Description: "Amount due (formatted)", Required: true, Example: "Rp333.000"},
+			{Key: "due_date", Description: "Invoice due date", Required: true, Example: "2026-09-10"},
+			{Key: "grace_days", Description: "Grace period in days", Required: true, Example: "7"},
+		},
+		"self_serve.workspace_reactivated": {
+			{Key: "app_name", Description: "Application name", Required: true, Example: "Zyad Cloud"},
+			{Key: "user_name", Description: "Recipient user name", Required: true, Example: "Sari"},
+			{Key: "workspace_name", Description: "Workspace name", Required: true, Example: "Toko Maju"},
+			{Key: "invoice_number", Description: "Settled invoice number", Required: true, Example: "INV-2026-0377"},
+		},
 		"permission.updated": {
 			{Key: "app_name", Description: "Application name", Required: true, Example: "Zyad Cloud"},
 			{Key: "user_name", Description: "Affected user name", Required: true, Example: "Admin"},
