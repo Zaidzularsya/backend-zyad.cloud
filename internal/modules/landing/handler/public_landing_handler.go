@@ -126,6 +126,7 @@ func (h *PublicLandingHandler) RenderHTML(c *gin.Context) {
 		return
 	}
 
+	resolved.OrganizationType = string(tenantContext.OrganizationType())
 	document := service.RenderGrapesDocument(resolved)
 	if document == "" {
 		corehttp.Fail(c, coreerrors.New("PUBLIC_PAGE_NOT_FOUND", "landing page was not found", http.StatusNotFound))

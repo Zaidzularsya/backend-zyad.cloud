@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/landing/domain"
 )
 
@@ -257,7 +258,7 @@ func RenderGrapesDocument(resolved ResolvedPage) string {
 		robots = "noindex, nofollow"
 	}
 
-	body := fillGrapesSentinels(resolved.HTML, resolved.Menus, resolved.PricingPlans, resolved.Branding, page)
+	body := fillGrapesSentinels(resolved.HTML, resolved.Menus, resolved.PricingPlans, resolved.Branding, page, resolved.OrganizationType)
 	css := strings.ReplaceAll(resolved.CSS, "</style", `<\/style`)
 
 	var b strings.Builder
@@ -302,6 +303,7 @@ func fillGrapesSentinels(
 	plans []ResolvedPricingPlan,
 	branding domain.LandingBranding,
 	page domain.LandingPage,
+	organizationType string,
 ) string {
 	// A tenant-chrome sentinel should appear at most once per page (dropping
 	// "Header tenant" / "Footer tenant" twice is a builder mistake, guarded
@@ -346,6 +348,11 @@ func fillGrapesSentinels(
 			return ""
 		}
 		catalogFilled = true
+		// Catalog pricing is a platform-only slot: tenants that copied the
+		// sentinel get an empty container, never the placeholder.
+		if organizationType != string(coretenant.OrganizationTypePlatform) {
+			return sentinelOpenTag(sentinel) + `</div>`
+		}
 		return sentinelOpenTag(sentinel) + buildCatalogPricingMarkup(parseSSRCatalogPricingTitle(sentinel)) + `</div>`
 	})
 

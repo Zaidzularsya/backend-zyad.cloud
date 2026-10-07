@@ -246,3 +246,31 @@ func TestPublicLandingResolveAndPreviewSetOrganizationType(t *testing.T) {
 		}
 	}
 }
+
+func TestPublicLandingRenderHTMLSetsOrganizationType(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	sentinel := `<div data-zyad-slot="catalog-pricing"></div>`
+	for orgType, wantPlaceholder := range map[coretenant.OrganizationType]bool{
+		coretenant.OrganizationTypePlatform: true,
+		coretenant.OrganizationTypeCustomer: false,
+	} {
+		resolver := &publicResolverServiceStub{
+			resolvedPage: service.ResolvedPage{
+				Builder: string(domain.PageBuilderGrapesJS),
+				Page:    domain.LandingPage{Slug: "promo", Status: domain.PageStatusPublished, Visibility: domain.PageVisibilityPublic},
+				HTML:    sentinel,
+			},
+		}
+		req := httptest.NewRequest(http.MethodGet, "/public/landing/render/promo", nil)
+		rec := httptest.NewRecorder()
+		orgTypeRouter(t, resolver, orgType).ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d body=%s", orgType, rec.Code, rec.Body.String())
+		}
+		if got := strings.Contains(rec.Body.String(), "zy-slot-catalog-pricing"); got != wantPlaceholder {
+			t.Fatalf("%s: placeholder present = %v, want %v\n%s", orgType, got, wantPlaceholder, rec.Body.String())
+		}
+	}
+}

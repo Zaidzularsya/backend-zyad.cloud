@@ -280,8 +280,9 @@ func TestRenderGrapesDocumentRobotsNoindexForPrivate(t *testing.T) {
 
 func catalogPricingDoc(config string) string {
 	return RenderGrapesDocument(ResolvedPage{
-		Builder: string(domain.PageBuilderGrapesJS),
-		HTML:    `<div data-zyad-slot="catalog-pricing" data-zyad-config='` + config + `'></div>`,
+		Builder:          string(domain.PageBuilderGrapesJS),
+		OrganizationType: "platform",
+		HTML:             `<div data-zyad-slot="catalog-pricing" data-zyad-config='` + config + `'></div>`,
 	})
 }
 
@@ -310,8 +311,9 @@ func TestRenderGrapesDocumentCatalogPricingDefaultTitle(t *testing.T) {
 		}
 	}
 	doc := RenderGrapesDocument(ResolvedPage{
-		Builder: string(domain.PageBuilderGrapesJS),
-		HTML:    `<div data-zyad-slot="catalog-pricing"></div>`,
+		Builder:          string(domain.PageBuilderGrapesJS),
+		OrganizationType: "platform",
+		HTML:             `<div data-zyad-slot="catalog-pricing"></div>`,
 	})
 	if !strings.Contains(doc, "<h2>"+def+"</h2>") {
 		t.Fatalf("no config attr: default title missing:\n%s", doc)
@@ -327,11 +329,30 @@ func TestRenderGrapesDocumentCatalogPricingEscapesInjectedHTML(t *testing.T) {
 
 func TestRenderGrapesDocumentCatalogPricingOnlyFirstSentinel(t *testing.T) {
 	doc := RenderGrapesDocument(ResolvedPage{
-		Builder: string(domain.PageBuilderGrapesJS),
+		Builder:          string(domain.PageBuilderGrapesJS),
+		OrganizationType: "platform",
 		HTML: `<div data-zyad-slot="catalog-pricing"></div><p>x</p>` +
 			`<div data-zyad-slot="catalog-pricing"></div>`,
 	})
 	if n := strings.Count(doc, `class="zy-slot-catalog-pricing"`); n != 1 {
 		t.Fatalf("expected 1 placeholder, got %d", n)
+	}
+}
+
+func TestRenderGrapesDocumentCatalogPricingOnlyForPlatform(t *testing.T) {
+	for name, org := range map[string]string{"customer": "customer", "empty": ""} {
+		doc := RenderGrapesDocument(ResolvedPage{
+			Builder:          string(domain.PageBuilderGrapesJS),
+			OrganizationType: org,
+			HTML:             `<div data-zyad-slot="catalog-pricing"></div><p>x</p>`,
+		})
+		for _, bad := range []string{"zy-slot-catalog-pricing", "Lihat paket harga", "<h2>"} {
+			if strings.Contains(doc, bad) {
+				t.Fatalf("%s: unexpected %q for non-platform org:\n%s", name, bad, doc)
+			}
+		}
+		if !strings.Contains(doc, "<p>x</p>") {
+			t.Fatalf("%s: surrounding content lost:\n%s", name, doc)
+		}
 	}
 }
