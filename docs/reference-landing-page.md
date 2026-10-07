@@ -430,3 +430,33 @@ Deferred advanced:
 - Mengimplementasikan notification provider di Landing.
 - Menyimpan arbitrary executable JavaScript.
 - Memecah form, submission, branding, atau analytics menjadi module bisnis terpisah.
+
+## Renderer Shadow DOM (R5-S1)
+
+Halaman GrapesJS publik dan preview dirender di **shadow root** pada dokumen utama, bukan lagi `<iframe srcdoc>` sandbox. Backend tidak berubah; sumber: `docs/superpowers/specs/2026-10-07-landing-marketing-v2-design.md` §5 (K6, K7, K12).
+
+### Alur
+
+1. `GrapesPageRenderer.vue` memilih renderer menurut flag build `VITE_LANDING_RENDERER` (`shadow` default, `iframe` = rollback ke `GrapesPageFrame.vue`).
+2. `ShadowPageRenderer.vue` memasang shadow root pada host `.zy-page-host`, menyanitasi HTML dengan DOMPurify (konfigurasi identik dengan renderer iframe lama), menyuntikkan base stylesheet + CSS slot + CSS halaman yang ditulis ulang (`rewritePageCss`: `html`/`body` → `.zy-page`, `:root` → `:host`), dan me-hoist `@font-face` ke `<style data-zy-fonts>` di `document.head`.
+3. Sentinel `[data-zyad-slot]` di-mount sebagai komponen Vue asli lewat `<Teleport>` menurut `SLOT_REGISTRY` (`tenant-nav`, `tenant-footer`, `pricing-plans`).
+4. Klik link: `#anchor` → scroll di dalam shadow root; path same-origin yang punya route SPA → `router.push`; sisanya (modifier, `target=_blank`, `/api/`, file/path tanpa route, cross-origin) → perilaku browser.
+
+### Aturan komponen slot (shadow-safe)
+
+- Tanpa Tailwind dan tanpa `<style>` SFC (CSS SFC tidak masuk shadow root). CSS ditaruh di `*.slot.css` dan di-import `?inline`.
+- Nama kelas slot lama dipertahankan (`zyad-tenant-header*`, `zyad-tenant-footer*`, `zyad-pricing-plans*`) karena tenant mungkin menimpanya lewat CSS halaman. Slot baru memakai prefix `zy-slot-`.
+- Semua href/src lewat `safeHref`; warna lewat `safeColor`.
+
+### Rollback
+
+Build ulang frontend dengan `VITE_LANDING_RENDERER=iframe`, atau flip symlink `current` ke release sebelumnya.
+
+### Catatan risiko (K7)
+
+HTML tenant kini berada di dokumen utama, sementara token auth mode `bearer` ada di `localStorage`. Risiko ini diterima Product Owner (7 Okt 2026); pagar yang dipasang: sanitasi ganda (bluemonday di backend + DOMPurify di frontend) dan header CSP `script-src` di nginx SPA. Backlog: pentest dan cookie auth httpOnly.
+
+Keterbatasan yang diketahui:
+- `@font-face` tenant di-hoist ke `document.head` sehingga bersifat global; family yang sama dengan font SPA (mis. Inter) bisa menimpa font aplikasi selama halaman hidup.
+- Tanpa sandbox, inline `position:fixed; z-index` pada HTML tenant dapat menutupi UI SPA (terutama di preview).
+- `@container`/`@layer` pada CSS halaman tidak ditulis ulang; Back/Forward antar `#id` tidak melakukan scroll.
