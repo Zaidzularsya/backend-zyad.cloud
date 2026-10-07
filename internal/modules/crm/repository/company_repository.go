@@ -398,7 +398,7 @@ func (r *companyRepository) SetTenantOrganization(ctx context.Context, scope cor
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
 		var err error
 		company, err = scanCompany(tx.QueryRow(ctx, `UPDATE crm_companies
-			SET tenant_organization_id = $3, updated_by = $4, updated_at = NOW()
+			SET tenant_organization_id = NULLIF($3::text, '')::uuid, updated_by = $4, updated_at = NOW()
 			WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL
 			RETURNING `+companyColumns, companyID, scope.OrganizationID(), tenantOrgID, nullableString(updatedBy)))
 		return err

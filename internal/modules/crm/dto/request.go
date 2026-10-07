@@ -1,5 +1,7 @@
 package dto
 
+import "encoding/json"
+
 // CompanyListQuery binds query parameters for listing companies.
 type CompanyListQuery struct {
 	Page        int    `form:"page"`
@@ -35,6 +37,28 @@ type UpdateCompanyRequest struct {
 	Notes       *string        `json:"notes"`
 	Tags        []string       `json:"tags"`
 	OwnerUserID *string        `json:"owner_user_id"`
+	// TenantOrganizationID: tautan workspace. Tidak dikirim = tidak diubah; null = melepas tautan.
+	TenantOrganizationID OptionalString `json:"tenant_organization_id"`
+}
+
+// OptionalString membedakan field yang tidak dikirim (Set=false) dari null (Set=true, Value=nil).
+type OptionalString struct {
+	Set   bool
+	Value *string
+}
+
+func (o *OptionalString) UnmarshalJSON(data []byte) error {
+	o.Set = true
+	if string(data) == "null" {
+		o.Value = nil
+		return nil
+	}
+	var v string
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	o.Value = &v
+	return nil
 }
 
 // ContactListQuery binds query parameters for listing contacts.

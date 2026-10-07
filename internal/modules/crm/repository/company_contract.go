@@ -63,7 +63,7 @@ type CompanyRepository interface {
 	// FindByTenantOrganization mengembalikan company yang tertaut ke workspace
 	// tenantOrgID, atau pgx.ErrNoRows.
 	FindByTenantOrganization(ctx context.Context, scope coretenant.Scope, tenantOrgID string) (domain.Company, error)
-	// SetTenantOrganization menautkan company ke workspace; ErrWorkspaceAlreadyLinked
+	// SetTenantOrganization menautkan company ke workspace (tenantOrgID kosong = melepas tautan); ErrWorkspaceAlreadyLinked
 	// bila workspace itu sudah tertaut ke company lain di org yang sama.
 	SetTenantOrganization(ctx context.Context, scope coretenant.Scope, companyID, tenantOrgID, updatedBy string) (domain.Company, error)
 }

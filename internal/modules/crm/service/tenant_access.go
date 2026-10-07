@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -199,4 +200,42 @@ func ratOf(raw json.RawMessage) (*big.Rat, bool) {
 		text = s
 	}
 	return new(big.Rat).SetString(text)
+}
+
+var _ WorkspaceLinkHook = (*TenantAccess)(nil)
+
+// OnWorkspaceLinkChanged memindahkan akses saat company ditautkan, diganti, atau dilepas dari workspace:
+// contract company dicabut dari workspace lama (yang lalu kembali ke paket default bila tidak punya contract
+// lain) dan diberikan ke workspace baru sesuai status bayarnya.
+func (a *TenantAccess) OnWorkspaceLinkChanged(ctx context.Context, scope coretenant.Scope, companyID string, oldTenantOrgID, newTenantOrgID *string) error {
+	const pageSize = 200
+	var errs []error
+	for offset := 0; ; offset += pageSize {
+		orders, total, err := a.orders.List(ctx, scope, repository.SalesOrderListFilter{CompanyID: companyID, Limit: pageSize, Offset: offset})
+		if err != nil {
+			return fmt.Errorf("list company sales orders: %w", err)
+		}
+		for _, so := range orders {
+			if so.ContractID == "" {
+				continue
+			}
+			if oldTenantOrgID != nil {
+				info, err := a.contracts.ContractAccess(ctx, scope, so.ContractID)
+				if err != nil {
+					errs = append(errs, fmt.Errorf("read contract %s: %w", so.ContractID, err))
+				} else if err := a.writer.RevokeContract(ctx, *oldTenantOrgID, info.ID, info.Number, ""); err != nil {
+					errs = append(errs, fmt.Errorf("revoke contract %s: %w", so.ContractID, err))
+				}
+			}
+			if newTenantOrgID != nil {
+				if err := a.SyncContract(ctx, scope, so.ContractID, SyncWorkspaceLinked); err != nil {
+					errs = append(errs, fmt.Errorf("sync contract %s: %w", so.ContractID, err))
+				}
+			}
+		}
+		if int64(offset+len(orders)) >= total || len(orders) == 0 {
+			break
+		}
+	}
+	return errors.Join(errs...)
 }

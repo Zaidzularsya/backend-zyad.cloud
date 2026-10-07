@@ -421,7 +421,6 @@ func New(ctx context.Context) (*App, error) {
 	crmCompanyRepo := crmrepo.NewCompanyRepository(db)
 	crmContactRepo := crmrepo.NewContactRepository(db)
 	crmLeadRepo := crmrepo.NewLeadRepository(db)
-	crmCompanySvc := crmservice.NewCompanyService(crmCompanyRepo)
 	crmContactSvc := crmservice.NewContactService(
 		crmContactRepo,
 		crmservice.WithContactQuotaGuard(subscriptionGuardService),
@@ -465,7 +464,6 @@ func New(ctx context.Context) (*App, error) {
 	crmDocumentCounterRepo := crmrepo.NewDocumentCounterRepository(db)
 	crmIntegrationRepo := crmrepo.NewIntegrationRepository(db)
 	crmIntegrationSvc := crmservice.NewIntegrationService(crmIntegrationRepo, cfg.App.Secret)
-	crmCompanyHandler := crmhandler.NewCompanyHandler(crmCompanySvc)
 	crmContactHandler := crmhandler.NewContactHandler(crmContactSvc)
 	crmLeadHandler := crmhandler.NewLeadHandler(crmLeadSvc)
 	crmLeadAttachmentHandler := crmhandler.NewLeadAttachmentHandler(crmLeadAttachmentSvc)
@@ -561,6 +559,10 @@ func New(ctx context.Context) (*App, error) {
 	}, crmWonEvaluator, time.Now)
 	crmTenantAccess := newCRMTenantAccess(db, receivableModule.Invoices, receivableModule.Contracts, defaultAccess)
 	receivableModule.Listeners.Add(crmservice.NewReceivableListener(crmSalesOrderRepo, crmWonEvaluator, crmActivityRepo).WithTenantAccess(crmTenantAccess))
+	// Tautan company ↔ workspace (R4-S3): mengubah tautan memindahkan entitlement contract.
+	crmCompanySvc := crmservice.NewCompanyService(crmCompanyRepo,
+		crmservice.WithWorkspaceLinking(workspaceDirectory{orgs: organizationrepo.NewOrganizationRepository(db)}, crmTenantAccess))
+	crmCompanyHandler := crmhandler.NewCompanyHandler(crmCompanySvc)
 	crmSalesOrderHandler := crmhandler.NewSalesOrderHandler(crmSalesOrderSvc, crmhandler.SalesOrderRefs{Invoices: crmReceivableDocs, Contracts: crmReceivableDocs})
 	crmDealOrdersHandler := crmhandler.NewDealOrdersHandler(crmSalesOrderHandler, crmWonEvaluator)
 

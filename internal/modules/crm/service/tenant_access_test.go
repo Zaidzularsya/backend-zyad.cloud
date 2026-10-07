@@ -19,6 +19,10 @@ type taOrders struct {
 	so domain.SalesOrder
 }
 
+func (o taOrders) List(context.Context, coretenant.Scope, repository.SalesOrderListFilter) ([]domain.SalesOrder, int64, error) {
+	return []domain.SalesOrder{o.so}, 1, nil
+}
+
 func (o taOrders) FindByID(context.Context, coretenant.Scope, string) (domain.SalesOrder, error) {
 	return o.so, nil
 }
@@ -218,5 +222,41 @@ func TestReceivableListenerSyncsAccess(t *testing.T) {
 	want := []string{"ctr-1:invoice_paid", "ctr-2:contract_created", "ctr-3:contract_ended"}
 	if !reflect.DeepEqual(syncer.calls, want) {
 		t.Fatalf("calls = %v, want %v", syncer.calls, want)
+	}
+}
+
+func strPtr(v string) *string { return &v }
+
+func TestWorkspaceLinkedAfterPaymentGrantsImmediately(t *testing.T) {
+	f := newTenantAccessFixture([]ContractAccessItem{{Prepaid: true, Features: []domain.FeatureSnapshot{feature("user.max", "5")}}}, true)
+	f.contract.paid = true
+	f.access.orders = taOrders{so: domain.SalesOrder{ID: "so-1", CompanyID: strPtr("co-1"), ContractID: "ctr-1"}}
+	if err := f.access.OnWorkspaceLinkChanged(context.Background(), coretenant.Scope{}, "co-1", nil, strPtr("ws-1")); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.writer.grants) != 1 || f.writer.orgs[0] != "ws-1" || len(f.writer.revokes) != 0 {
+		t.Fatalf("grants=%v orgs=%v revokes=%v", f.writer.grants, f.writer.orgs, f.writer.revokes)
+	}
+}
+
+func TestWorkspaceRelinkMovesAccess(t *testing.T) {
+	f := newTenantAccessFixture([]ContractAccessItem{{Prepaid: false, Features: []domain.FeatureSnapshot{feature("user.max", "5")}}}, true)
+	f.access.orders = taOrders{so: domain.SalesOrder{ID: "so-1", CompanyID: strPtr("co-1"), ContractID: "ctr-1"}}
+	if err := f.access.OnWorkspaceLinkChanged(context.Background(), coretenant.Scope{}, "co-1", strPtr("ws-old"), strPtr("ws-1")); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(f.writer.revokes, []string{"ws-old/ctr-1"}) || len(f.writer.grants) != 1 || f.writer.orgs[0] != "ws-1" {
+		t.Fatalf("revokes=%v grants=%v orgs=%v", f.writer.revokes, f.writer.grants, f.writer.orgs)
+	}
+}
+
+func TestWorkspaceUnlinkRevokesOnly(t *testing.T) {
+	f := newTenantAccessFixture([]ContractAccessItem{{Prepaid: false, Features: []domain.FeatureSnapshot{feature("user.max", "5")}}}, false)
+	f.access.orders = taOrders{so: domain.SalesOrder{ID: "so-1", CompanyID: strPtr("co-1"), ContractID: "ctr-1"}}
+	if err := f.access.OnWorkspaceLinkChanged(context.Background(), coretenant.Scope{}, "co-1", strPtr("ws-old"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(f.writer.revokes, []string{"ws-old/ctr-1"}) || len(f.writer.grants) != 0 {
+		t.Fatalf("revokes=%v grants=%v", f.writer.revokes, f.writer.grants)
 	}
 }

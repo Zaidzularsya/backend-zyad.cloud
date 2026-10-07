@@ -11,6 +11,7 @@ import (
 	corehttp "zyad.cloud/internal/core/http"
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	coretenant "zyad.cloud/internal/core/tenant"
+	"zyad.cloud/internal/modules/crm/domain"
 	"zyad.cloud/internal/modules/crm/dto"
 	"zyad.cloud/internal/modules/crm/repository"
 	"zyad.cloud/internal/modules/crm/service"
@@ -18,8 +19,12 @@ import (
 )
 
 type CompanyHandler struct {
-	svc service.CompanyService
+	svc  service.CompanyService
+	perm permissionmiddleware.CombinedPermissionChecker
 }
+
+// linkWorkspacePermission mengizinkan mengisi, mengganti, atau melepas tautan company ke workspace.
+const linkWorkspacePermission = "company.link_workspace"
 
 func NewCompanyHandler(svc service.CompanyService) *CompanyHandler {
 	return &CompanyHandler{svc: svc}
@@ -30,6 +35,7 @@ func NewCompanyHandler(svc service.CompanyService) *CompanyHandler {
 // (RequireActiveTenant + RequireCustomerTenant + RequireEntitlement("crm.enabled")),
 // set up once in internal/app/router.go for the whole /app/crm group.
 func (h *CompanyHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker) {
+	h.perm = p
 	group := router.Group("/companies")
 
 	group.GET("", permissionmiddleware.RequireOrganizationOrGlobal(p, "company.read"), h.List)
@@ -124,7 +130,7 @@ func (h *CompanyHandler) Get(c *gin.Context) {
 		return
 	}
 
-	corehttp.OK(c, "success", dto.CompanyFromDomain(company))
+	corehttp.OK(c, "success", h.companyResponse(c, company))
 }
 
 func (h *CompanyHandler) Update(c *gin.Context) {
@@ -141,25 +147,86 @@ func (h *CompanyHandler) Update(c *gin.Context) {
 		return
 	}
 
-	company, err := h.svc.Update(c.Request.Context(), scope, c.Param("id"), repository.UpdateCompanyParams{
-		Name:        req.Name,
-		Industry:    req.Industry,
-		Website:     req.Website,
-		Phone:       req.Phone,
-		Email:       req.Email,
-		Address:     req.Address,
-		SizeRange:   req.SizeRange,
-		Notes:       req.Notes,
-		Tags:        req.Tags,
-		OwnerUserID: req.OwnerUserID,
-		UpdatedBy:   userID,
-	})
-	if err != nil {
-		corehttp.Fail(c, err)
-		return
+	// Tautan workspace diproses lebih dulu: pelanggaran (bukan platform, tanpa izin, workspace bukan
+	// pelanggan, sudah tertaut ke company lain) menggagalkan request sebelum field lain diubah.
+	var company domain.Company
+	linked := false
+	if req.TenantOrganizationID.Set {
+		if err := h.authorizeWorkspaceLink(c); err != nil {
+			corehttp.Fail(c, err)
+			return
+		}
+		company, err = h.svc.SetWorkspaceLink(c.Request.Context(), scope, c.Param("id"), req.TenantOrganizationID.Value, userID)
+		if err != nil {
+			corehttp.Fail(c, err)
+			return
+		}
+		linked = true
+	}
+	if !linked || hasCompanyFieldUpdates(req) {
+		company, err = h.svc.Update(c.Request.Context(), scope, c.Param("id"), repository.UpdateCompanyParams{
+			Name:        req.Name,
+			Industry:    req.Industry,
+			Website:     req.Website,
+			Phone:       req.Phone,
+			Email:       req.Email,
+			Address:     req.Address,
+			SizeRange:   req.SizeRange,
+			Notes:       req.Notes,
+			Tags:        req.Tags,
+			OwnerUserID: req.OwnerUserID,
+			UpdatedBy:   userID,
+		})
+		if err != nil {
+			corehttp.Fail(c, err)
+			return
+		}
 	}
 
-	corehttp.OK(c, "success", dto.CompanyFromDomain(company))
+	corehttp.OK(c, "success", h.companyResponse(c, company))
+}
+
+func hasCompanyFieldUpdates(req dto.UpdateCompanyRequest) bool {
+	return req.Name != nil || req.Industry != nil || req.Website != nil || req.Phone != nil || req.Email != nil ||
+		req.Address != nil || req.SizeRange != nil || req.Notes != nil || req.Tags != nil || req.OwnerUserID != nil
+}
+
+// authorizeWorkspaceLink: hanya org platform (422 untuk org lain) dan pemegang company.link_workspace (403).
+func (h *CompanyHandler) authorizeWorkspaceLink(c *gin.Context) error {
+	tenantContext, ok := coretenant.FromContext(c.Request.Context())
+	if !ok {
+		return coreerrors.New("TENANT_CONTEXT_REQUIRED", "organization context is required", http.StatusForbidden)
+	}
+	if tenantContext.OrganizationType() != coretenant.OrganizationTypePlatform {
+		return coreerrors.New("WORKSPACE_LINK_PLATFORM_ONLY", "only the platform organization can link a workspace", http.StatusUnprocessableEntity)
+	}
+	if h.perm == nil {
+		return nil
+	}
+	userID := permissionmiddleware.UserID(c)
+	required := []string{linkWorkspacePermission}
+	if err := h.perm.CanOrganization(c.Request.Context(), userID, tenantContext.OrganizationID(), required); err == nil {
+		return nil
+	}
+	if err := h.perm.Can(c.Request.Context(), userID, required); err == nil {
+		return nil
+	}
+	return coreerrors.New("FORBIDDEN", "insufficient permissions", http.StatusForbidden)
+}
+
+// companyResponse menambahkan ringkasan workspace tertaut; org non-platform tidak melihatnya.
+func (h *CompanyHandler) companyResponse(c *gin.Context, company domain.Company) dto.CompanyResponse {
+	resp := dto.CompanyFromDomain(company)
+	if company.TenantOrganizationID == nil {
+		return resp
+	}
+	if tenantContext, ok := coretenant.FromContext(c.Request.Context()); !ok || tenantContext.OrganizationType() != coretenant.OrganizationTypePlatform {
+		return resp
+	}
+	if info := h.svc.Workspace(c.Request.Context(), *company.TenantOrganizationID); info != nil {
+		resp.TenantOrganization = &dto.WorkspaceSummary{ID: info.ID, Name: info.Name, Slug: info.Slug, Status: info.Status}
+	}
+	return resp
 }
 
 func (h *CompanyHandler) Delete(c *gin.Context) {
