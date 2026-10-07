@@ -27,7 +27,7 @@ func NewAdminFormHandler(formSvc service.FormService) *AdminFormHandler {
 
 func (h *AdminFormHandler) RegisterRoutes(router *gin.RouterGroup, checker permissionmiddleware.CombinedPermissionChecker) {
 	pageGroup := router.Group("/admin/landing-pages/:id/forms")
-	
+
 	pageGroup.GET("", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.page.read"), h.ListForms)
 	pageGroup.POST("", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.form.manage"), h.CreateForm)
 	pageGroup.PATCH("/:formId", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.form.manage"), h.UpdateForm)
@@ -68,16 +68,29 @@ func (h *AdminFormHandler) CreateForm(c *gin.Context) {
 		return
 	}
 
-	// Assuming redirect_url mapping
 	var redirectURL string
 	if req.RedirectURL != nil {
 		redirectURL = *req.RedirectURL
+		if err := dto.ValidateRedirectURL(redirectURL); err != nil {
+			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+			return
+		}
 	}
 
 	// SuccessMessage fallback
 	var successMsg string = req.SuccessMessage
 	if successMsg == "" {
 		successMsg = "Success"
+	}
+
+	// A new form creates CRM leads unless explicitly turned off.
+	createCRMLead := true
+	if req.CreateCRMLead != nil {
+		createCRMLead = *req.CreateCRMLead
+	}
+	var leadOwner string
+	if req.LeadOwnerUserID != nil {
+		leadOwner = *req.LeadOwnerUserID
 	}
 
 	params := repository.CreateFormParams{
@@ -89,6 +102,9 @@ func (h *AdminFormHandler) CreateForm(c *gin.Context) {
 		RedirectURL:    redirectURL,
 		IsActive:       req.IsActive,
 		CreatedBy:      permissionmiddleware.UserID(c),
+
+		CreateCRMLead:   createCRMLead,
+		LeadOwnerUserID: leadOwner,
 	}
 
 	form, err := h.formSvc.CreateForm(c.Request.Context(), scope, params)
@@ -115,6 +131,13 @@ func (h *AdminFormHandler) UpdateForm(c *gin.Context) {
 		return
 	}
 
+	if req.RedirectURL != nil {
+		if err := dto.ValidateRedirectURL(*req.RedirectURL); err != nil {
+			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+			return
+		}
+	}
+
 	params := repository.UpdateFormParams{
 		Name:           req.Name,
 		SubmitLabel:    req.SubmitLabel,
@@ -122,6 +145,9 @@ func (h *AdminFormHandler) UpdateForm(c *gin.Context) {
 		RedirectURL:    req.RedirectURL,
 		IsActive:       req.IsActive,
 		UpdatedBy:      permissionmiddleware.UserID(c),
+
+		CreateCRMLead:   req.CreateCRMLead,
+		LeadOwnerUserID: req.LeadOwnerUserID,
 	}
 
 	form, err := h.formSvc.UpdateForm(c.Request.Context(), scope, formID, params)

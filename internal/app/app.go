@@ -276,7 +276,7 @@ func New(ctx context.Context) (*App, error) {
 	landingBrandingSvc := landingservice.NewBrandingService(landingBrandingRepo)
 	landingFormSvc := landingservice.NewFormService(landingFormRepo)
 	landingSubmissionRepo := landingrepo.NewSubmissionRepository(db)
-	landingSubmissionSvc := landingservice.NewSubmissionService(landingSubmissionRepo, landingFormRepo)
+	// landingSubmissionSvc is built after the CRM services (it needs the lead sink).
 
 	landingReusableRepo := landingrepo.NewReusableRepository(db)
 	landingMediaRepo := landingrepo.NewMediaRepository(db)
@@ -343,7 +343,6 @@ func New(ctx context.Context) (*App, error) {
 	landingAdminBrandingHandler := landinghandler.NewAdminBrandingHandler(landingBrandingSvc)
 	landingAdminDomainHandler := landinghandler.NewAdminDomainHandler(landingDomainSvc)
 	landingAdminFormHandler := landinghandler.NewAdminFormHandler(landingFormSvc)
-	landingAdminSubmissionHandler := landinghandler.NewAdminSubmissionHandler(landingSubmissionSvc)
 	landingAdminCTAHandler := landinghandler.NewAdminCTAHandler(landingCTASvc)
 	landingAdminTemplateHandler := landinghandler.NewAdminTemplateHandler(landingTemplateSvc)
 	landingAdminMediaHandler := landinghandler.NewAdminMediaHandler(landingMediaSvc)
@@ -357,7 +356,6 @@ func New(ctx context.Context) (*App, error) {
 	landingResolverSvc := landingservice.NewResolverService(db, landingResolverRepo, landingVersionRepo, landingPageRepo, landingSectionRepo, landingFormRepo, landingBrandingRepo, landingReusableRepo, landingDocumentRepo, landingPublishSvc)
 	landingAnalyticsRepo := landingrepo.NewAnalyticsRepository(db)
 	landingAnalyticsSvc := landingservice.NewAnalyticsService(landingAnalyticsRepo, landingPageRepo, db)
-	publicLandingHandler := landinghandler.NewPublicLandingHandler(landingResolverSvc, landingVisibilitySvc, landingSubmissionSvc, landingAnalyticsSvc)
 
 	crmEntitlementChecker := entitlementChecker{guard: entitlementGuard}
 	crmCompanyRepo := crmrepo.NewCompanyRepository(db)
@@ -402,6 +400,16 @@ func New(ctx context.Context) (*App, error) {
 	)
 	crmActivityRepo := crmrepo.NewActivityRepository(db)
 	crmActivitySvc := crmservice.NewActivityService(crmActivityRepo, crmLeadRepo, crmContactRepo, crmCompanyRepo, crmDealRepo)
+
+	// Landing forms create CRM leads through crm's FormLeadIntake; tenants need
+	// the crm.lead_form feature, platform organizations are exempt.
+	landingSubmissionSvc := landingservice.NewSubmissionService(
+		landingSubmissionRepo, landingFormRepo, landingPageRepo,
+		landingLeadSink{intake: crmservice.NewFormLeadIntake(crmLeadRepo, crmLeadSvc, crmActivitySvc)},
+		crmEntitlementChecker,
+	)
+	landingAdminSubmissionHandler := landinghandler.NewAdminSubmissionHandler(landingSubmissionSvc)
+	publicLandingHandler := landinghandler.NewPublicLandingHandler(landingResolverSvc, landingVisibilitySvc, landingSubmissionSvc, landingAnalyticsSvc, redisClient)
 	crmQuotationRepo := crmrepo.NewQuotationRepository(db)
 	crmDocumentCounterRepo := crmrepo.NewDocumentCounterRepository(db)
 	crmIntegrationRepo := crmrepo.NewIntegrationRepository(db)

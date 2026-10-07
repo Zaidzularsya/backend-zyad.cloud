@@ -186,6 +186,7 @@ func (s *resolverService) resolveGrapesPage(ctx context.Context, scope tenant.Sc
 		CTAs:         s.resolveCTAs(ctx, scope),
 		PricingPlans: s.resolvePricingPlans(ctx, scope),
 		IsDraft:      isDraftPreview,
+		Forms:        s.resolveActiveFormsWithFields(ctx, scope, page.ID),
 	}
 
 	if !isDraftPreview {
@@ -215,10 +216,35 @@ func (s *resolverService) resolveSections(ctx context.Context, scope tenant.Scop
 	return sections
 }
 
+// resolveActiveFormsWithFields returns the page's active forms with their
+// fields, which is what a GrapesJS lead-form block needs to render. Inactive
+// forms are left out so the public page never offers a form that would reject
+// the submission.
+func (s *resolverService) resolveActiveFormsWithFields(ctx context.Context, scope tenant.Scope, pageID string) []domain.LandingForm {
+	all := s.resolveForms(ctx, scope, pageID)
+	active := make([]domain.LandingForm, 0, len(all))
+	for _, form := range all {
+		if !form.IsActive {
+			continue
+		}
+		if fields, err := s.formRepo.ListFieldsByForm(ctx, scope, form.ID); err == nil {
+			form.Fields = fields
+		}
+		active = append(active, form)
+	}
+	return active
+}
+
 func (s *resolverService) resolveForms(ctx context.Context, scope tenant.Scope, pageID string) []domain.LandingForm {
 	forms, err := s.resolverRepo.ResolveForms(ctx, scope, pageID)
 	if err != nil {
 		return []domain.LandingForm{}
+	}
+	// The public payload must not reveal the CRM routing config (PIC user id,
+	// lead flag); the admin API returns it from the form service instead.
+	for i := range forms {
+		forms[i].LeadOwnerUserID = ""
+		forms[i].CreateCRMLead = false
 	}
 	return forms
 }

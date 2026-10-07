@@ -17,6 +17,9 @@ type CreateFormParams struct {
 	RedirectURL    string
 	IsActive       bool
 	CreatedBy      string
+	// CreateCRMLead: nilai kolom create_crm_lead untuk form baru.
+	CreateCRMLead   bool
+	LeadOwnerUserID string
 }
 
 type UpdateFormParams struct {
@@ -27,6 +30,9 @@ type UpdateFormParams struct {
 	RedirectURL    *string
 	IsActive       *bool
 	UpdatedBy      string
+	CreateCRMLead  *bool
+	// LeadOwnerUserID: nil = tidak diubah, "" = kosongkan.
+	LeadOwnerUserID *string
 }
 
 type CreateFormFieldParams struct {

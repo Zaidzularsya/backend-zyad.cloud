@@ -472,3 +472,12 @@ Blok GrapesJS "Pricing Katalog" menampilkan produk publik dari Sales → Produk 
 - **Tombol:** `checkout` → `/app/checkout?product=<id>` (tamu: lewat register dengan redirect); `free` → register atau dashboard; Hubungi sales / Enterprise → mengisi minat (`<listing> · <frekuensi>`) pada konteks halaman lalu scroll ke `contactHref` (`#id`), path internal, atau URL eksternal.
 - **SSR:** sentinel diganti placeholder statis (judul dari config + link "Lihat paket harga") hanya untuk org platform; judul di-escape.
 - **Catatan:** `#konsultasi` baru ada setelah form konsultasi (S4); sebelum itu klik "Hubungi sales" hanya mengisi minat.
+
+## Slot Form Konsultasi (R5-S4)
+
+Blok GrapesJS "Form Konsultasi" (kategori Conversion, tersedia untuk semua org; satu per halaman) memasang sentinel `<div data-zyad-slot="lead-form" data-zyad-config='{"form_id":"<uuid form>"}'>`. Slot publik `LeadFormSlot.vue` membaca form dari `Forms` di resolve.
+
+- **Form standar** (tombol "Buat form standar"): key `konsultasi` (akhiran `-2`, `-3` bila dipakai), submit "Kirim", sukses "Terima kasih! Tim kami akan menghubungi Anda dalam 1 hari kerja.", field `name`, `email`, `phone` (wajib), `company`, `company_size` (select), `interest`, `message`, `consent` (wajib).
+- **Perilaku:** validasi klien; honeypot `website`; tombol nonaktif saat kirim; `Idempotency-Key` dibuat per percobaan dan dipakai ulang untuk retry payload yang sama (key baru bila input berubah); `interest` terisi dari konteks halaman (mis. dari tombol "Hubungi sales" pricing katalog); `page_url` dan UTM ikut terkirim. BE selalu mewajibkan `consent=true`, jadi form tanpa field `consent` mendapat checkbox persetujuan bawaan.
+- **Redirect:** hanya `/path` internal atau `http(s)://`; selain itu diabaikan.
+- **Status sinkron CRM per submission:** `skipped | created | merged | failed`; lihat `docs/reference-crm.md` (Lead dari form landing). Admin melihat dan mengirim ulang di halaman **Submissions** (menu Landing; permission `landing.submission.read`/`update`). Keterbatasan BE: daftar tanpa total/pencarian (paginasi "Sebelumnya/Berikutnya").

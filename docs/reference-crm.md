@@ -505,6 +505,17 @@ dan aktif kembali setelah tagihan lunas.
 - **Endpoint:** `GET /app/self-serve/subscription` (`organization.billing.read`) → status `free|awaiting_payment|active|overdue`,
   paket, fitur efektif, `suspend_in_days`, 12 invoice terbaru dengan link bayar. Migration `000153` (template + indeks parsial overdue).
 
+## Lead dari form landing (Rilis 5 S4)
+
+Form konsultasi di halaman landing (blok GrapesJS `lead-form`) dapat membuat lead CRM. Spec: `docs/superpowers/specs/2026-10-07-landing-marketing-v2-design.md` §7 (K4, K13, K14).
+
+- **Syarat sinkron:** `landing_forms.create_crm_lead = true` **dan** (org bertipe `platform` **atau** fitur `crm.lead_form` aktif). Jika tidak terpenuhi → submission berstatus `skipped`, tanpa lead.
+- **Owner/creator lead:** `landing_forms.lead_owner_user_id`, fallback `landing_pages.created_by`. Keduanya kosong → `failed` dengan `LANDING_FORM_OWNER_MISSING: PIC lead belum diatur`. Owner harus anggota org (divalidasi `leadSvc.Create`).
+- **Lead baru:** `Source = "landing_page"`, `SkipPlaybook = false` (playbook berjalan). Notes: satu baris `"<Label>: <nilai>"` per field (kecuali name/email/phone/company/consent/website), lalu `Halaman`, lalu UTM; nilai dipotong 1000 karakter.
+- **Dedup (K14):** email sama (trim, case-insensitive) dengan lead **terbuka** (status selain `converted`/`unqualified`, belum dihapus) di org yang sama → aktivitas `note` `completed` berjudul "Mengisi form lagi" pada lead itu (metadata `source=landing_form`, `submission_id`), bukan lead baru. Lead yang sudah converted/unqualified tidak digabung. Email kosong → tanpa dedup.
+- **Kegagalan (K13):** error sinkron tidak pernah dikembalikan ke pengunjung; submission tetap tersimpan dengan `crm_sync_status = failed` + `crm_sync_error`. Admin memakai `POST /admin/landing-submissions/:id/crm-sync` ("Kirim ulang ke CRM", permission `landing.submission.update`); idempoten bila `crm_lead_id` sudah terisi.
+- **Known limitation:** dedup email (`FindOpenByEmail` lalu `Create`) tidak atomik dan tanpa unique index → dua kiriman email sama yang benar-benar bersamaan dapat membuat dua lead; dua klik retry bersamaan pada submission tanpa email dapat membuat dua lead. `lead_owner_user_id` tidak divalidasi keanggotaannya saat form disimpan (baru terlihat saat sinkron `failed`). Retry pada form tanpa fitur/`create_crm_lead=false` tetap 200 tanpa perubahan.
+
 ## Non-Goals
 
 - Tidak menggantikan atau berinteraksi langsung dengan `billing_invoices`/`billing_payments` (modul

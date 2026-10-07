@@ -1,6 +1,10 @@
 package dto
 
-import "time"
+import (
+	"errors"
+	"strings"
+	"time"
+)
 
 // PageListQuery binds query parameters for listing landing pages.
 type PageListQuery struct {
@@ -189,6 +193,9 @@ type CreateFormRequest struct {
 	SuccessMessage string         `json:"success_message"`
 	RedirectURL    *string        `json:"redirect_url"`
 	Consent        map[string]any `json:"consent"`
+	// CreateCRMLead nil -> true (default). LeadOwnerUserID is a user UUID or "".
+	CreateCRMLead   *bool   `json:"create_crm_lead"`
+	LeadOwnerUserID *string `json:"lead_owner_user_id" binding:"omitnil,uuid|eq="`
 }
 
 // UpdateFormRequest binds form updates.
@@ -199,6 +206,9 @@ type UpdateFormRequest struct {
 	SuccessMessage *string         `json:"success_message"`
 	RedirectURL    *string         `json:"redirect_url"`
 	Consent        *map[string]any `json:"consent"`
+	CreateCRMLead  *bool           `json:"create_crm_lead"`
+	// LeadOwnerUserID is a user UUID, or "" to clear the PIC.
+	LeadOwnerUserID *string `json:"lead_owner_user_id" binding:"omitnil,uuid|eq="`
 }
 
 // FormFieldItem binds a single field specification.
@@ -421,3 +431,25 @@ type SaveDocumentRequest struct {
 	HTML    string         `json:"html"`
 	CSS     string         `json:"css"`
 }
+
+// ValidateRedirectURL accepts "", a site-relative path ("/x", not "//host" or
+// "/\\host"), or an absolute http(s) URL. Anything else (javascript:, data:,
+// protocol-relative) is rejected because the public page navigates to it.
+func ValidateRedirectURL(raw string) error {
+	if raw == "" {
+		return nil
+	}
+	lower := strings.ToLower(raw)
+	switch {
+	case strings.HasPrefix(raw, "/"):
+		if strings.HasPrefix(raw, "//") || strings.HasPrefix(raw, "/\\") {
+			return errInvalidRedirectURL
+		}
+		return nil
+	case strings.HasPrefix(lower, "https://"), strings.HasPrefix(lower, "http://"):
+		return nil
+	}
+	return errInvalidRedirectURL
+}
+
+var errInvalidRedirectURL = errors.New("redirect_url must be empty, a path starting with /, or an http(s) URL")

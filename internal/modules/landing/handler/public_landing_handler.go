@@ -2,12 +2,17 @@ package handler
 
 import (
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 
 	coreerrors "zyad.cloud/internal/core/errors"
 	corehttp "zyad.cloud/internal/core/http"
+	"zyad.cloud/internal/core/middleware"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/landing/domain"
 	"zyad.cloud/internal/modules/landing/dto"
@@ -20,6 +25,7 @@ type PublicLandingHandler struct {
 	visibilitySvc service.VisibilityService
 	submissionSvc service.SubmissionService
 	analyticsSvc  service.AnalyticsService
+	counter       middleware.RateCounter
 }
 
 func NewPublicLandingHandler(
@@ -27,12 +33,14 @@ func NewPublicLandingHandler(
 	visibilitySvc service.VisibilityService,
 	submissionSvc service.SubmissionService,
 	analyticsSvc service.AnalyticsService,
+	counter middleware.RateCounter,
 ) *PublicLandingHandler {
 	return &PublicLandingHandler{
 		resolverSvc:   resolverSvc,
 		visibilitySvc: visibilitySvc,
 		submissionSvc: submissionSvc,
 		analyticsSvc:  analyticsSvc,
+		counter:       counter,
 	}
 }
 
@@ -44,7 +52,11 @@ func (h *PublicLandingHandler) RegisterRoutes(router *gin.RouterGroup) {
 	group.GET("/render/:slug", h.RenderHTML)
 	group.GET("/preview/:token", h.Preview)
 	group.POST("/access/:publicPageId", h.RequestAccess)
-	group.POST("/forms/:formKey/submissions", h.SubmitForm)
+	// Public, unauthenticated and it can create CRM leads: throttle per client and form.
+	submitLimit := middleware.RateLimit(h.counter, "rl:lform:", 5, time.Minute, func(c *gin.Context) string {
+		return c.ClientIP() + ":" + c.Param("formKey")
+	})
+	group.POST("/forms/:formKey/submissions", submitLimit, h.SubmitForm)
 	group.POST("/forms/:formKey/uploads", h.UploadFile)
 	group.POST("/events", h.TrackEvent)
 }
@@ -226,12 +238,21 @@ func publicResolveError(err error) error {
 	}
 }
 
+// maxSubmitBodyBytes caps a public form submission body (64 KiB).
+const maxSubmitBodyBytes = 64 << 10
+
 func (h *PublicLandingHandler) SubmitForm(c *gin.Context) {
 	formKey := c.Param("formKey")
 
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxSubmitBodyBytes)
 	var req dto.PublicSubmissionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "request body too large", http.StatusRequestEntityTooLarge))
+			return
+		}
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "invalid request body", http.StatusUnprocessableEntity))
 		return
 	}
 	if req.Website != "" {
@@ -258,18 +279,40 @@ func (h *PublicLandingHandler) SubmitForm(c *gin.Context) {
 		IdempotencyKey: idempotencyKey,
 	}
 
-	scope, err := coretenant.RequireScope(c.Request.Context())
+	tenantContext, err := coretenant.RequireContext(c.Request.Context())
 	if err != nil {
 		corehttp.Fail(c, err)
 		return
 	}
-	submission, err := h.submissionSvc.SubmitForm(c.Request.Context(), scope, params)
+	scope, err := coretenant.NewScope(tenantContext)
 	if err != nil {
-		corehttp.Fail(c, coreerrors.New("INTERNAL_ERROR", err.Error(), http.StatusInternalServerError))
+		corehttp.Fail(c, err)
+		return
+	}
+	isPlatformOrg := tenantContext.OrganizationType() == coretenant.OrganizationTypePlatform
+	result, err := h.submissionSvc.SubmitPublic(c.Request.Context(), scope, params, isPlatformOrg)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrFormNotActive), errors.Is(err, pgx.ErrNoRows):
+			corehttp.Fail(c, coreerrors.New("LANDING_FORM_NOT_FOUND", "form was not found", http.StatusNotFound))
+		case errors.Is(err, service.ErrSpamDetected):
+			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "invalid submission", http.StatusUnprocessableEntity))
+		case errors.Is(err, service.ErrInvalidSubmission):
+			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		default:
+			// Never echo the raw error: it can carry driver text and PII.
+			slog.Error("landing: public form submit failed", "form_key", formKey, "error_type", fmt.Sprintf("%T", err))
+			corehttp.Fail(c, coreerrors.New("INTERNAL_ERROR", "internal server error", http.StatusInternalServerError))
+		}
 		return
 	}
 
-	corehttp.OK(c, "Form submitted successfully", submission)
+	resp := dto.PublicSubmissionResponse{Reference: result.Reference, SuccessMessage: result.SuccessMessage}
+	if result.RedirectURL != "" {
+		redirect := result.RedirectURL
+		resp.RedirectURL = &redirect
+	}
+	corehttp.OK(c, "Form submitted successfully", resp)
 }
 
 func (h *PublicLandingHandler) UploadFile(c *gin.Context) {
