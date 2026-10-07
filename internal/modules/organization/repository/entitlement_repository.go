@@ -34,6 +34,16 @@ const entitlementSelectColumns = `
 	updated_at
 `
 
+// entitlementSourcePriority: sumber yang lebih tinggi menang atas yang lebih rendah untuk fitur yang sama.
+const entitlementSourcePriority = `CASE source
+	WHEN 'platform_override' THEN 5
+	WHEN 'addon' THEN 4
+	WHEN 'contract' THEN 3
+	WHEN 'trial' THEN 2
+	WHEN 'plan' THEN 1
+	WHEN 'default' THEN 0
+END`
+
 const usageCounterSelectColumns = `
 	id,
 	organization_id,
@@ -259,12 +269,7 @@ func (r *EntitlementRepository) FindEffective(
 			AND effective_from <= $3
 			AND (effective_until IS NULL OR effective_until > $3)
 		ORDER BY
-			CASE source
-				WHEN 'platform_override' THEN 4
-				WHEN 'addon' THEN 3
-				WHEN 'trial' THEN 2
-				WHEN 'plan' THEN 1
-			END DESC,
+			`+entitlementSourcePriority+` DESC,
 			version DESC,
 			effective_from DESC,
 			updated_at DESC,
@@ -309,12 +314,7 @@ func (r *EntitlementRepository) ListEffective(
 			FROM organization_entitlements`+where+`
 			ORDER BY
 				feature_key ASC,
-				CASE source
-					WHEN 'platform_override' THEN 4
-					WHEN 'addon' THEN 3
-					WHEN 'trial' THEN 2
-					WHEN 'plan' THEN 1
-				END DESC,
+				`+entitlementSourcePriority+` DESC,
 				version DESC,
 				effective_from DESC,
 				updated_at DESC,
@@ -519,6 +519,119 @@ func (r *EntitlementRepository) IncrementUsage(
 		return model.UsageCounter{}, err
 	}
 	return counter, nil
+}
+
+// ListActiveBySource mengembalikan baris active milik sumber itu. sourceReference nil = semua referensi.
+func (r *EntitlementRepository) ListActiveBySource(
+	ctx context.Context,
+	organizationID string,
+	source model.EntitlementSource,
+	sourceReference *string,
+	at time.Time,
+) ([]model.Entitlement, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT `+entitlementSelectColumns+`
+		FROM organization_entitlements
+		WHERE organization_id = $1::uuid
+			AND source = $2
+			AND ($3::text IS NULL OR source_reference = $3)
+			AND status = 'active'
+			AND effective_from <= $4
+			AND (effective_until IS NULL OR effective_until > $4)
+		ORDER BY feature_key ASC, id ASC
+	`, strings.TrimSpace(organizationID), string(source), sourceReference, at)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	entitlements := make([]model.Entitlement, 0)
+	for rows.Next() {
+		var entitlement model.Entitlement
+		var limitsBytes []byte
+		if err := rows.Scan(entitlementScanDest(&entitlement, &limitsBytes)...); err != nil {
+			return nil, err
+		}
+		if err := decodeLimits(limitsBytes, &entitlement.Limits); err != nil {
+			return nil, err
+		}
+		entitlements = append(entitlements, entitlement)
+	}
+	return entitlements, rows.Err()
+}
+
+// HasActiveSource melaporkan apakah workspace masih punya baris active dari sumber itu.
+func (r *EntitlementRepository) HasActiveSource(
+	ctx context.Context,
+	organizationID string,
+	source model.EntitlementSource,
+	at time.Time,
+) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM organization_entitlements
+			WHERE organization_id = $1::uuid
+				AND source = $2
+				AND status = 'active'
+				AND effective_from <= $3
+				AND (effective_until IS NULL OR effective_until > $3)
+		)
+	`, strings.TrimSpace(organizationID), string(source), at).Scan(&exists)
+	return exists, err
+}
+
+// ExpireBySource mengubah baris active milik sumber itu menjadi expired (riwayat tetap ada untuk audit,
+// mengikuti pola EntitlementSink.ExpirePlanEntitlements). sourceReference nil = semua referensi.
+func (r *EntitlementRepository) ExpireBySource(
+	ctx context.Context,
+	organizationID string,
+	source model.EntitlementSource,
+	sourceReference *string,
+	effectiveUntil time.Time,
+	actorUserID string,
+	reason string,
+) (int64, error) {
+	tag, err := r.db.Exec(ctx, `
+		UPDATE organization_entitlements
+		SET
+			status = 'expired',
+			effective_until = GREATEST($4, effective_from + interval '1 microsecond'),
+			reason = NULLIF($6, ''),
+			updated_by = NULLIF($5, '')::uuid,
+			updated_at = now()
+		WHERE organization_id = $1::uuid
+			AND source = $2
+			AND ($3::text IS NULL OR source_reference = $3)
+			AND status = 'active'
+	`, strings.TrimSpace(organizationID), string(source), sourceReference, effectiveUntil,
+		strings.TrimSpace(actorUserID), strings.TrimSpace(reason))
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// ExpireByID mengakhiri satu baris active (dipakai saat fitur hilang dari contract yang masih berjalan).
+func (r *EntitlementRepository) ExpireByID(
+	ctx context.Context,
+	id string,
+	effectiveUntil time.Time,
+	actorUserID string,
+	reason string,
+) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE organization_entitlements
+		SET
+			status = 'expired',
+			effective_until = GREATEST($2, effective_from + interval '1 microsecond'),
+			reason = NULLIF($4, ''),
+			updated_by = NULLIF($3, '')::uuid,
+			updated_at = now()
+		WHERE id = $1::uuid AND status = 'active'
+	`, strings.TrimSpace(id), effectiveUntil, strings.TrimSpace(actorUserID), strings.TrimSpace(reason))
+	return err
 }
 
 func lockEntitlementKey(
