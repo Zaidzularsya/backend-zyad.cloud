@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"sort"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/landing/domain"
@@ -33,7 +34,7 @@ func (s *formService) GetForm(ctx context.Context, scope coretenant.Scope, formI
 	if err != nil {
 		return domain.LandingForm{}, err
 	}
-	
+
 	// Load fields
 	fields, err := s.formRepo.ListFieldsByForm(ctx, scope, formID)
 	if err == nil {
@@ -44,7 +45,26 @@ func (s *formService) GetForm(ctx context.Context, scope coretenant.Scope, formI
 }
 
 func (s *formService) ListFormsByPage(ctx context.Context, scope coretenant.Scope, pageID string) ([]domain.LandingForm, error) {
-	return s.formRepo.ListByPage(ctx, scope, pageID)
+	forms, err := s.formRepo.ListByPage(ctx, scope, pageID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Admin editors need every form (active or not) together with its fields.
+	// One query per form; forms per page are few, so no batch method is needed.
+	for i := range forms {
+		fields, err := s.formRepo.ListFieldsByForm(ctx, scope, forms[i].ID)
+		if err != nil {
+			return nil, err
+		}
+		if fields == nil {
+			fields = []domain.LandingFormField{}
+		}
+		sort.SliceStable(fields, func(a, b int) bool { return fields[a].SortOrder < fields[b].SortOrder })
+		forms[i].Fields = fields
+	}
+
+	return forms, nil
 }
 
 func (s *formService) UpdateForm(ctx context.Context, scope coretenant.Scope, formID string, params repository.UpdateFormParams) (domain.LandingForm, error) {
