@@ -629,7 +629,8 @@ func New(ctx context.Context) (*App, error) {
 			}, sc, time.Now)
 		},
 	}
-	crmSelfServeHandler := crmhandler.NewSelfServeHandler(selfServeSvc, selfServePlatformScopes, permService)
+	crmSelfServeHandler := crmhandler.NewSelfServeHandler(selfServeSvc, selfServePlatformScopes, permService).
+		WithSubscription(withSubscriptionView(crmTenantAccess, cfg, db, receivableModule.Invoices, receivableModule.Contracts, catalogProductService), cfg.SelfServe.GraceDays)
 
 	router, err := newRouter(Dependencies{
 		Config:                           cfg,

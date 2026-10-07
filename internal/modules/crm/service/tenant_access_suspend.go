@@ -20,6 +20,9 @@ type BillingInvoice struct {
 	ID, Number, Status, SourceType, SourceID, ContractID string
 	DueDate                                              *time.Time
 	AmountDue                                            string // sisa tagihan, desimal
+	// Dipakai ringkasan langganan.
+	GrandTotal                        string
+	IssueDate, PeriodStart, PeriodEnd *time.Time
 }
 
 // BillingInvoiceReader: pembacaan sempit ke modul receivable (diadaptasi di internal/app).

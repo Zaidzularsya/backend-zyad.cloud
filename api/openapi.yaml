@@ -4790,6 +4790,106 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/app/self-serve/subscription:
+    get:
+      summary: Ringkasan langganan workspace (status, paket, fitur, invoice)
+      description: |
+        Dibangun dari company yang tertaut ke workspace pemanggil → sales order → contract → invoice di CRM platform.
+        Workspace selalu diambil dari konteks tenant (bukan parameter). `status`: `free` (tanpa contract),
+        `awaiting_payment` (invoice awal belum lunas), `active`, `overdue` (ada invoice lewat jatuh tempo).
+        `suspend_in_days` terisi hanya saat `overdue`: sisa hari sebelum workspace ditangguhkan otomatis
+        (masa tenggang `SELF_SERVE_GRACE_DAYS`, default 7). Hanya untuk organisasi customer aktif dengan
+        permission organization.billing.read.
+      operationId: selfServeSubscription
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Ringkasan langganan
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                        enum: [free, awaiting_payment, active, overdue]
+                      product:
+                        type: object
+                        nullable: true
+                        properties:
+                          name:
+                            type: string
+                          sku:
+                            type: string
+                          frequency:
+                            type: string
+                      contract_number:
+                        type: string
+                      next_invoice_date:
+                        type: string
+                        description: YYYY-MM-DD, kosong bila tidak ada
+                      overdue_days:
+                        type: integer
+                      suspend_in_days:
+                        type: integer
+                        nullable: true
+                      features:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            feature_key:
+                              type: string
+                            value: {}
+                            label:
+                              type: string
+                      invoices:
+                        type: array
+                        description: 12 invoice terbaru, urut tanggal terbit menurun
+                        items:
+                          type: object
+                          properties:
+                            number:
+                              type: string
+                            status:
+                              type: string
+                            total:
+                              type: string
+                            period_label:
+                              type: string
+                            due_date:
+                              type: string
+                            url:
+                              type: string
+                              description: Link bayar/lihat publik; kosong untuk invoice void
+        "403":
+          description: Bukan organisasi customer, atau tanpa permission organization.billing.read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: SUBSCRIPTION_UNAVAILABLE
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: SELF_SERVE_NOT_CONFIGURED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/app/billing/cancel:
     post:
       summary: Schedule current organization subscription for cancellation

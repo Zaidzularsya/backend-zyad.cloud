@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -16,6 +17,7 @@ import (
 	notificationpublisher "zyad.cloud/internal/core/notification/publisher"
 	notificationrepo "zyad.cloud/internal/core/notification/repository"
 	coretenant "zyad.cloud/internal/core/tenant"
+	crmdomain "zyad.cloud/internal/modules/crm/domain"
 	crmservice "zyad.cloud/internal/modules/crm/service"
 	organizationrepo "zyad.cloud/internal/modules/organization/repository"
 	organizationservice "zyad.cloud/internal/modules/organization/service"
@@ -23,6 +25,7 @@ import (
 	receivablerepo "zyad.cloud/internal/modules/receivable/repository"
 	receivableservice "zyad.cloud/internal/modules/receivable/service"
 	"zyad.cloud/internal/platform/database"
+	"zyad.cloud/internal/shared/pricing"
 )
 
 // withBillingSuspend mengaktifkan suspend/aktif kembali karena tagihan pada TenantAccess.
@@ -81,6 +84,7 @@ func billingInvoice(inv receivabledomain.Invoice) crmservice.BillingInvoice {
 	return crmservice.BillingInvoice{
 		ID: inv.ID, Number: inv.InvoiceNumber, Status: string(inv.Status), SourceType: string(inv.SourceType),
 		SourceID: inv.SourceID, ContractID: inv.ContractID, DueDate: inv.DueDate, AmountDue: inv.Balance(),
+		GrandTotal: inv.GrandTotal, IssueDate: inv.IssueDate, PeriodStart: inv.PeriodStart, PeriodEnd: inv.PeriodEnd,
 	}
 }
 
@@ -140,4 +144,93 @@ func (r *SelfServeSuspendRunner) RunOnce(ctx context.Context) (crmservice.Suspen
 		return crmservice.SuspendResult{}, fmt.Errorf("platform scope: %w", err)
 	}
 	return r.access.SuspendOverdue(ctx, scope, businesstime.DayOf(r.now()), r.graceDays)
+}
+
+// subscriptionReader mengadaptasi receivable + katalog ke crmservice.SubscriptionReader.
+type subscriptionReader struct {
+	invoices  receivableservice.InvoiceService
+	contracts receivableservice.ContractService
+	settings  receivablerepo.SettingsRepository
+	products  defaultAccessProducts
+	freeSKU   string
+}
+
+var _ crmservice.SubscriptionReader = subscriptionReader{}
+
+func (r subscriptionReader) Contract(ctx context.Context, scope coretenant.Scope, id string) (crmservice.SubscriptionContract, error) {
+	c, err := r.contracts.Get(ctx, scope, id)
+	if err != nil {
+		return crmservice.SubscriptionContract{}, err
+	}
+	settings, err := r.settings.Get(ctx, scope)
+	if err != nil {
+		return crmservice.SubscriptionContract{}, fmt.Errorf("receivable settings: %w", err)
+	}
+	out := crmservice.SubscriptionContract{ID: c.ID, Number: c.ContractNumber, Status: string(c.Status), InvoiceLeadDays: settings.InvoiceLeadDays}
+	for _, it := range c.Items {
+		item := crmservice.SubscriptionContractItem{
+			Name: it.Description, SKU: it.SKU, Frequency: string(it.Frequency),
+			Prepaid: it.PaymentTiming == pricing.Prepaid, NextPeriodStart: it.NextPeriodStart,
+		}
+		if len(it.Features) > 0 {
+			if err := json.Unmarshal(it.Features, &item.Features); err != nil {
+				slog.WarnContext(ctx, "contract item features unreadable", "contract_id", id, "item_id", it.ID, "error", err)
+			}
+		}
+		out.Items = append(out.Items, item)
+	}
+	return out, nil
+}
+
+func (r subscriptionReader) InvoicesBySource(ctx context.Context, scope coretenant.Scope, sourceType, sourceID string) ([]crmservice.BillingInvoice, error) {
+	return r.list(ctx, scope, receivablerepo.InvoiceListFilter{SourceType: sourceType, SourceID: sourceID})
+}
+
+func (r subscriptionReader) InvoicesByContract(ctx context.Context, scope coretenant.Scope, contractID string) ([]crmservice.BillingInvoice, error) {
+	return r.list(ctx, scope, receivablerepo.InvoiceListFilter{ContractID: contractID})
+}
+
+func (r subscriptionReader) list(ctx context.Context, scope coretenant.Scope, f receivablerepo.InvoiceListFilter) ([]crmservice.BillingInvoice, error) {
+	const pageSize = 200
+	var out []crmservice.BillingInvoice
+	f.Limit = pageSize
+	for offset := 0; ; offset += pageSize {
+		f.Offset = offset
+		page, total, err := r.invoices.List(ctx, scope, f)
+		if err != nil {
+			return nil, err
+		}
+		for _, inv := range page {
+			out = append(out, billingInvoice(inv))
+		}
+		if int64(offset+len(page)) >= total || len(page) == 0 {
+			return out, nil
+		}
+	}
+}
+
+func (r subscriptionReader) FreeFeatures(ctx context.Context, scope coretenant.Scope) ([]crmdomain.FeatureSnapshot, error) {
+	product, err := r.products.FindBySKU(ctx, scope, r.freeSKU)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]crmdomain.FeatureSnapshot, 0, len(product.Features))
+	for _, f := range product.Features {
+		out = append(out, crmdomain.FeatureSnapshot{FeatureKey: f.FeatureKey, Value: f.Value, Label: f.Label})
+	}
+	return out, nil
+}
+
+func (r subscriptionReader) Link(ctx context.Context, scope coretenant.Scope, invoiceID string) (string, error) {
+	url, _, err := r.invoices.Link(ctx, scope, invoiceID, "")
+	return url, err
+}
+
+// withSubscriptionView mengaktifkan GET /app/self-serve/subscription pada TenantAccess.
+func withSubscriptionView(access *crmservice.TenantAccess, cfg config.Config, db *database.Pool, invoices receivableservice.InvoiceService,
+	contracts receivableservice.ContractService, products defaultAccessProducts) *crmservice.TenantAccess {
+	return access.WithSubscription(subscriptionReader{
+		invoices: invoices, contracts: contracts, settings: receivablerepo.NewSettingsRepository(db),
+		products: products, freeSKU: cfg.SelfServe.FreeProductSKU,
+	})
 }

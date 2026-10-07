@@ -71,6 +71,8 @@ type TenantAccess struct {
 	status   WorkspaceStatusPort
 	notifier AccessNotifier
 	actor    func(ctx context.Context) (string, error)
+
+	subscription SubscriptionReader // nil = ringkasan langganan nonaktif
 }
 
 var _ ContractSyncer = (*TenantAccess)(nil)

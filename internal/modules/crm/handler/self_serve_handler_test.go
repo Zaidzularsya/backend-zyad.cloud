@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -189,3 +190,57 @@ func TestSelfServeCheckoutNotConfigured(t *testing.T) {
 		t.Fatalf("status=%d code=%s", w.Code, code)
 	}
 }
+
+type ssSubFake struct {
+	view   service.SubscriptionView
+	tenant string
+	calls  int
+}
+
+func (f *ssSubFake) Subscription(_ context.Context, _ coretenant.Scope, tenantOrgID string, _ time.Time, _ int) (service.SubscriptionView, error) {
+	f.calls++
+	f.tenant = tenantOrgID
+	return f.view, nil
+}
+
+func TestSelfServeSubscriptionUsesTenantFromContext(t *testing.T) {
+	sub := &ssSubFake{view: service.SubscriptionView{Status: "overdue", OverdueDays: 3, SuspendInDays: ptr(5),
+		Invoices: []service.SubscriptionInvoice{{Number: "INV-1", Status: "overdue", Total: "333000.00"}}}}
+	r := newTestRouter(t)
+	r.Use(func(c *gin.Context) { permissionmiddleware.SetUserID(c, "buyer-1"); c.Next() })
+	NewSelfServeHandler(&ssSvcFake{}, ssPlatformFake{}, ssGrant{"organization.billing.read": true}).
+		WithSubscription(sub, 7).RegisterRoutes(&r.RouterGroup)
+	// parameter query tidak boleh menggeser tenant
+	w := performJSON(r, http.MethodGet, "/app/self-serve/subscription?tenant_organization_id=other", "")
+	if w.Code != http.StatusOK || sub.tenant != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("status=%d tenant=%q body=%s", w.Code, sub.tenant, w.Body)
+	}
+	var env struct {
+		Data struct {
+			Status        string `json:"status"`
+			OverdueDays   int    `json:"overdue_days"`
+			SuspendInDays *int   `json:"suspend_in_days"`
+			Features      []any  `json:"features"`
+			Invoices      []struct {
+				Number string `json:"number"`
+			} `json:"invoices"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &env)
+	if env.Data.Status != "overdue" || env.Data.OverdueDays != 3 || env.Data.SuspendInDays == nil || *env.Data.SuspendInDays != 5 ||
+		env.Data.Features == nil || len(env.Data.Invoices) != 1 || env.Data.Invoices[0].Number != "INV-1" {
+		t.Fatalf("data = %+v", env.Data)
+	}
+}
+
+func TestSelfServeSubscriptionRequiresBillingRead(t *testing.T) {
+	sub := &ssSubFake{}
+	r := newTestRouter(t)
+	r.Use(func(c *gin.Context) { permissionmiddleware.SetUserID(c, "buyer-1"); c.Next() })
+	NewSelfServeHandler(&ssSvcFake{}, ssPlatformFake{}, ssGrant{}).WithSubscription(sub, 7).RegisterRoutes(&r.RouterGroup)
+	if w := performJSON(r, http.MethodGet, "/app/self-serve/subscription", ""); w.Code != http.StatusForbidden || sub.calls != 0 {
+		t.Fatalf("status=%d calls=%d", w.Code, sub.calls)
+	}
+}
+
+func ptr(n int) *int { return &n }
