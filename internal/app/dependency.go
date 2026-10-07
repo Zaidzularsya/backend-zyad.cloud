@@ -9,7 +9,6 @@ import (
 	permissionhandler "zyad.cloud/internal/core/permission/handler"
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	assethandler "zyad.cloud/internal/modules/asset/handler"
-	billinghandler "zyad.cloud/internal/modules/billing/handler"
 	cataloghandler "zyad.cloud/internal/modules/catalog/handler"
 	crmhandler "zyad.cloud/internal/modules/crm/handler"
 	financehandler "zyad.cloud/internal/modules/finance/handler"
@@ -18,7 +17,6 @@ import (
 	organizationhandler "zyad.cloud/internal/modules/organization/handler"
 	producthandler "zyad.cloud/internal/modules/product/handler"
 	receivablehandler "zyad.cloud/internal/modules/receivable/handler"
-	subscriptionhandler "zyad.cloud/internal/modules/subscription/handler"
 	userhandler "zyad.cloud/internal/modules/user/handler"
 	whatsapphandler "zyad.cloud/internal/modules/whatsapp/handler"
 	pgdatabase "zyad.cloud/internal/platform/database"
@@ -38,10 +36,6 @@ type Dependencies struct {
 	NotificationVariableHandler      *notificationhandler.VariableHandler
 	PermissionHandler                *permissionhandler.Handler
 	PlatformProductHandler           *producthandler.PlatformProductHandler
-	PublicProductHandler             *producthandler.PublicProductHandler
-	PlatformSubscriptionHandler      *subscriptionhandler.PlatformSubscriptionHandler
-	PlatformBillingHandler           *billinghandler.PlatformBillingHandler
-	TenantBillingHandler             *billinghandler.TenantBillingHandler
 	DokuWebhookHandler               *receivablehandler.DokuWebhookHandler
 	OrganizationDomainHandler        *organizationhandler.DomainHandler
 	OrganizationEntitlementHandler   *organizationhandler.EntitlementHandler

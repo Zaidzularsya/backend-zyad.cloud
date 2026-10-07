@@ -24,9 +24,6 @@ import (
 	assethandler "zyad.cloud/internal/modules/asset/handler"
 	assetrepo "zyad.cloud/internal/modules/asset/repository"
 	assetservice "zyad.cloud/internal/modules/asset/service"
-	billinghandler "zyad.cloud/internal/modules/billing/handler"
-	billingrepo "zyad.cloud/internal/modules/billing/repository"
-	billingservice "zyad.cloud/internal/modules/billing/service"
 	cataloghandler "zyad.cloud/internal/modules/catalog/handler"
 	catalogrepo "zyad.cloud/internal/modules/catalog/repository"
 	catalogservice "zyad.cloud/internal/modules/catalog/service"
@@ -50,9 +47,6 @@ import (
 	productrepo "zyad.cloud/internal/modules/product/repository"
 	productservice "zyad.cloud/internal/modules/product/service"
 	receivablehandler "zyad.cloud/internal/modules/receivable/handler"
-	subscriptionhandler "zyad.cloud/internal/modules/subscription/handler"
-	subscriptionrepo "zyad.cloud/internal/modules/subscription/repository"
-	subscriptionservice "zyad.cloud/internal/modules/subscription/service"
 	userhandler "zyad.cloud/internal/modules/user/handler"
 	userrepo "zyad.cloud/internal/modules/user/repository"
 	userservice "zyad.cloud/internal/modules/user/service"
@@ -102,31 +96,8 @@ func New(ctx context.Context) (*App, error) {
 	permService := permissionservice.New(permRepo)
 	permHandler := permissionhandler.New(permService)
 
-	productPlanRepo := productrepo.NewPlanRepository(db)
 	productFeatureRepo := productrepo.NewFeatureRepository(db)
-	productPlanEntitlementRepo := productrepo.NewPlanEntitlementRepository(db)
-	subscriptionRepo := subscriptionrepo.NewSubscriptionRepository(db)
-	billingInvoiceRepo := billingrepo.NewInvoiceRepository(db)
-	billingPaymentRepo := billingrepo.NewPaymentRepository(db)
-	subscriptionEntitlementSink := subscriptionrepo.NewEntitlementSink(db)
-
-	productPlanService := productservice.NewPlanService(productPlanRepo, productPlanEntitlementRepo)
 	productFeatureService := productservice.NewFeatureService(productFeatureRepo)
-	productPlanEntitlementService := productservice.NewPlanEntitlementService(
-		productPlanEntitlementRepo,
-		productFeatureRepo,
-	)
-	subscriptionService := subscriptionservice.NewSubscriptionService(
-		subscriptionRepo,
-		productPlanEntitlementRepo,
-		subscriptionEntitlementSink,
-	)
-	billingInvoiceService := billingservice.NewInvoiceService(billingInvoiceRepo)
-	billingPaymentService := billingservice.NewPaymentService(
-		billingPaymentRepo,
-		billingInvoiceRepo,
-		subscriptionUpgradeActivatorAdapter{subscriptions: subscriptionService},
-	)
 	dokuClient := doku.NewClientFromConfig(doku.Config{
 		BaseURL:     cfg.Doku.BaseURL,
 		ClientID:    cfg.Doku.ClientID,
@@ -137,21 +108,8 @@ func New(ctx context.Context) (*App, error) {
 	if baseURL := strings.TrimRight(strings.TrimSpace(cfg.App.URL), "/"); baseURL != "" {
 		dokuNotificationURL = baseURL + "/api/v1/webhooks/doku"
 	}
-	billingPaymentService.SetDokuCheckout(dokuClient, cfg.App.FrontendURL, dokuNotificationURL)
 	platformProductHandler := producthandler.NewPlatformProductHandler(
-		productPlanService,
 		productFeatureService,
-		productPlanEntitlementService,
-		permService,
-	)
-	publicProductHandler := producthandler.NewPublicProductHandler(productPlanService)
-	platformSubscriptionHandler := subscriptionhandler.NewPlatformSubscriptionHandler(
-		subscriptionService,
-		permService,
-	)
-	platformBillingHandler := billinghandler.NewPlatformBillingHandler(
-		billingInvoiceService,
-		billingPaymentService,
 		permService,
 	)
 
@@ -274,17 +232,6 @@ func New(ctx context.Context) (*App, error) {
 		organizationDomainService,
 		permService,
 	)
-	tenantBillingService := billingservice.NewTenantBillingService(
-		subscriptionService,
-		productPlanService,
-		billingInvoiceService,
-		organizationEntitlementService,
-	)
-	tenantBillingHandler := billinghandler.NewTenantBillingHandler(
-		tenantBillingService,
-		permService,
-	)
-	tenantBillingHandler.SetCheckoutService(billingPaymentService)
 	organizationImpersonationHandler := organizationhandler.NewImpersonationHandler(
 		organizationservice.NewImpersonationService(
 			organizationrepo.NewImpersonationRepository(db),
@@ -641,10 +588,6 @@ func New(ctx context.Context) (*App, error) {
 		NotificationVariableHandler:      variableHandler,
 		PermissionHandler:                permHandler,
 		PlatformProductHandler:           platformProductHandler,
-		PublicProductHandler:             publicProductHandler,
-		PlatformSubscriptionHandler:      platformSubscriptionHandler,
-		PlatformBillingHandler:           platformBillingHandler,
-		TenantBillingHandler:             tenantBillingHandler,
 		DokuWebhookHandler:               dokuWebhookHandler,
 		OrganizationDomainHandler:        organizationDomainHandler,
 		OrganizationEntitlementHandler:   organizationEntitlementHandler,

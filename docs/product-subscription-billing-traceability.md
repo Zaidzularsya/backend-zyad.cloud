@@ -1,3 +1,5 @@
+> **DIGANTIKAN (R4-S5, Okt 2026):** plan, subscription, dan billing platform lama sudah dihapus. Mesin yang berlaku sekarang: katalog produk + contract + receivable + `organization_entitlements`. Lihat `docs/superpowers/specs/2026-10-06-self-serve-product-unification-design.md`. Dokumen ini disimpan sebagai riwayat.
+
 # Traceability: Product/Catalog, Subscription, Billing
 
 > Index requirement → file kode → API → permission → status untuk 3 modul hasil refactor. Requirement asal
