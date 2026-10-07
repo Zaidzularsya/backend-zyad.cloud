@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 	"zyad.cloud/internal/core/tenant"
@@ -64,6 +66,34 @@ func (s *resolverService) ResolveBySlug(ctx context.Context, scope tenant.Scope,
 	}
 
 	return s.resolvePageData(ctx, scope, page, previewToken)
+}
+
+// fallbackHomepageSlug is the legacy platform marketing page seeded by
+// migration 000035; it keeps "/" alive when no is_homepage page is published.
+const fallbackHomepageSlug = "public-marketing"
+
+func (s *resolverService) ResolveHomepage(ctx context.Context, scope tenant.Scope) (ResolvedPage, error) {
+	page, err := s.resolverRepo.ResolveHomepage(ctx, scope)
+	switch {
+	case err == nil:
+		resolved, resolveErr := s.resolvePageData(ctx, scope, page, "")
+		if resolveErr == nil {
+			return resolved, nil
+		}
+		if !errors.Is(resolveErr, ErrPageNotPublished) && !errors.Is(resolveErr, ErrPageNotFound) {
+			// Unlike "not published", an unexpected error means a configured
+			// homepage is broken; falling back keeps "/" alive but must not be silent.
+			slog.Warn("landing homepage resolve failed, falling back to default page",
+				"page_id", page.ID,
+				"organization_id", scope.OrganizationID(),
+				"error_type", fmt.Sprintf("%T", resolveErr),
+			)
+		}
+	case !errors.Is(err, pgx.ErrNoRows):
+		return ResolvedPage{}, err
+	}
+
+	return s.ResolveBySlug(ctx, scope, fallbackHomepageSlug, "")
 }
 
 func (s *resolverService) ResolveByDomain(ctx context.Context, scope tenant.Scope, customDomain string, previewToken string) (ResolvedPage, error) {
