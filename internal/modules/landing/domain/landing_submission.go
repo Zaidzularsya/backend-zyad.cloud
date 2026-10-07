@@ -29,6 +29,16 @@ func (s SubmissionStatus) IsValid() bool {
 	}
 }
 
+// CRMSyncStatus adalah hasil sinkron submission ke lead CRM.
+type CRMSyncStatus string
+
+const (
+	CRMSyncSkipped CRMSyncStatus = "skipped"
+	CRMSyncCreated CRMSyncStatus = "created"
+	CRMSyncMerged  CRMSyncStatus = "merged"
+	CRMSyncFailed  CRMSyncStatus = "failed"
+)
+
 type LandingSubmission struct {
 	ID             string
 	OrganizationID string
@@ -47,6 +57,9 @@ type LandingSubmission struct {
 	IPAddressHash  string
 	UserAgent      string
 	IdempotencyKey string
+	CRMLeadID      string
+	CRMSyncStatus  CRMSyncStatus
+	CRMSyncError   string
 	SubmittedAt    time.Time
 	UpdatedAt      time.Time
 	DeletedAt      *time.Time

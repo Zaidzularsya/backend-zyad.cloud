@@ -276,7 +276,7 @@ func New(ctx context.Context) (*App, error) {
 	landingBrandingSvc := landingservice.NewBrandingService(landingBrandingRepo)
 	landingFormSvc := landingservice.NewFormService(landingFormRepo)
 	landingSubmissionRepo := landingrepo.NewSubmissionRepository(db)
-	landingSubmissionSvc := landingservice.NewSubmissionService(landingSubmissionRepo, landingFormRepo)
+	landingSubmissionSvc := landingservice.NewSubmissionService(landingSubmissionRepo, landingFormRepo, landingPageRepo, nil, nil) // TODO(R5-S4-T3): LeadSink + FeatureChecker
 
 	landingReusableRepo := landingrepo.NewReusableRepository(db)
 	landingMediaRepo := landingrepo.NewMediaRepository(db)

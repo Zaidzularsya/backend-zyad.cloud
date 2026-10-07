@@ -9,7 +9,8 @@ import (
 )
 
 type SubmissionService interface {
-	SubmitForm(ctx context.Context, scope coretenant.Scope, params repository.CreateSubmissionParams) (domain.LandingSubmission, error)
+	SubmitForm(ctx context.Context, scope coretenant.Scope, params repository.CreateSubmissionParams, isPlatformOrg bool) (domain.LandingSubmission, error)
+	RetryCRMSync(ctx context.Context, scope coretenant.Scope, id string, isPlatformOrg bool) (domain.LandingSubmission, error)
 	GetSubmission(ctx context.Context, scope coretenant.Scope, id string) (domain.LandingSubmission, error)
 	ListSubmissions(ctx context.Context, scope coretenant.Scope, filter repository.SubmissionFilter) ([]domain.LandingSubmission, error)
 	UpdateSubmissionStatus(ctx context.Context, scope coretenant.Scope, id string, status domain.SubmissionStatus) (domain.LandingSubmission, error)

@@ -263,7 +263,8 @@ func (h *PublicLandingHandler) SubmitForm(c *gin.Context) {
 		corehttp.Fail(c, err)
 		return
 	}
-	submission, err := h.submissionSvc.SubmitForm(c.Request.Context(), scope, params)
+	// TODO(R5-S4-T3): derive isPlatformOrg from the tenant context.
+	submission, err := h.submissionSvc.SubmitForm(c.Request.Context(), scope, params, false)
 	if err != nil {
 		corehttp.Fail(c, coreerrors.New("INTERNAL_ERROR", err.Error(), http.StatusInternalServerError))
 		return

@@ -156,6 +156,7 @@ func (r *resolverRepository) ResolveForms(ctx context.Context, scope coretenant.
 		SELECT
 			id, landing_page_id, name, key, description,
 			submit_label, success_message, redirect_url, is_active,
+			create_crm_lead, COALESCE(lead_owner_user_id::text, ''),
 			created_at, updated_at
 		FROM landing_forms
 		WHERE landing_page_id = $1 AND deleted_at IS NULL
@@ -175,6 +176,7 @@ func (r *resolverRepository) ResolveForms(ctx context.Context, scope coretenant.
 			err := rows.Scan(
 				&form.ID, &form.LandingPageID, &form.Name, &form.Key, &form.Description,
 				&form.SubmitLabel, &form.SuccessMessage, &form.RedirectURL, &form.IsActive,
+				&form.CreateCRMLead, &form.LeadOwnerUserID,
 				&form.CreatedAt, &form.UpdatedAt,
 			)
 			if err != nil {

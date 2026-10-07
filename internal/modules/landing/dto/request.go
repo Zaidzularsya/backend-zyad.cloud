@@ -189,6 +189,9 @@ type CreateFormRequest struct {
 	SuccessMessage string         `json:"success_message"`
 	RedirectURL    *string        `json:"redirect_url"`
 	Consent        map[string]any `json:"consent"`
+	// CreateCRMLead nil -> true (default). LeadOwnerUserID is a user UUID or "".
+	CreateCRMLead   *bool   `json:"create_crm_lead"`
+	LeadOwnerUserID *string `json:"lead_owner_user_id" binding:"omitnil,uuid|eq="`
 }
 
 // UpdateFormRequest binds form updates.
@@ -199,6 +202,9 @@ type UpdateFormRequest struct {
 	SuccessMessage *string         `json:"success_message"`
 	RedirectURL    *string         `json:"redirect_url"`
 	Consent        *map[string]any `json:"consent"`
+	CreateCRMLead  *bool           `json:"create_crm_lead"`
+	// LeadOwnerUserID is a user UUID, or "" to clear the PIC.
+	LeadOwnerUserID *string `json:"lead_owner_user_id" binding:"omitnil,uuid|eq="`
 }
 
 // FormFieldItem binds a single field specification.

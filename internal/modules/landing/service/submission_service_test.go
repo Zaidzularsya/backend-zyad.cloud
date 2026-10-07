@@ -22,7 +22,7 @@ func TestSubmissionServiceIntegration(t *testing.T) {
 	formRepo := repository.NewFormRepository(db)
 	submissionRepo := repository.NewSubmissionRepository(db)
 
-	submissionService := service.NewSubmissionService(submissionRepo, formRepo)
+	submissionService := service.NewSubmissionService(submissionRepo, formRepo, pageRepo, nil, nil)
 
 	// Create Page
 	page, err := pageRepo.Create(ctx, tenants.A.Scope, repository.CreatePageParams{
@@ -53,7 +53,7 @@ func TestSubmissionServiceIntegration(t *testing.T) {
 		LandingPageID: page.ID,
 		FormID:        form.ID,
 		SubmittedData: map[string]any{"email": "test@example.com"},
-	})
+	}, false)
 	if err != nil {
 		t.Fatalf("SubmitForm (Valid): %v", err)
 	}
@@ -70,7 +70,7 @@ func TestSubmissionServiceIntegration(t *testing.T) {
 		LandingPageID: page.ID,
 		FormID:        form.ID,
 		SubmittedData: map[string]any{"email": "spam@example.com", "_honey": "bot"},
-	})
+	}, false)
 	if err == nil || err != service.ErrSpamDetected {
 		t.Errorf("Expected ErrSpamDetected, got %v", err)
 	}
@@ -92,7 +92,7 @@ func TestSubmissionServiceIntegration(t *testing.T) {
 		LandingPageID: page.ID,
 		FormID:        form.ID,
 		SubmittedData: map[string]any{"email": "test@example.com"},
-	})
+	}, false)
 	if err == nil || err != service.ErrFormNotActive {
 		t.Errorf("Expected ErrFormNotActive, got %v", err)
 	}

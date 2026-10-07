@@ -316,3 +316,87 @@ func TestSubmissionTenantIsolationSuite(t *testing.T) {
 	}
 	testutil.RunTenantIsolationSuite(t, adapter)
 }
+
+func TestSubmissionRepositoryCRMSyncAndIdempotencyIntegration(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+
+	pageRepo := repository.NewPageRepository(db)
+	formRepo := repository.NewFormRepository(db)
+	subRepo := repository.NewSubmissionRepository(db)
+
+	page, err := pageRepo.Create(ctx, tenants.A.Scope, repository.CreatePageParams{
+		Name:       "CRM Sync Page",
+		Title:      "CRM Sync",
+		Slug:       strings.ReplaceAll("page-"+testutil.UniqueCode("crmsync"), ".", "-"),
+		Type:       domain.PageTypeCampaign,
+		Status:     domain.PageStatusDraft,
+		Visibility: domain.PageVisibilityPublic,
+	})
+	if err != nil {
+		t.Fatalf("Create page: %v", err)
+	}
+
+	form, err := formRepo.Create(ctx, tenants.A.Scope, repository.CreateFormParams{
+		LandingPageID: page.ID,
+		Name:          "Konsultasi",
+		Key:           "konsultasi",
+		IsActive:      true,
+		CreateCRMLead: true,
+	})
+	if err != nil {
+		t.Fatalf("Create form: %v", err)
+	}
+	if !form.CreateCRMLead || form.LeadOwnerUserID != "" {
+		t.Fatalf("form = %+v, want CreateCRMLead true and no owner", form)
+	}
+
+	off := false
+	updated, err := formRepo.Update(ctx, tenants.A.Scope, form.ID, repository.UpdateFormParams{CreateCRMLead: &off})
+	if err != nil || updated.CreateCRMLead {
+		t.Fatalf("Update CreateCRMLead: err=%v form=%+v", err, updated)
+	}
+
+	sub, err := subRepo.Create(ctx, tenants.A.Scope, repository.CreateSubmissionParams{
+		LandingPageID:  page.ID,
+		FormID:         form.ID,
+		Reference:      "SUB-CRM-1",
+		Status:         domain.SubmissionStatusNew,
+		SubmittedData:  map[string]any{"email": "a@x.id"},
+		IdempotencyKey: testutil.UniqueCode("idem"),
+	})
+	if err != nil {
+		t.Fatalf("Create submission: %v", err)
+	}
+	if sub.CRMSyncStatus != domain.CRMSyncSkipped || sub.CRMLeadID != "" || sub.CRMSyncError != "" {
+		t.Fatalf("defaults wrong: %+v", sub)
+	}
+
+	found, err := subRepo.FindByIdempotencyKey(ctx, tenants.A.Scope, sub.IdempotencyKey)
+	if err != nil || found.ID != sub.ID {
+		t.Fatalf("FindByIdempotencyKey: err=%v found=%+v", err, found)
+	}
+	if _, err := subRepo.FindByIdempotencyKey(ctx, tenants.B.Scope, sub.IdempotencyKey); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("other tenant must not see the key, err = %v", err)
+	}
+
+	failed, err := subRepo.UpdateCRMSync(ctx, tenants.A.Scope, sub.ID, repository.UpdateCRMSyncParams{
+		Status: domain.CRMSyncFailed, Error: "boom",
+	})
+	if err != nil || failed.CRMSyncStatus != domain.CRMSyncFailed || failed.CRMSyncError != "boom" || failed.CRMLeadID != "" {
+		t.Fatalf("UpdateCRMSync failed: err=%v sub=%+v", err, failed)
+	}
+
+	leadID := "9d2c1b1e-6f0a-4a57-8f1c-2b9d3c4e5f60"
+	created, err := subRepo.UpdateCRMSync(ctx, tenants.A.Scope, sub.ID, repository.UpdateCRMSyncParams{
+		Status: domain.CRMSyncCreated, LeadID: leadID,
+	})
+	if err != nil || created.CRMSyncStatus != domain.CRMSyncCreated || created.CRMLeadID != leadID || created.CRMSyncError != "" {
+		t.Fatalf("UpdateCRMSync created: err=%v sub=%+v", err, created)
+	}
+
+	if _, err := subRepo.UpdateCRMSync(ctx, tenants.B.Scope, sub.ID, repository.UpdateCRMSyncParams{Status: domain.CRMSyncFailed}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("other tenant UpdateCRMSync must not match, err = %v", err)
+	}
+}

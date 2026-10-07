@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin/binding"
+
 	"zyad.cloud/internal/modules/landing/dto"
 )
 
@@ -73,5 +75,27 @@ func TestPublicSubmissionRequestUnmarshaling(t *testing.T) {
 	}
 	if req.Context.PageVersion != 2 || req.Context.UTMSource != "google" {
 		t.Errorf("Unexpected context values: %+v", req.Context)
+	}
+}
+
+func TestUpdateFormRequestLeadOwnerValidation(t *testing.T) {
+	str := func(s string) *string { return &s }
+	cases := []struct {
+		name    string
+		owner   *string
+		wantErr bool
+	}{
+		{"nil leaves PIC unchanged", nil, false},
+		{"empty clears PIC", str(""), false},
+		{"valid uuid", str("3f2b8a6e-1c1d-4c52-9a43-0e6f1a7b9c10"), false},
+		{"garbage rejected", str("not-a-uuid"), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := binding.Validator.ValidateStruct(dto.UpdateFormRequest{LeadOwnerUserID: tc.owner})
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("ValidateStruct() error = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
 	}
 }
