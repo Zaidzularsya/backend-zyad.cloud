@@ -201,6 +201,24 @@ func (r *productRepository) FindByID(ctx context.Context, scope coretenant.Scope
 	return out, err
 }
 
+func (r *productRepository) FindBySKU(ctx context.Context, scope coretenant.Scope, sku string) (domain.Product, error) {
+	var out domain.Product
+	err := withTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		p, err := scanProduct(tx.QueryRow(ctx, productSelect+` WHERE p.sku = $1 AND p.organization_id = $2 AND p.is_active AND p.deleted_at IS NULL`,
+			sku, scope.OrganizationID()))
+		if err != nil {
+			return err
+		}
+		list := []domain.Product{p}
+		if err := attachFeatures(ctx, tx, scope, list); err != nil {
+			return err
+		}
+		out = list[0]
+		return nil
+	})
+	return out, err
+}
+
 func (r *productRepository) FindByIDs(ctx context.Context, scope coretenant.Scope, ids []string) (map[string]domain.Product, error) {
 	out := make(map[string]domain.Product, len(ids))
 	if len(ids) == 0 {

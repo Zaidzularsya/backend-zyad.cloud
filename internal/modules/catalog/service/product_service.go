@@ -95,6 +95,12 @@ func (s *productService) Get(ctx context.Context, scope coretenant.Scope, id str
 	return s.withLabels(ctx, p, err)
 }
 
+func (s *productService) FindBySKU(ctx context.Context, scope coretenant.Scope, sku string) (domain.Product, error) {
+	p, err := s.repo.FindBySKU(ctx, scope, strings.TrimSpace(sku))
+	err = catalogmodule.MapNotFound(err, "PRODUCT_NOT_FOUND", "product not found or already deleted")
+	return s.withLabels(ctx, p, err)
+}
+
 func (s *productService) List(ctx context.Context, scope coretenant.Scope, f repository.ProductListFilter) ([]domain.Product, int64, error) {
 	list, total, err := s.repo.List(ctx, scope, f)
 	if err != nil {

@@ -103,6 +103,7 @@ func LoadSelfServe() SelfServeConfig {
 	return SelfServeConfig{
 		BotEmail:       getEnv("SELF_SERVE_BOT_EMAIL", "self-serve-bot@zyad.cloud"),
 		DealOwnerEmail: getEnv("SELF_SERVE_DEAL_OWNER_EMAIL", ""),
+		FreeProductSKU: getEnv("SELF_SERVE_FREE_PRODUCT_SKU", "FREE"),
 	}
 }
 

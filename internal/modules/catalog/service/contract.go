@@ -47,6 +47,8 @@ type ProductService interface {
 	List(ctx context.Context, scope coretenant.Scope, f repository.ProductListFilter) ([]domain.Product, int64, error)
 	Update(ctx context.Context, scope coretenant.Scope, id string, in repository.UpdateProductParams, platform bool) (domain.Product, error)
 	Delete(ctx context.Context, scope coretenant.Scope, id, userID string) error
+	// FindBySKU: produk aktif dengan SKU persis itu; label fitur terisi. Tidak ada → PRODUCT_NOT_FOUND.
+	FindBySKU(ctx context.Context, scope coretenant.Scope, sku string) (domain.Product, error)
 	// FindByIDs memenuhi interface katalog CRM; label fitur terisi.
 	FindByIDs(ctx context.Context, scope coretenant.Scope, ids []string) (map[string]domain.Product, error)
 	ListFeatures(ctx context.Context) ([]domain.FeatureDef, error)

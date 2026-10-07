@@ -120,6 +120,8 @@ type SeedAdminConfig struct {
 type SelfServeConfig struct {
 	BotEmail       string
 	DealOwnerEmail string // kosong → bot
+	// FreeProductSKU: SKU produk katalog platform yang fiturnya menjadi paket gratis workspace baru.
+	FreeProductSKU string
 }
 
 type HTTPConfig struct {
