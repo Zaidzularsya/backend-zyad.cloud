@@ -3513,6 +3513,14 @@ paths:
   /api/v1/public/landing/resolve:
     get:
       summary: Resolve public landing page
+      description: >-
+        Organisasi SELALU diturunkan dari host (tenant context), bukan dari query atau body.
+        Respons memuat `OrganizationType` (`platform` | `customer`; kosong diperlakukan bukan platform)
+        yang dipakai frontend untuk menggerbang slot khusus platform (`catalog-pricing`).
+        Dengan `home=1`, halaman dipilih dari beranda organisasi host (`is_homepage`, bukan archived/template,
+        harus published) dengan fallback ke slug `public-marketing`; `home=1` mengalahkan `slug`.
+        Untuk halaman GrapesJS, `Forms` hanya berisi form aktif dengan `Fields`
+        (`LeadOwnerUserID` dan `CreateCRMLead` tidak disertakan di jalur publik).
       operationId: resolvePublicLandingPage
       tags:
         - Public Landing
@@ -3521,9 +3529,17 @@ paths:
           in: query
           schema:
             type: string
+        - name: home
+          in: query
+          description: "`1` memilih beranda organisasi host (mode beranda platform)."
+          schema:
+            type: string
+            enum: ["1"]
       responses:
         "200":
           description: Public landing page resolved successfully
+        "404":
+          description: PUBLIC_PAGE_NOT_FOUND (tidak ada, belum published, atau host tidak terdaftar)
   /api/v1/public/landing/render:
     get:
       summary: Server-render a published GrapesJS landing page as HTML (SEO)
