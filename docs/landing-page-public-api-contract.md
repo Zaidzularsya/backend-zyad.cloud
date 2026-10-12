@@ -646,6 +646,8 @@ Response:
 
 Response boleh memakai `ETag` dari published version. Draft update tidak mengubah public ETag.
 
+Mode beranda (R5-S5): `GET /public/landing/resolve?home=1` memilih beranda organisasi **host** (`is_homepage = true`, bukan archived/template/terhapus, status published); bila tidak ada atau tidak published, fallback ke halaman slug `public-marketing`; bila itu juga tidak ada → `404 PUBLIC_PAGE_NOT_FOUND`. `home=1` dicek sebelum `slug`. Organisasi hanya dari tenant context host; `organization_id`/`slug` di query diabaikan pada mode ini. Preview token tidak berlaku. Menyetel beranda: `PATCH /admin/landing-pages/:id` dengan `{"is_homepage": true}` melepas flag dari halaman lain di organisasi yang sama (satu transaksi + advisory lock per organisasi); target archived → `409 PAGE_HOMEPAGE_TARGET_ARCHIVED`, template → `422 PAGE_HOMEPAGE_TEMPLATE_INVALID`.
+
 Field tambahan halaman GrapesJS (R5-S3): `OrganizationType` (`"platform"` | `"customer"`, nama field PascalCase seperti field `ResolvedPage` lainnya). Nilainya dari tenant context host, dipakai frontend untuk menggerbang slot khusus platform (`catalog-pricing`). Endpoint `GET /public/landing/preview/:token` dan SSR `GET /public/landing/render` memakai nilai yang sama. Nilai kosong atau tidak dikenal diperlakukan sebagai bukan platform (fail-closed).
 
 #### Form konsultasi & sinkron CRM (R5-S4)
