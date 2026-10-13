@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -195,15 +196,24 @@ func (h *AdminNavigationHandler) CreateMenuItem(c *gin.Context) {
 
 	item, err := h.navigationService.CreateMenuItem(c.Request.Context(), scope, params)
 	if err != nil {
-		if err == service.ErrMaxMenuDepth {
-			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusBadRequest))
-			return
-		}
-		corehttp.Fail(c, coreerrors.New("INTERNAL_ERROR", err.Error(), http.StatusInternalServerError))
+		failMenuItem(c, err)
 		return
 	}
 
 	corehttp.OK(c, "success", item)
+}
+
+// failMenuItem maps menu item validation errors to 4xx so the admin UI shows
+// an actionable message instead of a generic 500.
+func failMenuItem(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, service.ErrMaxMenuDepth):
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusBadRequest))
+	case errors.Is(err, service.ErrInvalidInternalPageDestination), errors.Is(err, service.ErrInvalidLinkType):
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+	default:
+		corehttp.Fail(c, coreerrors.New("INTERNAL_ERROR", err.Error(), http.StatusInternalServerError))
+	}
 }
 
 func (h *AdminNavigationHandler) UpdateMenuItem(c *gin.Context) {
@@ -257,7 +267,7 @@ func (h *AdminNavigationHandler) UpdateMenuItem(c *gin.Context) {
 
 	item, err := h.navigationService.UpdateMenuItem(c.Request.Context(), scope, itemID, params)
 	if err != nil {
-		corehttp.Fail(c, coreerrors.New("INTERNAL_ERROR", err.Error(), http.StatusInternalServerError))
+		failMenuItem(c, err)
 		return
 	}
 
