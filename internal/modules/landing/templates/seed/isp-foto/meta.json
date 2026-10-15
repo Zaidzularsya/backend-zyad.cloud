@@ -1,0 +1,9 @@
+{
+  "slug": "isp-foto",
+  "name": "Provider Internet & RT/RW Net Modern (Foto)",
+  "description": "Halaman penyedia internet atau RT/RW Net bergaya gelap dengan foto jaringan dan pelanggan di Indonesia: keunggulan, paket, area layanan, alur pemasangan, dan formulir permintaan pemasangan.",
+  "category": "teknologi-isp",
+  "sort_order": 4,
+  "platform_only": false,
+  "version": 1
+}

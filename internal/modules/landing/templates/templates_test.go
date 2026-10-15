@@ -12,9 +12,10 @@ func TestLoadSeeds_ValidAndComplete(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"asosiasi", "company-profile", "event", "isp-rtrw-net", "jasa-profesional", "klinik",
-		"portfolio", "pricing", "properti", "restoran-kafe", "saas", "sekolah-kursus",
-		"toko-umkm", "zyad-marketing",
+		"asosiasi", "asosiasi-foto", "company-profile", "event", "isp-foto", "isp-rtrw-net",
+		"jasa-foto", "jasa-profesional", "klinik", "klinik-foto", "portfolio", "pricing",
+		"properti", "properti-foto", "restoran-foto", "restoran-kafe", "saas",
+		"sekolah-foto", "sekolah-kursus", "toko-foto", "toko-umkm", "zyad-marketing",
 	}
 	if len(seeds) != len(want) {
 		t.Fatalf("got %d seeds, want %d", len(seeds), len(want))

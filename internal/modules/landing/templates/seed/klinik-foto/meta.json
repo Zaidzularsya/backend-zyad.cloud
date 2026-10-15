@@ -1,0 +1,9 @@
+{
+  "slug": "klinik-foto",
+  "name": "Klinik Modern (Foto)",
+  "description": "Halaman klinik bergaya editorial dengan foto layanan kesehatan di Indonesia: layanan, tim medis, fasilitas, alur kunjungan, dan janji temu.",
+  "category": "kesehatan",
+  "sort_order": 1,
+  "platform_only": false,
+  "version": 1
+}
