@@ -1,0 +1,9 @@
+{
+  "slug": "klinik",
+  "name": "Klinik & Layanan Kesehatan",
+  "description": "Halaman klinik dengan janji temu, layanan, jadwal dokter, fasilitas, alur kunjungan, dan FAQ.",
+  "category": "kesehatan",
+  "sort_order": 10,
+  "platform_only": false,
+  "version": 1
+}

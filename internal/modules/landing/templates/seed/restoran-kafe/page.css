@@ -1,0 +1,125 @@
+@font-face { font-family: 'TP Cormorant Garamond'; src: url('/landing-templates/_fonts/cormorant-garamond-700.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'TP Karla'; src: url('/landing-templates/_fonts/karla-400.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'TP Karla'; src: url('/landing-templates/_fonts/karla-600.woff2') format('woff2'); font-weight: 600; font-style: normal; font-display: swap; }
+
+.tp-restoran-kafe-root {
+  --tp-primary: #2B1A12; --tp-accent: #6B7A3A; --tp-ink: #2B1A12; --tp-muted: #665548;
+  --tp-surface: #FAF3E6; --tp-surface-alt: #F0E6D2; --tp-on-primary: #FAF3E6; --tp-line: #E3D6BD;
+  --tp-radius: 4px;
+  font-family: 'TP Karla', 'Inter', system-ui, sans-serif; color: var(--tp-ink); background: var(--tp-surface); line-height: 1.65; font-size: 17px;
+  overflow-wrap: anywhere; -webkit-font-smoothing: antialiased;
+}
+.tp-restoran-kafe-root *, .tp-restoran-kafe-root *::before, .tp-restoran-kafe-root *::after { box-sizing: border-box; }
+.tp-restoran-kafe-root :where(p) { margin: 0 0 14px; color: var(--tp-muted); }
+.tp-restoran-kafe-img { display: block; width: 100%; height: auto; object-fit: cover; }
+.tp-restoran-kafe-wrap { max-width: 1160px; margin: 0 auto; padding: 0 24px; }
+.tp-restoran-kafe-sec { padding: clamp(64px, 9vw, 112px) 0; background: var(--tp-surface); }
+.tp-restoran-kafe-sec--alt { background: var(--tp-surface-alt); }
+.tp-restoran-kafe-eyebrow { margin: 0 0 14px; font-size: 13px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--tp-eyebrow, var(--tp-primary)); }
+.tp-restoran-kafe-h1 { margin: 0 0 20px; font-family: 'TP Cormorant Garamond', Georgia, serif; font-weight: 700; font-size: clamp(36px, 6.4vw, 66px); line-height: 1.08; letter-spacing: 0; color: inherit; }
+.tp-restoran-kafe-h2 { margin: 0 0 16px; font-family: 'TP Cormorant Garamond', Georgia, serif; font-weight: 700; font-size: clamp(28px, 4.2vw, 44px); line-height: 1.15; letter-spacing: 0; }
+.tp-restoran-kafe-h3 { margin: 0 0 8px; font-family: 'TP Cormorant Garamond', Georgia, serif; font-weight: 700; font-size: clamp(19px, 2.2vw, 23px); line-height: 1.25; }
+.tp-restoran-kafe-lead { font-size: clamp(18px, 2vw, 21px); line-height: 1.6; max-width: 56ch; }
+.tp-restoran-kafe-head { max-width: 680px; margin-bottom: clamp(32px, 5vw, 56px); }
+.tp-restoran-kafe-head--center { margin-left: auto; margin-right: auto; text-align: center; }
+.tp-restoran-kafe-head--center .tp-restoran-kafe-lead { margin-left: auto; margin-right: auto; }
+.tp-restoran-kafe-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+.tp-restoran-kafe-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 26px; border-radius: 2px; font-family: 'TP Karla', 'Inter', system-ui, sans-serif; font-weight: 600; font-size: 16px; text-decoration: none; border: 1.5px solid transparent; transition: transform .15s ease, box-shadow .15s ease, background .15s ease; }
+.tp-restoran-kafe-btn:hover { transform: translateY(-2px); }
+.tp-restoran-kafe-btn--primary { background: var(--tp-btn-bg, var(--tp-primary)); color: var(--tp-btn-fg, var(--tp-on-primary)); }
+.tp-restoran-kafe-btn--primary:hover { box-shadow: 0 10px 24px rgba(0,0,0,.18); }
+.tp-restoran-kafe-btn--ghost { background: transparent; color: inherit; border-color: currentColor; }
+.tp-restoran-kafe-btn--light { background: #fff; color: #2B1A12; }
+.tp-restoran-kafe-cards { display: grid; gap: 20px; }
+.tp-restoran-kafe-cols2 { grid-template-columns: repeat(2, 1fr); }
+.tp-restoran-kafe-cols3 { grid-template-columns: repeat(3, 1fr); }
+.tp-restoran-kafe-cols4 { grid-template-columns: repeat(4, 1fr); }
+.tp-restoran-kafe-card { padding: 28px; background: var(--tp-card, #fff); border: 1px solid var(--tp-line); border-radius: var(--tp-radius); }
+.tp-restoran-kafe-card p { margin: 0; }
+.tp-restoran-kafe-icon { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; margin-bottom: 18px; border-radius: calc(var(--tp-radius) * .7); background: var(--tp-icon-bg, var(--tp-surface-alt)); color: var(--tp-primary); font-size: 22px; font-weight: 700; }
+.tp-restoran-kafe-row { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(32px, 6vw, 80px); align-items: center; }
+.tp-restoran-kafe-row + .tp-restoran-kafe-row { margin-top: clamp(48px, 7vw, 96px); }
+.tp-restoran-kafe-row--rev .tp-restoran-kafe-row__media { order: -1; }
+.tp-restoran-kafe-row__media .tp-restoran-kafe-img { border-radius: var(--tp-radius); aspect-ratio: 4 / 3; }
+.tp-restoran-kafe-ticks { list-style: none; margin: 18px 0 0; padding: 0; display: grid; gap: 10px; }
+.tp-restoran-kafe-ticks li { position: relative; padding-left: 30px; color: var(--tp-muted); }
+.tp-restoran-kafe-ticks li::before { content: '✓'; position: absolute; left: 0; top: 0; width: 22px; height: 22px; border-radius: 50%; background: var(--tp-primary); color: var(--tp-on-primary); font-size: 13px; font-weight: 700; text-align: center; line-height: 22px; }
+.tp-restoran-kafe-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 28px; counter-reset: s; }
+.tp-restoran-kafe-step { display: flex; flex-direction: column; gap: 14px; padding-top: 18px; border-top: 2px solid var(--tp-primary); }
+.tp-restoran-kafe-step p { margin: 0; }
+.tp-restoran-kafe-step__n { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; background: var(--tp-primary); color: var(--tp-on-primary); font-family: 'TP Cormorant Garamond', Georgia, serif; font-weight: 700; font-size: 18px; }
+.tp-restoran-kafe-steps--v { grid-template-columns: 1fr; max-width: 760px; gap: 0; }
+.tp-restoran-kafe-steps--v .tp-restoran-kafe-step { flex-direction: row; gap: 22px; padding: 26px 0; border-top: 0; border-bottom: 1px solid var(--tp-line); }
+.tp-restoran-kafe-faq { max-width: 820px; margin: 0 auto; display: grid; gap: 12px; }
+.tp-restoran-kafe-faq__item { background: var(--tp-card, #fff); border: 1px solid var(--tp-line); border-radius: var(--tp-radius); padding: 0 22px; }
+.tp-restoran-kafe-faq__item summary { cursor: pointer; list-style: none; padding: 20px 28px 20px 0; font-weight: 600; font-size: 18px; position: relative; color: var(--tp-ink); min-height: 48px; }
+.tp-restoran-kafe-faq__item summary::-webkit-details-marker { display: none; }
+.tp-restoran-kafe-faq__item summary::after { content: '+'; position: absolute; right: 0; top: 50%; transform: translateY(-50%); font-size: 26px; font-weight: 400; color: var(--tp-primary); }
+.tp-restoran-kafe-faq__item[open] summary::after { content: '–'; }
+.tp-restoran-kafe-faq__item p { padding-bottom: 20px; margin: 0; }
+.tp-restoran-kafe-people { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 20px; }
+.tp-restoran-kafe-person { text-align: center; padding: 26px 18px; background: var(--tp-card, #fff); border: 1px solid var(--tp-line); border-radius: var(--tp-radius); }
+.tp-restoran-kafe-person p { margin: 0; }
+.tp-restoran-kafe-person__ph { width: 84px; height: 84px; margin: 0 auto 16px; border-radius: 50%; background: var(--tp-surface-alt); border: 2px dashed var(--tp-primary); color: var(--tp-primary); display: flex; align-items: center; justify-content: center; font-size: 28px; }
+.tp-restoran-kafe-note { margin-top: 20px; font-size: 14px; }
+.tp-restoran-kafe-pcard { background: var(--tp-card, #fff); border: 1px solid var(--tp-line); border-radius: var(--tp-radius); overflow: hidden; display: flex; flex-direction: column; }
+.tp-restoran-kafe-pcard__media .tp-restoran-kafe-img { aspect-ratio: 4 / 3; }
+.tp-restoran-kafe-pcard__body { padding: 22px 24px 26px; }
+.tp-restoran-kafe-pcard__body p { margin: 0; }
+.tp-restoran-kafe-gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.tp-restoran-kafe-gallery .tp-restoran-kafe-img { aspect-ratio: 4 / 3; border-radius: calc(var(--tp-radius) * .8); }
+.tp-restoran-kafe-gallery figure { margin: 0; }
+.tp-restoran-kafe-gallery figcaption { margin-top: 8px; font-size: 14px; color: var(--tp-muted); }
+.tp-restoran-kafe-band { background: var(--tp-primary); color: var(--tp-on-primary); padding: clamp(44px, 6vw, 72px) 0; }
+.tp-restoran-kafe-band p { color: inherit; opacity: .88; margin: 0; }
+.tp-restoran-kafe-band__in { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 24px; }
+.tp-restoran-kafe-band .tp-restoran-kafe-h2 { color: inherit; margin-bottom: 8px; }
+.tp-restoran-kafe-contact { display: grid; grid-template-columns: .9fr 1.1fr; gap: clamp(32px, 6vw, 72px); align-items: start; }
+.tp-restoran-kafe-contact__form { min-width: 0; }
+.tp-restoran-kafe-info { list-style: none; margin: 28px 0 0; padding: 0; display: grid; gap: 14px; }
+.tp-restoran-kafe-info li { display: grid; gap: 2px; padding-left: 16px; border-left: 3px solid var(--tp-primary); }
+.tp-restoran-kafe-info strong { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--tp-ink); }
+.tp-restoran-kafe-info span { color: var(--tp-muted); }
+.tp-restoran-kafe-hero { position: relative; overflow: hidden; }
+@media (max-width: 900px) {
+  .tp-restoran-kafe-cols3, .tp-restoran-kafe-cols4 { grid-template-columns: repeat(2, 1fr); }
+  .tp-restoran-kafe-row, .tp-restoran-kafe-contact { grid-template-columns: 1fr; }
+  .tp-restoran-kafe-row--rev .tp-restoran-kafe-row__media { order: 0; }
+  .tp-restoran-kafe-gallery { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 600px) {
+  .tp-restoran-kafe-root { font-size: 16px; }
+  .tp-restoran-kafe-wrap { padding: 0 20px; }
+  .tp-restoran-kafe-cols2, .tp-restoran-kafe-cols3, .tp-restoran-kafe-cols4, .tp-restoran-kafe-gallery { grid-template-columns: 1fr; }
+  .tp-restoran-kafe-actions { flex-direction: column; align-items: stretch; }
+  .tp-restoran-kafe-band__in { flex-direction: column; align-items: stretch; text-align: center; }
+  .tp-restoran-kafe-steps--v .tp-restoran-kafe-step { gap: 16px; }
+}
+
+.tp-restoran-kafe-story { max-width: 760px; margin: 0 auto; text-align: center; }
+.tp-restoran-kafe-story .tp-restoran-kafe-lead { margin-left: auto; margin-right: auto; }
+.tp-restoran-kafe-story .tp-restoran-kafe-ticks { justify-items: center; }
+.tp-restoran-kafe-gallery { grid-template-columns: repeat(2, 1fr); }
+
+.tp-restoran-kafe-hero { position: relative; min-height: min(86vh, 760px); display: flex; align-items: center; background: #2B1A12; color: #FAF3E6; text-align: center; padding: 96px 0; }
+.tp-restoran-kafe-hero__bg { position: absolute; inset: 0; }
+.tp-restoran-kafe-hero__bg .tp-restoran-kafe-img { height: 100%; opacity: .55; }
+.tp-restoran-kafe-hero::after { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse at center, rgba(43,26,18,.35), rgba(43,26,18,.88)); }
+.tp-restoran-kafe-hero .tp-restoran-kafe-wrap { position: relative; z-index: 1; }
+.tp-restoran-kafe-hero .tp-restoran-kafe-h1 { max-width: 16ch; margin-left: auto; margin-right: auto; font-size: clamp(42px, 8vw, 88px); font-style: italic; }
+.tp-restoran-kafe-hero .tp-restoran-kafe-lead { margin-left: auto; margin-right: auto; color: #EADFC8; }
+.tp-restoran-kafe-hero .tp-restoran-kafe-eyebrow { --tp-eyebrow: #D9C48A; }
+.tp-restoran-kafe-hero .tp-restoran-kafe-actions { justify-content: center; }
+.tp-restoran-kafe-hero .tp-restoran-kafe-btn--primary { --tp-btn-bg: #FAF3E6; --tp-btn-fg: #2B1A12; }
+.tp-restoran-kafe-pcard { text-align: center; background: transparent; border: 0; }
+.tp-restoran-kafe-pcard__media .tp-restoran-kafe-img { border-radius: 200px 200px 4px 4px; aspect-ratio: 4 / 5; }
+.tp-restoran-kafe-pcard__body { padding: 20px 8px 0; }
+.tp-restoran-kafe-h2, .tp-restoran-kafe-h3 { font-weight: 700; }
+.tp-restoran-kafe-visit { background: #2B1A12; color: #FAF3E6; padding: clamp(64px, 9vw, 112px) 0; }
+.tp-restoran-kafe-visit__grid { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(32px, 6vw, 72px); align-items: center; }
+.tp-restoran-kafe-visit :where(p) { color: #D9CDB5; }
+.tp-restoran-kafe-visit .tp-restoran-kafe-eyebrow { --tp-eyebrow: #D9C48A; }
+.tp-restoran-kafe-visit .tp-restoran-kafe-info strong { color: #FAF3E6; }
+.tp-restoran-kafe-visit .tp-restoran-kafe-info li { border-left-color: #C9A36A; }
+.tp-restoran-kafe-visit .tp-restoran-kafe-btn--primary { --tp-btn-bg: #FAF3E6; --tp-btn-fg: #2B1A12; }
+@media (max-width: 900px) { .tp-restoran-kafe-visit__grid { grid-template-columns: 1fr; } }

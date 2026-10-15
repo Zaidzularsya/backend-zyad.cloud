@@ -1,0 +1,9 @@
+{
+  "slug": "toko-umkm",
+  "name": "Toko & UMKM",
+  "description": "Halaman toko atau UMKM: produk unggulan, cara order via WhatsApp, keunggulan, lokasi, dan formulir pertanyaan.",
+  "category": "ritel-umkm",
+  "sort_order": 60,
+  "platform_only": false,
+  "version": 1
+}

@@ -1,0 +1,9 @@
+{
+  "slug": "asosiasi",
+  "name": "Asosiasi & Komunitas",
+  "description": "Halaman asosiasi atau komunitas: misi, manfaat anggota, agenda, pengurus, alur keanggotaan, dan formulir calon anggota.",
+  "category": "komunitas",
+  "sort_order": 30,
+  "platform_only": false,
+  "version": 1
+}

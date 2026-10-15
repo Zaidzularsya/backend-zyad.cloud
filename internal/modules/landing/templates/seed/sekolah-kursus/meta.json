@@ -1,0 +1,9 @@
+{
+  "slug": "sekolah-kursus",
+  "name": "Sekolah & Lembaga Kursus",
+  "description": "Halaman sekolah atau kursus: program, keunggulan, alur pendaftaran, galeri kegiatan, FAQ, dan formulir minat.",
+  "category": "pendidikan",
+  "sort_order": 20,
+  "platform_only": false,
+  "version": 1
+}
