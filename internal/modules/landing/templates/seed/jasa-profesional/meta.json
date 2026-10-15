@@ -1,0 +1,9 @@
+{
+  "slug": "jasa-profesional",
+  "name": "Jasa Profesional & Agensi",
+  "description": "Halaman jasa profesional atau agensi: layanan, proses kerja, studi kasus, tim, dan formulir konsultasi.",
+  "category": "bisnis-jasa",
+  "sort_order": 50,
+  "platform_only": false,
+  "version": 1
+}

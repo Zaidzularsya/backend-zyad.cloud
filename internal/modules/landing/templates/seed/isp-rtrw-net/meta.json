@@ -1,0 +1,9 @@
+{
+  "slug": "isp-rtrw-net",
+  "name": "Provider Internet & RT/RW Net",
+  "description": "Halaman penyedia internet atau RT/RW Net: keunggulan jaringan, paket, area layanan, alur pemasangan, FAQ, dan formulir permintaan pemasangan.",
+  "category": "teknologi-isp",
+  "sort_order": 40,
+  "platform_only": false,
+  "version": 1
+}

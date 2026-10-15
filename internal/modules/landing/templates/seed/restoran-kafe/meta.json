@@ -1,0 +1,9 @@
+{
+  "slug": "restoran-kafe",
+  "name": "Restoran & Kafe",
+  "description": "Halaman restoran atau kafe: hero penuh, menu andalan, cerita, suasana, lokasi & jam buka, dan formulir reservasi.",
+  "category": "kuliner",
+  "sort_order": 70,
+  "platform_only": false,
+  "version": 1
+}

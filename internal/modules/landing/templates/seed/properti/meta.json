@@ -1,0 +1,9 @@
+{
+  "slug": "properti",
+  "name": "Properti & Perumahan",
+  "description": "Halaman perumahan atau proyek properti: tipe unit, fasilitas, lokasi, langkah pembelian, galeri, dan formulir jadwal survei.",
+  "category": "properti",
+  "sort_order": 80,
+  "platform_only": false,
+  "version": 1
+}

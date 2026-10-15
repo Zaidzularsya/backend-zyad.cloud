@@ -1,0 +1,116 @@
+@font-face { font-family: 'TP Sora'; src: url('/landing-templates/_fonts/sora-700.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'TP Manrope'; src: url('/landing-templates/_fonts/manrope-400.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'TP Manrope'; src: url('/landing-templates/_fonts/manrope-600.woff2') format('woff2'); font-weight: 600; font-style: normal; font-display: swap; }
+
+.tp-jasa-profesional-root {
+  --tp-primary: #1E1F23; --tp-accent: #FF6B57; --tp-ink: #1E1F23; --tp-muted: #565861;
+  --tp-surface: #FFFFFF; --tp-surface-alt: #F4F2EF; --tp-on-primary: #FFFFFF; --tp-line: #E6E3DE;
+  --tp-radius: 6px;
+  font-family: 'TP Manrope', 'Inter', system-ui, sans-serif; color: var(--tp-ink); background: var(--tp-surface); line-height: 1.65; font-size: 17px;
+  overflow-wrap: anywhere; -webkit-font-smoothing: antialiased;
+}
+.tp-jasa-profesional-root *, .tp-jasa-profesional-root *::before, .tp-jasa-profesional-root *::after { box-sizing: border-box; }
+.tp-jasa-profesional-root :where(p) { margin: 0 0 14px; color: var(--tp-muted); }
+.tp-jasa-profesional-img { display: block; width: 100%; height: auto; object-fit: cover; }
+.tp-jasa-profesional-wrap { max-width: 1160px; margin: 0 auto; padding: 0 24px; }
+.tp-jasa-profesional-sec { padding: clamp(64px, 9vw, 112px) 0; background: var(--tp-surface); }
+.tp-jasa-profesional-sec--alt { background: var(--tp-surface-alt); }
+.tp-jasa-profesional-eyebrow { margin: 0 0 14px; font-size: 13px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--tp-eyebrow, var(--tp-primary)); }
+.tp-jasa-profesional-h1 { margin: 0 0 20px; font-family: 'TP Sora', 'Inter', system-ui, sans-serif; font-weight: 700; font-size: clamp(36px, 6.4vw, 66px); line-height: 1.08; letter-spacing: -.03em; color: inherit; }
+.tp-jasa-profesional-h2 { margin: 0 0 16px; font-family: 'TP Sora', 'Inter', system-ui, sans-serif; font-weight: 700; font-size: clamp(28px, 4.2vw, 44px); line-height: 1.15; letter-spacing: -.03em; }
+.tp-jasa-profesional-h3 { margin: 0 0 8px; font-family: 'TP Sora', 'Inter', system-ui, sans-serif; font-weight: 700; font-size: clamp(19px, 2.2vw, 23px); line-height: 1.25; }
+.tp-jasa-profesional-lead { font-size: clamp(18px, 2vw, 21px); line-height: 1.6; max-width: 56ch; }
+.tp-jasa-profesional-head { max-width: 680px; margin-bottom: clamp(32px, 5vw, 56px); }
+.tp-jasa-profesional-head--center { margin-left: auto; margin-right: auto; text-align: center; }
+.tp-jasa-profesional-head--center .tp-jasa-profesional-lead { margin-left: auto; margin-right: auto; }
+.tp-jasa-profesional-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+.tp-jasa-profesional-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 26px; border-radius: 4px; font-family: 'TP Manrope', 'Inter', system-ui, sans-serif; font-weight: 600; font-size: 16px; text-decoration: none; border: 1.5px solid transparent; transition: transform .15s ease, box-shadow .15s ease, background .15s ease; }
+.tp-jasa-profesional-btn:hover { transform: translateY(-2px); }
+.tp-jasa-profesional-btn--primary { background: var(--tp-btn-bg, var(--tp-primary)); color: var(--tp-btn-fg, var(--tp-on-primary)); }
+.tp-jasa-profesional-btn--primary:hover { box-shadow: 0 10px 24px rgba(0,0,0,.18); }
+.tp-jasa-profesional-btn--ghost { background: transparent; color: inherit; border-color: currentColor; }
+.tp-jasa-profesional-btn--light { background: #fff; color: #1E1F23; }
+.tp-jasa-profesional-cards { display: grid; gap: 20px; }
+.tp-jasa-profesional-cols2 { grid-template-columns: repeat(2, 1fr); }
+.tp-jasa-profesional-cols3 { grid-template-columns: repeat(3, 1fr); }
+.tp-jasa-profesional-cols4 { grid-template-columns: repeat(4, 1fr); }
+.tp-jasa-profesional-card { padding: 28px; background: var(--tp-card, #fff); border: 1px solid var(--tp-line); border-radius: var(--tp-radius); }
+.tp-jasa-profesional-card p { margin: 0; }
+.tp-jasa-profesional-icon { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; margin-bottom: 18px; border-radius: calc(var(--tp-radius) * .7); background: var(--tp-icon-bg, var(--tp-surface-alt)); color: var(--tp-primary); font-size: 22px; font-weight: 700; }
+.tp-jasa-profesional-row { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(32px, 6vw, 80px); align-items: center; }
+.tp-jasa-profesional-row + .tp-jasa-profesional-row { margin-top: clamp(48px, 7vw, 96px); }
+.tp-jasa-profesional-row--rev .tp-jasa-profesional-row__media { order: -1; }
+.tp-jasa-profesional-row__media .tp-jasa-profesional-img { border-radius: var(--tp-radius); aspect-ratio: 4 / 3; }
+.tp-jasa-profesional-ticks { list-style: none; margin: 18px 0 0; padding: 0; display: grid; gap: 10px; }
+.tp-jasa-profesional-ticks li { position: relative; padding-left: 30px; color: var(--tp-muted); }
+.tp-jasa-profesional-ticks li::before { content: '✓'; position: absolute; left: 0; top: 0; width: 22px; height: 22px; border-radius: 50%; background: var(--tp-primary); color: var(--tp-on-primary); font-size: 13px; font-weight: 700; text-align: center; line-height: 22px; }
+.tp-jasa-profesional-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 28px; counter-reset: s; }
+.tp-jasa-profesional-step { display: flex; flex-direction: column; gap: 14px; padding-top: 18px; border-top: 2px solid var(--tp-primary); }
+.tp-jasa-profesional-step p { margin: 0; }
+.tp-jasa-profesional-step__n { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; background: var(--tp-primary); color: var(--tp-on-primary); font-family: 'TP Sora', 'Inter', system-ui, sans-serif; font-weight: 700; font-size: 18px; }
+.tp-jasa-profesional-steps--v { grid-template-columns: 1fr; max-width: 760px; gap: 0; }
+.tp-jasa-profesional-steps--v .tp-jasa-profesional-step { flex-direction: row; gap: 22px; padding: 26px 0; border-top: 0; border-bottom: 1px solid var(--tp-line); }
+.tp-jasa-profesional-faq { max-width: 820px; margin: 0 auto; display: grid; gap: 12px; }
+.tp-jasa-profesional-faq__item { background: var(--tp-card, #fff); border: 1px solid var(--tp-line); border-radius: var(--tp-radius); padding: 0 22px; }
+.tp-jasa-profesional-faq__item summary { cursor: pointer; list-style: none; padding: 20px 28px 20px 0; font-weight: 600; font-size: 18px; position: relative; color: var(--tp-ink); min-height: 48px; }
+.tp-jasa-profesional-faq__item summary::-webkit-details-marker { display: none; }
+.tp-jasa-profesional-faq__item summary::after { content: '+'; position: absolute; right: 0; top: 50%; transform: translateY(-50%); font-size: 26px; font-weight: 400; color: var(--tp-primary); }
+.tp-jasa-profesional-faq__item[open] summary::after { content: '–'; }
+.tp-jasa-profesional-faq__item p { padding-bottom: 20px; margin: 0; }
+.tp-jasa-profesional-people { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 20px; }
+.tp-jasa-profesional-person { text-align: center; padding: 26px 18px; background: var(--tp-card, #fff); border: 1px solid var(--tp-line); border-radius: var(--tp-radius); }
+.tp-jasa-profesional-person p { margin: 0; }
+.tp-jasa-profesional-person__ph { width: 84px; height: 84px; margin: 0 auto 16px; border-radius: 50%; background: var(--tp-surface-alt); border: 2px dashed var(--tp-primary); color: var(--tp-primary); display: flex; align-items: center; justify-content: center; font-size: 28px; }
+.tp-jasa-profesional-note { margin-top: 20px; font-size: 14px; }
+.tp-jasa-profesional-pcard { background: var(--tp-card, #fff); border: 1px solid var(--tp-line); border-radius: var(--tp-radius); overflow: hidden; display: flex; flex-direction: column; }
+.tp-jasa-profesional-pcard__media .tp-jasa-profesional-img { aspect-ratio: 4 / 3; }
+.tp-jasa-profesional-pcard__body { padding: 22px 24px 26px; }
+.tp-jasa-profesional-pcard__body p { margin: 0; }
+.tp-jasa-profesional-gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.tp-jasa-profesional-gallery .tp-jasa-profesional-img { aspect-ratio: 4 / 3; border-radius: calc(var(--tp-radius) * .8); }
+.tp-jasa-profesional-gallery figure { margin: 0; }
+.tp-jasa-profesional-gallery figcaption { margin-top: 8px; font-size: 14px; color: var(--tp-muted); }
+.tp-jasa-profesional-band { background: var(--tp-primary); color: var(--tp-on-primary); padding: clamp(44px, 6vw, 72px) 0; }
+.tp-jasa-profesional-band p { color: inherit; opacity: .88; margin: 0; }
+.tp-jasa-profesional-band__in { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 24px; }
+.tp-jasa-profesional-band .tp-jasa-profesional-h2 { color: inherit; margin-bottom: 8px; }
+.tp-jasa-profesional-contact { display: grid; grid-template-columns: .9fr 1.1fr; gap: clamp(32px, 6vw, 72px); align-items: start; }
+.tp-jasa-profesional-contact__form { min-width: 0; }
+.tp-jasa-profesional-info { list-style: none; margin: 28px 0 0; padding: 0; display: grid; gap: 14px; }
+.tp-jasa-profesional-info li { display: grid; gap: 2px; padding-left: 16px; border-left: 3px solid var(--tp-primary); }
+.tp-jasa-profesional-info strong { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--tp-ink); }
+.tp-jasa-profesional-info span { color: var(--tp-muted); }
+.tp-jasa-profesional-hero { position: relative; overflow: hidden; }
+@media (max-width: 900px) {
+  .tp-jasa-profesional-cols3, .tp-jasa-profesional-cols4 { grid-template-columns: repeat(2, 1fr); }
+  .tp-jasa-profesional-row, .tp-jasa-profesional-contact { grid-template-columns: 1fr; }
+  .tp-jasa-profesional-row--rev .tp-jasa-profesional-row__media { order: 0; }
+  .tp-jasa-profesional-gallery { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 600px) {
+  .tp-jasa-profesional-root { font-size: 16px; }
+  .tp-jasa-profesional-wrap { padding: 0 20px; }
+  .tp-jasa-profesional-cols2, .tp-jasa-profesional-cols3, .tp-jasa-profesional-cols4, .tp-jasa-profesional-gallery { grid-template-columns: 1fr; }
+  .tp-jasa-profesional-actions { flex-direction: column; align-items: stretch; }
+  .tp-jasa-profesional-band__in { flex-direction: column; align-items: stretch; text-align: center; }
+  .tp-jasa-profesional-steps--v .tp-jasa-profesional-step { gap: 16px; }
+}
+
+.tp-jasa-profesional-hero { padding: clamp(48px, 8vw, 104px) 0 clamp(56px, 8vw, 112px); border-bottom: 1px solid var(--tp-line); }
+.tp-jasa-profesional-hero__grid { display: grid; grid-template-columns: 1.2fr .8fr; gap: clamp(32px, 6vw, 72px); align-items: center; }
+.tp-jasa-profesional-h1 { font-size: clamp(36px, 6vw, 68px); }
+.tp-jasa-profesional-mark { background: linear-gradient(transparent 62%, #FF6B57 62%, #FF6B57 92%, transparent 92%); }
+.tp-jasa-profesional-hero__media .tp-jasa-profesional-img { aspect-ratio: 4 / 5; border-radius: 4px; }
+.tp-jasa-profesional-btn--primary { --tp-btn-bg: #1E1F23; }
+.tp-jasa-profesional-svcs { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--tp-ink); }
+.tp-jasa-profesional-svc { display: grid; grid-template-columns: 80px 1fr 1.4fr 48px; gap: 24px; align-items: baseline; padding: 28px 0; border-bottom: 1px solid var(--tp-line); transition: background .2s ease, padding .2s ease; }
+.tp-jasa-profesional-svc:hover { background: var(--tp-surface-alt); padding-left: 16px; padding-right: 16px; }
+.tp-jasa-profesional-svc p { margin: 0; }
+.tp-jasa-profesional-svc__n { font-family: 'TP Sora', sans-serif; font-weight: 700; color: #D8412E; font-size: 18px; }
+.tp-jasa-profesional-svc a { font-size: 24px; text-decoration: none; color: var(--tp-ink); min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+.tp-jasa-profesional-dark { background: #1E1F23; color: #fff; padding: clamp(64px, 9vw, 112px) 0; }
+.tp-jasa-profesional-dark :where(p) { color: #C9CAD1; }
+.tp-jasa-profesional-dark .tp-jasa-profesional-eyebrow { --tp-eyebrow: #FF8F7F; }
+.tp-jasa-profesional-dark .tp-jasa-profesional-step { border-top-color: #FF6B57; }
+.tp-jasa-profesional-dark .tp-jasa-profesional-step__n { background: #FF6B57; color: #1E1F23; }
+@media (max-width: 900px) { .tp-jasa-profesional-hero__grid { grid-template-columns: 1fr; } .tp-jasa-profesional-hero__media { max-width: 420px; } .tp-jasa-profesional-svc { grid-template-columns: 56px 1fr 44px; } .tp-jasa-profesional-svc p { grid-column: 2 / 3; } }

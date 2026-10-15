@@ -1,0 +1,114 @@
+@font-face { font-family: 'TP Fraunces'; src: url('/landing-templates/_fonts/fraunces-700.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'TP Nunito Sans'; src: url('/landing-templates/_fonts/nunito-sans-400.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'TP Nunito Sans'; src: url('/landing-templates/_fonts/nunito-sans-700.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+
+.tp-sekolah-kursus-root {
+  --tp-primary: #1B2A5C; --tp-accent: #F2B632; --tp-ink: #151B3A; --tp-muted: #4A5273;
+  --tp-surface: #FFFFFF; --tp-surface-alt: #F6F3EA; --tp-on-primary: #FFFFFF; --tp-line: #E4E1D6;
+  --tp-radius: 18px;
+  font-family: 'TP Nunito Sans', 'Inter', system-ui, sans-serif; color: var(--tp-ink); background: var(--tp-surface); line-height: 1.65; font-size: 17px;
+  overflow-wrap: anywhere; -webkit-font-smoothing: antialiased;
+}
+.tp-sekolah-kursus-root *, .tp-sekolah-kursus-root *::before, .tp-sekolah-kursus-root *::after { box-sizing: border-box; }
+.tp-sekolah-kursus-root :where(p) { margin: 0 0 14px; color: var(--tp-muted); }
+.tp-sekolah-kursus-img { display: block; width: 100%; height: auto; object-fit: cover; }
+.tp-sekolah-kursus-wrap { max-width: 1160px; margin: 0 auto; padding: 0 24px; }
+.tp-sekolah-kursus-sec { padding: clamp(64px, 9vw, 112px) 0; background: var(--tp-surface); }
+.tp-sekolah-kursus-sec--alt { background: var(--tp-surface-alt); }
+.tp-sekolah-kursus-eyebrow { margin: 0 0 14px; font-size: 13px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--tp-eyebrow, var(--tp-primary)); }
+.tp-sekolah-kursus-h1 { margin: 0 0 20px; font-family: 'TP Fraunces', Georgia, serif; font-weight: 700; font-size: clamp(36px, 6.4vw, 66px); line-height: 1.08; letter-spacing: -.015em; color: inherit; }
+.tp-sekolah-kursus-h2 { margin: 0 0 16px; font-family: 'TP Fraunces', Georgia, serif; font-weight: 700; font-size: clamp(28px, 4.2vw, 44px); line-height: 1.15; letter-spacing: -.01em; }
+.tp-sekolah-kursus-h3 { margin: 0 0 8px; font-family: 'TP Fraunces', Georgia, serif; font-weight: 700; font-size: clamp(19px, 2.2vw, 23px); line-height: 1.25; }
+.tp-sekolah-kursus-lead { font-size: clamp(18px, 2vw, 21px); line-height: 1.6; max-width: 56ch; }
+.tp-sekolah-kursus-head { max-width: 680px; margin-bottom: clamp(32px, 5vw, 56px); }
+.tp-sekolah-kursus-head--center { margin-left: auto; margin-right: auto; text-align: center; }
+.tp-sekolah-kursus-head--center .tp-sekolah-kursus-lead { margin-left: auto; margin-right: auto; }
+.tp-sekolah-kursus-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+.tp-sekolah-kursus-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 26px; border-radius: 12px; font-family: 'TP Nunito Sans', 'Inter', system-ui, sans-serif; font-weight: 600; font-size: 16px; text-decoration: none; border: 1.5px solid transparent; transition: transform .15s ease, box-shadow .15s ease, background .15s ease; }
+.tp-sekolah-kursus-btn:hover { transform: translateY(-2px); }
+.tp-sekolah-kursus-btn--primary { background: var(--tp-btn-bg, var(--tp-primary)); color: var(--tp-btn-fg, var(--tp-on-primary)); }
+.tp-sekolah-kursus-btn--primary:hover { box-shadow: 0 10px 24px rgba(0,0,0,.18); }
+.tp-sekolah-kursus-btn--ghost { background: transparent; color: inherit; border-color: currentColor; }
+.tp-sekolah-kursus-btn--light { background: #fff; color: #151B3A; }
+.tp-sekolah-kursus-cards { display: grid; gap: 20px; }
+.tp-sekolah-kursus-cols2 { grid-template-columns: repeat(2, 1fr); }
+.tp-sekolah-kursus-cols3 { grid-template-columns: repeat(3, 1fr); }
+.tp-sekolah-kursus-cols4 { grid-template-columns: repeat(4, 1fr); }
+.tp-sekolah-kursus-card { padding: 28px; background: var(--tp-card, #fff); border: 1px solid var(--tp-line); border-radius: var(--tp-radius); }
+.tp-sekolah-kursus-card p { margin: 0; }
+.tp-sekolah-kursus-icon { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; margin-bottom: 18px; border-radius: calc(var(--tp-radius) * .7); background: var(--tp-icon-bg, var(--tp-surface-alt)); color: var(--tp-primary); font-size: 22px; font-weight: 700; }
+.tp-sekolah-kursus-row { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(32px, 6vw, 80px); align-items: center; }
+.tp-sekolah-kursus-row + .tp-sekolah-kursus-row { margin-top: clamp(48px, 7vw, 96px); }
+.tp-sekolah-kursus-row--rev .tp-sekolah-kursus-row__media { order: -1; }
+.tp-sekolah-kursus-row__media .tp-sekolah-kursus-img { border-radius: var(--tp-radius); aspect-ratio: 4 / 3; }
+.tp-sekolah-kursus-ticks { list-style: none; margin: 18px 0 0; padding: 0; display: grid; gap: 10px; }
+.tp-sekolah-kursus-ticks li { position: relative; padding-left: 30px; color: var(--tp-muted); }
+.tp-sekolah-kursus-ticks li::before { content: '✓'; position: absolute; left: 0; top: 0; width: 22px; height: 22px; border-radius: 50%; background: var(--tp-primary); color: var(--tp-on-primary); font-size: 13px; font-weight: 700; text-align: center; line-height: 22px; }
+.tp-sekolah-kursus-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 28px; counter-reset: s; }
+.tp-sekolah-kursus-step { display: flex; flex-direction: column; gap: 14px; padding-top: 18px; border-top: 2px solid var(--tp-primary); }
+.tp-sekolah-kursus-step p { margin: 0; }
+.tp-sekolah-kursus-step__n { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; background: var(--tp-primary); color: var(--tp-on-primary); font-family: 'TP Fraunces', Georgia, serif; font-weight: 700; font-size: 18px; }
+.tp-sekolah-kursus-steps--v { grid-template-columns: 1fr; max-width: 760px; gap: 0; }
+.tp-sekolah-kursus-steps--v .tp-sekolah-kursus-step { flex-direction: row; gap: 22px; padding: 26px 0; border-top: 0; border-bottom: 1px solid var(--tp-line); }
+.tp-sekolah-kursus-faq { max-width: 820px; margin: 0 auto; display: grid; gap: 12px; }
+.tp-sekolah-kursus-faq__item { background: var(--tp-card, #fff); border: 1px solid var(--tp-line); border-radius: var(--tp-radius); padding: 0 22px; }
+.tp-sekolah-kursus-faq__item summary { cursor: pointer; list-style: none; padding: 20px 28px 20px 0; font-weight: 600; font-size: 18px; position: relative; color: var(--tp-ink); min-height: 48px; }
+.tp-sekolah-kursus-faq__item summary::-webkit-details-marker { display: none; }
+.tp-sekolah-kursus-faq__item summary::after { content: '+'; position: absolute; right: 0; top: 50%; transform: translateY(-50%); font-size: 26px; font-weight: 400; color: var(--tp-primary); }
+.tp-sekolah-kursus-faq__item[open] summary::after { content: '–'; }
+.tp-sekolah-kursus-faq__item p { padding-bottom: 20px; margin: 0; }
+.tp-sekolah-kursus-people { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 20px; }
+.tp-sekolah-kursus-person { text-align: center; padding: 26px 18px; background: var(--tp-card, #fff); border: 1px solid var(--tp-line); border-radius: var(--tp-radius); }
+.tp-sekolah-kursus-person p { margin: 0; }
+.tp-sekolah-kursus-person__ph { width: 84px; height: 84px; margin: 0 auto 16px; border-radius: 50%; background: var(--tp-surface-alt); border: 2px dashed var(--tp-primary); color: var(--tp-primary); display: flex; align-items: center; justify-content: center; font-size: 28px; }
+.tp-sekolah-kursus-note { margin-top: 20px; font-size: 14px; }
+.tp-sekolah-kursus-gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.tp-sekolah-kursus-gallery .tp-sekolah-kursus-img { aspect-ratio: 4 / 3; border-radius: calc(var(--tp-radius) * .8); }
+.tp-sekolah-kursus-gallery figure { margin: 0; }
+.tp-sekolah-kursus-gallery figcaption { margin-top: 8px; font-size: 14px; color: var(--tp-muted); }
+.tp-sekolah-kursus-band { background: var(--tp-primary); color: var(--tp-on-primary); padding: clamp(44px, 6vw, 72px) 0; }
+.tp-sekolah-kursus-band p { color: inherit; opacity: .88; margin: 0; }
+.tp-sekolah-kursus-band__in { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 24px; }
+.tp-sekolah-kursus-band .tp-sekolah-kursus-h2 { color: inherit; margin-bottom: 8px; }
+.tp-sekolah-kursus-contact { display: grid; grid-template-columns: .9fr 1.1fr; gap: clamp(32px, 6vw, 72px); align-items: start; }
+.tp-sekolah-kursus-contact__form { min-width: 0; }
+.tp-sekolah-kursus-info { list-style: none; margin: 28px 0 0; padding: 0; display: grid; gap: 14px; }
+.tp-sekolah-kursus-info li { display: grid; gap: 2px; padding-left: 16px; border-left: 3px solid var(--tp-primary); }
+.tp-sekolah-kursus-info strong { font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--tp-ink); }
+.tp-sekolah-kursus-info span { color: var(--tp-muted); }
+.tp-sekolah-kursus-hero { position: relative; overflow: hidden; }
+@media (max-width: 900px) {
+  .tp-sekolah-kursus-cols3, .tp-sekolah-kursus-cols4 { grid-template-columns: repeat(2, 1fr); }
+  .tp-sekolah-kursus-row, .tp-sekolah-kursus-contact { grid-template-columns: 1fr; }
+  .tp-sekolah-kursus-row--rev .tp-sekolah-kursus-row__media { order: 0; }
+  .tp-sekolah-kursus-gallery { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 600px) {
+  .tp-sekolah-kursus-root { font-size: 16px; }
+  .tp-sekolah-kursus-wrap { padding: 0 20px; }
+  .tp-sekolah-kursus-cols2, .tp-sekolah-kursus-cols3, .tp-sekolah-kursus-cols4, .tp-sekolah-kursus-gallery { grid-template-columns: 1fr; }
+  .tp-sekolah-kursus-actions { flex-direction: column; align-items: stretch; }
+  .tp-sekolah-kursus-band__in { flex-direction: column; align-items: stretch; text-align: center; }
+  .tp-sekolah-kursus-steps--v .tp-sekolah-kursus-step { gap: 16px; }
+}
+
+.tp-sekolah-kursus-hero { background: #1B2A5C; color: #fff; padding: clamp(56px, 9vw, 112px) 0 0; }
+.tp-sekolah-kursus-hero .tp-sekolah-kursus-wrap { text-align: center; }
+.tp-sekolah-kursus-hero .tp-sekolah-kursus-eyebrow { color: #FFD879; }
+.tp-sekolah-kursus-hero .tp-sekolah-kursus-h1 { max-width: 18ch; margin-left: auto; margin-right: auto; }
+.tp-sekolah-kursus-hero .tp-sekolah-kursus-lead { margin-left: auto; margin-right: auto; color: #D8DEF5; }
+.tp-sekolah-kursus-hero .tp-sekolah-kursus-actions { justify-content: center; }
+.tp-sekolah-kursus-hero .tp-sekolah-kursus-btn--primary { --tp-btn-bg: #F2B632; --tp-btn-fg: #151B3A; }
+.tp-sekolah-kursus-hero__art { margin-top: clamp(40px, 6vw, 72px); }
+.tp-sekolah-kursus-hero__art .tp-sekolah-kursus-img { border-radius: 28px 28px 0 0; aspect-ratio: 5 / 2; }
+.tp-sekolah-kursus-card { border-top: 6px solid #F2B632; }
+.tp-sekolah-kursus-icon { background: #1B2A5C; color: #FFD879; }
+.tp-sekolah-kursus-bento { display: grid; grid-template-columns: 1.3fr 1fr 1fr; grid-template-rows: auto auto; gap: 20px; }
+.tp-sekolah-kursus-bento__big { grid-row: span 2; padding: clamp(28px, 4vw, 48px); background: #1B2A5C; color: #fff; border-radius: var(--tp-radius); }
+.tp-sekolah-kursus-bento__big :where(p) { color: #D8DEF5; }
+.tp-sekolah-kursus-bento__big .tp-sekolah-kursus-eyebrow { color: #FFD879; }
+.tp-sekolah-kursus-bento__cell { padding: 28px; background: #fff; border: 1px solid var(--tp-line); border-radius: var(--tp-radius); }
+.tp-sekolah-kursus-bento__cell p { margin: 0; }
+.tp-sekolah-kursus-bento__cell--accent { grid-column: span 2; background: #F2B632; border-color: #F2B632; }
+.tp-sekolah-kursus-bento__cell--accent :where(p) { color: #2A2A3A; }
+@media (max-width: 900px) { .tp-sekolah-kursus-bento { grid-template-columns: 1fr; } .tp-sekolah-kursus-bento__big { grid-row: auto; } .tp-sekolah-kursus-bento__cell--accent { grid-column: auto; } }
