@@ -39,6 +39,63 @@ func (r *submissionRepository) withTx(ctx context.Context, scope coretenant.Scop
 	return tx.Commit(ctx)
 }
 
+// submissionColumns lists the columns scanned by scanSubmission, in order.
+const submissionColumns = `
+	id, landing_page_id, form_id, reference, status,
+	submitted_data, source_url, referrer, utm_source, utm_medium,
+	utm_campaign, utm_term, utm_content, ip_address_hash, user_agent,
+	idempotency_key, COALESCE(crm_lead_id::text, ''), crm_sync_status,
+	COALESCE(crm_sync_error, ''), submitted_at, updated_at
+`
+
+func scanSubmission(row pgx.Row, organizationID string) (domain.LandingSubmission, error) {
+	var submission domain.LandingSubmission
+	var sourceURL, referrer, utmSource, utmMedium, utmCampaign, utmTerm, utmContent, ipAddressHash, userAgent, idempotencyKey *string
+
+	err := row.Scan(
+		&submission.ID, &submission.LandingPageID, &submission.FormID, &submission.Reference, &submission.Status,
+		&submission.SubmittedData, &sourceURL, &referrer, &utmSource, &utmMedium,
+		&utmCampaign, &utmTerm, &utmContent, &ipAddressHash, &userAgent,
+		&idempotencyKey, &submission.CRMLeadID, &submission.CRMSyncStatus,
+		&submission.CRMSyncError, &submission.SubmittedAt, &submission.UpdatedAt,
+	)
+	if err != nil {
+		return domain.LandingSubmission{}, err
+	}
+	submission.OrganizationID = organizationID
+	if sourceURL != nil {
+		submission.SourceURL = *sourceURL
+	}
+	if referrer != nil {
+		submission.Referrer = *referrer
+	}
+	if utmSource != nil {
+		submission.UTMSource = *utmSource
+	}
+	if utmMedium != nil {
+		submission.UTMMedium = *utmMedium
+	}
+	if utmCampaign != nil {
+		submission.UTMCampaign = *utmCampaign
+	}
+	if utmTerm != nil {
+		submission.UTMTerm = *utmTerm
+	}
+	if utmContent != nil {
+		submission.UTMContent = *utmContent
+	}
+	if ipAddressHash != nil {
+		submission.IPAddressHash = *ipAddressHash
+	}
+	if userAgent != nil {
+		submission.UserAgent = *userAgent
+	}
+	if idempotencyKey != nil {
+		submission.IdempotencyKey = *idempotencyKey
+	}
+	return submission, nil
+}
+
 func (r *submissionRepository) Create(ctx context.Context, scope coretenant.Scope, params CreateSubmissionParams) (domain.LandingSubmission, error) {
 	if !scope.IsValid() {
 		return domain.LandingSubmission{}, coretenant.ErrInvalidScope
@@ -53,14 +110,7 @@ func (r *submissionRepository) Create(ctx context.Context, scope coretenant.Scop
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
 			$11, $12, $13, $14, $15, $16
-		) RETURNING
-			id, landing_page_id, form_id, reference, status,
-			submitted_data, source_url, referrer, utm_source, utm_medium,
-			utm_campaign, utm_term, utm_content, ip_address_hash, user_agent,
-			idempotency_key, submitted_at, updated_at
-	`
-
-	var submission domain.LandingSubmission
+		) RETURNING` + submissionColumns
 
 	submittedData := params.SubmittedData
 	if submittedData == nil {
@@ -72,10 +122,10 @@ func (r *submissionRepository) Create(ctx context.Context, scope coretenant.Scop
 		idempotencyKeyInput = params.IdempotencyKey
 	}
 
-	var sourceURL, referrer, utmSource, utmMedium, utmCampaign, utmTerm, utmContent, ipAddressHash, userAgent, idempotencyKey *string
-
+	var submission domain.LandingSubmission
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, query,
+		var err error
+		submission, err = scanSubmission(tx.QueryRow(ctx, query,
 			scope.OrganizationID(),
 			params.LandingPageID,
 			params.FormID,
@@ -92,29 +142,12 @@ func (r *submissionRepository) Create(ctx context.Context, scope coretenant.Scop
 			params.IPAddressHash,
 			params.UserAgent,
 			idempotencyKeyInput,
-		).Scan(
-			&submission.ID, &submission.LandingPageID, &submission.FormID, &submission.Reference, &submission.Status,
-			&submission.SubmittedData, &sourceURL, &referrer, &utmSource, &utmMedium,
-			&utmCampaign, &utmTerm, &utmContent, &ipAddressHash, &userAgent,
-			&idempotencyKey, &submission.SubmittedAt, &submission.UpdatedAt,
-		)
+		), scope.OrganizationID())
+		return err
 	})
-
 	if err != nil {
 		return domain.LandingSubmission{}, err
 	}
-	submission.OrganizationID = scope.OrganizationID()
-	if sourceURL != nil { submission.SourceURL = *sourceURL }
-	if referrer != nil { submission.Referrer = *referrer }
-	if utmSource != nil { submission.UTMSource = *utmSource }
-	if utmMedium != nil { submission.UTMMedium = *utmMedium }
-	if utmCampaign != nil { submission.UTMCampaign = *utmCampaign }
-	if utmTerm != nil { submission.UTMTerm = *utmTerm }
-	if utmContent != nil { submission.UTMContent = *utmContent }
-	if ipAddressHash != nil { submission.IPAddressHash = *ipAddressHash }
-	if userAgent != nil { submission.UserAgent = *userAgent }
-	if idempotencyKey != nil { submission.IdempotencyKey = *idempotencyKey }
-
 	return submission, nil
 }
 
@@ -123,43 +156,40 @@ func (r *submissionRepository) FindByID(ctx context.Context, scope coretenant.Sc
 		return domain.LandingSubmission{}, coretenant.ErrInvalidScope
 	}
 
-	query := `
-		SELECT
-			id, landing_page_id, form_id, reference, status,
-			submitted_data, source_url, referrer, utm_source, utm_medium,
-			utm_campaign, utm_term, utm_content, ip_address_hash, user_agent,
-			idempotency_key, submitted_at, updated_at
+	query := `SELECT` + submissionColumns + `
 		FROM landing_submissions
-		WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL
-	`
+		WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`
 
 	var submission domain.LandingSubmission
-	var sourceURL, referrer, utmSource, utmMedium, utmCampaign, utmTerm, utmContent, ipAddressHash, userAgent, idempotencyKey *string
-
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, query, id, scope.OrganizationID()).Scan(
-			&submission.ID, &submission.LandingPageID, &submission.FormID, &submission.Reference, &submission.Status,
-			&submission.SubmittedData, &sourceURL, &referrer, &utmSource, &utmMedium,
-			&utmCampaign, &utmTerm, &utmContent, &ipAddressHash, &userAgent,
-			&idempotencyKey, &submission.SubmittedAt, &submission.UpdatedAt,
-		)
+		var err error
+		submission, err = scanSubmission(tx.QueryRow(ctx, query, id, scope.OrganizationID()), scope.OrganizationID())
+		return err
 	})
-
 	if err != nil {
 		return domain.LandingSubmission{}, err
 	}
-	submission.OrganizationID = scope.OrganizationID()
-	if sourceURL != nil { submission.SourceURL = *sourceURL }
-	if referrer != nil { submission.Referrer = *referrer }
-	if utmSource != nil { submission.UTMSource = *utmSource }
-	if utmMedium != nil { submission.UTMMedium = *utmMedium }
-	if utmCampaign != nil { submission.UTMCampaign = *utmCampaign }
-	if utmTerm != nil { submission.UTMTerm = *utmTerm }
-	if utmContent != nil { submission.UTMContent = *utmContent }
-	if ipAddressHash != nil { submission.IPAddressHash = *ipAddressHash }
-	if userAgent != nil { submission.UserAgent = *userAgent }
-	if idempotencyKey != nil { submission.IdempotencyKey = *idempotencyKey }
+	return submission, nil
+}
 
+func (r *submissionRepository) FindByIdempotencyKey(ctx context.Context, scope coretenant.Scope, key string) (domain.LandingSubmission, error) {
+	if !scope.IsValid() {
+		return domain.LandingSubmission{}, coretenant.ErrInvalidScope
+	}
+
+	query := `SELECT` + submissionColumns + `
+		FROM landing_submissions
+		WHERE idempotency_key = $1 AND organization_id = $2 AND deleted_at IS NULL`
+
+	var submission domain.LandingSubmission
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var err error
+		submission, err = scanSubmission(tx.QueryRow(ctx, query, key, scope.OrganizationID()), scope.OrganizationID())
+		return err
+	})
+	if err != nil {
+		return domain.LandingSubmission{}, err
+	}
 	return submission, nil
 }
 
@@ -168,12 +198,7 @@ func (r *submissionRepository) List(ctx context.Context, scope coretenant.Scope,
 		return nil, coretenant.ErrInvalidScope
 	}
 
-	query := `
-		SELECT
-			id, landing_page_id, form_id, reference, status,
-			submitted_data, source_url, referrer, utm_source, utm_medium,
-			utm_campaign, utm_term, utm_content, ip_address_hash, user_agent,
-			idempotency_key, submitted_at, updated_at
+	query := `SELECT` + submissionColumns + `
 		FROM landing_submissions
 		WHERE organization_id = $1 AND deleted_at IS NULL
 	`
@@ -220,28 +245,10 @@ func (r *submissionRepository) List(ctx context.Context, scope coretenant.Scope,
 		defer rows.Close()
 
 		for rows.Next() {
-			var submission domain.LandingSubmission
-			var sourceURL, referrer, utmSource, utmMedium, utmCampaign, utmTerm, utmContent, ipAddressHash, userAgent, idempotencyKey *string
-			err := rows.Scan(
-				&submission.ID, &submission.LandingPageID, &submission.FormID, &submission.Reference, &submission.Status,
-				&submission.SubmittedData, &sourceURL, &referrer, &utmSource, &utmMedium,
-				&utmCampaign, &utmTerm, &utmContent, &ipAddressHash, &userAgent,
-				&idempotencyKey, &submission.SubmittedAt, &submission.UpdatedAt,
-			)
+			submission, err := scanSubmission(rows, scope.OrganizationID())
 			if err != nil {
 				return err
 			}
-			submission.OrganizationID = scope.OrganizationID()
-			if sourceURL != nil { submission.SourceURL = *sourceURL }
-			if referrer != nil { submission.Referrer = *referrer }
-			if utmSource != nil { submission.UTMSource = *utmSource }
-			if utmMedium != nil { submission.UTMMedium = *utmMedium }
-			if utmCampaign != nil { submission.UTMCampaign = *utmCampaign }
-			if utmTerm != nil { submission.UTMTerm = *utmTerm }
-			if utmContent != nil { submission.UTMContent = *utmContent }
-			if ipAddressHash != nil { submission.IPAddressHash = *ipAddressHash }
-			if userAgent != nil { submission.UserAgent = *userAgent }
-			if idempotencyKey != nil { submission.IdempotencyKey = *idempotencyKey }
 			submissions = append(submissions, submission)
 		}
 		return rows.Err()
@@ -271,40 +278,49 @@ func (r *submissionRepository) Update(ctx context.Context, scope coretenant.Scop
 
 	args = append(args, id, scope.OrganizationID())
 	query += fmt.Sprintf(" WHERE id = $%d AND organization_id = $%d AND deleted_at IS NULL RETURNING ", argCount, argCount+1)
-	query += `
-		id, landing_page_id, form_id, reference, status,
-		submitted_data, source_url, referrer, utm_source, utm_medium,
-		utm_campaign, utm_term, utm_content, ip_address_hash, user_agent,
-		idempotency_key, submitted_at, updated_at
-	`
+	query += submissionColumns
 
 	var submission domain.LandingSubmission
-	var sourceURL, referrer, utmSource, utmMedium, utmCampaign, utmTerm, utmContent, ipAddressHash, userAgent, idempotencyKey *string
-
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, query, args...).Scan(
-			&submission.ID, &submission.LandingPageID, &submission.FormID, &submission.Reference, &submission.Status,
-			&submission.SubmittedData, &sourceURL, &referrer, &utmSource, &utmMedium,
-			&utmCampaign, &utmTerm, &utmContent, &ipAddressHash, &userAgent,
-			&idempotencyKey, &submission.SubmittedAt, &submission.UpdatedAt,
-		)
+		var err error
+		submission, err = scanSubmission(tx.QueryRow(ctx, query, args...), scope.OrganizationID())
+		return err
 	})
-
 	if err != nil {
 		return domain.LandingSubmission{}, err
 	}
-	submission.OrganizationID = scope.OrganizationID()
-	if sourceURL != nil { submission.SourceURL = *sourceURL }
-	if referrer != nil { submission.Referrer = *referrer }
-	if utmSource != nil { submission.UTMSource = *utmSource }
-	if utmMedium != nil { submission.UTMMedium = *utmMedium }
-	if utmCampaign != nil { submission.UTMCampaign = *utmCampaign }
-	if utmTerm != nil { submission.UTMTerm = *utmTerm }
-	if utmContent != nil { submission.UTMContent = *utmContent }
-	if ipAddressHash != nil { submission.IPAddressHash = *ipAddressHash }
-	if userAgent != nil { submission.UserAgent = *userAgent }
-	if idempotencyKey != nil { submission.IdempotencyKey = *idempotencyKey }
+	return submission, nil
+}
 
+func (r *submissionRepository) UpdateCRMSync(ctx context.Context, scope coretenant.Scope, id string, p UpdateCRMSyncParams) (domain.LandingSubmission, error) {
+	if !scope.IsValid() {
+		return domain.LandingSubmission{}, coretenant.ErrInvalidScope
+	}
+
+	query := `
+		UPDATE landing_submissions
+		SET crm_lead_id = $1, crm_sync_status = $2, crm_sync_error = $3, updated_at = NOW()
+		WHERE id = $4 AND organization_id = $5 AND deleted_at IS NULL
+		RETURNING` + submissionColumns
+
+	var leadID interface{} = nil
+	if p.LeadID != "" {
+		leadID = p.LeadID
+	}
+	var syncErr interface{} = nil
+	if p.Error != "" {
+		syncErr = p.Error
+	}
+
+	var submission domain.LandingSubmission
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var err error
+		submission, err = scanSubmission(tx.QueryRow(ctx, query, leadID, p.Status, syncErr, id, scope.OrganizationID()), scope.OrganizationID())
+		return err
+	})
+	if err != nil {
+		return domain.LandingSubmission{}, err
+	}
 	return submission, nil
 }
 
@@ -343,7 +359,7 @@ func (r *submissionRepository) CreateNote(ctx context.Context, scope coretenant.
 			$1, $2, $3, $4
 		)
 	`
-	
+
 	var createdBy interface{} = nil
 	if params.CreatedBy != "" {
 		createdBy = params.CreatedBy

@@ -14,6 +14,7 @@ type DealListFilter struct {
 	StageID        string
 	Status         domain.DealStatus
 	OwnerUserID    string
+	ContactID      string
 	IncludeDeleted bool
 	Limit          int
 	Offset         int
@@ -32,6 +33,8 @@ type CreateDealParams struct {
 	ExpectedCloseDate *time.Time
 	OwnerUserID       string
 	CreatedBy         string
+	Description       string
+	DecisionMaker     string
 }
 
 type UpdateDealParams struct {
@@ -43,6 +46,8 @@ type UpdateDealParams struct {
 	Currency          *string
 	ExpectedCloseDate *time.Time
 	OwnerUserID       *string
+	Description       *string
+	DecisionMaker     *string
 	UpdatedBy         string
 }
 
@@ -59,4 +64,7 @@ type DealRepository interface {
 	CloseWon(context.Context, coretenant.Scope, string, string) (domain.Deal, error)
 	CloseLost(context.Context, coretenant.Scope, string, string, string) (domain.Deal, error)
 	ApproveDiscount(context.Context, coretenant.Scope, string, string, string) (domain.Deal, error)
+	// ListOpenByCompanyAndPipeline: deal berstatus open milik company di pipeline,
+	// terlama dulu.
+	ListOpenByCompanyAndPipeline(ctx context.Context, scope coretenant.Scope, companyID, pipelineID string) ([]domain.Deal, error)
 }

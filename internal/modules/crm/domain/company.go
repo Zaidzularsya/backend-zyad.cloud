@@ -16,9 +16,12 @@ type Company struct {
 	Notes          string
 	Tags           []string
 	OwnerUserID    string
-	CreatedBy      string
-	UpdatedBy      string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	DeletedAt      *time.Time
+	// TenantOrganizationID: workspace pelanggan yang tertaut ke company ini
+	// (diisi checkout self-serve); nil = tidak tertaut.
+	TenantOrganizationID *string
+	CreatedBy            string
+	UpdatedBy            string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	DeletedAt            *time.Time
 }

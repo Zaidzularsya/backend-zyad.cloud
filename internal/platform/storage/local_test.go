@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -57,5 +58,31 @@ func TestLocalProviderRejectsUnsafeKeys(t *testing.T) {
 		if _, err := provider.ResolvePublic(key); err == nil {
 			t.Errorf("ResolvePublic(%q) should be rejected", key)
 		}
+	}
+}
+
+func TestLocalProviderOpenPrivate(t *testing.T) {
+	p, err := NewLocalProvider(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "organizations/11111111-1111-1111-1111-111111111111/private/tenant-storage/q.pdf"
+	if err := p.Put(context.Background(), key, strings.NewReader("%PDF-1.4"), "application/pdf", 8); err != nil {
+		t.Fatal(err)
+	}
+	rc, _, err := p.Open(context.Background(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rc.Close()
+	b, _ := io.ReadAll(rc)
+	if string(b) != "%PDF-1.4" {
+		t.Fatalf("content = %q", b)
+	}
+	if _, _, err := p.Open(context.Background(), "../etc/passwd"); err == nil {
+		t.Fatal("path traversal must fail")
+	}
+	if _, _, err := p.Open(context.Background(), "organizations/11111111-1111-1111-1111-111111111111/private/tenant-storage/missing.pdf"); !errors.Is(err, ErrObjectNotFound) {
+		t.Fatalf("missing err = %v", err)
 	}
 }

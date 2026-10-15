@@ -40,27 +40,40 @@ type CompanyResponse struct {
 	Notes       string         `json:"notes,omitempty"`
 	Tags        []string       `json:"tags"`
 	OwnerUserID string         `json:"owner_user_id,omitempty"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	DeletedAt   *time.Time     `json:"deleted_at,omitempty"`
+	// TenantOrganizationID: workspace tertaut (checkout self-serve).
+	TenantOrganizationID *string `json:"tenant_organization_id,omitempty"`
+	// TenantOrganization: ringkasan workspace tertaut; null bila tidak ada.
+	TenantOrganization *WorkspaceSummary `json:"tenant_organization"`
+	CreatedAt          time.Time         `json:"created_at"`
+	UpdatedAt          time.Time         `json:"updated_at"`
+	DeletedAt          *time.Time        `json:"deleted_at,omitempty"`
+}
+
+// WorkspaceSummary meringkas workspace pelanggan yang tertaut ke company.
+type WorkspaceSummary struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Slug   string `json:"slug"`
+	Status string `json:"status"`
 }
 
 func CompanyFromDomain(c domain.Company) CompanyResponse {
 	return CompanyResponse{
-		ID:          c.ID,
-		Name:        c.Name,
-		Industry:    c.Industry,
-		Website:     c.Website,
-		Phone:       c.Phone,
-		Email:       c.Email,
-		Address:     c.Address,
-		SizeRange:   c.SizeRange,
-		Notes:       c.Notes,
-		Tags:        c.Tags,
-		OwnerUserID: c.OwnerUserID,
-		CreatedAt:   c.CreatedAt,
-		UpdatedAt:   c.UpdatedAt,
-		DeletedAt:   c.DeletedAt,
+		ID:                   c.ID,
+		Name:                 c.Name,
+		Industry:             c.Industry,
+		Website:              c.Website,
+		Phone:                c.Phone,
+		Email:                c.Email,
+		Address:              c.Address,
+		SizeRange:            c.SizeRange,
+		Notes:                c.Notes,
+		Tags:                 c.Tags,
+		OwnerUserID:          c.OwnerUserID,
+		TenantOrganizationID: c.TenantOrganizationID,
+		CreatedAt:            c.CreatedAt,
+		UpdatedAt:            c.UpdatedAt,
+		DeletedAt:            c.DeletedAt,
 	}
 }
 
@@ -121,27 +134,51 @@ func ContactListFromDomain(contacts []domain.Contact) []ContactResponse {
 }
 
 type LeadResponse struct {
-	ID                 string     `json:"id"`
-	ContactName        string     `json:"contact_name"`
-	CompanyName        string     `json:"company_name,omitempty"`
-	Email              string     `json:"email,omitempty"`
-	Phone              string     `json:"phone,omitempty"`
-	Source             string     `json:"source,omitempty"`
-	Status             string     `json:"status"`
-	Score              int        `json:"score"`
-	OwnerUserID        string     `json:"owner_user_id,omitempty"`
-	Notes              string     `json:"notes,omitempty"`
-	ConvertedContactID *string    `json:"converted_contact_id,omitempty"`
-	ConvertedCompanyID *string    `json:"converted_company_id,omitempty"`
-	ConvertedDealID    *string    `json:"converted_deal_id,omitempty"`
-	ConvertedAt        *time.Time `json:"converted_at,omitempty"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
-	DeletedAt          *time.Time `json:"deleted_at,omitempty"`
+	ID                 string         `json:"id"`
+	ContactName        string         `json:"contact_name"`
+	CompanyName        string         `json:"company_name,omitempty"`
+	Email              string         `json:"email,omitempty"`
+	Phone              string         `json:"phone,omitempty"`
+	Source             string         `json:"source,omitempty"`
+	Status             string         `json:"status"`
+	Score              int            `json:"score"`
+	OwnerUserID        string         `json:"owner_user_id,omitempty"`
+	OwnerName          string         `json:"owner_name,omitempty"`
+	Notes              string         `json:"notes,omitempty"`
+	JobTitle           string         `json:"job_title,omitempty"`
+	AnnualRevenue      *string        `json:"annual_revenue,omitempty"`
+	Address            map[string]any `json:"address"`
+	ConvertedContactID *string        `json:"converted_contact_id,omitempty"`
+	ConvertedCompanyID *string        `json:"converted_company_id,omitempty"`
+	ConvertedDealID    *string        `json:"converted_deal_id,omitempty"`
+	ConvertedAt        *time.Time     `json:"converted_at,omitempty"`
+	CreatedAt          time.Time      `json:"created_at"`
+	UpdatedAt          time.Time      `json:"updated_at"`
+	DeletedAt          *time.Time     `json:"deleted_at,omitempty"`
+
+	RequirementSummary string                `json:"requirement_summary,omitempty"`
+	BudgetEstimate     *string               `json:"budget_estimate,omitempty"`
+	TargetDate         *string               `json:"target_date,omitempty"` // YYYY-MM-DD
+	DecisionMaker      string                `json:"decision_maker,omitempty"`
+	DisqualifyReason   string                `json:"disqualify_reason,omitempty"`
+	DisqualifyNote     string                `json:"disqualify_note,omitempty"`
+	PlaybookRun        *LeadPlaybookResponse `json:"playbook_run,omitempty"`
 }
 
 func LeadFromDomain(l domain.Lead) LeadResponse {
+	var targetDate *string
+	if l.TargetDate != nil {
+		d := l.TargetDate.Format("2006-01-02")
+		targetDate = &d
+	}
 	return LeadResponse{
+		RequirementSummary: l.RequirementSummary,
+		BudgetEstimate:     l.BudgetEstimate,
+		TargetDate:         targetDate,
+		DecisionMaker:      l.DecisionMaker,
+		DisqualifyReason:   l.DisqualifyReason,
+		DisqualifyNote:     l.DisqualifyNote,
+		PlaybookRun:        leadPlaybookFromDomain(l.Playbook),
 		ID:                 l.ID,
 		ContactName:        l.ContactName,
 		CompanyName:        l.CompanyName,
@@ -151,7 +188,11 @@ func LeadFromDomain(l domain.Lead) LeadResponse {
 		Status:             string(l.Status),
 		Score:              l.Score,
 		OwnerUserID:        l.OwnerUserID,
+		OwnerName:          l.OwnerName,
 		Notes:              l.Notes,
+		JobTitle:           l.JobTitle,
+		AnnualRevenue:      l.AnnualRevenue,
+		Address:            l.Address,
 		ConvertedContactID: l.ConvertedContactID,
 		ConvertedCompanyID: l.ConvertedCompanyID,
 		ConvertedDealID:    l.ConvertedDealID,
@@ -234,6 +275,8 @@ type DealResponse struct {
 	ExpectedCloseDate  *time.Time `json:"expected_close_date,omitempty"`
 	Status             string     `json:"status"`
 	LostReason         string     `json:"lost_reason,omitempty"`
+	Description        string     `json:"description,omitempty"`
+	DecisionMaker      string     `json:"decision_maker,omitempty"`
 	OwnerUserID        string     `json:"owner_user_id,omitempty"`
 	DiscountPercent    *string    `json:"discount_percent,omitempty"`
 	DiscountApprovedBy string     `json:"discount_approved_by,omitempty"`
@@ -256,6 +299,8 @@ func DealFromDomain(d domain.Deal) DealResponse {
 		ExpectedCloseDate:  d.ExpectedCloseDate,
 		Status:             string(d.Status),
 		LostReason:         d.LostReason,
+		Description:        d.Description,
+		DecisionMaker:      d.DecisionMaker,
 		OwnerUserID:        d.OwnerUserID,
 		DiscountPercent:    d.DiscountPercent,
 		DiscountApprovedBy: d.DiscountApprovedBy,
@@ -275,19 +320,22 @@ func DealListFromDomain(deals []domain.Deal) []DealResponse {
 }
 
 type ActivityResponse struct {
-	ID                string     `json:"id"`
-	RelatedEntityType string     `json:"related_entity_type"`
-	RelatedEntityID   string     `json:"related_entity_id"`
-	Type              string     `json:"type"`
-	Subject           string     `json:"subject"`
-	Description       string     `json:"description,omitempty"`
-	DueAt             *time.Time `json:"due_at,omitempty"`
-	CompletedAt       *time.Time `json:"completed_at,omitempty"`
-	Status            string     `json:"status"`
-	AssigneeUserID    string     `json:"assignee_user_id,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	DeletedAt         *time.Time `json:"deleted_at,omitempty"`
+	ID                string                    `json:"id"`
+	RelatedEntityType string                    `json:"related_entity_type"`
+	RelatedEntityID   string                    `json:"related_entity_id"`
+	Type              string                    `json:"type"`
+	Subject           string                    `json:"subject"`
+	Description       string                    `json:"description,omitempty"`
+	DueAt             *time.Time                `json:"due_at,omitempty"`
+	CompletedAt       *time.Time                `json:"completed_at,omitempty"`
+	Status            string                    `json:"status"`
+	AssigneeUserID    string                    `json:"assignee_user_id,omitempty"`
+	OutcomeKey        string                    `json:"outcome_key,omitempty"`
+	Playbook          *ActivityPlaybookResponse `json:"playbook,omitempty"`
+	Metadata          map[string]any            `json:"metadata,omitempty"`
+	CreatedAt         time.Time                 `json:"created_at"`
+	UpdatedAt         time.Time                 `json:"updated_at"`
+	DeletedAt         *time.Time                `json:"deleted_at,omitempty"`
 }
 
 func ActivityFromDomain(a domain.Activity) ActivityResponse {
@@ -302,6 +350,9 @@ func ActivityFromDomain(a domain.Activity) ActivityResponse {
 		CompletedAt:       a.CompletedAt,
 		Status:            string(a.Status),
 		AssigneeUserID:    a.AssigneeUserID,
+		OutcomeKey:        a.OutcomeKey,
+		Playbook:          activityPlaybookFromDomain(a.Playbook),
+		Metadata:          a.Metadata,
 		CreatedAt:         a.CreatedAt,
 		UpdatedAt:         a.UpdatedAt,
 		DeletedAt:         a.DeletedAt,
@@ -324,34 +375,90 @@ type LineItemResponse struct {
 	DiscountPercent *string `json:"discount_percent,omitempty"`
 	LineTotal       string  `json:"line_total"`
 	Position        int     `json:"position"`
+	ProductID       *string `json:"product_id,omitempty"`
+	SKU             string  `json:"sku,omitempty"`
+	Unit            string  `json:"unit,omitempty"`
+	TaxPercent      string  `json:"tax_percent,omitempty"`
+	TaxAmount       string  `json:"tax_amount,omitempty"`
+	// Atribut harga: hanya diisi untuk item quotation (omitempty menjaga respons invoice).
+	ChargeType       string  `json:"charge_type,omitempty"`
+	BillingFrequency *string `json:"billing_frequency,omitempty"`
+	PaymentTiming    string  `json:"payment_timing,omitempty"`
 }
 
 type QuotationResponse struct {
-	ID              string             `json:"id"`
-	DealID          *string            `json:"deal_id,omitempty"`
-	ContactID       *string            `json:"contact_id,omitempty"`
-	CompanyID       *string            `json:"company_id,omitempty"`
-	QuotationNumber string             `json:"quotation_number"`
-	Status          string             `json:"status"`
-	ValidUntil      *time.Time         `json:"valid_until,omitempty"`
-	Subtotal        string             `json:"subtotal"`
-	DiscountTotal   string             `json:"discount_total"`
-	TaxTotal        string             `json:"tax_total"`
-	GrandTotal      string             `json:"grand_total"`
-	Currency        string             `json:"currency"`
-	Notes           string             `json:"notes,omitempty"`
-	SentAt          *time.Time         `json:"sent_at,omitempty"`
-	ApprovedAt      *time.Time         `json:"approved_at,omitempty"`
-	RejectedAt      *time.Time         `json:"rejected_at,omitempty"`
-	Items           []LineItemResponse `json:"items"`
-	CreatedAt       time.Time          `json:"created_at"`
-	UpdatedAt       time.Time          `json:"updated_at"`
-	DeletedAt       *time.Time         `json:"deleted_at,omitempty"`
+	ID              string     `json:"id"`
+	DealID          *string    `json:"deal_id,omitempty"`
+	ContactID       *string    `json:"contact_id,omitempty"`
+	CompanyID       *string    `json:"company_id,omitempty"`
+	QuotationNumber string     `json:"quotation_number"`
+	Status          string     `json:"status"`
+	ValidUntil      *time.Time `json:"valid_until,omitempty"`
+	Subtotal        string     `json:"subtotal"`
+	DiscountTotal   string     `json:"discount_total"`
+	TaxTotal        string     `json:"tax_total"`
+	GrandTotal      string     `json:"grand_total"`
+	// Rincian: sekali bayar, berulang per frekuensi, dan tagihan pertama.
+	OneTimeTotal      string             `json:"one_time_total"`
+	FirstInvoiceTotal string             `json:"first_invoice_total"`
+	RecurringTotals   map[string]string  `json:"recurring_totals"`
+	Currency          string             `json:"currency"`
+	Notes             string             `json:"notes,omitempty"`
+	SentAt            *time.Time         `json:"sent_at,omitempty"`
+	ApprovedAt        *time.Time         `json:"approved_at,omitempty"`
+	RejectedAt        *time.Time         `json:"rejected_at,omitempty"`
+	Items             []LineItemResponse `json:"items"`
+	CreatedAt         time.Time          `json:"created_at"`
+	UpdatedAt         time.Time          `json:"updated_at"`
+	DeletedAt         *time.Time         `json:"deleted_at,omitempty"`
+	RevisionOfID      *string            `json:"revision_of_id,omitempty"`
+	RevisionNo        int                `json:"revision_no"`
+	HasPDF            bool               `json:"has_pdf"`
+	PDFGeneratedAt    *time.Time         `json:"pdf_generated_at,omitempty"`
+}
+
+// QuotationDecisionResponse: hasil approve/reject + saran status deal untuk UI
+// ("won" bila quotation terhubung ke deal saat approve).
+type QuotationDecisionResponse struct {
+	QuotationResponse
+	SuggestDealStatus string `json:"suggest_deal_status"`
+}
+
+type QuotationSendResponse struct {
+	ID         string    `json:"id"`
+	Channel    string    `json:"channel"`
+	Mode       string    `json:"mode"`
+	Recipient  string    `json:"recipient"`
+	Status     string    `json:"status"`
+	Error      string    `json:"error,omitempty"`
+	SentByName string    `json:"sent_by_name,omitempty"`
+	SentAt     time.Time `json:"sent_at"`
+}
+
+func QuotationSendFromDomain(s domain.QuotationSend) QuotationSendResponse {
+	return QuotationSendResponse{ID: s.ID, Channel: string(s.Channel), Mode: string(s.Mode), Recipient: s.Recipient,
+		Status: string(s.Status), Error: s.Error, SentByName: s.SentByName, SentAt: s.SentAt}
+}
+
+type QuotationSendResultResponse struct {
+	Quotation QuotationResponse     `json:"quotation"`
+	Send      QuotationSendResponse `json:"send"`
+}
+
+type QuotationSummaryResponse struct {
+	Subject string `json:"subject"`
+	Text    string `json:"text"`
+	HTML    string `json:"html"`
 }
 
 func quotationItemsFromDomain(items []domain.QuotationItem) []LineItemResponse {
 	responses := make([]LineItemResponse, 0, len(items))
 	for _, item := range items {
+		var freq *string
+		if item.Pricing.Frequency != "" {
+			f := string(item.Pricing.Frequency)
+			freq = &f
+		}
 		responses = append(responses, LineItemResponse{
 			ID:              item.ID,
 			Description:     item.Description,
@@ -360,33 +467,53 @@ func quotationItemsFromDomain(items []domain.QuotationItem) []LineItemResponse {
 			DiscountPercent: item.DiscountPercent,
 			LineTotal:       item.LineTotal,
 			Position:        item.Position,
+			ProductID:       item.ProductID,
+			SKU:             item.SKU,
+			Unit:            item.Unit,
+			TaxPercent:      item.TaxPercent,
+			TaxAmount:       item.TaxAmount,
+
+			ChargeType:       string(item.Pricing.ChargeType),
+			BillingFrequency: freq,
+			PaymentTiming:    string(item.Pricing.PaymentTiming),
 		})
 	}
 	return responses
 }
 
 func QuotationFromDomain(q domain.Quotation) QuotationResponse {
+	recurring := make(map[string]string, len(q.RecurringTotals))
+	for f, v := range q.RecurringTotals {
+		recurring[string(f)] = v
+	}
 	return QuotationResponse{
-		ID:              q.ID,
-		DealID:          q.DealID,
-		ContactID:       q.ContactID,
-		CompanyID:       q.CompanyID,
-		QuotationNumber: q.QuotationNumber,
-		Status:          string(q.Status),
-		ValidUntil:      q.ValidUntil,
-		Subtotal:        q.Subtotal,
-		DiscountTotal:   q.DiscountTotal,
-		TaxTotal:        q.TaxTotal,
-		GrandTotal:      q.GrandTotal,
-		Currency:        q.Currency,
-		Notes:           q.Notes,
-		SentAt:          q.SentAt,
-		ApprovedAt:      q.ApprovedAt,
-		RejectedAt:      q.RejectedAt,
-		Items:           quotationItemsFromDomain(q.Items),
-		CreatedAt:       q.CreatedAt,
-		UpdatedAt:       q.UpdatedAt,
-		DeletedAt:       q.DeletedAt,
+		OneTimeTotal:      q.OneTimeTotal,
+		FirstInvoiceTotal: q.FirstInvoiceTotal,
+		RecurringTotals:   recurring,
+		ID:                q.ID,
+		DealID:            q.DealID,
+		ContactID:         q.ContactID,
+		CompanyID:         q.CompanyID,
+		QuotationNumber:   q.QuotationNumber,
+		Status:            string(q.Status),
+		ValidUntil:        q.ValidUntil,
+		Subtotal:          q.Subtotal,
+		DiscountTotal:     q.DiscountTotal,
+		TaxTotal:          q.TaxTotal,
+		GrandTotal:        q.GrandTotal,
+		Currency:          q.Currency,
+		Notes:             q.Notes,
+		SentAt:            q.SentAt,
+		ApprovedAt:        q.ApprovedAt,
+		RejectedAt:        q.RejectedAt,
+		Items:             quotationItemsFromDomain(q.Items),
+		CreatedAt:         q.CreatedAt,
+		UpdatedAt:         q.UpdatedAt,
+		DeletedAt:         q.DeletedAt,
+		RevisionOfID:      q.RevisionOfID,
+		RevisionNo:        q.RevisionNo,
+		HasPDF:            q.PDFAssetID != nil,
+		PDFGeneratedAt:    q.PDFGeneratedAt,
 	}
 }
 
@@ -394,76 +521,6 @@ func QuotationListFromDomain(quotations []domain.Quotation) []QuotationResponse 
 	items := make([]QuotationResponse, 0, len(quotations))
 	for _, q := range quotations {
 		items = append(items, QuotationFromDomain(q))
-	}
-	return items
-}
-
-type InvoiceResponse struct {
-	ID            string             `json:"id"`
-	QuotationID   *string            `json:"quotation_id,omitempty"`
-	DealID        *string            `json:"deal_id,omitempty"`
-	ContactID     *string            `json:"contact_id,omitempty"`
-	CompanyID     *string            `json:"company_id,omitempty"`
-	InvoiceNumber string             `json:"invoice_number"`
-	Status        string             `json:"status"`
-	IssueDate     *time.Time         `json:"issue_date,omitempty"`
-	DueDate       *time.Time         `json:"due_date,omitempty"`
-	Subtotal      string             `json:"subtotal"`
-	TaxTotal      string             `json:"tax_total"`
-	GrandTotal    string             `json:"grand_total"`
-	AmountPaid    string             `json:"amount_paid"`
-	PaidAt        *time.Time         `json:"paid_at,omitempty"`
-	Currency      string             `json:"currency"`
-	Items         []LineItemResponse `json:"items"`
-	CreatedAt     time.Time          `json:"created_at"`
-	UpdatedAt     time.Time          `json:"updated_at"`
-	DeletedAt     *time.Time         `json:"deleted_at,omitempty"`
-}
-
-func invoiceItemsFromDomain(items []domain.InvoiceItem) []LineItemResponse {
-	responses := make([]LineItemResponse, 0, len(items))
-	for _, item := range items {
-		responses = append(responses, LineItemResponse{
-			ID:              item.ID,
-			Description:     item.Description,
-			Quantity:        item.Quantity,
-			UnitPrice:       item.UnitPrice,
-			DiscountPercent: item.DiscountPercent,
-			LineTotal:       item.LineTotal,
-			Position:        item.Position,
-		})
-	}
-	return responses
-}
-
-func InvoiceFromDomain(inv domain.Invoice) InvoiceResponse {
-	return InvoiceResponse{
-		ID:            inv.ID,
-		QuotationID:   inv.QuotationID,
-		DealID:        inv.DealID,
-		ContactID:     inv.ContactID,
-		CompanyID:     inv.CompanyID,
-		InvoiceNumber: inv.InvoiceNumber,
-		Status:        string(inv.Status),
-		IssueDate:     inv.IssueDate,
-		DueDate:       inv.DueDate,
-		Subtotal:      inv.Subtotal,
-		TaxTotal:      inv.TaxTotal,
-		GrandTotal:    inv.GrandTotal,
-		AmountPaid:    inv.AmountPaid,
-		PaidAt:        inv.PaidAt,
-		Currency:      inv.Currency,
-		Items:         invoiceItemsFromDomain(inv.Items),
-		CreatedAt:     inv.CreatedAt,
-		UpdatedAt:     inv.UpdatedAt,
-		DeletedAt:     inv.DeletedAt,
-	}
-}
-
-func InvoiceListFromDomain(invoices []domain.Invoice) []InvoiceResponse {
-	items := make([]InvoiceResponse, 0, len(invoices))
-	for _, inv := range invoices {
-		items = append(items, InvoiceFromDomain(inv))
 	}
 	return items
 }
@@ -519,6 +576,7 @@ type LeadConversionResponse struct {
 	Lead    LeadResponse     `json:"lead"`
 	Contact ContactResponse  `json:"contact"`
 	Company *CompanyResponse `json:"company,omitempty"`
+	Deal    *DealResponse    `json:"deal,omitempty"`
 }
 
 func LeadConversionFromDomain(result domain.LeadConversionResult) LeadConversionResponse {
@@ -529,6 +587,215 @@ func LeadConversionFromDomain(result domain.LeadConversionResult) LeadConversion
 	if result.Company != nil {
 		companyResp := CompanyFromDomain(*result.Company)
 		resp.Company = &companyResp
+	}
+	if result.Deal != nil {
+		dealResp := DealFromDomain(*result.Deal)
+		resp.Deal = &dealResp
+	}
+	return resp
+}
+
+type LeadDealResponse struct {
+	Lead LeadResponse `json:"lead"`
+	Deal DealResponse `json:"deal"`
+}
+
+type MemberResponse struct {
+	UserID string `json:"user_id"`
+	Name   string `json:"name"`
+	Email  string `json:"email"`
+}
+
+func MemberListFromDomain(members []domain.OrganizationMember) []MemberResponse {
+	items := make([]MemberResponse, 0, len(members))
+	for _, m := range members {
+		items = append(items, MemberResponse{UserID: m.UserID, Name: m.Name, Email: m.Email})
+	}
+	return items
+}
+
+type LeadAttachmentResponse struct {
+	ID            string    `json:"id"`
+	LeadID        string    `json:"lead_id"`
+	AssetObjectID string    `json:"asset_object_id"`
+	Filename      string    `json:"filename"`
+	MimeType      string    `json:"mime_type"`
+	SizeBytes     int64     `json:"size_bytes"`
+	CreatedBy     string    `json:"created_by,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+func LeadAttachmentFromDomain(a domain.LeadAttachment) LeadAttachmentResponse {
+	return LeadAttachmentResponse{
+		ID:            a.ID,
+		LeadID:        a.LeadID,
+		AssetObjectID: a.AssetObjectID,
+		Filename:      a.Filename,
+		MimeType:      a.MimeType,
+		SizeBytes:     a.SizeBytes,
+		CreatedBy:     a.CreatedBy,
+		CreatedAt:     a.CreatedAt,
+	}
+}
+
+func LeadAttachmentListFromDomain(attachments []domain.LeadAttachment) []LeadAttachmentResponse {
+	items := make([]LeadAttachmentResponse, 0, len(attachments))
+	for _, a := range attachments {
+		items = append(items, LeadAttachmentFromDomain(a))
+	}
+	return items
+}
+
+type ContactAttachmentResponse struct {
+	ID            string    `json:"id"`
+	ContactID     string    `json:"contact_id"`
+	AssetObjectID string    `json:"asset_object_id"`
+	Filename      string    `json:"filename"`
+	MimeType      string    `json:"mime_type"`
+	SizeBytes     int64     `json:"size_bytes"`
+	CreatedBy     string    `json:"created_by,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+func ContactAttachmentFromDomain(a domain.ContactAttachment) ContactAttachmentResponse {
+	return ContactAttachmentResponse{
+		ID:            a.ID,
+		ContactID:     a.ContactID,
+		AssetObjectID: a.AssetObjectID,
+		Filename:      a.Filename,
+		MimeType:      a.MimeType,
+		SizeBytes:     a.SizeBytes,
+		CreatedBy:     a.CreatedBy,
+		CreatedAt:     a.CreatedAt,
+	}
+}
+
+func ContactAttachmentListFromDomain(attachments []domain.ContactAttachment) []ContactAttachmentResponse {
+	items := make([]ContactAttachmentResponse, 0, len(attachments))
+	for _, a := range attachments {
+		items = append(items, ContactAttachmentFromDomain(a))
+	}
+	return items
+}
+
+type PlaybookOutcomeResponse struct {
+	Key           string `json:"key"`
+	Label         string `json:"label"`
+	RequiredInput string `json:"required_input"`
+}
+
+type ActivityPlaybookResponse struct {
+	RunID          string                    `json:"run_id"`
+	StepKey        string                    `json:"step_key"`
+	StepName       string                    `json:"step_name"`
+	AttemptNo      int                       `json:"attempt_no"`
+	MaxAttempts    *int                      `json:"max_attempts,omitempty"`
+	FinalReview    bool                      `json:"final_review"`
+	ChannelActions []string                  `json:"channel_actions"`
+	Outcomes       []PlaybookOutcomeResponse `json:"outcomes"`
+}
+
+type PlaybookRunResponse struct {
+	ID     string  `json:"id"`
+	Status string  `json:"status"`
+	Result *string `json:"result,omitempty"`
+}
+
+type CompleteActivityResponse struct {
+	Activity     ActivityResponse     `json:"activity"`
+	Lead         *LeadResponse        `json:"lead,omitempty"`
+	NextActivity *ActivityResponse    `json:"next_activity,omitempty"`
+	Run          *PlaybookRunResponse `json:"run,omitempty"`
+}
+
+func activityPlaybookFromDomain(p *domain.ActivityPlaybookInfo) *ActivityPlaybookResponse {
+	if p == nil {
+		return nil
+	}
+	out := &ActivityPlaybookResponse{RunID: p.RunID, StepKey: p.StepKey, StepName: p.StepName, AttemptNo: p.AttemptNo,
+		MaxAttempts: p.MaxAttempts, FinalReview: p.FinalReview, ChannelActions: p.ChannelActions, Outcomes: []PlaybookOutcomeResponse{}}
+	for _, o := range p.Outcomes {
+		out.Outcomes = append(out.Outcomes, PlaybookOutcomeResponse{Key: o.Key, Label: o.Label, RequiredInput: string(o.RequiredInput)})
+	}
+	return out
+}
+
+func PlaybookRunFromDomain(r *domain.PlaybookRun) *PlaybookRunResponse {
+	if r == nil {
+		return nil
+	}
+	resp := &PlaybookRunResponse{ID: r.ID, Status: string(r.Status)}
+	if r.Result != nil {
+		s := string(*r.Result)
+		resp.Result = &s
+	}
+	return resp
+}
+
+type LeadPlaybookResponse struct {
+	RunID       string     `json:"run_id"`
+	Status      string     `json:"status"`
+	Result      *string    `json:"result,omitempty"`
+	StepKey     string     `json:"step_key,omitempty"`
+	StepName    string     `json:"step_name,omitempty"`
+	DueAt       *time.Time `json:"due_at,omitempty"`
+	AttemptNo   int        `json:"attempt_no,omitempty"`
+	FinalReview bool       `json:"final_review"`
+}
+
+func leadPlaybookFromDomain(p *domain.LeadPlaybookSummary) *LeadPlaybookResponse {
+	if p == nil {
+		return nil
+	}
+	out := &LeadPlaybookResponse{RunID: p.RunID, Status: string(p.Status), StepKey: p.StepKey, StepName: p.StepName,
+		DueAt: p.DueAt, AttemptNo: p.AttemptNo, FinalReview: p.FinalReview}
+	if p.Result != nil {
+		r := string(*p.Result)
+		out.Result = &r
+	}
+	return out
+}
+
+type LeadEventResponse struct {
+	ID          string    `json:"id"`
+	LeadID      string    `json:"lead_id"`
+	EventType   string    `json:"event_type"`
+	FromValue   string    `json:"from_value,omitempty"`
+	ToValue     string    `json:"to_value,omitempty"`
+	ActorUserID string    `json:"actor_user_id,omitempty"`
+	ActorName   string    `json:"actor_name,omitempty"`
+	FromName    string    `json:"from_name,omitempty"`
+	ToName      string    `json:"to_name,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+func LeadEventFromDomain(e domain.LeadEvent) LeadEventResponse {
+	return LeadEventResponse{ID: e.ID, LeadID: e.LeadID, EventType: string(e.EventType), FromValue: e.FromValue, ToValue: e.ToValue,
+		ActorUserID: e.ActorUserID, ActorName: e.ActorName, FromName: e.FromName, ToName: e.ToName, CreatedAt: e.CreatedAt}
+}
+
+type CRMSettingsResponse struct {
+	LeadPlaybookEnabled bool       `json:"lead_playbook_enabled"`
+	UpdatedAt           *time.Time `json:"updated_at,omitempty"`
+}
+
+type DealSourceLeadResponse struct {
+	ID          string `json:"id"`
+	ContactName string `json:"contact_name"`
+}
+
+// DealDetailResponse menyisipkan DealResponse supaya klien lama yang
+// membaca field deal di level atas tetap bekerja.
+type DealDetailResponse struct {
+	DealResponse
+	Pipeline   PipelineResponse        `json:"pipeline"`
+	SourceLead *DealSourceLeadResponse `json:"source_lead"`
+}
+
+func DealDetailFromDomain(d domain.DealDetail) DealDetailResponse {
+	resp := DealDetailResponse{DealResponse: DealFromDomain(d.Deal), Pipeline: PipelineFromDomain(d.Pipeline)}
+	if d.SourceLead != nil {
+		resp.SourceLead = &DealSourceLeadResponse{ID: d.SourceLead.ID, ContactName: d.SourceLead.ContactName}
 	}
 	return resp
 }

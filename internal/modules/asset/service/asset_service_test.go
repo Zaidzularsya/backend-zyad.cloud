@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -183,6 +184,27 @@ func TestAssetServiceUploadObjectRejectsInvalidMimeType(t *testing.T) {
 	}
 }
 
+func TestAssetServiceUploadObjectHonorsAllowedMimeTypesOverride(t *testing.T) {
+	docx := "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	allowed := map[string]bool{docx: true}
+
+	repo := &assetRepoStub{createResult: domain.AssetObject{ID: "asset-1"}}
+	svc := NewAssetService(repo, &landingMediaSumStub{}, WithAssetObjectStorage(&objectStoragePutStub{}))
+	if _, err := svc.UploadObject(context.Background(), mustAssetScope(t), UploadObjectParams{
+		Filename: "offer.docx", MimeType: docx, SizeBytes: 10, AllowedMimeTypes: allowed,
+	}, bytes.NewReader(make([]byte, 10))); err != nil {
+		t.Fatalf("UploadObject(docx, override) error = %v, want nil", err)
+	}
+
+	// The override replaces the default list rather than extending it.
+	_, err := svc.UploadObject(context.Background(), mustAssetScope(t), UploadObjectParams{
+		Filename: "photo.png", MimeType: "image/png", SizeBytes: 10, AllowedMimeTypes: allowed,
+	}, bytes.NewReader(make([]byte, 10)))
+	if !errors.Is(err, ErrInvalidMimeType) {
+		t.Fatalf("UploadObject(png, override) error = %v, want %v", err, ErrInvalidMimeType)
+	}
+}
+
 func TestAssetServiceUploadObjectRejectsFileTooLarge(t *testing.T) {
 	repo := &assetRepoStub{}
 	store := &objectStoragePutStub{}
@@ -221,3 +243,42 @@ func TestAssetServiceGetUsageSumsAcrossBothTables(t *testing.T) {
 }
 
 var _ storage.ObjectStorage = (*objectStoragePutStub)(nil)
+
+type objectStorageReadStub struct {
+	objectStoragePutStub
+	content string
+}
+
+func (s *objectStorageReadStub) Open(context.Context, string) (io.ReadCloser, string, error) {
+	return io.NopCloser(strings.NewReader(s.content)), "application/pdf", nil
+}
+
+func TestOpenObjectReadsOwnedPrivateObject(t *testing.T) {
+	own := "organizations/" + assetServiceOrganizationID + "/private/tenant-storage/q.pdf"
+	repo := &assetRepoStub{getResult: domain.AssetObject{ID: "a1", StorageKey: own}}
+	svc := NewAssetService(repo, &landingMediaSumStub{}, WithAssetObjectStorage(&objectStorageReadStub{content: "%PDF"}))
+	rc, obj, err := svc.OpenObject(context.Background(), mustAssetScope(t), "a1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rc.Close()
+	b, _ := io.ReadAll(rc)
+	if string(b) != "%PDF" || obj.ID != "a1" {
+		t.Fatalf("content=%q obj=%+v", b, obj)
+	}
+}
+
+func TestOpenObjectRejectsForeignKeyAndUnreadableStorage(t *testing.T) {
+	foreign := "organizations/22222222-2222-2222-2222-222222222222/private/tenant-storage/q.pdf"
+	svc := NewAssetService(&assetRepoStub{getResult: domain.AssetObject{ID: "a1", StorageKey: foreign}}, &landingMediaSumStub{},
+		WithAssetObjectStorage(&objectStorageReadStub{content: "x"}))
+	if _, _, err := svc.OpenObject(context.Background(), mustAssetScope(t), "a1"); err == nil {
+		t.Fatal("foreign object key must be rejected")
+	}
+	own := "organizations/" + assetServiceOrganizationID + "/private/tenant-storage/q.pdf"
+	svc = NewAssetService(&assetRepoStub{getResult: domain.AssetObject{ID: "a1", StorageKey: own}}, &landingMediaSumStub{},
+		WithAssetObjectStorage(&objectStoragePutStub{}))
+	if _, _, err := svc.OpenObject(context.Background(), mustAssetScope(t), "a1"); !errors.Is(err, ErrStorageReadUnsupported) {
+		t.Fatalf("err = %v, want ErrStorageReadUnsupported", err)
+	}
+}

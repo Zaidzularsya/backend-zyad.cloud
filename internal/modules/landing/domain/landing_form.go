@@ -47,9 +47,13 @@ type LandingForm struct {
 	SuccessMessage string
 	RedirectURL    string
 	IsActive       bool
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	Fields         []LandingFormField
+	// CreateCRMLead: submission form ini boleh dijadikan lead CRM.
+	CreateCRMLead bool
+	// LeadOwnerUserID: PIC lead; kosong -> pembuat halaman (landing_pages.created_by).
+	LeadOwnerUserID string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	Fields          []LandingFormField
 }
 
 type LandingFormField struct {

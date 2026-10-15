@@ -93,3 +93,16 @@ func TestBuildGrapesJSSnapshotSanitizesAndTags(t *testing.T) {
 		t.Fatalf("grapesSnapshotMarkup(nil) should be empty")
 	}
 }
+
+func TestSanitizeGrapesHTMLKeepsZyadConfig(t *testing.T) {
+	in := `<div data-zyad-slot="catalog-pricing" data-zyad-config='{"title":"Harga"}' onclick="x()" onmouseover="y()"></div>`
+	out := SanitizeGrapesHTML(in)
+	if !strings.Contains(out, `data-zyad-config=`) {
+		t.Fatalf("data-zyad-config dropped:\n%s", out)
+	}
+	for _, banned := range []string{"onclick", "onmouseover"} {
+		if strings.Contains(out, banned) {
+			t.Fatalf("sanitized HTML still contains %q:\n%s", banned, out)
+		}
+	}
+}

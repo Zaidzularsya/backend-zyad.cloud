@@ -24,17 +24,17 @@ type OnboardingStore interface {
 	CreateWorkspace(context.Context, repository.CreateWorkspaceParams) (repository.MembershipOrganization, error)
 }
 
-// DefaultSubscriptionProvisioner creates the default (free) subscription for
-// a freshly created workspace so billing lookups never 404 for new tenants.
-// The concrete implementation is composed in the app wiring layer.
-type DefaultSubscriptionProvisioner interface {
-	ProvisionDefaultSubscription(ctx context.Context, organizationID string) error
+// DefaultAccessProvisioner gives a freshly created workspace its free-tier
+// features (from the default catalog product) so feature guards pass for new
+// tenants. The concrete implementation is composed in the app wiring layer.
+type DefaultAccessProvisioner interface {
+	ProvisionDefaultAccess(ctx context.Context, organizationID string) error
 }
 
 type OnboardingService struct {
-	store                OnboardingStore
-	defaultSubscriptions DefaultSubscriptionProvisioner
-	now                  func() time.Time
+	store         OnboardingStore
+	defaultAccess DefaultAccessProvisioner
+	now           func() time.Time
 }
 
 type OnboardingMetadata struct {
@@ -47,10 +47,10 @@ func NewOnboardingService(store OnboardingStore) *OnboardingService {
 	return &OnboardingService{store: store, now: time.Now}
 }
 
-// SetDefaultSubscriptionProvisioner wires the optional post-onboarding
-// default subscription provisioning step.
-func (s *OnboardingService) SetDefaultSubscriptionProvisioner(provisioner DefaultSubscriptionProvisioner) {
-	s.defaultSubscriptions = provisioner
+// SetDefaultAccessProvisioner wires the optional post-onboarding default
+// access provisioning step.
+func (s *OnboardingService) SetDefaultAccessProvisioner(provisioner DefaultAccessProvisioner) {
+	s.defaultAccess = provisioner
 }
 
 func (s *OnboardingService) CreateWorkspace(
@@ -101,13 +101,12 @@ func (s *OnboardingService) CreateWorkspace(
 		return dto.CreateWorkspaceResponse{}, mapOnboardingError(err)
 	}
 	// Non-fatal: the workspace is already committed; a provisioning failure
-	// must not fail onboarding (retrying would hit a slug conflict). The
-	// RequestUpgrade safety net covers organizations left without a
-	// subscription here.
-	if s.defaultSubscriptions != nil {
-		if provisionErr := s.defaultSubscriptions.ProvisionDefaultSubscription(ctx, result.Organization.ID); provisionErr != nil {
+	// must not fail onboarding (retrying would hit a slug conflict). Calling the
+	// provisioner again once the default product exists repairs the workspace.
+	if s.defaultAccess != nil {
+		if provisionErr := s.defaultAccess.ProvisionDefaultAccess(ctx, result.Organization.ID); provisionErr != nil {
 			slog.Default().Error(
-				"provision default subscription after onboarding failed",
+				"provision default access after onboarding failed",
 				"organization_id", result.Organization.ID,
 				"error", provisionErr,
 			)

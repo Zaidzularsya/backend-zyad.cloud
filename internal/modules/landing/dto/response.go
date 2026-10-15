@@ -69,16 +69,18 @@ type SectionResponse struct {
 
 // FormResponse represents form specifications.
 type FormResponse struct {
-	ID             string         `json:"id"`
-	Name           string         `json:"name"`
-	Key            string         `json:"key"`
-	SubmitLabel    string         `json:"submit_label"`
-	SuccessMessage string         `json:"success_message"`
-	RedirectURL    *string        `json:"redirect_url,omitempty"`
-	IsActive       bool           `json:"is_active"`
-	Consent        map[string]any `json:"consent,omitempty"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
+	ID              string         `json:"id"`
+	Name            string         `json:"name"`
+	Key             string         `json:"key"`
+	SubmitLabel     string         `json:"submit_label"`
+	SuccessMessage  string         `json:"success_message"`
+	RedirectURL     *string        `json:"redirect_url,omitempty"`
+	IsActive        bool           `json:"is_active"`
+	CreateCRMLead   bool           `json:"create_crm_lead"`
+	LeadOwnerUserID *string        `json:"lead_owner_user_id"`
+	Consent         map[string]any `json:"consent,omitempty"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
 // FormFieldResponse represents form input field metadata.
@@ -109,6 +111,9 @@ type SubmissionResponse struct {
 	UTMCampaign   string         `json:"utm_campaign,omitempty"`
 	UTMTerm       string         `json:"utm_term,omitempty"`
 	UTMContent    string         `json:"utm_content,omitempty"`
+	CRMLeadID     *string        `json:"crm_lead_id"`
+	CRMSyncStatus string         `json:"crm_sync_status"`
+	CRMSyncError  *string        `json:"crm_sync_error"`
 	SubmittedAt   time.Time      `json:"submitted_at"`
 	UpdatedAt     time.Time      `json:"updated_at"`
 }

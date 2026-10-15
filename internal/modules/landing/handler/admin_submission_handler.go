@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 
 	coreerrors "zyad.cloud/internal/core/errors"
 	corehttp "zyad.cloud/internal/core/http"
@@ -33,6 +35,7 @@ func (h *AdminSubmissionHandler) RegisterRoutes(router *gin.RouterGroup, checker
 	group.GET("/:id", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.submission.read"), h.GetSubmission)
 	group.PATCH("/:id/status", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.submission.update"), h.UpdateStatus)
 	group.POST("/:id/notes", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.submission.update"), h.AddNote)
+	group.POST("/:id/crm-sync", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.submission.update"), h.RetryCRMSync)
 	group.DELETE("/:id", permissionmiddleware.RequireOrganizationOrGlobal(checker, "landing.submission.delete"), h.DeleteSubmission)
 }
 
@@ -152,6 +155,34 @@ func (h *AdminSubmissionHandler) AddNote(c *gin.Context) {
 	}
 
 	corehttp.OK(c, "Note added successfully", nil)
+}
+
+// RetryCRMSync re-runs the CRM sync of a stored submission (e.g. after the form
+// PIC was fixed). The response is the submission, shaped like GetSubmission.
+func (h *AdminSubmissionHandler) RetryCRMSync(c *gin.Context) {
+	tenantContext, err := coretenant.RequireContext(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	scope, err := coretenant.NewScope(tenantContext)
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	isPlatformOrg := tenantContext.OrganizationType() == coretenant.OrganizationTypePlatform
+
+	submission, err := h.submissionSvc.RetryCRMSync(c.Request.Context(), scope, c.Param("id"), isPlatformOrg)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			corehttp.Fail(c, coreerrors.New("SUBMISSION_NOT_FOUND", "submission was not found", http.StatusNotFound))
+			return
+		}
+		corehttp.Fail(c, err)
+		return
+	}
+
+	corehttp.OK(c, "Submission CRM sync retried successfully", submission)
 }
 
 func (h *AdminSubmissionHandler) DeleteSubmission(c *gin.Context) {

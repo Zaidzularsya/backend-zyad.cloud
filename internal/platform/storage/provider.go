@@ -25,6 +25,13 @@ type PublicObjectReader interface {
 	OpenPublic(ctx context.Context, key string) (content io.ReadCloser, contentType string, err error)
 }
 
+// PrivateObjectReader membuka object apa pun (termasuk non-public). Dipakai
+// backend untuk membaca object non-public (mis. snapshot PDF) setelah
+// kepemilikan tenant divalidasi pemanggil.
+type PrivateObjectReader interface {
+	Open(ctx context.Context, key string) (content io.ReadCloser, contentType string, err error)
+}
+
 // PresignedResult adalah hasil presign untuk satu operasi.
 type PresignedResult struct {
 	URL       string

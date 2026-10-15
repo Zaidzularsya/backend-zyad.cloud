@@ -1,0 +1,9 @@
+{
+  "slug": "company-profile",
+  "name": "Company profile",
+  "description": "Hero, tentang perusahaan, dan layanan.",
+  "category": "bisnis-jasa",
+  "sort_order": 110,
+  "platform_only": false,
+  "version": 1
+}

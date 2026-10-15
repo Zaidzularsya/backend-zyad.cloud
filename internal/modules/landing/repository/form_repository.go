@@ -47,12 +47,14 @@ func (r *formRepository) Create(ctx context.Context, scope coretenant.Scope, par
 	query := `
 		INSERT INTO landing_forms (
 			organization_id, landing_page_id, name, key, description,
-			submit_label, success_message, redirect_url, is_active, created_by
+			submit_label, success_message, redirect_url, is_active, created_by,
+			create_crm_lead, lead_owner_user_id
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 		) RETURNING
 			id, landing_page_id, name, key, description,
 			submit_label, success_message, redirect_url, is_active,
+			create_crm_lead, COALESCE(lead_owner_user_id::text, ''),
 			created_at, updated_at
 	`
 
@@ -60,6 +62,10 @@ func (r *formRepository) Create(ctx context.Context, scope coretenant.Scope, par
 	var createdBy interface{} = nil
 	if params.CreatedBy != "" {
 		createdBy = params.CreatedBy
+	}
+	var leadOwner interface{} = nil
+	if params.LeadOwnerUserID != "" {
+		leadOwner = params.LeadOwnerUserID
 	}
 
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
@@ -74,9 +80,12 @@ func (r *formRepository) Create(ctx context.Context, scope coretenant.Scope, par
 			params.RedirectURL,
 			params.IsActive,
 			createdBy,
+			params.CreateCRMLead,
+			leadOwner,
 		).Scan(
 			&form.ID, &form.LandingPageID, &form.Name, &form.Key, &form.Description,
 			&form.SubmitLabel, &form.SuccessMessage, &form.RedirectURL, &form.IsActive,
+			&form.CreateCRMLead, &form.LeadOwnerUserID,
 			&form.CreatedAt, &form.UpdatedAt,
 		)
 	})
@@ -97,6 +106,7 @@ func (r *formRepository) FindByID(ctx context.Context, scope coretenant.Scope, i
 		SELECT
 			id, landing_page_id, name, key, description,
 			submit_label, success_message, redirect_url, is_active,
+			create_crm_lead, COALESCE(lead_owner_user_id::text, ''),
 			created_at, updated_at
 		FROM landing_forms
 		WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL
@@ -108,6 +118,7 @@ func (r *formRepository) FindByID(ctx context.Context, scope coretenant.Scope, i
 		return tx.QueryRow(ctx, query, id, scope.OrganizationID()).Scan(
 			&form.ID, &form.LandingPageID, &form.Name, &form.Key, &form.Description,
 			&form.SubmitLabel, &form.SuccessMessage, &form.RedirectURL, &form.IsActive,
+			&form.CreateCRMLead, &form.LeadOwnerUserID,
 			&form.CreatedAt, &form.UpdatedAt,
 		)
 	})
@@ -128,6 +139,7 @@ func (r *formRepository) FindByKey(ctx context.Context, scope coretenant.Scope, 
 		SELECT
 			id, landing_page_id, name, key, description,
 			submit_label, success_message, redirect_url, is_active,
+			create_crm_lead, COALESCE(lead_owner_user_id::text, ''),
 			created_at, updated_at
 		FROM landing_forms
 		WHERE landing_page_id = $1 AND lower(key) = lower($2) AND organization_id = $3 AND deleted_at IS NULL
@@ -139,6 +151,7 @@ func (r *formRepository) FindByKey(ctx context.Context, scope coretenant.Scope, 
 		return tx.QueryRow(ctx, query, pageID, key, scope.OrganizationID()).Scan(
 			&form.ID, &form.LandingPageID, &form.Name, &form.Key, &form.Description,
 			&form.SubmitLabel, &form.SuccessMessage, &form.RedirectURL, &form.IsActive,
+			&form.CreateCRMLead, &form.LeadOwnerUserID,
 			&form.CreatedAt, &form.UpdatedAt,
 		)
 	})
@@ -159,6 +172,7 @@ func (r *formRepository) ListByPage(ctx context.Context, scope coretenant.Scope,
 		SELECT
 			id, landing_page_id, name, key, description,
 			submit_label, success_message, redirect_url, is_active,
+			create_crm_lead, COALESCE(lead_owner_user_id::text, ''),
 			created_at, updated_at
 		FROM landing_forms
 		WHERE landing_page_id = $1 AND organization_id = $2 AND deleted_at IS NULL
@@ -179,6 +193,7 @@ func (r *formRepository) ListByPage(ctx context.Context, scope coretenant.Scope,
 			err := rows.Scan(
 				&form.ID, &form.LandingPageID, &form.Name, &form.Key, &form.Description,
 				&form.SubmitLabel, &form.SuccessMessage, &form.RedirectURL, &form.IsActive,
+				&form.CreateCRMLead, &form.LeadOwnerUserID,
 				&form.CreatedAt, &form.UpdatedAt,
 			)
 			if err != nil {
@@ -236,6 +251,21 @@ func (r *formRepository) Update(ctx context.Context, scope coretenant.Scope, id 
 		query += fmt.Sprintf(", is_active = $%d", argCount)
 		argCount++
 	}
+	if params.CreateCRMLead != nil {
+		args = append(args, *params.CreateCRMLead)
+		query += fmt.Sprintf(", create_crm_lead = $%d", argCount)
+		argCount++
+	}
+	if params.LeadOwnerUserID != nil {
+		// "" mengosongkan PIC (kembali ke pembuat halaman).
+		var owner interface{} = nil
+		if *params.LeadOwnerUserID != "" {
+			owner = *params.LeadOwnerUserID
+		}
+		args = append(args, owner)
+		query += fmt.Sprintf(", lead_owner_user_id = $%d", argCount)
+		argCount++
+	}
 	if params.UpdatedBy != "" {
 		args = append(args, params.UpdatedBy)
 		query += fmt.Sprintf(", updated_by = $%d", argCount)
@@ -247,6 +277,7 @@ func (r *formRepository) Update(ctx context.Context, scope coretenant.Scope, id 
 	query += `
 		id, landing_page_id, name, key, description,
 		submit_label, success_message, redirect_url, is_active,
+		create_crm_lead, COALESCE(lead_owner_user_id::text, ''),
 		created_at, updated_at
 	`
 
@@ -256,6 +287,7 @@ func (r *formRepository) Update(ctx context.Context, scope coretenant.Scope, id 
 		return tx.QueryRow(ctx, query, args...).Scan(
 			&form.ID, &form.LandingPageID, &form.Name, &form.Key, &form.Description,
 			&form.SubmitLabel, &form.SuccessMessage, &form.RedirectURL, &form.IsActive,
+			&form.CreateCRMLead, &form.LeadOwnerUserID,
 			&form.CreatedAt, &form.UpdatedAt,
 		)
 	})

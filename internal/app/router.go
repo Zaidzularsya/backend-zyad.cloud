@@ -27,7 +27,7 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		middleware.CORS(),
 		middleware.RequestID(),
 		middleware.Recovery(deps.Logger),
-		gin.Logger(),
+		middleware.AccessLogger(),
 	)
 
 	router.GET("/healthz", func(c *gin.Context) {
@@ -99,14 +99,27 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.UserAuthHandler != nil {
 		deps.UserAuthHandler.RegisterRoutes(api)
 	}
-	if deps.PublicProductHandler != nil {
-		deps.PublicProductHandler.RegisterRoutes(api)
+	if deps.CatalogPublicListingHandler != nil {
+		deps.CatalogPublicListingHandler.RegisterRoutes(api)
 	}
 	// DOKU payment notifications authenticate via HMAC signature headers, so
 	// the route lives outside both the JWT-protected and tenant-resolved
 	// groups.
 	if deps.DokuWebhookHandler != nil {
 		deps.DokuWebhookHandler.RegisterRoutes(api)
+	}
+	// WAHA webhooks authenticate via X-Webhook-Hmac; same placement as DOKU.
+	if deps.WhatsAppWebhookHandler != nil {
+		deps.WhatsAppWebhookHandler.RegisterRoutes(api)
+	}
+
+	// Link penawaran publik: akses lewat token (bukan JWT/tenant host), dengan
+	// rate limit per IP dan per token. Detail di handler.
+	if deps.CRMPublicQuotationHandler != nil {
+		deps.CRMPublicQuotationHandler.RegisterRoutes(api)
+	}
+	if deps.ReceivablePublicInvoiceHandler != nil {
+		deps.ReceivablePublicInvoiceHandler.RegisterRoutes(api)
 	}
 
 	protected := api.Group("")
@@ -147,14 +160,8 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.PlatformProductHandler != nil {
 		deps.PlatformProductHandler.RegisterRoutes(protected)
 	}
-	if deps.PlatformSubscriptionHandler != nil {
-		deps.PlatformSubscriptionHandler.RegisterRoutes(protected)
-	}
-	if deps.PlatformBillingHandler != nil {
-		deps.PlatformBillingHandler.RegisterRoutes(protected)
-	}
-	if deps.TenantBillingHandler != nil {
-		deps.TenantBillingHandler.RegisterRoutes(protected)
+	if deps.CRMSelfServeHandler != nil {
+		deps.CRMSelfServeHandler.RegisterRoutes(protected)
 	}
 	if deps.NotificationTemplateHandler != nil {
 		deps.NotificationTemplateHandler.RegisterRoutes(protected)
@@ -183,6 +190,9 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	}
 	if deps.LandingAdminDocumentHandler != nil {
 		deps.LandingAdminDocumentHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
+	if deps.LandingAdminPageTemplateHandler != nil {
+		deps.LandingAdminPageTemplateHandler.RegisterRoutes(protected, deps.PermissionChecker)
 	}
 	if deps.LandingAdminBrandingHandler != nil {
 		deps.LandingAdminBrandingHandler.RegisterRoutes(protected, deps.PermissionChecker)
@@ -253,7 +263,7 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	// own organization are allowed in — the platform uses the same CRM to
 	// track its own sales/leads to prospective tenants) and
 	// RequireEntitlement("crm.enabled") (bypassed entirely for the platform
-	// organization, see SubscriptionGuardService.RequireFeature — platform
+	// organization, see EntitlementGuard.RequireFeature — platform
 	// never subscribes to a plan). Access within CRM is differentiated by
 	// permission grants, not organization type — see migration
 	// 000119_seed_crm_super_admin_permissions and
@@ -273,6 +283,21 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.CRMLeadHandler != nil {
 		deps.CRMLeadHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
 	}
+	if deps.CRMLeadAttachmentHandler != nil {
+		deps.CRMLeadAttachmentHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	}
+	if deps.CRMContactAttachmentHandler != nil {
+		deps.CRMContactAttachmentHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	}
+	if deps.CRMSettingsHandler != nil {
+		deps.CRMSettingsHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	}
+	if deps.CRMLeadDashboardHandler != nil {
+		deps.CRMLeadDashboardHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	}
+	if deps.CRMMemberHandler != nil {
+		deps.CRMMemberHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	}
 	if deps.CRMPipelineHandler != nil {
 		deps.CRMPipelineHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
 	}
@@ -285,11 +310,77 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.CRMQuotationHandler != nil {
 		deps.CRMQuotationHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
 	}
-	if deps.CRMInvoiceHandler != nil {
-		deps.CRMInvoiceHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	if deps.CRMSalesOrderHandler != nil {
+		deps.CRMSalesOrderHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	}
+	if deps.CRMDealOrdersHandler != nil {
+		deps.CRMDealOrdersHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
 	}
 	if deps.CRMIntegrationHandler != nil {
 		deps.CRMIntegrationHandler.RegisterRoutes(crmGroup, deps.PermissionChecker)
+	}
+
+	// Receivable: penagihan tenant ke pelanggannya. Aturan tenant sama dengan CRM (tenant customer atau
+	// organisasi platform), digerbang receivable.enabled (organisasi platform bypass lewat checker).
+	if deps.ReceivableInvoiceHandler != nil {
+		receivableGroup := protected.Group("/app/receivable")
+		receivableGroup.Use(
+			middleware.RequireActiveTenant(),
+			middleware.RequireCustomerOrPlatformTenant(),
+			middleware.RequireEntitlement(deps.CRMEntitlementChecker, "receivable.enabled"),
+		)
+		deps.ReceivableAccountHandler.RegisterRoutes(receivableGroup, deps.PermissionChecker)
+		deps.ReceivableInvoiceHandler.RegisterRoutes(receivableGroup, deps.PermissionChecker)
+		deps.ReceivablePaymentHandler.RegisterRoutes(receivableGroup, deps.PermissionChecker)
+		deps.ReceivableSettingsHandler.RegisterRoutes(receivableGroup, deps.PermissionChecker)
+		if deps.ReceivableContractHandler != nil {
+			deps.ReceivableContractHandler.RegisterRoutes(receivableGroup, deps.PermissionChecker)
+		}
+		if deps.ReceivableOverviewHandler != nil {
+			deps.ReceivableOverviewHandler.RegisterRoutes(receivableGroup, deps.PermissionChecker)
+		}
+	}
+
+	// Katalog produk tenant (dipakai quotation CRM dan invoice receivable). Aturan tenant sama
+	// dengan CRM; entitlement cukup salah satu dari crm.enabled / receivable.enabled.
+	if deps.CatalogProductHandler != nil {
+		catalogGroup := protected.Group("/app/catalog")
+		catalogGroup.Use(
+			middleware.RequireActiveTenant(),
+			middleware.RequireCustomerOrPlatformTenant(),
+			middleware.RequireAnyEntitlement(deps.CRMEntitlementChecker, "crm.enabled", "receivable.enabled"),
+		)
+		deps.CatalogProductHandler.RegisterRoutes(catalogGroup, deps.PermissionChecker)
+		deps.CatalogCategoryHandler.RegisterRoutes(catalogGroup, deps.PermissionChecker)
+		deps.CatalogFeatureHandler.RegisterRoutes(catalogGroup, deps.PermissionChecker)
+	}
+
+	// Email: each user's own mailboxes (CRM and receivable). Same tenant rules as CRM.
+	if deps.MailboxHandler != nil {
+		emailMiddleware := []gin.HandlerFunc{
+			middleware.RequireActiveTenant(),
+			middleware.RequireCustomerOrPlatformTenant(),
+			middleware.RequireAnyEntitlement(deps.CRMEntitlementChecker, "crm.enabled", "receivable.enabled"),
+		}
+		mailboxGroup := protected.Group("/app/mailboxes", emailMiddleware...)
+		emailGroup := protected.Group("/app/emails", emailMiddleware...)
+		deps.MailboxHandler.RegisterRoutes(mailboxGroup, emailGroup, deps.PermissionChecker)
+	}
+
+	// WhatsApp channel (WAHA). Same tenant rules as CRM: customer or platform
+	// organizations, gated by whatsapp.enabled (platform bypasses entitlement).
+	// The WAHA webhook receiver is public and registered separately.
+	whatsappGroup := protected.Group("/app/whatsapp")
+	whatsappGroup.Use(
+		middleware.RequireActiveTenant(),
+		middleware.RequireCustomerOrPlatformTenant(),
+		middleware.RequireEntitlement(deps.WhatsAppEntitlementChecker, "whatsapp.enabled"),
+	)
+	if deps.WhatsAppSessionHandler != nil {
+		deps.WhatsAppSessionHandler.RegisterRoutes(whatsappGroup, deps.PermissionChecker)
+	}
+	if deps.WhatsAppConversationHandler != nil {
+		deps.WhatsAppConversationHandler.RegisterRoutes(whatsappGroup, deps.PermissionChecker)
 	}
 
 	publicTenantMiddleware, err := middleware.ResolvePublicOrganization(

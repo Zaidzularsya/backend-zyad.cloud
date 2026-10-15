@@ -1,0 +1,9 @@
+{
+  "slug": "portfolio",
+  "name": "Portfolio / personal brand",
+  "description": "Perkenalan, karya pilihan, dan kontak untuk individu atau studio kecil.",
+  "category": "personal",
+  "sort_order": 130,
+  "platform_only": false,
+  "version": 1
+}

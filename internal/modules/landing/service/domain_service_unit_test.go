@@ -226,3 +226,7 @@ func TestDomainServiceListAllBindingsPassesThrough(t *testing.T) {
 		t.Fatalf("expected 2 bindings across all pages, got %d", len(bindings))
 	}
 }
+
+func (s *landingDomainPageRepoStub) SetHomepage(context.Context, coretenant.Scope, string) error {
+	return nil
+}

@@ -10,6 +10,7 @@ import (
 	netmail "net/mail"
 	"net/smtp"
 	"strings"
+	"syscall"
 	"time"
 
 	"zyad.cloud/internal/config"
@@ -41,6 +42,12 @@ type SMTPConfig struct {
 	From     string
 	Secure   bool
 	TLS      bool
+	// RequireTLS fails the connection when TLS is set but the server does
+	// not offer STARTTLS, instead of continuing in plaintext.
+	RequireTLS bool
+	// DialControl, when set, runs before each connection (e.g. to reject
+	// private addresses for user-supplied hosts).
+	DialControl func(network, address string, conn syscall.RawConn) error
 }
 
 type SMTPMailer struct {
@@ -140,7 +147,7 @@ func (m *SMTPMailer) Send(ctx context.Context, message Message) (Result, error) 
 }
 
 func dialSMTP(ctx context.Context, cfg SMTPConfig, address string) (*smtp.Client, error) {
-	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	dialer := &net.Dialer{Timeout: 10 * time.Second, Control: cfg.DialControl}
 	if cfg.Secure {
 		conn, err := tls.DialWithDialer(dialer, "tcp", address, &tls.Config{
 			ServerName: cfg.Host,
@@ -172,6 +179,9 @@ func dialSMTP(ctx context.Context, cfg SMTPConfig, address string) (*smtp.Client
 				_ = client.Close()
 				return nil, fmt.Errorf("smtp starttls: %w", err)
 			}
+		} else if cfg.RequireTLS {
+			_ = client.Close()
+			return nil, errors.New("smtp server does not support STARTTLS")
 		}
 	}
 

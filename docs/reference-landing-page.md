@@ -430,3 +430,75 @@ Deferred advanced:
 - Mengimplementasikan notification provider di Landing.
 - Menyimpan arbitrary executable JavaScript.
 - Memecah form, submission, branding, atau analytics menjadi module bisnis terpisah.
+
+## Renderer Shadow DOM (R5-S1)
+
+Halaman GrapesJS publik dan preview dirender di **shadow root** pada dokumen utama, bukan lagi `<iframe srcdoc>` sandbox. Backend tidak berubah; sumber: `docs/superpowers/specs/2026-10-07-landing-marketing-v2-design.md` §5 (K6, K7, K12).
+
+### Alur
+
+1. `GrapesPageRenderer.vue` memilih renderer menurut flag build `VITE_LANDING_RENDERER` (`shadow` default, `iframe` = rollback ke `GrapesPageFrame.vue`).
+2. `ShadowPageRenderer.vue` memasang shadow root pada host `.zy-page-host`, menyanitasi HTML dengan DOMPurify (konfigurasi identik dengan renderer iframe lama), menyuntikkan base stylesheet + CSS slot + CSS halaman yang ditulis ulang (`rewritePageCss`: `html`/`body` → `.zy-page`, `:root` → `:host`), dan me-hoist `@font-face` ke `<style data-zy-fonts>` di `document.head`.
+3. Sentinel `[data-zyad-slot]` di-mount sebagai komponen Vue asli lewat `<Teleport>` menurut `SLOT_REGISTRY` (`tenant-nav`, `tenant-footer`, `pricing-plans`).
+4. Klik link: `#anchor` → scroll di dalam shadow root; path same-origin yang punya route SPA → `router.push`; sisanya (modifier, `target=_blank`, `/api/`, file/path tanpa route, cross-origin) → perilaku browser.
+
+### Aturan komponen slot (shadow-safe)
+
+- Tanpa Tailwind dan tanpa `<style>` SFC (CSS SFC tidak masuk shadow root). CSS ditaruh di `*.slot.css` dan di-import `?inline`.
+- Nama kelas slot lama dipertahankan (`zyad-tenant-header*`, `zyad-tenant-footer*`, `zyad-pricing-plans*`) karena tenant mungkin menimpanya lewat CSS halaman. Slot baru memakai prefix `zy-slot-`.
+- Semua href/src lewat `safeHref`; warna lewat `safeColor`.
+
+### Rollback
+
+Build ulang frontend dengan `VITE_LANDING_RENDERER=iframe`, atau flip symlink `current` ke release sebelumnya.
+
+### Catatan risiko (K7)
+
+HTML tenant kini berada di dokumen utama, sementara token auth mode `bearer` ada di `localStorage`. Risiko ini diterima Product Owner (7 Okt 2026); pagar yang dipasang: sanitasi ganda (bluemonday di backend + DOMPurify di frontend) dan header CSP `script-src` di nginx SPA. Backlog: pentest dan cookie auth httpOnly.
+
+Keterbatasan yang diketahui:
+- `@font-face` tenant di-hoist ke `document.head` sehingga bersifat global; family yang sama dengan font SPA (mis. Inter) bisa menimpa font aplikasi selama halaman hidup.
+- Tanpa sandbox, inline `position:fixed; z-index` pada HTML tenant dapat menutupi UI SPA (terutama di preview).
+- `@container`/`@layer` pada CSS halaman tidak ditulis ulang; Back/Forward antar `#id` tidak melakukan scroll.
+
+## Slot Pricing Katalog (R5-S3)
+
+Blok GrapesJS "Pricing Katalog" menampilkan produk publik dari Sales → Produk di halaman marketing platform. Spec: `docs/superpowers/specs/2026-10-07-landing-marketing-v2-design.md` §6 (K1, K2).
+
+- **Sentinel:** `<div data-zyad-slot="catalog-pricing" data-zyad-config='{…}'>`. Harga dan fitur **tidak** disimpan di halaman; diambil saat render dari endpoint katalog publik. Sanitizer mengizinkan atribut `data-zyad-config`.
+- **Khusus org platform:** blok hanya terdaftar di editor bila `isPlatformOrganization`. Di halaman publik slot tidak merender apa pun dan tidak memanggil API bila `OrganizationType != "platform"` (juga di placeholder SSR).
+- **Config** (parse per field; nilai tidak valid jatuh ke default): `title` ≤120, `subtitle` ≤240, `categoryIds` (kosong = semua; kategori yang sudah dihapus diabaikan, jika hasil kosong dipakai semua), `defaultFrequency` (`monthly`|`annual` — nilai backend, bukan `yearly`), `featuredCode`, `showYearlySavings`, `enterpriseCard` (`points` ≤6×120), `contactHref` (lolos `safeHref`, bukan `#`; default `#konsultasi`).
+- **Hemat tahunan:** `round((1 − tahunan ÷ (bulanan × 12)) × 100)` dari `price_with_tax`; `null` bila salah satu varian tidak ada, harga 0, atau hasil ≤ 0.
+- **Tombol:** `checkout` → `/app/checkout?product=<id>` (tamu: lewat register dengan redirect); `free` → register atau dashboard; Hubungi sales / Enterprise → mengisi minat (`<listing> · <frekuensi>`) pada konteks halaman lalu scroll ke `contactHref` (`#id`), path internal, atau URL eksternal.
+- **SSR:** sentinel diganti placeholder statis (judul dari config + link "Lihat paket harga") hanya untuk org platform; judul di-escape.
+- **Catatan:** `#konsultasi` baru ada setelah form konsultasi (S4); sebelum itu klik "Hubungi sales" hanya mengisi minat.
+
+## Slot Form Konsultasi (R5-S4)
+
+Blok GrapesJS "Form Konsultasi" (kategori Conversion, tersedia untuk semua org; satu per halaman) memasang sentinel `<div data-zyad-slot="lead-form" data-zyad-config='{"form_id":"<uuid form>"}'>`. Slot publik `LeadFormSlot.vue` membaca form dari `Forms` di resolve.
+
+- **Form standar** (tombol "Buat form standar"): key `konsultasi` (akhiran `-2`, `-3` bila dipakai), submit "Kirim", sukses "Terima kasih! Tim kami akan menghubungi Anda dalam 1 hari kerja.", field `name`, `email`, `phone` (wajib), `company`, `company_size` (select), `interest`, `message`, `consent` (wajib).
+- **Perilaku:** validasi klien; honeypot `website`; tombol nonaktif saat kirim; `Idempotency-Key` dibuat per percobaan dan dipakai ulang untuk retry payload yang sama (key baru bila input berubah); `interest` terisi dari konteks halaman (mis. dari tombol "Hubungi sales" pricing katalog); `page_url` dan UTM ikut terkirim. BE selalu mewajibkan `consent=true`, jadi form tanpa field `consent` mendapat checkbox persetujuan bawaan.
+- **Redirect:** hanya `/path` internal atau `http(s)://`; selain itu diabaikan.
+- **Status sinkron CRM per submission:** `skipped | created | merged | failed`; lihat `docs/reference-crm.md` (Lead dari form landing). Admin melihat dan mengirim ulang di halaman **Submissions** (menu Landing; permission `landing.submission.read`/`update`). Keterbatasan BE: daftar tanpa total/pencarian (paginasi "Sebelumnya/Berikutnya").
+
+## Animasi (R5-S2)
+
+Sistem animasi halaman GrapesJS (MOTION 3). Spec: `docs/superpowers/specs/2026-10-07-landing-marketing-v2-design.md` §8. Murni frontend; backend tidak berubah (sanitizer sudah mengizinkan `class` dan `style`). Sumber: `frontend/src/features/landing/renderer/motion/` (`zy-motion.css`, `page-runtime.ts`) dan `builder/grapes/grapes.motion.ts`.
+
+- **Kelas** (satu kelompok = paling banyak satu kelas aktif lewat panel):
+  - Efek masuk: `zy-anim-fade-up|fade-in|zoom-in|slide-left|slide-right|blur-in|clip-reveal` (runtime menambah `is-in` sekali saat masuk viewport; geser 32 px, 16 px di bawah 768 px).
+  - Pengatur: `zy-delay-100` … `zy-delay-800`, `zy-dur-fast` (400 ms), `zy-dur-slow` (1200 ms; default 700 ms), `zy-stagger` (anak langsung +80 ms per indeks; hanya berlaku bila kontainer punya salah satu efek masuk di atas).
+  - Hero: `zy-anim-hero` (keyframes CSS saat load, tidak diamati runtime).
+  - Scroll: `zy-parallax-slow|med|fast` (×0.1/0.2/0.35), `zy-scale-in-scroll` (0,94 → 1), digerakkan `--zy-progress`.
+  - Interaksi: `zy-tilt` (maks 6°), `zy-hover-lift` (−4 px), `zy-hover-glow`.
+  - Ambient: `zy-aurora`, `zy-float`, `zy-text-shimmer`.
+  - Data: `zy-count`, `zy-marquee` + `zy-marquee__track`; blok mockup memakai `zy-flow` / `zy-flow__step` (siklus 8 s).
+- **Runtime** `createPageRuntime(contentRoot, env)` → `{ start, stop, replay, refresh }`, tanpa dependency: reveal (IntersectionObserver, threshold 0,15), stagger, counter (1,2 s, format angka Indonesia), marquee (isi digandakan sekali; klon `aria-hidden`, `inert`, tanpa `id`/`name`), serta parallax/scale-in (listener scroll ber-rAF) dan tilt (pointer). Parallax, tilt, dan scale-in hanya aktif bila `rich` = `(hover: hover) and (min-width: 768px)`.
+- **Kondisi `.zy-js`:** `start()` memasang kelas `zy-js` pada root konten. Semua state awal tersembunyi hanya berlaku di bawah `.zy-js` dan `:not(.is-in)`; tanpa runtime (JS gagal, crawler, SSR) konten tampil dalam state akhir. Tanpa `IntersectionObserver` semua elemen langsung `is-in`.
+- **Reduced motion:** `prefers-reduced-motion: reduce` → `start()` tidak memasang apa pun dan CSS mematikan animation/transition serta memaksa state akhir (termasuk hover-lift).
+- **Editor:** stylesheet disisipkan ke `<head>` kanvas dan runtime berjalan di `body` kanvas; semua kelas/atribut runtime ditulis langsung ke DOM kanvas sehingga tidak masuk `getHtml()`/`getCss()`/autosave (ekspor bersih). Kanvas aman diedit: elemen `zy-anim-*` (dan anak langsung `zy-stagger`) yang belum `is-in` dipaksa tampil lewat override CSS. Panel **Animasi** (sektor trait kustom) mengelola token kelas `zy-*` per kelompok. Tombol **▶ Putar animasi** memanggil `replay()` dan menyalakan `data-zy-replaying` pada body selama jendela 4 s (override dimatikan sementara agar efek masuk terlihat).
+- **Blok kategori "Animasi"** (enam, platform dan tenant): Hero Aurora, Marquee Logo / Integrasi, Statistik Counter, Bento Fitur, Langkah / Timeline, Mockup Alur Produk. Teks placeholder dalam kurung siku; tanpa angka, testimoni, atau nama merek karangan.
+- **Aturan kualitas:** satu `zy-aurora` per halaman (hanya blok Hero Aurora); headline LCP memakai `zy-anim-hero`, bukan efek masuk berbasis observer; hanya `transform`, `opacity`, `clip-path`, `filter` yang dianimasikan (pengecualian: `zy-text-shimmer` menganimasikan `background-position`); tanpa indigo/ungu.
+- **SSR:** tidak berubah. `GET /public/landing/render` menyajikan HTML tanpa kelas `zy-js`, jadi seluruh konten terlihat tanpa JS.
+- **Keterbatasan yang diketahui:** belum diuji di browser nyata (uji unit jsdom saja; QA Playwright di DEV menyusul); `zy-text-shimmer` non-compositor (6 s, hanya untuk frasa pendek); klon marquee dihapus saat `stop()` (mis. detach editor) dan dibuat ulang saat `start()`.

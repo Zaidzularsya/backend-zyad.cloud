@@ -2,11 +2,33 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/crm/domain"
+	"zyad.cloud/internal/shared/pricing"
 )
+
+var (
+	ErrQuotationLocked       = errors.New("quotation is not a draft")
+	ErrQuotationNotRevisable = errors.New("only sent, rejected or expired quotations can be revised")
+)
+
+// ReplaceQuotationItemsParams mengganti seluruh item draft beserta total header
+// yang sudah dihitung service.
+type ReplaceQuotationItemsParams struct {
+	Items         []QuotationItemInput
+	Subtotal      string
+	DiscountTotal string
+	TaxTotal      string
+	GrandTotal    string
+	UpdatedBy     string
+
+	OneTimeTotal      string
+	FirstInvoiceTotal string
+	RecurringTotals   map[pricing.Frequency]string
+}
 
 type QuotationListFilter struct {
 	Status         domain.QuotationStatus
@@ -27,6 +49,14 @@ type QuotationItemInput struct {
 	DiscountPercent string
 	LineTotal       string
 	Position        int
+	// Snapshot katalog (kosong untuk baris bebas).
+	ProductID  string
+	SKU        string
+	Unit       string
+	TaxPercent string
+	TaxAmount  string
+	Pricing    pricing.Attributes
+	Features   []domain.FeatureSnapshot
 }
 
 // CreateQuotationParams intentionally excludes OrganizationID. Implementations
@@ -44,8 +74,16 @@ type CreateQuotationParams struct {
 	GrandTotal      string
 	Currency        string
 	Notes           string
-	Items           []QuotationItemInput
-	CreatedBy       string
+	// Rincian total (lihat domain.Quotation).
+	OneTimeTotal      string
+	FirstInvoiceTotal string
+	RecurringTotals   map[pricing.Frequency]string
+	Items             []QuotationItemInput
+	CreatedBy         string
+	RevisionOfID      string
+	RevisionNo        int
+	// Channel "" = quotation sales; domain.QuotationChannelSelfServe untuk checkout self-serve.
+	Channel string
 }
 
 type UpdateQuotationParams struct {
@@ -69,4 +107,17 @@ type QuotationRepository interface {
 	Send(context.Context, coretenant.Scope, string, string) (domain.Quotation, error)
 	Approve(context.Context, coretenant.Scope, string, string) (domain.Quotation, error)
 	Reject(context.Context, coretenant.Scope, string, string) (domain.Quotation, error)
+	// ReplaceItems hanya untuk draft (ErrQuotationLocked selain itu).
+	ReplaceItems(ctx context.Context, scope coretenant.Scope, id string, p ReplaceQuotationItemsParams) (domain.Quotation, error)
+	// Revise menandai id superseded dan membuat draft baru dalam satu transaksi;
+	// hanya dari sent/rejected/expired (ErrQuotationNotRevisable). RevisionOfID diisi = id.
+	Revise(ctx context.Context, scope coretenant.Scope, id string, p CreateQuotationParams) (domain.Quotation, error)
+	// ExpireDue mengubah sent dengan valid_until < today menjadi expired.
+	ExpireDue(ctx context.Context, scope coretenant.Scope, today time.Time) (int64, error)
+	// SetPDFSnapshot menyimpan snapshot PDF final sekali; false bila sudah ada.
+	SetPDFSnapshot(ctx context.Context, scope coretenant.Scope, id, assetID string) (bool, error)
+	// FindSelfServeByDeal: quotation self-serve draft/approved milik deal, atau pgx.ErrNoRows.
+	FindSelfServeByDeal(ctx context.Context, scope coretenant.Scope, dealID string) (domain.Quotation, error)
+	// AcceptSelfServe: draft self-serve → approved; pgx.ErrNoRows bila bukan draft self-serve.
+	AcceptSelfServe(ctx context.Context, scope coretenant.Scope, id, updatedBy string) (domain.Quotation, error)
 }

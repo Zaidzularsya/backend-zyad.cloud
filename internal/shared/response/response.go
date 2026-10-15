@@ -13,6 +13,8 @@ type ErrorEnvelope struct {
 	Success bool   `json:"success"`
 	Code    string `json:"code,omitempty"`
 	Message string `json:"message"`
+	// Data memuat detail terstruktur opsional (mis. {"fields": [...]} pada validasi).
+	Data any `json:"data,omitempty"`
 }
 
 func JSON(c *gin.Context, status int, message string, data any, meta any) {
@@ -30,4 +32,9 @@ func Error(c *gin.Context, status int, code, message string) {
 		Code:    code,
 		Message: message,
 	})
+}
+
+// ErrorWithData seperti Error, ditambah detail terstruktur di "data".
+func ErrorWithData(c *gin.Context, status int, code, message string, data any) {
+	c.JSON(status, ErrorEnvelope{Success: false, Code: code, Message: message, Data: data})
 }

@@ -38,6 +38,12 @@
 ### Billing — invoice & payment (migration 000052–000053, TIDAK berubah oleh refactor)
 `billing_invoices`, `billing_invoice_items`, `billing_payments`, `billing_payment_events`
 
+### Receivable — penagihan tenant ke pelanggannya (migration 000144, Rilis 3 S3)
+`receivable_settings`, `receivable_document_counters`, `receivable_accounts`, `receivable_invoices`,
+`receivable_invoice_items`, `receivable_invoice_sends`, `receivable_payments` — semua `organization_id NOT NULL`
+dengan `apply_organization_rls` (tidak termasuk hitungan "Total" di bawah, yang mencatat cakupan domain billing saja).
+Beda dari `billing_invoices` (tagihan platform ke tenant). Detail: `docs/reference-receivable.md`.
+
 **Total: 52 tabel** (jumlah tabel domain bisnis billing tidak berubah — hanya 6 tabel di-rename/dipecah
 menjadi domain Product/Subscription, 4 tabel invoice/payment tetap). Migration 000045–000049 berisi seed
 role (`member`, `organization_owner`) dan seed permission tambahan — bukan tabel baru (lihat bagian Seed).
@@ -128,6 +134,10 @@ sebelum repository landing dipanggil.
 - **`billing_payment_events`**: unique `(provider, provider_event_id)` — idempotency untuk webhook event.
 - **`landing_submissions`**: unique `(organization_id, idempotency_key)` untuk mencegah submission ganda
   dari form yang sama.
+- **Sinkron form → CRM (migration `000155`, R5-S4)**: `landing_forms.create_crm_lead boolean NOT NULL DEFAULT true` dan
+  `landing_forms.lead_owner_user_id uuid NULL REFERENCES users(id) ON DELETE SET NULL` (PIC lead);
+  `landing_submissions.crm_lead_id uuid NULL`, `crm_sync_status varchar(20) NOT NULL DEFAULT 'skipped'`
+  (CHECK `skipped|created|merged|failed`), `crm_sync_error text NULL`. Aditif; baris lama mendapat default aman.
 - **Soft delete**: pola `deleted_at IS NULL` dipakai konsisten di `users`, `organizations`,
   `organization_domains`, dan sebagian besar tabel `landing_*` — index unique banyak yang partial
   (`WHERE deleted_at IS NULL`) agar slug/identifier bisa dipakai ulang setelah soft-delete.
@@ -198,3 +208,7 @@ terisi lewat migration 000061 (bukan lewat `cmd/seed`).
   koneksi database terpisah per tenant. Ini menjadikan audit filter manual/RLS di tabel `organization_*`
   dan `billing_*` (bagian 3 dan bagian 6 baris pertama) lebih prioritas, karena shared database adalah
   arsitektur yang benar-benar dipakai saat ini.
+
+## Timezone
+
+Sesi koneksi dikunci ke UTC dan semua `timestamp without time zone` berisi wall-clock UTC. Aturan lengkap, insiden, dan tech debt `timestamptz`: [`timezone-handling.md`](timezone-handling.md).

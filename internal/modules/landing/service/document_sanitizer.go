@@ -37,7 +37,7 @@ func buildGrapesHTMLPolicy() *bluemonday.Policy {
 	p.AllowAttrs("class", "id", "title", "role", "style", "dir", "lang").Globally()
 	// Tenant-chrome sentinel (Phase 5b live nav/footer substitution) + the
 	// per-page header presentation blob (Phase 8: sticky/variant/align/action).
-	p.AllowAttrs("data-zyad-slot", "data-zyad-header").Globally()
+	p.AllowAttrs("data-zyad-slot", "data-zyad-header", "data-zyad-config").Globally()
 	p.AllowAttrs(
 		"aria-label", "aria-hidden", "aria-expanded", "aria-controls",
 		"aria-describedby", "aria-labelledby", "aria-current",

@@ -142,3 +142,7 @@ func TestUpdateMenuItemAllowsValidDestinationChange(t *testing.T) {
 		t.Fatal("UpdateMenuItem() should reach repository when destination is valid")
 	}
 }
+
+func (f *fakeNavigationPageRepo) SetHomepage(context.Context, coretenant.Scope, string) error {
+	return nil
+}

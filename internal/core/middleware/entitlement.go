@@ -50,3 +50,44 @@ func RequireEntitlement(checker EntitlementChecker, featureKey string) gin.Handl
 		c.Next()
 	}
 }
+
+// RequireAnyEntitlement lolos bila salah satu feature aktif. Kalau semuanya
+// gagal, galat feature pertama dikembalikan (kode sama dengan RequireEntitlement).
+// Bypass organisasi platform ada di checker, sama seperti RequireEntitlement.
+func RequireAnyEntitlement(checker EntitlementChecker, featureKeys ...string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tenantContext, err := RequireTenantContext(c)
+		if err != nil {
+			corehttp.Fail(c, err)
+			c.Abort()
+			return
+		}
+
+		if checker == nil {
+			corehttp.Fail(c, coreerrors.New(
+				"ENTITLEMENT_CHECKER_REQUIRED",
+				"entitlement checker is required",
+				http.StatusInternalServerError,
+			))
+			c.Abort()
+			return
+		}
+
+		var firstErr error
+		for _, featureKey := range featureKeys {
+			err := checker.RequireFeature(c.Request.Context(), tenantContext.OrganizationID(), featureKey)
+			if err == nil {
+				c.Next()
+				return
+			}
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+		if firstErr == nil { // tanpa key: fail closed
+			firstErr = coreerrors.New("ENTITLEMENT_REQUIRED", "feature entitlement is required", http.StatusForbidden)
+		}
+		corehttp.Fail(c, firstErr)
+		c.Abort()
+	}
+}

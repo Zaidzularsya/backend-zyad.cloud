@@ -18,6 +18,11 @@ type ResolvedPage struct {
 	Snapshot     map[string]any
 	IsDraft      bool
 
+	// OrganizationType is "platform" or "customer", filled by the public
+	// handler from the verified tenant context (not by the resolver) so the
+	// renderer can gate platform-only slots such as catalog-pricing.
+	OrganizationType string
+
 	// Set only for pages authored with the GrapesJS builder. When Builder is
 	// "grapesjs" the renderer ignores Sections/Forms and uses HTML+CSS instead.
 	Builder string
@@ -76,6 +81,11 @@ type ResolvedMenuItem struct {
 type ResolverService interface {
 	// ResolveBySlug finds a published page (or draft if preview token valid) by its slug
 	ResolveBySlug(ctx context.Context, scope tenant.Scope, slug string, previewToken string) (ResolvedPage, error)
+
+	// ResolveHomepage serves the organization's published is_homepage page, or
+	// the "public-marketing" page when there is none (or it is not published).
+	// Never serves drafts: no preview token is accepted.
+	ResolveHomepage(ctx context.Context, scope tenant.Scope) (ResolvedPage, error)
 
 	// ResolveByDomain finds a published page by a custom domain
 	ResolveByDomain(ctx context.Context, scope tenant.Scope, customDomain string, previewToken string) (ResolvedPage, error)

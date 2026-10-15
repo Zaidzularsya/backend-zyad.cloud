@@ -22,6 +22,7 @@ type Config struct {
 	Discord      DiscordConfig
 	Security     SecurityConfig
 	Storage      StorageConfig
+	SelfServe    SelfServeConfig
 }
 
 var loadEnvOnce sync.Once
@@ -47,6 +48,7 @@ func Load() Config {
 		Discord:      LoadDiscord(),
 		Security:     LoadSecurity(),
 		Storage:      LoadStorage(),
+		SelfServe:    LoadSelfServe(),
 	}
 }
 
@@ -114,6 +116,18 @@ type SeedAdminConfig struct {
 	Role     string
 }
 
+// SelfServeConfig: aktor otomatis checkout self-serve (modul CRM).
+type SelfServeConfig struct {
+	BotEmail       string
+	DealOwnerEmail string // kosong → bot
+	// FreeProductSKU: SKU produk katalog platform yang fiturnya menjadi paket gratis workspace baru.
+	FreeProductSKU string
+	// GraceDays: masa tenggang setelah jatuh tempo sebelum workspace ditangguhkan (0–60).
+	GraceDays int
+	// GraceDaysInvalid: nilai SELF_SERVE_GRACE_DAYS di luar rentang/bukan angka, sehingga default dipakai.
+	GraceDaysInvalid bool
+}
+
 type HTTPConfig struct {
 	ReadTimeoutSeconds  int
 	WriteTimeoutSeconds int
@@ -139,6 +153,21 @@ type MailConfig struct {
 	From     string
 	Secure   bool
 	TLS      bool
+	// MailboxAllowPrivateHosts lets user-connected mailboxes (CRM email)
+	// use private/loopback mail servers. Development only: in production it
+	// would let users reach internal services through the SMTP client.
+	MailboxAllowPrivateHosts bool
+	// MailSyncIntervalSeconds: how often the worker polls every connected
+	// mailbox's INBOX over IMAP (Fase 3). Not realtime — IMAP IDLE would be,
+	// but needs one held connection per mailbox; polling is simpler to run
+	// for many tenants.
+	MailSyncIntervalSeconds int
+	// MailSyncInitialDays bounds how far back the first sync of a mailbox
+	// reaches (INBOX only; Sent is tracked from emails this app sends).
+	MailSyncInitialDays int
+	// MailSyncBatchLimit caps messages fetched per mailbox per sync pass, so
+	// one slow/huge mailbox cannot starve the others.
+	MailSyncBatchLimit int
 }
 
 type NotificationConfig struct {
@@ -175,9 +204,16 @@ type WhatsAppConfig struct {
 	Sender         string
 	CallbackURL    string
 	TimeoutSeconds int
-	TelegramBot    string
-	ForumChatID    string
-	TopikNews      string
+	// WebhookHMACKey is set as config.webhooks[].hmac.key on every WAHA session
+	// the app creates, and used to verify X-Webhook-Hmac on inbound webhooks.
+	WebhookHMACKey           string
+	Engine                   string
+	SendRatePerMinute        int
+	WorkerIntervalSeconds    int
+	ReconcileIntervalSeconds int
+	TelegramBot              string
+	ForumChatID              string
+	TopikNews                string
 }
 
 type DiscordConfig struct {

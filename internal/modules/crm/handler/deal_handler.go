@@ -81,6 +81,7 @@ func (h *DealHandler) List(c *gin.Context) {
 		StageID:     query.StageID,
 		Status:      domain.DealStatus(query.Status),
 		OwnerUserID: query.OwnerUserID,
+		ContactID:   query.ContactID,
 		Limit:       perPage,
 		Offset:      (page - 1) * perPage,
 	})
@@ -122,6 +123,8 @@ func (h *DealHandler) Create(c *gin.Context) {
 		Currency:          req.Currency,
 		ExpectedCloseDate: expectedCloseDate,
 		OwnerUserID:       req.OwnerUserID,
+		Description:       req.Description,
+		DecisionMaker:     req.DecisionMaker,
 		CreatedBy:         userID,
 	})
 	if err != nil {
@@ -143,13 +146,13 @@ func (h *DealHandler) Get(c *gin.Context) {
 		return
 	}
 
-	deal, err := h.svc.Get(c.Request.Context(), scope, c.Param("id"))
+	detail, err := h.svc.GetDetail(c.Request.Context(), scope, c.Param("id"))
 	if err != nil {
 		corehttp.Fail(c, err)
 		return
 	}
 
-	corehttp.OK(c, "success", dto.DealFromDomain(deal))
+	corehttp.OK(c, "success", dto.DealDetailFromDomain(detail))
 }
 
 func (h *DealHandler) Update(c *gin.Context) {
@@ -185,6 +188,8 @@ func (h *DealHandler) Update(c *gin.Context) {
 		Currency:          req.Currency,
 		ExpectedCloseDate: expectedCloseDate,
 		OwnerUserID:       req.OwnerUserID,
+		Description:       req.Description,
+		DecisionMaker:     req.DecisionMaker,
 		UpdatedBy:         userID,
 	})
 	if err != nil {

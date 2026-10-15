@@ -483,3 +483,24 @@ func (r *pipelineRepository) CountActive(ctx context.Context, scope coretenant.S
 	}
 	return total, nil
 }
+
+func (r *pipelineRepository) FindBySystemKey(ctx context.Context, scope coretenant.Scope, key string) (domain.Pipeline, error) {
+	if !scope.IsValid() {
+		return domain.Pipeline{}, coretenant.ErrInvalidScope
+	}
+	var pipeline domain.Pipeline
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var err error
+		pipeline, err = scanPipeline(tx.QueryRow(ctx, `SELECT `+pipelineColumns+` FROM crm_pipelines
+			WHERE organization_id = $1 AND system_key = $2 AND deleted_at IS NULL`, scope.OrganizationID(), key))
+		if err != nil {
+			return err
+		}
+		pipeline.Stages, err = loadStages(ctx, tx, scope.OrganizationID(), pipeline.ID)
+		return err
+	})
+	if err != nil {
+		return domain.Pipeline{}, err
+	}
+	return pipeline, nil
+}

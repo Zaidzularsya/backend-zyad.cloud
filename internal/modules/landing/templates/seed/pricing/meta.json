@@ -1,0 +1,9 @@
+{
+  "slug": "pricing",
+  "name": "Pricing",
+  "description": "Judul harga + block Pricing tenant (kelola paketnya lewat panel Konten).",
+  "category": "dasar",
+  "sort_order": 120,
+  "platform_only": false,
+  "version": 1
+}

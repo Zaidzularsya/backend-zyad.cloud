@@ -1,3 +1,5 @@
+> **DIGANTIKAN (R4-S5, Okt 2026):** plan, subscription, dan billing platform lama sudah dihapus. Mesin yang berlaku sekarang: katalog produk + contract + receivable + `organization_entitlements`. Lihat `docs/superpowers/specs/2026-10-06-self-serve-product-unification-design.md`. Dokumen ini disimpan sebagai riwayat.
+
 # Billing Plan Concept Reference
 
 > **Catatan riwayat (refactor domain-split)**: Dokumen ini adalah rujukan desain awal sebelum modul
@@ -24,6 +26,11 @@ Sumber konteks:
 - `docs/migration-guide.md`
 - Implementasi existing `internal/modules/organization`
 - Implementasi existing `internal/modules/landing`
+
+> **Catatan (Rilis 4 S3):** entitlement workspace kini bersumber dari **contract** (produk katalog platform → Sales Order → contract),
+> bukan dari `customer_subscriptions`. `organization_entitlements` mendapat source `contract` dan `default`; guard tidak lagi
+> memeriksa subscription. Konsep Plan/Subscription di dokumen ini berlaku untuk workspace lama sampai Rilis 4 S5. Lihat
+> `docs/reference-crm.md` bagian "Tautan workspace & akses dari contract".
 
 ## Overview
 

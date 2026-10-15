@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/crm/domain"
@@ -29,6 +30,8 @@ type CreateCompanyParams struct {
 	Tags        []string
 	OwnerUserID string
 	CreatedBy   string
+	// TenantOrganizationID menautkan company ke workspace saat dibuat (atomik dengan insert).
+	TenantOrganizationID string
 }
 
 type UpdateCompanyParams struct {
@@ -48,10 +51,21 @@ type UpdateCompanyParams struct {
 // CompanyRepository is the tenant-owned data contract. Every method requires
 // a verified immutable scope and row lookups include both scope and resource ID.
 type CompanyRepository interface {
+	// FindCandidatesByName: kandidat kasar untuk pengecekan duplikat
+	// (lower(name) mengandung needle). needle sudah lowercase.
+	FindCandidatesByName(ctx context.Context, scope coretenant.Scope, needle string, limit int) ([]domain.Company, error)
 	Create(context.Context, coretenant.Scope, CreateCompanyParams) (domain.Company, error)
 	FindByID(context.Context, coretenant.Scope, string) (domain.Company, error)
 	List(context.Context, coretenant.Scope, CompanyListFilter) ([]domain.Company, int64, error)
 	Update(context.Context, coretenant.Scope, string, UpdateCompanyParams) (domain.Company, error)
 	Delete(context.Context, coretenant.Scope, string, string) error
 	Restore(context.Context, coretenant.Scope, string, string) error
+	// FindByTenantOrganization mengembalikan company yang tertaut ke workspace
+	// tenantOrgID, atau pgx.ErrNoRows.
+	FindByTenantOrganization(ctx context.Context, scope coretenant.Scope, tenantOrgID string) (domain.Company, error)
+	// SetTenantOrganization menautkan company ke workspace (tenantOrgID kosong = melepas tautan); ErrWorkspaceAlreadyLinked
+	// bila workspace itu sudah tertaut ke company lain di org yang sama.
+	SetTenantOrganization(ctx context.Context, scope coretenant.Scope, companyID, tenantOrgID, updatedBy string) (domain.Company, error)
 }
+
+var ErrWorkspaceAlreadyLinked = errors.New("workspace already linked to another company")

@@ -3,7 +3,6 @@ package app
 import (
 	"zyad.cloud/internal/modules/account"
 	"zyad.cloud/internal/modules/asset"
-	"zyad.cloud/internal/modules/billing"
 	"zyad.cloud/internal/modules/contract"
 	"zyad.cloud/internal/modules/dashboard"
 	"zyad.cloud/internal/modules/mikrotik"
@@ -23,7 +22,6 @@ import (
 func registerModuleRoutes(router gin.IRoutes) {
 	account.RegisterRoutes(router)
 	asset.RegisterRoutes(router)
-	billing.RegisterRoutes(router)
 	contract.RegisterRoutes(router)
 	dashboard.RegisterRoutes(router)
 	mikrotik.RegisterRoutes(router)

@@ -17,6 +17,10 @@ type UploadObjectParams struct {
 	Class     domain.ObjectClass
 	Label     string
 	CreatedBy string
+	// AllowedMimeTypes menggantikan daftar default (JPG/PNG/WEBP/PDF) untuk
+	// pemanggil yang butuh tipe lain, mis. lampiran email. Key lowercase;
+	// nil = daftar default.
+	AllowedMimeTypes map[string]bool
 }
 
 type DownloadResult struct {
@@ -39,6 +43,8 @@ type AssetService interface {
 	// GetUsage menjumlahkan pemakaian storage tenant gabungan (asset_objects +
 	// landing_media_assets) dan, kalau tersedia, limit kuotanya.
 	GetUsage(ctx context.Context, scope coretenant.Scope) (StorageUsage, error)
+	// OpenObject membaca isi object privat setelah kepemilikan tenant divalidasi.
+	OpenObject(ctx context.Context, scope coretenant.Scope, id string) (io.ReadCloser, domain.AssetObject, error)
 }
 
 // LandingMediaSumRepository adalah subset kecil dari
@@ -53,7 +59,7 @@ type LandingMediaSumRepository interface {
 // sebelum upload maupun untuk endpoint platform yang menampilkan limit ke
 // super admin.
 //
-// Storage TIDAK memakai pola AssetQuotaGuard/SubscriptionGuardService penuh
+// Storage TIDAK memakai pola AssetQuotaGuard/EntitlementGuard penuh
 // seperti landing.max_pages (yang mewajibkan subscription aktif + entitlement
 // row, gagal keras kalau tidak ada) — feature key storage.max_bytes ini baru,
 // belum ada di plan manapun, jadi kalau dipaksa lewat RequireQuotaValue,

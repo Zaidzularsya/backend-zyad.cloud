@@ -58,6 +58,44 @@ func (r *resolverRepository) ResolveBySlug(ctx context.Context, scope coretenant
 	return page, nil
 }
 
+func (r *resolverRepository) ResolveHomepage(ctx context.Context, scope coretenant.Scope) (domain.LandingPage, error) {
+	query := `
+		SELECT
+			id, organization_id, name, title, slug, page_type, status,
+			visibility, password_hash, seo, settings, locale, timezone,
+			is_homepage, is_template, created_by, created_at, updated_at, builder
+		FROM landing_pages
+		WHERE organization_id = $1
+			AND is_homepage = true
+			AND deleted_at IS NULL
+			AND is_template = false
+			AND status <> 'archived'
+		LIMIT 1
+	`
+
+	var page domain.LandingPage
+	var passwordHash *string
+	var createdBy *string
+	err := r.within(ctx, scope, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, query, scope.OrganizationID()).Scan(
+			&page.ID, &page.OrganizationID, &page.Name, &page.Title, &page.Slug,
+			&page.Type, &page.Status, &page.Visibility, &passwordHash,
+			&page.SEO, &page.Settings, &page.Locale, &page.Timezone, &page.IsHomepage, &page.IsTemplate,
+			&createdBy, &page.CreatedAt, &page.UpdatedAt, &page.Builder,
+		)
+	})
+	if err != nil {
+		return domain.LandingPage{}, err
+	}
+	if passwordHash != nil {
+		page.PasswordHash = *passwordHash
+	}
+	if createdBy != nil {
+		page.CreatedBy = *createdBy
+	}
+	return page, nil
+}
+
 func (r *resolverRepository) ResolveByDomain(ctx context.Context, scope coretenant.Scope, customDomain string) (domain.LandingPage, error) {
 	// Explicit page binding wins. When no binding exists, the tenant primary domain
 	// falls back to the published homepage so first-domain setup works out of the box.
@@ -156,6 +194,7 @@ func (r *resolverRepository) ResolveForms(ctx context.Context, scope coretenant.
 		SELECT
 			id, landing_page_id, name, key, description,
 			submit_label, success_message, redirect_url, is_active,
+			create_crm_lead, COALESCE(lead_owner_user_id::text, ''),
 			created_at, updated_at
 		FROM landing_forms
 		WHERE landing_page_id = $1 AND deleted_at IS NULL
@@ -175,6 +214,7 @@ func (r *resolverRepository) ResolveForms(ctx context.Context, scope coretenant.
 			err := rows.Scan(
 				&form.ID, &form.LandingPageID, &form.Name, &form.Key, &form.Description,
 				&form.SubmitLabel, &form.SuccessMessage, &form.RedirectURL, &form.IsActive,
+				&form.CreateCRMLead, &form.LeadOwnerUserID,
 				&form.CreatedAt, &form.UpdatedAt,
 			)
 			if err != nil {

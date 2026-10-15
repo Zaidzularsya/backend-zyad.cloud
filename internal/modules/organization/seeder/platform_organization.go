@@ -12,13 +12,10 @@ import (
 	"zyad.cloud/internal/platform/database"
 )
 
-const internalEntitlementFeatureKey = "platform.internal"
-
 type PlatformOrganizationResult struct {
 	OrganizationID string
 	OwnerUserID    string
 	MembershipID   string
-	EntitlementID  string
 	DomainIDs      []string
 }
 
@@ -82,15 +79,6 @@ func SeedPlatformOrganization(
 		return PlatformOrganizationResult{}, err
 	}
 
-	entitlementID, err := upsertInternalPlanEntitlement(
-		ctx,
-		tx,
-		organizationID,
-		ownerUserID,
-	)
-	if err != nil {
-		return PlatformOrganizationResult{}, err
-	}
 	domainIDs, err := upsertPlatformDomains(
 		ctx,
 		tx,
@@ -109,7 +97,6 @@ func SeedPlatformOrganization(
 		OrganizationID: organizationID,
 		OwnerUserID:    ownerUserID,
 		MembershipID:   membershipID,
-		EntitlementID:  entitlementID,
 		DomainIDs:      domainIDs,
 	}, nil
 }
@@ -351,79 +338,6 @@ func assignPlatformOwnerRole(
 		return fmt.Errorf("assign platform owner role: %w", err)
 	}
 	return nil
-}
-
-func upsertInternalPlanEntitlement(
-	ctx context.Context,
-	tx pgx.Tx,
-	organizationID string,
-	actorUserID string,
-) (string, error) {
-	var entitlementID string
-	err := tx.QueryRow(ctx, `
-		SELECT id::text
-		FROM organization_entitlements
-		WHERE organization_id = $1::uuid
-			AND feature_key = $2
-			AND source = 'plan'
-			AND source_reference = 'platform-internal'
-		ORDER BY version DESC, updated_at DESC
-		LIMIT 1
-		FOR UPDATE
-	`, organizationID, internalEntitlementFeatureKey).Scan(&entitlementID)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return "", fmt.Errorf("upsert internal platform entitlement: %w", err)
-	}
-	if entitlementID != "" {
-		if _, err := tx.Exec(ctx, `
-			UPDATE organization_entitlements
-			SET
-				status = 'active',
-				limits = '{}'::jsonb,
-				effective_until = NULL,
-				reason = 'internal platform entitlement',
-				updated_by = $2::uuid,
-				updated_at = now()
-			WHERE id = $1::uuid
-		`, entitlementID, actorUserID); err != nil {
-			return "", fmt.Errorf("update internal platform entitlement: %w", err)
-		}
-		return entitlementID, nil
-	}
-	if err := tx.QueryRow(ctx, `
-		INSERT INTO organization_entitlements (
-			organization_id,
-			feature_key,
-			source,
-			source_reference,
-			status,
-			limits,
-			effective_from,
-			reason,
-			created_by,
-			updated_by,
-			created_at,
-			updated_at
-		)
-		VALUES (
-			$1::uuid,
-			$2,
-			'plan',
-			'platform-internal',
-			'active',
-			'{}'::jsonb,
-			now(),
-			'internal platform entitlement',
-			$3::uuid,
-			$3::uuid,
-			now(),
-			now()
-		)
-		RETURNING id::text
-	`, organizationID, internalEntitlementFeatureKey, actorUserID).Scan(&entitlementID); err != nil {
-		return "", fmt.Errorf("create internal platform entitlement: %w", err)
-	}
-	return entitlementID, nil
 }
 
 func upsertPlatformDomains(

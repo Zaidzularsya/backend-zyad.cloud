@@ -1,0 +1,803 @@
+//go:build integration
+
+package repository_test
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	coretenant "zyad.cloud/internal/core/tenant"
+	"zyad.cloud/internal/modules/receivable/domain"
+	"zyad.cloud/internal/modules/receivable/repository"
+	"zyad.cloud/internal/platform/database"
+	"zyad.cloud/internal/platform/database/testutil"
+	"zyad.cloud/internal/shared/pricing"
+)
+
+type env struct {
+	ctx       context.Context
+	db        *database.Pool
+	tenants   testutil.TenantPair
+	accounts  repository.AccountRepository
+	invoices  repository.InvoiceRepository
+	payments  repository.PaymentRepository
+	sends     repository.SendRepository
+	settings  repository.SettingsRepository
+	counters  repository.CounterRepository
+	contracts repository.ContractRepository
+}
+
+func setup(t *testing.T) env {
+	t.Helper()
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+	if _, err := db.Exec(ctx, `
+		INSERT INTO organizations (id, type, slug, name, status)
+		VALUES ($1, 'customer', 'organization-a', 'Organization A', 'active'),
+		       ($2, 'customer', 'organization-b', 'Organization B', 'active')
+		ON CONFLICT DO NOTHING`, tenants.A.OrganizationID, tenants.B.OrganizationID); err != nil {
+		t.Fatalf("insert organizations: %v", err)
+	}
+	cleanup := func() {
+		// receivable_* di bawah FORCE RLS: hapus per scope organisasi, anak dulu.
+		for _, orgID := range []string{tenants.A.OrganizationID, tenants.B.OrganizationID} {
+			tx, err := db.Begin(ctx)
+			if err != nil {
+				t.Errorf("cleanup begin: %v", err)
+				return
+			}
+			_, _ = tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", orgID)
+			for _, table := range []string{
+				"receivable_payments", "receivable_invoice_sends", "receivable_invoice_items", "receivable_invoices",
+				"receivable_contract_items", "receivable_contracts",
+				"receivable_accounts", "receivable_document_counters", "receivable_settings",
+			} {
+				_, _ = tx.Exec(ctx, "DELETE FROM "+table+" WHERE organization_id = $1", orgID)
+			}
+			_ = tx.Commit(ctx)
+		}
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	return env{
+		ctx: ctx, db: db, tenants: tenants,
+		accounts: repository.NewAccountRepository(db), invoices: repository.NewInvoiceRepository(db),
+		payments: repository.NewPaymentRepository(db), sends: repository.NewSendRepository(db),
+		settings: repository.NewSettingsRepository(db), counters: repository.NewCounterRepository(db),
+		contracts: repository.NewContractRepository(db),
+	}
+}
+
+func (e env) account(t *testing.T, scope coretenant.Scope, name string) domain.Account {
+	t.Helper()
+	a, err := e.accounts.Create(e.ctx, scope, repository.AccountParams{Name: name, Email: "budi@example.com"}, "")
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	return a
+}
+
+func date(s string) *time.Time {
+	d, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		panic(err)
+	}
+	return &d
+}
+
+// params membangun invoice dari baris yang dihitung pricing.PriceLines (kode nyata).
+func params(t *testing.T, accountID string, lines ...pricing.LineInput) repository.CreateInvoiceParams {
+	t.Helper()
+	totals, priced, err := pricing.PriceLines(lines)
+	if err != nil {
+		t.Fatalf("price lines: %v", err)
+	}
+	items := make([]repository.InvoiceItemParams, len(priced))
+	for i, l := range priced {
+		items[i] = repository.InvoiceItemParams{Line: l}
+	}
+	return repository.CreateInvoiceParams{AccountID: accountID, Currency: "IDR", Totals: totals, Items: items, Channels: []string{"email"}}
+}
+
+// threeThirtyThree: 33.000 sekali bayar + 300.000 bulanan prabayar = 333.000.
+func threeThirtyThree(t *testing.T, accountID string) repository.CreateInvoiceParams {
+	p := params(t, accountID,
+		pricing.LineInput{Description: "Instalasi", UnitPrice: "33000"},
+		pricing.LineInput{Description: "Internet 50 Mbps", UnitPrice: "300000", Attrs: pricing.Attributes{ChargeType: pricing.Recurring, Frequency: pricing.Monthly, PaymentTiming: pricing.Prepaid}},
+	)
+	p.Items[1].PeriodStart, p.Items[1].PeriodEnd = date("2026-10-01"), date("2026-10-31")
+	return p
+}
+
+func (e env) issued(t *testing.T, scope coretenant.Scope, accountID, number string) domain.Invoice {
+	t.Helper()
+	inv, err := e.invoices.Create(e.ctx, scope, threeThirtyThree(t, accountID))
+	if err != nil {
+		t.Fatalf("create invoice: %v", err)
+	}
+	inv, err = e.invoices.Issue(e.ctx, scope, inv.ID, number, *date("2026-10-05"), *date("2026-10-12"), "")
+	if err != nil {
+		t.Fatalf("issue invoice: %v", err)
+	}
+	return inv
+}
+
+func TestInvoiceLifecycle(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	acc := e.account(t, scope, "Budi")
+
+	draft, err := e.invoices.Create(e.ctx, scope, threeThirtyThree(t, acc.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft.Status != domain.InvoiceDraft || draft.InvoiceNumber != "" || draft.GrandTotal != "333000.00" || len(draft.Items) != 2 || draft.Account.Name != "Budi" {
+		t.Fatalf("draft = %+v", draft)
+	}
+	if draft.Items[1].Pricing.Frequency != pricing.Monthly || draft.Items[1].PeriodStart == nil {
+		t.Fatalf("item 2 = %+v", draft.Items[1])
+	}
+
+	inv, err := e.invoices.Issue(e.ctx, scope, draft.ID, "INV-2026-0001", *date("2026-10-05"), *date("2026-10-12"), "")
+	if err != nil || inv.Status != domain.InvoiceIssued || inv.InvoiceNumber != "INV-2026-0001" || inv.DueDate.Format("2006-01-02") != "2026-10-12" {
+		t.Fatalf("issued = %+v err=%v", inv, err)
+	}
+	if _, err := e.invoices.Issue(e.ctx, scope, draft.ID, "INV-2026-0002", *date("2026-10-05"), *date("2026-10-12"), ""); !errors.Is(err, repository.ErrInvoiceNotDraft) {
+		t.Fatalf("second issue err = %v", err)
+	}
+
+	inv, _, created, err := e.payments.Record(e.ctx, scope, draft.ID, repository.PaymentParams{Amount: "100000", Method: "manual", PaidAt: time.Now().UTC()})
+	if err != nil || !created || inv.Status != domain.InvoiceIssued || inv.AmountPaid != "100000.00" || inv.Balance() != "233000.00" {
+		t.Fatalf("partial = %+v created=%v err=%v", inv, created, err)
+	}
+	if _, _, _, err := e.payments.Record(e.ctx, scope, draft.ID, repository.PaymentParams{Amount: "300000", Method: "manual", PaidAt: time.Now().UTC()}); !errors.Is(err, repository.ErrPaymentExceeds) {
+		t.Fatalf("overpay err = %v", err)
+	}
+	inv, _, _, err = e.payments.Record(e.ctx, scope, draft.ID, repository.PaymentParams{Amount: "233000", Method: "manual", PaidAt: time.Now().UTC()})
+	if err != nil || inv.Status != domain.InvoicePaid || inv.PaidAt == nil || inv.Balance() != "0.00" {
+		t.Fatalf("paid = %+v err=%v", inv, err)
+	}
+	if _, err := e.invoices.Void(e.ctx, scope, draft.ID, "salah", ""); !errors.Is(err, repository.ErrInvoiceHasPayments) {
+		t.Fatalf("void paid err = %v", err)
+	}
+	if _, _, _, err := e.payments.Record(e.ctx, scope, draft.ID, repository.PaymentParams{Amount: "1", Method: "manual", PaidAt: time.Now().UTC()}); !errors.Is(err, repository.ErrInvoiceNotPayable) {
+		t.Fatalf("pay paid err = %v", err)
+	}
+	list, err := e.payments.List(e.ctx, scope, draft.ID)
+	if err != nil || len(list) != 2 {
+		t.Fatalf("payments = %+v err=%v", list, err)
+	}
+	all, total, err := e.payments.ListAll(e.ctx, scope, 10, 0)
+	if err != nil || total != 2 || len(all) != 2 || all[0].InvoiceNumber != "INV-2026-0001" || all[0].AccountName != "Budi" {
+		t.Fatalf("all = %+v total=%d err=%v", all, total, err)
+	}
+}
+
+func TestVoidDraftAndIssued(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	acc := e.account(t, scope, "Budi")
+	draft, _ := e.invoices.Create(e.ctx, scope, threeThirtyThree(t, acc.ID))
+	v, err := e.invoices.Void(e.ctx, scope, draft.ID, "dibatalkan", "")
+	if err != nil || v.Status != domain.InvoiceVoid || v.VoidReason != "dibatalkan" || v.VoidedAt == nil {
+		t.Fatalf("void = %+v err=%v", v, err)
+	}
+	if _, err := e.invoices.Void(e.ctx, scope, draft.ID, "lagi", ""); !errors.Is(err, repository.ErrInvoiceNotPayable) {
+		t.Fatalf("void twice err = %v", err)
+	}
+	if _, err := e.invoices.ReplaceDraft(e.ctx, scope, draft.ID, threeThirtyThree(t, acc.ID)); !errors.Is(err, repository.ErrInvoiceNotDraft) {
+		t.Fatalf("replace non-draft err = %v", err)
+	}
+}
+
+func TestReplaceDraftSwapsItems(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	acc := e.account(t, scope, "Budi")
+	draft, _ := e.invoices.Create(e.ctx, scope, threeThirtyThree(t, acc.ID))
+	next := params(t, acc.ID, pricing.LineInput{Description: "Hanya satu", UnitPrice: "1000"})
+	next.Notes = "revisi"
+	got, err := e.invoices.ReplaceDraft(e.ctx, scope, draft.ID, next)
+	if err != nil || len(got.Items) != 1 || got.GrandTotal != "1000.00" || got.Notes != "revisi" {
+		t.Fatalf("replaced = %+v err=%v", got, err)
+	}
+}
+
+func TestPaymentConcurrency(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	inv := e.issued(t, scope, e.account(t, scope, "Budi").ID, "INV-2026-0001")
+
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i := range errs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, _, _, errs[i] = e.payments.Record(e.ctx, scope, inv.ID, repository.PaymentParams{Amount: "200000", Method: "manual", PaidAt: time.Now().UTC()})
+		}(i)
+	}
+	wg.Wait()
+	ok, exceeded := 0, 0
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			ok++
+		case errors.Is(err, repository.ErrPaymentExceeds):
+			exceeded++
+		default:
+			t.Fatalf("unexpected err = %v", err)
+		}
+	}
+	if ok != 1 || exceeded != 1 {
+		t.Fatalf("ok=%d exceeded=%d, want 1/1", ok, exceeded)
+	}
+	got, _ := e.invoices.FindByID(e.ctx, scope, inv.ID)
+	if got.AmountPaid != "200000.00" {
+		t.Fatalf("amount paid = %s", got.AmountPaid)
+	}
+}
+
+func TestDuplicateSourceAndContractPeriod(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	acc := e.account(t, scope, "Budi")
+	so := "aaaaaaaa-0000-0000-0000-000000000001"
+
+	p := threeThirtyThree(t, acc.ID)
+	p.SourceType, p.SourceID, p.IdempotencyKey = "sales_order", so, "initial"
+	first, err := e.invoices.Create(e.ctx, scope, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.invoices.Create(e.ctx, scope, p); !errors.Is(err, repository.ErrDuplicateSource) {
+		t.Fatalf("duplicate err = %v", err)
+	}
+	found, err := e.invoices.FindBySource(e.ctx, scope, "sales_order", so, "initial")
+	if err != nil || found.ID != first.ID {
+		t.Fatalf("FindBySource = %+v err=%v", found, err)
+	}
+	if _, err := e.invoices.FindBySource(e.ctx, scope, "sales_order", so, "nope"); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("missing err = %v", err)
+	}
+
+	ct := e.contract(t, scope, acc.ID, "CTR-2026-0001", "aaaaaaaa-0000-0000-0000-000000000002")
+	ci := ct.Items[0].ID
+	withContractItem := func() repository.CreateInvoiceParams {
+		c := params(t, acc.ID, pricing.LineInput{Description: "Internet", UnitPrice: "1000"})
+		c.Items[0].ContractItemID, c.Items[0].PeriodStart, c.Items[0].PeriodEnd = ci, date("2026-11-01"), date("2026-11-30")
+		return c
+	}
+	if _, err := e.invoices.Create(e.ctx, scope, withContractItem()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.invoices.Create(e.ctx, scope, withContractItem()); err == nil {
+		t.Fatal("same contract_item_id + period_start must be rejected")
+	}
+}
+
+func TestPaymentReferenceIdempotent(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	inv := e.issued(t, scope, e.account(t, scope, "Budi").ID, "INV-2026-0001")
+	pay := repository.PaymentParams{Amount: "100000", Method: "doku", Reference: "R1", PaidAt: time.Now().UTC(), ProviderPayload: map[string]any{"status": "SUCCESS"}}
+
+	_, first, created, err := e.payments.Record(e.ctx, scope, inv.ID, pay)
+	if err != nil || !created {
+		t.Fatalf("first created=%v err=%v", created, err)
+	}
+	got, second, created, err := e.payments.Record(e.ctx, scope, inv.ID, pay)
+	if err != nil || created || second.ID != first.ID || got.AmountPaid != "100000.00" {
+		t.Fatalf("second = %+v created=%v paid=%s err=%v", second, created, got.AmountPaid, err)
+	}
+}
+
+func TestMarkOverdue(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	acc := e.account(t, scope, "Budi")
+	late, _ := e.invoices.Create(e.ctx, scope, threeThirtyThree(t, acc.ID))
+	late, err := e.invoices.Issue(e.ctx, scope, late.ID, "INV-2026-0001", *date("2026-09-01"), *date("2026-09-08"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, _ := e.invoices.Create(e.ctx, scope, threeThirtyThree(t, acc.ID))
+	notDue := e.issued(t, scope, acc.ID, "INV-2026-0002") // due 2026-10-12
+
+	n, err := e.invoices.MarkOverdue(e.ctx, scope, *date("2026-10-06"))
+	if err != nil || n != 1 {
+		t.Fatalf("marked = %d err=%v", n, err)
+	}
+	for id, want := range map[string]domain.InvoiceStatus{late.ID: domain.InvoiceOverdue, draft.ID: domain.InvoiceDraft, notDue.ID: domain.InvoiceIssued} {
+		if got, _ := e.invoices.FindByID(e.ctx, scope, id); got.Status != want {
+			t.Fatalf("invoice %s status = %s, want %s", id, got.Status, want)
+		}
+	}
+	// invoice overdue masih bisa dibayar sampai lunas.
+	if inv, _, _, err := e.payments.Record(e.ctx, scope, late.ID, repository.PaymentParams{Amount: "333000", Method: "manual", PaidAt: time.Now().UTC()}); err != nil || inv.Status != domain.InvoicePaid {
+		t.Fatalf("pay overdue = %+v err=%v", inv, err)
+	}
+}
+
+func TestListFilters(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	budi, siti := e.account(t, scope, "Budi"), e.account(t, scope, "Siti")
+	inv := e.issued(t, scope, budi.ID, "INV-2026-0001")
+	_, _ = e.invoices.Create(e.ctx, scope, threeThirtyThree(t, siti.ID))
+
+	all, total, err := e.invoices.List(e.ctx, scope, repository.InvoiceListFilter{})
+	if err != nil || total != 2 || len(all) != 2 {
+		t.Fatalf("all = %d total=%d err=%v", len(all), total, err)
+	}
+	if got, total, _ := e.invoices.List(e.ctx, scope, repository.InvoiceListFilter{Status: "issued"}); total != 1 || got[0].ID != inv.ID {
+		t.Fatalf("status filter = %+v", got)
+	}
+	if got, total, _ := e.invoices.List(e.ctx, scope, repository.InvoiceListFilter{Search: "siti"}); total != 1 || got[0].Account.Name != "Siti" {
+		t.Fatalf("search by account = %+v", got)
+	}
+	if _, total, _ := e.invoices.List(e.ctx, scope, repository.InvoiceListFilter{Search: "INV-2026-0001"}); total != 1 {
+		t.Fatalf("search by number total = %d", total)
+	}
+	if _, total, _ := e.invoices.List(e.ctx, scope, repository.InvoiceListFilter{AccountID: siti.ID}); total != 1 {
+		t.Fatalf("account filter total = %d", total)
+	}
+	// SendFailed: gagal tanpa kiriman sukses sesudahnya pada kanal yang sama.
+	if _, err := e.sends.Record(e.ctx, scope, repository.RecordSendParams{InvoiceID: inv.ID, Channel: "email", Status: "failed", Error: "Belum ada pengirim.", Trigger: "auto"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, total, _ := e.invoices.List(e.ctx, scope, repository.InvoiceListFilter{SendFailed: true}); total != 1 || got[0].ID != inv.ID {
+		t.Fatalf("send_failed filter = %+v", got)
+	}
+	if _, err := e.sends.Record(e.ctx, scope, repository.RecordSendParams{InvoiceID: inv.ID, Channel: "email", Status: "sent", Trigger: "manual"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, total, _ := e.invoices.List(e.ctx, scope, repository.InvoiceListFilter{SendFailed: true}); total != 0 {
+		t.Fatalf("send_failed after successful retry total = %d", total)
+	}
+}
+
+func TestSendLog(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	inv := e.issued(t, scope, e.account(t, scope, "Budi").ID, "INV-2026-0001")
+
+	first, err := e.sends.Record(e.ctx, scope, repository.RecordSendParams{InvoiceID: inv.ID, Channel: "email", Recipient: "budi@example.com", Status: "failed", Error: "Mailbox tidak aktif", ClientRequestID: "req-1", Trigger: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.sends.Record(e.ctx, scope, repository.RecordSendParams{InvoiceID: inv.ID, Channel: "email", Status: "sent", ClientRequestID: "req-1", Trigger: "manual"}); err == nil {
+		t.Fatal("duplicate client_request_id must fail")
+	}
+	got, err := e.sends.FindByClientRequest(e.ctx, scope, inv.ID, "req-1")
+	if err != nil || got.ID != first.ID || got.Error != "Mailbox tidak aktif" {
+		t.Fatalf("found = %+v err=%v", got, err)
+	}
+	if _, err := e.sends.FindByClientRequest(e.ctx, scope, inv.ID, "nope"); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("missing err = %v", err)
+	}
+	if lf, err := e.sends.LatestFailedByInvoice(e.ctx, scope, inv.ID); err != nil || lf.ID != first.ID {
+		t.Fatalf("latest failed = %+v err=%v", lf, err)
+	}
+	_, _ = e.sends.Record(e.ctx, scope, repository.RecordSendParams{InvoiceID: inv.ID, Channel: "whatsapp", Recipient: "6281234567890", Status: "sent", ExternalMessageID: "true_628", Trigger: "auto"})
+	list, err := e.sends.ListByInvoice(e.ctx, scope, inv.ID)
+	if err != nil || len(list) != 2 || list[0].Channel != "whatsapp" {
+		t.Fatalf("list = %+v err=%v", list, err)
+	}
+	if other, _ := e.sends.ListByInvoice(e.ctx, e.tenants.B.Scope, inv.ID); len(other) != 0 {
+		t.Fatal("tenant B must not see tenant A sends")
+	}
+}
+
+func TestReceivableIsolation(t *testing.T) {
+	e := setup(t)
+	a, b := e.tenants.A.Scope, e.tenants.B.Scope
+	acc := e.account(t, a, "Budi")
+	inv := e.issued(t, a, acc.ID, "INV-2026-0001")
+	_, _, _, _ = e.payments.Record(e.ctx, a, inv.ID, repository.PaymentParams{Amount: "1000", Method: "manual", PaidAt: time.Now().UTC()})
+
+	if _, err := e.accounts.FindByID(e.ctx, b, acc.ID); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("account leak err = %v", err)
+	}
+	if _, err := e.invoices.FindByID(e.ctx, b, inv.ID); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("invoice leak err = %v", err)
+	}
+	if _, _, _, err := e.payments.Record(e.ctx, b, inv.ID, repository.PaymentParams{Amount: "1000", Method: "manual", PaidAt: time.Now().UTC()}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("cross-tenant payment err = %v", err)
+	}
+	if list, total, _ := e.invoices.List(e.ctx, b, repository.InvoiceListFilter{}); total != 0 || len(list) != 0 {
+		t.Fatalf("invoice list leak = %+v", list)
+	}
+	if list, total, _ := e.payments.ListAll(e.ctx, b, 10, 0); total != 0 || len(list) != 0 {
+		t.Fatalf("payment list leak = %+v", list)
+	}
+	if list, total, _ := e.accounts.List(e.ctx, b, "", 10, 0); total != 0 || len(list) != 0 {
+		t.Fatalf("account list leak = %+v", list)
+	}
+	na, _ := e.counters.Next(e.ctx, a, "invoice", 2026)
+	nb, _ := e.counters.Next(e.ctx, b, "invoice", 2026)
+	na2, _ := e.counters.Next(e.ctx, a, "invoice", 2026)
+	if na != 1 || nb != 1 || na2 != 2 {
+		t.Fatalf("counters a=%d b=%d a2=%d", na, nb, na2)
+	}
+}
+
+func TestAccountSourceAndUpdate(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	contact := "cccccccc-0000-0000-0000-000000000001"
+	acc, err := e.accounts.Create(e.ctx, scope, repository.AccountParams{Name: "Budi", SourceType: "crm_contact", SourceID: contact}, "")
+	if err != nil || acc.ContactID() != contact {
+		t.Fatalf("account = %+v err=%v", acc, err)
+	}
+	if _, err := e.accounts.Create(e.ctx, scope, repository.AccountParams{Name: "Dobel", SourceType: "crm_contact", SourceID: contact}, ""); !errors.Is(err, repository.ErrDuplicateAccountSource) {
+		t.Fatalf("duplicate source err = %v", err)
+	}
+	by, err := e.accounts.FindBySource(e.ctx, scope, "crm_contact", contact)
+	if err != nil || by.ID != acc.ID {
+		t.Fatalf("FindBySource = %+v err=%v", by, err)
+	}
+	upd, err := e.accounts.Update(e.ctx, scope, acc.ID, repository.AccountParams{Name: "Budi S.", CompanyName: "PT Maju", Email: "b@x.id"})
+	if err != nil || upd.Name != "Budi S." || upd.CompanyName != "PT Maju" || upd.SourceID != contact {
+		t.Fatalf("updated = %+v err=%v", upd, err)
+	}
+	manual := e.account(t, scope, "Manual")
+	if manual.ContactID() != "" {
+		t.Fatalf("manual account must have no contact: %+v", manual)
+	}
+	if _, total, _ := e.accounts.List(e.ctx, scope, "maju", 10, 0); total != 1 {
+		t.Fatalf("search total = %d", total)
+	}
+}
+
+func TestSettingsDefault(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	got, err := e.settings.Get(e.ctx, scope)
+	if err != nil || got.InvoiceLeadDays != 7 || got.PaymentTermsDays != 7 || len(got.DefaultChannels) != 1 || got.DefaultChannels[0] != "email" || got.DefaultSenderUserID != "" {
+		t.Fatalf("default = %+v err=%v", got, err)
+	}
+	saved, err := e.settings.Upsert(e.ctx, scope, domain.Settings{InvoiceLeadDays: 14, PaymentTermsDays: 30, DefaultChannels: []string{"email", "whatsapp"}}, "")
+	if err != nil || saved.PaymentTermsDays != 30 || len(saved.DefaultChannels) != 2 {
+		t.Fatalf("saved = %+v err=%v", saved, err)
+	}
+	if again, _ := e.settings.Get(e.ctx, scope); again.InvoiceLeadDays != 14 {
+		t.Fatalf("persisted = %+v", again)
+	}
+	if _, err := e.settings.Upsert(e.ctx, scope, domain.Settings{InvoiceLeadDays: 61, PaymentTermsDays: 7, DefaultChannels: []string{"email"}}, ""); err == nil {
+		t.Fatal("lead days > 60 must be rejected by the database CHECK")
+	}
+}
+
+// Referensi pembayaran manual bebas diisi tenant (mis. nomor transfer): tidak boleh
+// bentrok lintas tenant maupun antar-pembayaran, hanya referensi provider yang idempoten.
+func TestManualPaymentReferenceNotGloballyUnique(t *testing.T) {
+	e := setup(t)
+	a, b := e.tenants.A.Scope, e.tenants.B.Scope
+	invA := e.issued(t, a, e.account(t, a, "Budi").ID, "INV-2026-0001")
+	invB := e.issued(t, b, e.account(t, b, "Siti").ID, "INV-2026-0001")
+	pay := repository.PaymentParams{Amount: "1000", Method: "manual", Reference: "TRF-001", PaidAt: time.Now().UTC()}
+
+	for _, tc := range []struct {
+		scope coretenant.Scope
+		id    string
+	}{{a, invA.ID}, {b, invB.ID}, {a, invA.ID}} {
+		if _, _, created, err := e.payments.Record(e.ctx, tc.scope, tc.id, pay); err != nil || !created {
+			t.Fatalf("manual payment with shared reference: created=%v err=%v", created, err)
+		}
+	}
+	if got, _ := e.invoices.FindByID(e.ctx, a, invA.ID); got.AmountPaid != "2000.00" {
+		t.Fatalf("both manual payments on A must count, paid = %s", got.AmountPaid)
+	}
+}
+
+func TestLatestSendByInvoices(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	acc := e.account(t, scope, "Budi")
+	one := e.issued(t, scope, acc.ID, "INV-2026-0001")
+	two := e.issued(t, scope, acc.ID, "INV-2026-0002")
+	none := e.issued(t, scope, acc.ID, "INV-2026-0003")
+
+	_, _ = e.sends.Record(e.ctx, scope, repository.RecordSendParams{InvoiceID: one.ID, Channel: "email", Status: "failed", Error: "x", Trigger: "auto"})
+	time.Sleep(5 * time.Millisecond)
+	_, _ = e.sends.Record(e.ctx, scope, repository.RecordSendParams{InvoiceID: one.ID, Channel: "email", Status: "sent", Trigger: "manual"})
+	_, _ = e.sends.Record(e.ctx, scope, repository.RecordSendParams{InvoiceID: two.ID, Channel: "whatsapp", Status: "failed", Error: "y", Trigger: "auto"})
+
+	got, err := e.sends.LatestByInvoices(e.ctx, scope, []string{one.ID, two.ID, none.ID})
+	if err != nil || len(got) != 2 || got[one.ID].Status != "sent" || got[two.ID].Channel != "whatsapp" {
+		t.Fatalf("latest = %+v err=%v", got, err)
+	}
+	if _, ok := got[none.ID]; ok {
+		t.Fatal("invoice without sends must be absent")
+	}
+	if other, _ := e.sends.LatestByInvoices(e.ctx, e.tenants.B.Scope, []string{one.ID}); len(other) != 0 {
+		t.Fatal("tenant B must not see tenant A sends")
+	}
+	if empty, err := e.sends.LatestByInvoices(e.ctx, scope, nil); err != nil || len(empty) != 0 {
+		t.Fatalf("empty input = %+v err=%v", empty, err)
+	}
+}
+
+func (e env) contract(t *testing.T, scope coretenant.Scope, accountID, number, sourceID string) domain.Contract {
+	t.Helper()
+	monthly := repository.ContractItemParams{
+		Description: "Internet", Quantity: "1", UnitPrice: "300000", TaxPercent: "11",
+		Frequency: pricing.Monthly, PaymentTiming: pricing.Prepaid, PeriodIndex: 1,
+		NextPeriodStart: *date("2026-11-05"), NextPeriodEnd: *date("2026-12-04"),
+	}
+	annual := repository.ContractItemParams{
+		Description: "Domain", Quantity: "1", UnitPrice: "200000", TaxPercent: "0",
+		Frequency: pricing.Annual, PaymentTiming: pricing.Postpaid, PeriodIndex: 0,
+		NextPeriodStart: *date("2026-10-05"), NextPeriodEnd: *date("2027-10-04"),
+	}
+	c, err := e.contracts.Create(e.ctx, scope, repository.CreateContractParams{
+		Number: number, AccountID: accountID, SourceType: "sales_order", SourceID: sourceID,
+		StartDate: *date("2026-10-05"), Channels: []string{"email"}, Items: []repository.ContractItemParams{monthly, annual},
+	})
+	if err != nil {
+		t.Fatalf("create contract: %v", err)
+	}
+	return c
+}
+
+func TestContractCreateUniqueAndEnd(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	acc := e.account(t, scope, "Budi")
+	so := "cccccccc-0000-0000-0000-000000000001"
+
+	c := e.contract(t, scope, acc.ID, "CTR-2026-0001", so)
+	if c.Status != domain.ContractActive || len(c.Items) != 2 || c.Items[0].PeriodIndex != 1 || c.Items[1].PaymentTiming != pricing.Postpaid ||
+		c.Items[0].NextPeriodStart.Format("2006-01-02") != "2026-11-05" || c.Account.Name != "Budi" {
+		t.Fatalf("contract = %+v", c)
+	}
+	_, err := e.contracts.Create(e.ctx, scope, repository.CreateContractParams{
+		Number: "CTR-2026-0002", AccountID: acc.ID, SourceType: "sales_order", SourceID: so, StartDate: *date("2026-10-05"),
+		Items: []repository.ContractItemParams{{Description: "x", Quantity: "1", UnitPrice: "1", TaxPercent: "0",
+			Frequency: pricing.Monthly, PaymentTiming: pricing.Prepaid, NextPeriodStart: *date("2026-10-05"), NextPeriodEnd: *date("2026-11-04")}},
+	})
+	if !errors.Is(err, repository.ErrDuplicateSource) {
+		t.Fatalf("duplicate err = %v", err)
+	}
+	found, err := e.contracts.FindBySource(e.ctx, scope, "sales_order", so)
+	if err != nil || found.ID != c.ID {
+		t.Fatalf("FindBySource = %+v err=%v", found, err)
+	}
+
+	withEnd, err := e.contracts.SetEndDate(e.ctx, scope, c.ID, date("2027-10-04"), "")
+	if err != nil || withEnd.EndDate == nil {
+		t.Fatalf("SetEndDate = %+v err=%v", withEnd, err)
+	}
+	ended, err := e.contracts.End(e.ctx, scope, c.ID, *date("2026-12-31"), "Pelanggan berhenti", "")
+	if err != nil || ended.Status != domain.ContractEnded || ended.EndReason != "Pelanggan berhenti" || ended.EndedAt == nil {
+		t.Fatalf("End = %+v err=%v", ended, err)
+	}
+	if _, err := e.contracts.End(e.ctx, scope, c.ID, *date("2026-12-31"), "lagi", ""); !errors.Is(err, repository.ErrContractNotActive) {
+		t.Fatalf("second End err = %v", err)
+	}
+	if _, err := e.contracts.SetEndDate(e.ctx, scope, c.ID, nil, ""); !errors.Is(err, repository.ErrContractNotActive) {
+		t.Fatalf("SetEndDate on ended err = %v", err)
+	}
+	if _, err := e.contracts.End(e.ctx, scope, "dddddddd-0000-0000-0000-000000000009", *date("2026-12-31"), "x", ""); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("missing err = %v", err)
+	}
+
+	list, total, err := e.contracts.List(e.ctx, scope, repository.ContractListFilter{Status: "ended", Search: "budi"})
+	if err != nil || total != 1 || len(list) != 1 {
+		t.Fatalf("list = %d/%d err=%v", len(list), total, err)
+	}
+
+	// Isolasi tenant B.
+	other := e.tenants.B.Scope
+	if _, err := e.contracts.FindByID(e.ctx, other, c.ID); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("tenant B FindByID err = %v", err)
+	}
+	if _, total, _ := e.contracts.List(e.ctx, other, repository.ContractListFilter{}); total != 0 {
+		t.Fatalf("tenant B sees %d contracts", total)
+	}
+}
+
+func TestDueItemsAndAdvance(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	acc := e.account(t, scope, "Budi")
+	c := e.contract(t, scope, acc.ID, "CTR-S5-1", "7f2f1c6e-0000-4000-8000-0000000000a1")
+	itemA, itemB := c.Items[0], c.Items[1]
+
+	due := func(today string, lead int) []repository.DueItem {
+		t.Helper()
+		got, err := e.contracts.DueItems(e.ctx, scope, *date(today), lead, 500)
+		if err != nil {
+			t.Fatalf("DueItems(%s): %v", today, err)
+		}
+		return got
+	}
+	if got := due("2026-10-28", 7); len(got) != 0 {
+		t.Fatalf("2026-10-28 lead 7 = %+v, want empty", got)
+	}
+	got := due("2026-10-29", 7)
+	if len(got) != 1 || got[0].ItemID != itemA.ID || got[0].BillOn.Format("2006-01-02") != "2026-10-29" ||
+		got[0].ContractID != c.ID || got[0].ContractNumber != "CTR-S5-1" || got[0].AccountID != acc.ID ||
+		got[0].Contract.Currency != "IDR" || len(got[0].Contract.Channels) != 1 || got[0].Item.Description != "Internet" {
+		t.Fatalf("2026-10-29 = %+v", got)
+	}
+	if got := due("2026-10-29", 14); len(got) != 1 {
+		t.Fatalf("lead 14 on 2026-10-29 = %d", len(got))
+	}
+	if got := due("2026-10-22", 14); len(got) != 1 {
+		t.Fatalf("lead 14 on 2026-10-22 = %d, want 1 (H-14)", len(got))
+	}
+	both := due("2027-10-05", 7)
+	// urut next_period_start: B (2026-10-05) lebih dulu dari A (2026-11-05).
+	if len(both) != 2 || both[0].ItemID != itemB.ID || both[0].BillOn.Format("2006-01-02") != "2027-10-05" || both[1].ItemID != itemA.ID {
+		t.Fatalf("2027-10-05 = %+v", both)
+	}
+
+	nextStart, nextEnd := *date("2026-12-05"), *date("2027-01-04")
+	if ok, err := e.contracts.Advance(e.ctx, scope, itemA.ID, 1, nextStart, nextEnd); err != nil || !ok {
+		t.Fatalf("advance = %v err=%v", ok, err)
+	}
+	if ok, err := e.contracts.Advance(e.ctx, scope, itemA.ID, 1, nextStart, nextEnd); err != nil || ok {
+		t.Fatalf("second advance with from=1 = %v err=%v, want false", ok, err)
+	}
+	after, _ := e.contracts.FindByID(e.ctx, scope, c.ID)
+	if after.Items[0].PeriodIndex != 2 || after.Items[0].NextPeriodStart.Format("2006-01-02") != "2026-12-05" ||
+		after.Items[0].NextPeriodEnd.Format("2006-01-02") != "2027-01-04" {
+		t.Fatalf("item after advance = %+v", after.Items[0])
+	}
+	if other, _ := e.contracts.DueItems(e.ctx, e.tenants.B.Scope, *date("2027-10-05"), 7, 500); len(other) != 0 {
+		t.Fatal("tenant B must not see tenant A due items")
+	}
+}
+
+func TestDueItemsRespectEndDateAndEndExpired(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	acc := e.account(t, scope, "Budi")
+	c := e.contract(t, scope, acc.ID, "CTR-S5-2", "7f2f1c6e-0000-4000-8000-0000000000a2")
+	end := *date("2026-11-04")
+	if _, err := e.contracts.SetEndDate(e.ctx, scope, c.ID, &end, ""); err != nil {
+		t.Fatal(err)
+	}
+	// A: periode berikutnya mulai 5 Nov > end_date → tidak ditagih; B (postpaid, mulai 5 Okt) masih bisa.
+	got, _ := e.contracts.DueItems(e.ctx, scope, *date("2026-10-29"), 7, 500)
+	if len(got) != 0 {
+		t.Fatalf("A after end_date must not be due: %+v", got)
+	}
+	// B: next_period_start 2026-10-05 <= end_date, BillOn 2027-10-05 → jatuh tempo, sehingga contract belum boleh ended.
+	if n, err := e.contracts.EndExpired(e.ctx, scope, *date("2026-11-05")); err != nil || len(n) != 0 {
+		t.Fatalf("EndExpired with due-able item B = %v err=%v, want 0", n, err)
+	}
+	// Maju B melewati end_date → tidak ada item tersisa sebelum end_date.
+	if ok, err := e.contracts.Advance(e.ctx, scope, c.Items[1].ID, 0, *date("2027-10-05"), *date("2028-10-04")); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if n, err := e.contracts.EndExpired(e.ctx, scope, *date("2026-11-04")); err != nil || len(n) != 0 {
+		t.Fatalf("EndExpired on end_date itself = %v err=%v, want 0 (end_date < today required)", n, err)
+	}
+	if n, err := e.contracts.EndExpired(e.ctx, scope, *date("2026-11-05")); err != nil || len(n) != 1 || n[0].ID == "" || n[0].ContractNumber == "" {
+		t.Fatalf("EndExpired = %v err=%v, want 1", n, err)
+	}
+	ended, _ := e.contracts.FindByID(e.ctx, scope, c.ID)
+	if ended.Status != domain.ContractEnded || ended.EndReason != "Masa kontrak berakhir" || ended.EndedAt == nil {
+		t.Fatalf("ended = %+v", ended)
+	}
+	if got, _ := e.contracts.DueItems(e.ctx, scope, *date("2030-01-01"), 7, 500); len(got) != 0 {
+		t.Fatal("ended contract must not appear in DueItems")
+	}
+}
+
+func TestOverviewQueries(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	repo := repository.NewOverviewRepository(e.db)
+	acc := e.account(t, scope, "Budi")
+	e.contract(t, scope, acc.ID, "CTR-OV-1", "7f2f1c6e-0000-4000-8000-0000000000b1")
+	ended := e.contract(t, scope, acc.ID, "CTR-OV-2", "7f2f1c6e-0000-4000-8000-0000000000b2")
+	if _, err := e.contracts.End(e.ctx, scope, ended.ID, *date("2026-12-31"), "selesai", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := repo.ActiveItems(e.ctx, scope, 100)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("active items = %d err=%v (ended contract must be excluded)", len(items), err)
+	}
+	if items[0].ContractNumber != "CTR-OV-1" || items[0].AccountName != "Budi" || items[0].Item.Description != "Internet" ||
+		items[0].StartDate.Format("2006-01-02") != "2026-10-05" || items[1].Item.Frequency != pricing.Annual {
+		t.Fatalf("items = %+v", items)
+	}
+	if other, _ := repo.ActiveItems(e.ctx, e.tenants.B.Scope, 100); len(other) != 0 {
+		t.Fatal("tenant B must not see tenant A items")
+	}
+
+	// Unpaid: dua invoice issued (333.000), satu dibayar 1.000, satu void (tidak dihitung).
+	one := e.issued(t, scope, acc.ID, "INV-OV-1")
+	two := e.issued(t, scope, acc.ID, "INV-OV-2")
+	three := e.issued(t, scope, acc.ID, "INV-OV-3")
+	if _, _, _, err := e.payments.Record(e.ctx, scope, one.ID, repository.PaymentParams{Amount: "1000", Method: "manual", PaidAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.invoices.Void(e.ctx, scope, three.ID, "salah", ""); err != nil {
+		t.Fatal(err)
+	}
+	sum, err := repo.Unpaid(e.ctx, scope, *date("2026-10-20"))
+	if err != nil || sum.Count != 2 || sum.OverdueCount != 2 || sum.TotalBalance != "665000.00" {
+		t.Fatalf("unpaid = %+v err=%v", sum, err)
+	}
+	if early, _ := repo.Unpaid(e.ctx, scope, *date("2026-10-10")); early.OverdueCount != 0 {
+		t.Fatalf("overdue before due_date = %d", early.OverdueCount)
+	}
+
+	// Kiriman gagal: one gagal lalu sukses (hilang); two gagal WA (tampil); one gagal email dua kali di invoice lain → satu baris.
+	rec := func(inv, channel, status, msg string) {
+		t.Helper()
+		if _, err := e.sends.Record(e.ctx, scope, repository.RecordSendParams{InvoiceID: inv, Channel: channel, Status: status, Error: msg, Trigger: "auto"}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	rec(one.ID, "email", "failed", "smtp down")
+	rec(one.ID, "email", "sent", "")
+	rec(two.ID, "email", "failed", "pertama")
+	rec(two.ID, "email", "failed", "kedua")
+	rec(two.ID, "whatsapp", "failed", "wa down")
+	failed, err := repo.FailedSends(e.ctx, scope, 50)
+	if err != nil || len(failed) != 2 {
+		t.Fatalf("failed sends = %+v err=%v", failed, err)
+	}
+	if failed[0].InvoiceID != two.ID || failed[0].Channel != "whatsapp" || failed[0].Error != "wa down" || failed[0].InvoiceNumber != "INV-OV-2" || failed[0].AccountName != "Budi" {
+		t.Fatalf("failed[0] = %+v", failed[0])
+	}
+	if failed[1].Channel != "email" || failed[1].Error != "kedua" {
+		t.Fatalf("failed[1] = %+v (must be the latest failure of the pair)", failed[1])
+	}
+	if other, _ := repo.FailedSends(e.ctx, e.tenants.B.Scope, 50); len(other) != 0 {
+		t.Fatal("tenant B must not see tenant A failed sends")
+	}
+}
+
+func TestInvoiceListDueBefore(t *testing.T) {
+	e := setup(t)
+	a, b := e.tenants.A.Scope, e.tenants.B.Scope
+	accA, accB := e.account(t, a, "Budi"), e.account(t, b, "Siti")
+
+	issueAt := func(scope coretenant.Scope, accountID, number, due string) domain.Invoice {
+		inv, err := e.invoices.Create(e.ctx, scope, threeThirtyThree(t, accountID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		inv, err = e.invoices.Issue(e.ctx, scope, inv.ID, number, *date("2026-09-01"), *date(due), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return inv
+	}
+	old := issueAt(a, accA.ID, "INV-2026-0101", "2026-09-10")
+	edge := issueAt(a, accA.ID, "INV-2026-0102", "2026-09-29") // tepat di batas: tidak ikut (due_date < X)
+	recent := issueAt(a, accA.ID, "INV-2026-0103", "2026-10-02")
+	notYet := issueAt(a, accA.ID, "INV-2026-0104", "2026-10-20") // belum jatuh tempo: tetap 'issued'
+	_ = issueAt(b, accB.ID, "INV-2026-0201", "2026-09-10")       // org lain
+	for _, s := range []coretenant.Scope{a, b} {
+		if _, err := e.invoices.MarkOverdue(e.ctx, s, *date("2026-10-06")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, total, err := e.invoices.List(e.ctx, a, repository.InvoiceListFilter{Status: "overdue", DueBefore: date("2026-09-29")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for _, inv := range got {
+		ids[inv.ID] = true
+	}
+	if total != 1 || !ids[old.ID] || ids[edge.ID] || ids[recent.ID] || ids[notYet.ID] {
+		t.Fatalf("due before = %d %+v", total, ids)
+	}
+}

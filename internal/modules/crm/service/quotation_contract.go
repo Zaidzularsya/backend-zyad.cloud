@@ -2,22 +2,34 @@ package service
 
 import (
 	"context"
+	"errors"
+	"io"
 	"time"
 
 	coretenant "zyad.cloud/internal/core/tenant"
+	assetdomain "zyad.cloud/internal/modules/asset/domain"
+	assetservice "zyad.cloud/internal/modules/asset/service"
+	catalogdomain "zyad.cloud/internal/modules/catalog/domain"
 	"zyad.cloud/internal/modules/crm/domain"
+	"zyad.cloud/internal/modules/crm/quotationpdf"
 	"zyad.cloud/internal/modules/crm/repository"
+	"zyad.cloud/internal/shared/pricing"
 )
 
-// QuotationLineInput is the raw (unpriced-total) line item a caller submits.
-// QuotationService.computeTotals fills in LineTotal/Subtotal/DiscountTotal/
-// GrandTotal from these before handing off to the repository, using
-// math/big.Rat arithmetic (see that method's doc comment).
+// QuotationLineInput is the raw line item a caller submits. priceQuotationLines
+// computes line/header totals from it with per-line half-up rounding.
 type QuotationLineInput struct {
+	ProductID       string // S3: snapshot katalog bila diisi
 	Description     string
 	Quantity        string
 	UnitPrice       string
 	DiscountPercent string
+	TaxPercent      string
+	Unit            string
+	SKU             string             // diisi service dari katalog; klien tidak mengirim
+	Pricing         pricing.Attributes // nilai nol = belum diisi (katalog/default)
+	// Features diisi service (applyCatalog atau revisi); nilai dari klien selalu diabaikan.
+	Features []domain.FeatureSnapshot
 }
 
 type CreateQuotationInput struct {
@@ -31,6 +43,8 @@ type CreateQuotationInput struct {
 	TaxTotal        string
 	Items           []QuotationLineInput
 	CreatedBy       string
+	// Channel diisi hanya oleh orkestrator self-serve; tidak diekspos handler.
+	Channel string
 }
 
 type UpdateQuotationInput struct {
@@ -40,6 +54,63 @@ type UpdateQuotationInput struct {
 	ValidUntil *time.Time
 	Notes      *string
 	UpdatedBy  string
+	// Items nil = item tidak diubah; non-nil mengganti seluruh item (hanya draft).
+	Items []QuotationLineInput
+}
+
+// CatalogProducts adalah subset katalog yang dipakai quotation untuk snapshot item.
+type CatalogProducts interface {
+	FindByIDs(ctx context.Context, scope coretenant.Scope, ids []string) (map[string]catalogdomain.Product, error)
+}
+
+type QuotationServiceOption func(*quotationService)
+
+// QuotationFileStore: subset asset service untuk snapshot PDF privat.
+type QuotationFileStore interface {
+	UploadObject(ctx context.Context, scope coretenant.Scope, params assetservice.UploadObjectParams, content io.Reader) (assetdomain.AssetObject, error)
+	OpenObject(ctx context.Context, scope coretenant.Scope, id string) (io.ReadCloser, assetdomain.AssetObject, error)
+	DeleteObject(ctx context.Context, scope coretenant.Scope, id string) error
+}
+
+type QuotationPDFRenderer interface {
+	Render(quotationpdf.Document) ([]byte, error)
+}
+
+type QuotationDocumentDeps struct {
+	Issuers    repository.QuotationIssuerRepository
+	Contacts   repository.ContactRepository
+	Companies  repository.CompanyRepository
+	Activities repository.ActivityRepository
+	Files      QuotationFileStore
+	Renderer   QuotationPDFRenderer
+}
+
+type QuotationChannelDeps struct {
+	Sends    repository.QuotationSendRepository
+	Email    QuotationEmailSender    // nil = kanal tidak tersedia
+	WhatsApp QuotationWhatsAppSender // nil = kanal tidak tersedia
+}
+
+type SendQuotationInput struct {
+	Channel            domain.QuotationSendChannel
+	Mode               domain.QuotationSendMode
+	Recipient          string // email saja; "" = email kontak
+	Message            string // pesan pembuka; "" = default
+	MailboxID          string
+	SessionID          string
+	ClientRequestID    string
+	UserID             string
+	CanReadAllWhatsApp bool
+}
+
+type SendQuotationResult struct {
+	Quotation domain.Quotation
+	Send      domain.QuotationSend
+}
+
+type QuotationPDF struct {
+	Filename string
+	Content  []byte
 }
 
 type QuotationService interface {
@@ -51,4 +122,26 @@ type QuotationService interface {
 	Send(context.Context, coretenant.Scope, string, string) (domain.Quotation, error)
 	Approve(context.Context, coretenant.Scope, string, string) (domain.Quotation, error)
 	Reject(context.Context, coretenant.Scope, string, string) (domain.Quotation, error)
+	// Revise membuat draft {nomor akar}-R{n} dari quotation sent/rejected/expired.
+	Revise(ctx context.Context, scope coretenant.Scope, id, userID string) (domain.Quotation, error)
+	// PDF: draft dirender on-demand (watermark); selain draft dilayani dari
+	// snapshot final (dibuat bila belum ada).
+	PDF(ctx context.Context, scope coretenant.Scope, id string) (QuotationPDF, error)
+	// MarkSentManually: snapshot PDF final + status sent + activity deal.
+	MarkSentManually(ctx context.Context, scope coretenant.Scope, id, userID string) (domain.Quotation, error)
+	// SendVia mengirim lewat email/WhatsApp, mencatat log, dan menandai sent
+	// pada kiriman sukses pertama. Kanal tidak tersedia → ChannelError (tidak dicatat).
+	SendVia(ctx context.Context, scope coretenant.Scope, id string, in SendQuotationInput) (SendQuotationResult, error)
+	Summary(ctx context.Context, scope coretenant.Scope, id, opening string) (quotationpdf.Summary, error)
+	ListSends(ctx context.Context, scope coretenant.Scope, id string) ([]domain.QuotationSend, error)
+	// Link: URL publik untuk quotation berstatus sent (dibuat bila belum ada).
+	Link(ctx context.Context, scope coretenant.Scope, id, userID string) (QuotationLink, error)
+	Responses(ctx context.Context, scope coretenant.Scope, id string) ([]domain.QuotationResponse, error)
+	// FindSelfServeByDeal: quotation self-serve draft/approved milik deal, atau pgx.ErrNoRows.
+	FindSelfServeByDeal(ctx context.Context, scope coretenant.Scope, dealID string) (domain.Quotation, error)
+	// AcceptOnline: draft self-serve → approved (customer menyetujui lewat checkout). Idempoten
+	// untuk quotation self-serve yang sudah approved; quotation lain → ErrNotSelfServeQuotation.
+	AcceptOnline(ctx context.Context, scope coretenant.Scope, id, actorUserID string) (domain.Quotation, error)
 }
+
+var ErrNotSelfServeQuotation = errors.New("only draft self-serve quotations can be accepted online")

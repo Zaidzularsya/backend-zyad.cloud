@@ -41,11 +41,17 @@ func TestVariableRegistryCodes(t *testing.T) {
 	want := []string{
 		"auth.password_changed",
 		"auth.password_reset",
+		"crm.quotation_approved",
+		"crm.quotation_revision_requested",
 		"lead.created",
 		"payment.paid",
 		"permission.updated",
+		"receivable.invoice_send_failed",
 		"security.new_login",
+		"self_serve.workspace_reactivated",
+		"self_serve.workspace_suspended",
 		"user.invitation",
+		"whatsapp.session_disconnected",
 	}
 	if len(codes) != len(want) {
 		t.Fatalf("Codes() length = %d, want %d", len(codes), len(want))

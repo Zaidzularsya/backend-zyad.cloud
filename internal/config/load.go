@@ -99,6 +99,32 @@ func LoadSeedAdmin() SeedAdminConfig {
 	}
 }
 
+const defaultSelfServeGraceDays = 7
+
+func LoadSelfServe() SelfServeConfig {
+	grace, invalid := parseGraceDays(os.Getenv("SELF_SERVE_GRACE_DAYS"))
+	return SelfServeConfig{
+		BotEmail:         getEnv("SELF_SERVE_BOT_EMAIL", "self-serve-bot@zyad.cloud"),
+		DealOwnerEmail:   getEnv("SELF_SERVE_DEAL_OWNER_EMAIL", ""),
+		FreeProductSKU:   getEnv("SELF_SERVE_FREE_PRODUCT_SKU", "FREE"),
+		GraceDays:        grace,
+		GraceDaysInvalid: invalid,
+	}
+}
+
+// parseGraceDays: kosong → default; bukan angka atau di luar 0–60 → default dan invalid=true.
+func parseGraceDays(raw string) (days int, invalid bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultSelfServeGraceDays, false
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 || n > 60 {
+		return defaultSelfServeGraceDays, true
+	}
+	return n, false
+}
+
 func LoadHTTP() HTTPConfig {
 	return HTTPConfig{
 		ReadTimeoutSeconds:  getEnvInt("HTTP_READ_TIMEOUT_SECONDS", 15),
@@ -132,6 +158,11 @@ func LoadMail() MailConfig {
 		From:     getEnv("MAIL_FROM", ""),
 		Secure:   getEnvBool("MAIL_SECURE", false),
 		TLS:      getEnvBool("MAIL_TLS", true),
+
+		MailboxAllowPrivateHosts: getEnvBool("MAILBOX_ALLOW_PRIVATE_HOSTS", false),
+		MailSyncIntervalSeconds:  getEnvInt("MAIL_SYNC_INTERVAL_SECONDS", 300),
+		MailSyncInitialDays:      getEnvInt("MAIL_SYNC_INITIAL_DAYS", 30),
+		MailSyncBatchLimit:       getEnvInt("MAIL_SYNC_BATCH_LIMIT", 200),
 	}
 }
 
@@ -181,16 +212,21 @@ func LoadDoku() DokuConfig {
 
 func LoadWhatsApp() WhatsAppConfig {
 	return WhatsAppConfig{
-		Provider:       getEnv("WHATSAPP_PROVIDER", "noop"),
-		URL:            getEnv("WHATSAPP_API_URL", ""),
-		APIKey:         getEnv("WHATSAPP_API_KEY", ""),
-		Session:        getEnv("WHATSAPP_API_SESSION", ""),
-		Sender:         getEnv("WHATSAPP_SENDER", ""),
-		CallbackURL:    getEnv("WHATSAPP_API_URL_CALLBACK", ""),
-		TimeoutSeconds: getEnvInt("WHATSAPP_TIMEOUT_SECONDS", 15),
-		TelegramBot:    getEnv("TELEGRAM_BOT_TOKEN", ""),
-		ForumChatID:    getEnv("LUNADESK_FORUM_CHATID", ""),
-		TopikNews:      getEnv("TOPIK_NEWS", ""),
+		Provider:                 getEnv("WHATSAPP_PROVIDER", "noop"),
+		URL:                      getEnv("WHATSAPP_API_URL", ""),
+		APIKey:                   getEnv("WHATSAPP_API_KEY", ""),
+		Session:                  getEnv("WHATSAPP_API_SESSION", ""),
+		Sender:                   getEnv("WHATSAPP_SENDER", ""),
+		CallbackURL:              getEnv("WHATSAPP_API_URL_CALLBACK", ""),
+		TimeoutSeconds:           getEnvInt("WHATSAPP_TIMEOUT_SECONDS", 15),
+		WebhookHMACKey:           getEnv("WHATSAPP_WEBHOOK_HMAC_KEY", ""),
+		Engine:                   getEnv("WHATSAPP_ENGINE", "GOWS"),
+		SendRatePerMinute:        getEnvInt("WHATSAPP_SEND_RATE_PER_MINUTE", 20),
+		WorkerIntervalSeconds:    getEnvInt("WHATSAPP_WORKER_INTERVAL_SECONDS", 1),
+		ReconcileIntervalSeconds: getEnvInt("WHATSAPP_RECONCILE_INTERVAL_SECONDS", 300),
+		TelegramBot:              getEnv("TELEGRAM_BOT_TOKEN", ""),
+		ForumChatID:              getEnv("LUNADESK_FORUM_CHATID", ""),
+		TopikNews:                getEnv("TOPIK_NEWS", ""),
 	}
 }
 

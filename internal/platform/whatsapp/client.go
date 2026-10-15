@@ -6,9 +6,22 @@ import (
 )
 
 type Message struct {
+	// Session selects the sending session for providers that host several
+	// numbers (WAHA). Empty means the provider's default session.
+	Session  string
 	To       string
 	Text     string
 	Metadata map[string]any
+}
+
+// FileMessage adalah dokumen (mis. PDF penawaran) yang dikirim lewat WAHA sendFile.
+type FileMessage struct {
+	Session  string
+	To       string
+	Caption  string
+	Filename string
+	MimeType string
+	Data     []byte
 }
 
 type Result struct {

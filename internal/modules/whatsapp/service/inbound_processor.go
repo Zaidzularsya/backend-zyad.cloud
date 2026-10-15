@@ -1,0 +1,509 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	coretenant "zyad.cloud/internal/core/tenant"
+	"zyad.cloud/internal/modules/whatsapp/domain"
+	"zyad.cloud/internal/modules/whatsapp/realtime"
+	"zyad.cloud/internal/modules/whatsapp/repository"
+	platformwhatsapp "zyad.cloud/internal/platform/whatsapp"
+	"zyad.cloud/internal/shared/phone"
+)
+
+const (
+	webhookLease       = 2 * time.Minute
+	maxRetryBackoff    = 10 * time.Minute
+	baseRetryBackoff   = 10 * time.Second
+	mediaPreview       = "[media]"
+	autoLeadNamePrefix = "WhatsApp +"
+)
+
+type WebhookEventStore interface {
+	ClaimDue(ctx context.Context, limit int, lease time.Duration) ([]domain.WebhookEvent, error)
+	MarkProcessed(ctx context.Context, id string) error
+	MarkFailed(ctx context.Context, id string, errorMessage string, nextRetryAt time.Time) error
+}
+
+type DirectoryResolver interface {
+	Resolve(ctx context.Context, sessionName string) (domain.DirectoryEntry, error)
+}
+
+// LIDResolver maps a WhatsApp Linked ID (xxx@lid) to its phone chat id.
+type LIDResolver interface {
+	ResolveLID(ctx context.Context, session, lid string) (string, error)
+}
+
+// InboundCRM is what InboundProcessor needs from CRM: phone matching/lead
+// creation (CRMMatcher) plus the same per-conversation-per-day activity write
+// ConversationService uses, so an inbound message (or one sent from the
+// phone) also lands on the lead's timeline instead of only app-sent ones.
+type InboundCRM interface {
+	CRMMatcher
+	RecordActivity(ctx context.Context, scope coretenant.Scope, input CRMActivityInput) error
+}
+
+type ProcessResult struct {
+	Claimed   int
+	Processed int
+	Failed    int
+}
+
+// InboundProcessor applies stored WAHA webhook events: session status,
+// messages (inbound and sent from the phone), and delivery acks. It runs in
+// the worker; the organization always comes from wa_session_directory.
+type InboundProcessor struct {
+	events        WebhookEventStore
+	directory     DirectoryResolver
+	resolver      WorkerTenantResolver
+	sessions      repository.SessionRepository
+	sessionSvc    *SessionService
+	conversations repository.ConversationRepository
+	lids          LIDResolver
+	crm           InboundCRM
+	realtime      realtime.Publisher
+	log           *slog.Logger
+	now           func() time.Time
+	location      *time.Location
+}
+
+type InboundProcessorDeps struct {
+	Events        WebhookEventStore
+	Directory     DirectoryResolver
+	Resolver      WorkerTenantResolver
+	Sessions      repository.SessionRepository
+	SessionSvc    *SessionService
+	Conversations repository.ConversationRepository
+	// LIDs may be nil; @lid chats then stay unresolved (no CRM match).
+	LIDs LIDResolver
+	CRM  InboundCRM
+	// Realtime may be nil; clients then rely on their polling fallback.
+	Realtime realtime.Publisher
+	Logger   *slog.Logger
+}
+
+func NewInboundProcessor(deps InboundProcessorDeps) *InboundProcessor {
+	log := deps.Logger
+	if log == nil {
+		log = slog.Default()
+	}
+	location, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+		location = time.FixedZone("WIB", 7*60*60)
+	}
+	return &InboundProcessor{
+		events:        deps.Events,
+		directory:     deps.Directory,
+		resolver:      deps.Resolver,
+		sessions:      deps.Sessions,
+		sessionSvc:    deps.SessionSvc,
+		conversations: deps.Conversations,
+		lids:          deps.LIDs,
+		crm:           deps.CRM,
+		realtime:      deps.Realtime,
+		log:           log,
+		now:           func() time.Time { return time.Now().UTC() },
+		location:      location,
+	}
+}
+
+// permanentError marks an event that can never succeed (malformed payload);
+// it is marked processed instead of being retried.
+type permanentError struct{ err error }
+
+func (e permanentError) Error() string { return e.err.Error() }
+func (e permanentError) Unwrap() error { return e.err }
+
+func (p *InboundProcessor) RunOnce(ctx context.Context, limit int) (ProcessResult, error) {
+	events, err := p.events.ClaimDue(ctx, limit, webhookLease)
+	if err != nil {
+		return ProcessResult{}, err
+	}
+
+	result := ProcessResult{Claimed: len(events)}
+	for _, event := range events {
+		if ctx.Err() != nil {
+			return result, ctx.Err()
+		}
+		err := p.process(ctx, event)
+		var permanent permanentError
+		switch {
+		case err == nil:
+			result.Processed++
+			if markErr := p.events.MarkProcessed(ctx, event.ID); markErr != nil {
+				return result, markErr
+			}
+		case errors.As(err, &permanent):
+			result.Processed++
+			p.log.Warn("whatsapp: dropping malformed webhook event", "event_id", event.EventID, "type", event.EventType, "error", err)
+			if markErr := p.events.MarkProcessed(ctx, event.ID); markErr != nil {
+				return result, markErr
+			}
+		default:
+			result.Failed++
+			p.log.Warn("whatsapp: webhook event failed", "event_id", event.EventID, "type", event.EventType, "attempt", event.Attempts, "error", err)
+			if markErr := p.events.MarkFailed(ctx, event.ID, err.Error(), p.now().Add(retryBackoff(event.Attempts))); markErr != nil {
+				return result, markErr
+			}
+		}
+	}
+	return result, nil
+}
+
+func retryBackoff(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	backoff := time.Duration(attempt*attempt) * baseRetryBackoff
+	if backoff > maxRetryBackoff {
+		return maxRetryBackoff
+	}
+	return backoff
+}
+
+type webhookEnvelope struct {
+	ID      string          `json:"id"`
+	Event   string          `json:"event"`
+	Session string          `json:"session"`
+	Me      *webhookMe      `json:"me"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+type webhookMe struct {
+	ID       string `json:"id"`
+	LID      string `json:"lid"`
+	PushName string `json:"pushName"`
+}
+
+type sessionStatusPayload struct {
+	Status string `json:"status"`
+}
+
+type messagePayload struct {
+	ID        string  `json:"id"`
+	Timestamp float64 `json:"timestamp"`
+	From      string  `json:"from"`
+	To        string  `json:"to"`
+	FromMe    bool    `json:"fromMe"`
+	Source    string  `json:"source"`
+	// Participant is set for group messages (the sender inside the group).
+	Participant string `json:"participant"`
+	Body        string `json:"body"`
+	HasMedia    bool   `json:"hasMedia"`
+	Ack         *int   `json:"ack"`
+}
+
+type ackPayload struct {
+	ID  string `json:"id"`
+	Ack int    `json:"ack"`
+}
+
+func (p *InboundProcessor) process(ctx context.Context, event domain.WebhookEvent) error {
+	var envelope webhookEnvelope
+	if err := json.Unmarshal(event.Payload, &envelope); err != nil {
+		return permanentError{fmt.Errorf("decode envelope: %w", err)}
+	}
+	switch envelope.Event {
+	case domain.EventSessionStatus, domain.EventMessage, domain.EventMessageAny, domain.EventMessageAck:
+	default:
+		return nil
+	}
+
+	entry, err := p.directory.Resolve(ctx, event.SessionName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil // session deleted since the webhook arrived
+	}
+	if err != nil {
+		return err
+	}
+	tenantContext, err := p.resolver.ResolveWorkerOrganization(ctx, entry.OrganizationID, WorkerIdentity)
+	if err != nil {
+		return err
+	}
+	scope, err := coretenant.NewScope(tenantContext)
+	if err != nil {
+		return err
+	}
+	ctx = coretenant.WithContext(ctx, tenantContext)
+
+	session, err := p.sessions.GetByID(ctx, scope, entry.SessionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	switch envelope.Event {
+	case domain.EventSessionStatus:
+		return p.handleSessionStatus(ctx, scope, session, envelope)
+	case domain.EventMessage, domain.EventMessageAny:
+		// The engine does not reliably send both for a given message (GOWS
+		// has been observed emitting only "message" for some inbound
+		// messages), so both are handled the same way. RecordMessage dedups
+		// on (conversation_id, waha_message_id), so if the engine does send
+		// both, the second is a no-op.
+		return p.handleMessage(ctx, scope, session, envelope)
+	default:
+		return p.handleAck(ctx, scope, session, envelope)
+	}
+}
+
+func (p *InboundProcessor) handleSessionStatus(ctx context.Context, scope coretenant.Scope, session domain.Session, envelope webhookEnvelope) error {
+	var payload sessionStatusPayload
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+		return permanentError{fmt.Errorf("decode session.status: %w", err)}
+	}
+	info := platformwhatsapp.SessionInfo{Name: session.Name, Status: payload.Status}
+	if payload.Status == platformwhatsapp.SessionStatusWorking && envelope.Me != nil && envelope.Me.ID != "" {
+		info.Me = &platformwhatsapp.Me{ID: envelope.Me.ID, PushName: envelope.Me.PushName}
+	}
+	_, err := p.sessionSvc.ApplyObservedStatus(ctx, scope, session, info)
+	return err
+}
+
+func (p *InboundProcessor) handleMessage(ctx context.Context, scope coretenant.Scope, session domain.Session, envelope webhookEnvelope) error {
+	var payload messagePayload
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+		return permanentError{fmt.Errorf("decode message.any: %w", err)}
+	}
+	if payload.ID == "" {
+		return permanentError{errors.New("message without id")}
+	}
+	// Messages sent through the API are stored by ConversationService.Send
+	// (MarkMessageSent also removes a copy if this event wins the race).
+	if payload.FromMe && payload.Source == "api" {
+		return nil
+	}
+
+	// Groups, status updates, broadcasts, and channels are not CRM chats.
+	// Engines differ on which field holds the group (GOWS puts it in "from"
+	// even for our own messages), so both fields are checked.
+	if payload.Participant != "" || isIgnoredChat(payload.From) || isIgnoredChat(payload.To) {
+		return nil
+	}
+
+	self := selfIDs(envelope.Me, session.Phone)
+	chatID := counterpart(payload, self)
+	if chatID == "" {
+		return nil
+	}
+	if strings.HasSuffix(chatID, "@lid") && p.lids != nil {
+		pn, err := p.lids.ResolveLID(ctx, session.Name, chatID)
+		if err != nil {
+			return fmt.Errorf("resolve lid: %w", err)
+		}
+		if pn != "" {
+			chatID = normalizeJID(pn)
+		}
+	}
+	// Never open a conversation with the connected number itself (notes to
+	// self, or our own LID resolving to our number).
+	if self[chatID] {
+		return nil
+	}
+
+	conversation, err := p.conversationFor(ctx, scope, session, chatID)
+	if err != nil {
+		return err
+	}
+
+	direction := domain.MessageDirectionIn
+	status := domain.MessageStatusDelivered
+	if payload.FromMe {
+		direction = domain.MessageDirectionOut
+		status = domain.MessageStatusSent
+		if payload.Ack != nil {
+			if fromAck, ok := domain.MessageStatusFromAck(*payload.Ack); ok {
+				status = fromAck
+			}
+		}
+	}
+	preview := payload.Body
+	if preview == "" && payload.HasMedia {
+		preview = mediaPreview
+	}
+	sentAt := p.now()
+	if payload.Timestamp > 0 {
+		sentAt = time.Unix(int64(payload.Timestamp), 0).UTC()
+	}
+
+	raw := map[string]any{
+		"id":       payload.ID,
+		"from":     payload.From,
+		"to":       payload.To,
+		"fromMe":   payload.FromMe,
+		"source":   payload.Source,
+		"hasMedia": payload.HasMedia,
+	}
+	if payload.Ack != nil {
+		raw["ack"] = *payload.Ack
+	}
+
+	recorded, inserted, err := p.conversations.RecordMessage(ctx, scope, conversation.ID, repository.RecordMessageParams{
+		WAHAMessageID: payload.ID,
+		Direction:     direction,
+		Body:          payload.Body,
+		Preview:       preview,
+		Status:        status,
+		SentAt:        sentAt,
+		Raw:           raw,
+	})
+	if err != nil {
+		return err
+	}
+	// A replayed/duplicate event (already claimed a day, or nothing new to
+	// log) must not re-touch the timeline.
+	if inserted {
+		claimAndRecordDailyActivity(ctx, scope, p.conversations, p.crm, p.now().In(p.location), conversation, session, conversation.AssigneeUserID, p.log)
+		publishChange(ctx, p.realtime, scope, realtime.EventMessage, conversation, recorded.ID)
+	}
+	return nil
+}
+
+// conversationFor returns the chat's conversation, creating it on the first
+// message. Only a new conversation is matched to CRM (and may auto-create a
+// lead), so a manual re-link later is never overwritten.
+func (p *InboundProcessor) conversationFor(ctx context.Context, scope coretenant.Scope, session domain.Session, chatID string) (domain.Conversation, error) {
+	conversation, err := p.conversations.GetBySessionChat(ctx, scope, session.ID, chatID)
+	if err == nil {
+		return conversation, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return domain.Conversation{}, err
+	}
+
+	params := repository.CreateConversationParams{SessionID: session.ID, ChatID: chatID}
+	if strings.HasSuffix(chatID, "@c.us") {
+		if normalized, ok := phone.NormalizeID(strings.TrimSuffix(chatID, "@c.us")); ok {
+			params.PhoneNormalized = normalized
+			params.ContactName = "+" + normalized
+		}
+	}
+
+	if params.PhoneNormalized != "" && p.crm != nil {
+		match, found, err := p.crm.MatchPhone(ctx, scope, params.PhoneNormalized)
+		if err != nil {
+			return domain.Conversation{}, fmt.Errorf("match crm: %w", err)
+		}
+		if !found && session.AutoCreateLead {
+			match, err = p.crm.CreateLead(ctx, scope, CreateLeadInput{
+				ContactName: autoLeadNamePrefix + params.PhoneNormalized,
+				Phone:       "+" + params.PhoneNormalized,
+				OwnerUserID: session.CreatedBy,
+			})
+			if err != nil {
+				return domain.Conversation{}, fmt.Errorf("auto-create lead: %w", err)
+			}
+			found = true
+		}
+		if found {
+			params.RelatedEntityType = match.EntityType
+			params.RelatedEntityID = match.EntityID
+			params.AssigneeUserID = match.OwnerUserID
+			if match.Name != "" {
+				params.ContactName = match.Name
+			}
+		}
+	}
+
+	conversation, _, err = p.conversations.Create(ctx, scope, params)
+	return conversation, err
+}
+
+func (p *InboundProcessor) handleAck(ctx context.Context, scope coretenant.Scope, session domain.Session, envelope webhookEnvelope) error {
+	var payload ackPayload
+	if err := json.Unmarshal(envelope.Payload, &payload); err != nil {
+		return permanentError{fmt.Errorf("decode message.ack: %w", err)}
+	}
+	next, ok := domain.MessageStatusFromAck(payload.Ack)
+	if !ok || payload.ID == "" {
+		return nil
+	}
+
+	message, err := p.conversations.FindMessageByWAHAID(ctx, scope, session.ID, payload.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil // ack for a message we do not store (yet); a later ack updates it
+	}
+	if err != nil {
+		return err
+	}
+	if !message.Status.CanTransitionTo(next) {
+		return nil
+	}
+	if _, err = p.conversations.SetMessageStatus(ctx, scope, message.ID, message.Status, next); err != nil {
+		return err
+	}
+	if p.realtime != nil {
+		// Best effort: a failed lookup only means clients see the new status
+		// on their next fallback poll.
+		if conversation, getErr := p.conversations.GetByID(ctx, scope, message.ConversationID); getErr == nil {
+			publishChange(ctx, p.realtime, scope, realtime.EventAck, conversation, message.ID)
+		}
+	}
+	return nil
+}
+
+// isIgnoredChat skips groups, status updates, broadcast lists, and channels.
+func isIgnoredChat(chatID string) bool {
+	return strings.HasSuffix(chatID, "@g.us") ||
+		strings.HasSuffix(chatID, "@broadcast") ||
+		strings.HasSuffix(chatID, "@newsletter")
+}
+
+// normalizeJID maps WhatsApp ids to the form WAHA accepts for chats:
+// "@s.whatsapp.net" becomes "@c.us" and a device suffix ("628…:12@…") is
+// dropped.
+func normalizeJID(id string) string {
+	id = strings.TrimSpace(id)
+	id = strings.Replace(id, "@s.whatsapp.net", "@c.us", 1)
+	if at := strings.Index(id, "@"); at > 0 {
+		if colon := strings.Index(id[:at], ":"); colon >= 0 {
+			id = id[:colon] + id[at:]
+		}
+	}
+	return id
+}
+
+// selfIDs are the ids of the connected account: its phone chat id and its
+// Linked ID from the webhook "me", plus the number stored on the session.
+func selfIDs(me *webhookMe, sessionPhone string) map[string]bool {
+	self := map[string]bool{}
+	if me != nil {
+		for _, id := range []string{me.ID, me.LID} {
+			if id = normalizeJID(id); id != "" {
+				self[id] = true
+			}
+		}
+	}
+	if sessionPhone != "" {
+		self[sessionPhone+"@c.us"] = true
+	}
+	return self
+}
+
+// counterpart returns the other party of a direct chat. Engines disagree on
+// the fields: WEBJS puts the recipient of our own messages in "to", while
+// GOWS keeps the chat in "from" and may leave "to" empty or set it to our
+// own LID. So the first id that is not ours wins, preferring "to" for our
+// own messages and "from" for inbound ones.
+func counterpart(payload messagePayload, self map[string]bool) string {
+	candidates := []string{payload.From, payload.To}
+	if payload.FromMe {
+		candidates = []string{payload.To, payload.From}
+	}
+	for _, candidate := range candidates {
+		if id := normalizeJID(candidate); id != "" && !self[id] {
+			return id
+		}
+	}
+	return ""
+}

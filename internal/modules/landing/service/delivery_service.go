@@ -240,7 +240,7 @@ func (s *deliveryService) markFailed(ctx context.Context, log domain.LandingLead
 
 	// Retry logic (max 3 attempts)
 	if log.Attempts < 2 {
-		retryTime := time.Now().Add(time.Minute * 5)
+		retryTime := time.Now().UTC().Add(time.Minute * 5)
 		nextRetry = &retryTime
 	}
 

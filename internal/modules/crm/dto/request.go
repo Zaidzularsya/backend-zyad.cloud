@@ -1,5 +1,7 @@
 package dto
 
+import "encoding/json"
+
 // CompanyListQuery binds query parameters for listing companies.
 type CompanyListQuery struct {
 	Page        int    `form:"page"`
@@ -35,6 +37,28 @@ type UpdateCompanyRequest struct {
 	Notes       *string        `json:"notes"`
 	Tags        []string       `json:"tags"`
 	OwnerUserID *string        `json:"owner_user_id"`
+	// TenantOrganizationID: tautan workspace. Tidak dikirim = tidak diubah; null = melepas tautan.
+	TenantOrganizationID OptionalString `json:"tenant_organization_id"`
+}
+
+// OptionalString membedakan field yang tidak dikirim (Set=false) dari null (Set=true, Value=nil).
+type OptionalString struct {
+	Set   bool
+	Value *string
+}
+
+func (o *OptionalString) UnmarshalJSON(data []byte) error {
+	o.Set = true
+	if string(data) == "null" {
+		o.Value = nil
+		return nil
+	}
+	var v string
+	if err := json.Unmarshal(data, &v); err != nil {
+		return err
+	}
+	o.Value = &v
+	return nil
 }
 
 // ContactListQuery binds query parameters for listing contacts.
@@ -86,6 +110,14 @@ type LeadListQuery struct {
 	Search      string `form:"search"`
 	Status      string `form:"status"`
 	OwnerUserID string `form:"owner_user_id"`
+	Source      string `form:"source"`
+	// ConvertedContactID: lead asal dari sebuah contact.
+	ConvertedContactID string `form:"converted_contact_id"`
+	// CreatedFrom/CreatedTo: YYYY-MM-DD, inclusive (Asia/Jakarta days).
+	CreatedFrom string `form:"created_from"`
+	CreatedTo   string `form:"created_to"`
+	// Sort: field name, "-" prefix = descending. Default "-created_at".
+	Sort string `form:"sort"`
 }
 
 // CreateLeadRequest binds the payload for creating a lead.
@@ -98,6 +130,10 @@ type CreateLeadRequest struct {
 	Score       int    `json:"score" binding:"omitempty,min=0,max=100"`
 	OwnerUserID string `json:"owner_user_id"`
 	Notes       string `json:"notes"`
+	JobTitle    string `json:"job_title" binding:"omitempty,max=150"`
+	// AnnualRevenue string desimal (mis. "5000000.50"), divalidasi di service.
+	AnnualRevenue string         `json:"annual_revenue"`
+	Address       map[string]any `json:"address"`
 }
 
 // UpdateLeadRequest binds the payload for updating a lead.
@@ -111,6 +147,20 @@ type UpdateLeadRequest struct {
 	Score       *int    `json:"score"`
 	OwnerUserID *string `json:"owner_user_id"`
 	Notes       *string `json:"notes"`
+	JobTitle    *string `json:"job_title" binding:"omitempty,max=150"`
+	// AnnualRevenue "" = kosongkan (NULL).
+	AnnualRevenue *string        `json:"annual_revenue"`
+	Address       map[string]any `json:"address"`
+
+	// Form kebutuhan; "" mengosongkan nilai.
+	RequirementSummary *string `json:"requirement_summary"`
+	BudgetEstimate     *string `json:"budget_estimate"`
+	TargetDate         *string `json:"target_date"` // YYYY-MM-DD
+	DecisionMaker      *string `json:"decision_maker"`
+}
+
+type UpdateCRMSettingsRequest struct {
+	LeadPlaybookEnabled *bool `json:"lead_playbook_enabled" binding:"required"`
 }
 
 // AssignLeadRequest binds the payload for assigning a lead to a user.
@@ -119,9 +169,32 @@ type AssignLeadRequest struct {
 }
 
 // ConvertLeadRequest binds the payload for converting a lead.
+type ConvertCompanyRequest struct {
+	Mode      string `json:"mode" binding:"required,oneof=none existing new"`
+	CompanyID string `json:"company_id"`
+	Name      string `json:"name" binding:"max=200"`
+	Industry  string `json:"industry" binding:"max=100"`
+	Website   string `json:"website" binding:"max=255"`
+	Phone     string `json:"phone" binding:"max=50"`
+}
+
+type ConvertDealRequest struct {
+	PipelineID        string `json:"pipeline_id" binding:"required"`
+	StageID           string `json:"stage_id" binding:"required"`
+	Title             string `json:"title" binding:"required,max=200"`
+	Value             string `json:"value"`
+	ExpectedCloseDate string `json:"expected_close_date"`
+	Description       string `json:"description" binding:"max=5000"`
+	DecisionMaker     string `json:"decision_maker" binding:"max=150"`
+	OwnerUserID       string `json:"owner_user_id"`
+}
+
+// ConvertLeadRequest: tanpa company/deal = perilaku lama (create_company).
 type ConvertLeadRequest struct {
-	CreateCompany bool   `json:"create_company"`
-	OwnerUserID   string `json:"owner_user_id"`
+	CreateCompany bool                   `json:"create_company"`
+	OwnerUserID   string                 `json:"owner_user_id"`
+	Company       *ConvertCompanyRequest `json:"company"`
+	Deal          *ConvertDealRequest    `json:"deal"`
 }
 
 // StageRequest binds one pipeline stage in a create/replace-stages request.
@@ -169,6 +242,7 @@ type DealListQuery struct {
 	StageID     string `form:"stage_id"`
 	Status      string `form:"status"`
 	OwnerUserID string `form:"owner_user_id"`
+	ContactID   string `form:"contact_id"`
 }
 
 // CreateDealRequest binds the payload for creating a deal.
@@ -182,6 +256,8 @@ type CreateDealRequest struct {
 	Currency          string  `json:"currency"`
 	ExpectedCloseDate *string `json:"expected_close_date"`
 	OwnerUserID       string  `json:"owner_user_id"`
+	Description       string  `json:"description" binding:"max=5000"`
+	DecisionMaker     string  `json:"decision_maker" binding:"max=150"`
 }
 
 // UpdateDealRequest binds the payload for updating a deal.
@@ -194,6 +270,8 @@ type UpdateDealRequest struct {
 	Currency          *string `json:"currency"`
 	ExpectedCloseDate *string `json:"expected_close_date"`
 	OwnerUserID       *string `json:"owner_user_id"`
+	Description       *string `json:"description" binding:"omitempty,max=5000"`
+	DecisionMaker     *string `json:"decision_maker" binding:"omitempty,max=150"`
 }
 
 // MoveDealStageRequest binds the payload for POST .../deals/:id/move-stage.
@@ -230,6 +308,28 @@ type CreateActivityRequest struct {
 	Description       string  `json:"description"`
 	DueAt             *string `json:"due_at"`
 	AssigneeUserID    string  `json:"assignee_user_id"`
+	Status            string  `json:"status"` // "" | pending | completed
+}
+
+// CompleteActivityRequest is optional for plain activities; playbook steps
+// require OutcomeKey (+ the input its outcome asks for).
+type CompleteActivityRequest struct {
+	OutcomeKey   string                   `json:"outcome_key"`
+	RescheduleAt *string                  `json:"reschedule_at"`
+	Requirements *LeadRequirementsRequest `json:"requirements"`
+	Disqualify   *DisqualifyRequest       `json:"disqualify"`
+}
+
+type LeadRequirementsRequest struct {
+	Summary        string  `json:"summary"`
+	BudgetEstimate *string `json:"budget_estimate"`
+	TargetDate     *string `json:"target_date"` // YYYY-MM-DD
+	DecisionMaker  string  `json:"decision_maker"`
+}
+
+type DisqualifyRequest struct {
+	Reason string `json:"reason"`
+	Note   string `json:"note"`
 }
 
 // UpdateActivityRequest binds the payload for updating an activity.
@@ -252,6 +352,14 @@ type LineItemRequest struct {
 	Quantity        string `json:"quantity"`
 	UnitPrice       string `json:"unit_price"`
 	DiscountPercent string `json:"discount_percent"`
+	// Quotation v2 (diabaikan invoice).
+	ProductID  string `json:"product_id"`
+	TaxPercent string `json:"tax_percent"`
+	Unit       string `json:"unit" binding:"max=30"`
+	// Atribut harga (quotation saja; kosong = ikut katalog/default).
+	ChargeType       string `json:"charge_type" binding:"omitempty,oneof=one_time recurring"`
+	BillingFrequency string `json:"billing_frequency"`
+	PaymentTiming    string `json:"payment_timing" binding:"omitempty,oneof=prepaid postpaid"`
 }
 
 // QuotationListQuery binds query parameters for listing quotations.
@@ -279,53 +387,24 @@ type CreateQuotationRequest struct {
 
 // UpdateQuotationRequest binds the payload for updating a quotation.
 type UpdateQuotationRequest struct {
-	DealID     *string `json:"deal_id"`
-	ContactID  *string `json:"contact_id"`
-	CompanyID  *string `json:"company_id"`
-	ValidUntil *string `json:"valid_until"`
-	Notes      *string `json:"notes"`
+	DealID     *string           `json:"deal_id"`
+	ContactID  *string           `json:"contact_id"`
+	CompanyID  *string           `json:"company_id"`
+	ValidUntil *string           `json:"valid_until"`
+	Notes      *string           `json:"notes"`
+	Items      []LineItemRequest `json:"items" binding:"omitempty,min=1,dive"`
 }
 
-// InvoiceListQuery binds query parameters for listing invoices.
-type InvoiceListQuery struct {
-	Page        int    `form:"page"`
-	PerPage     int    `form:"per_page"`
-	Status      string `form:"status"`
-	DealID      string `form:"deal_id"`
-	ContactID   string `form:"contact_id"`
-	CompanyID   string `form:"company_id"`
-	QuotationID string `form:"quotation_id"`
-}
-
-// CreateInvoiceRequest binds the payload for creating an invoice. When
-// QuotationID is set and Items is empty, items/totals are copied from that
-// quotation instead of being computed from Items.
-type CreateInvoiceRequest struct {
-	QuotationID   string            `json:"quotation_id"`
-	DealID        string            `json:"deal_id"`
-	ContactID     string            `json:"contact_id"`
-	CompanyID     string            `json:"company_id"`
-	InvoiceNumber string            `json:"invoice_number"`
-	IssueDate     *string           `json:"issue_date"`
-	DueDate       *string           `json:"due_date"`
-	Currency      string            `json:"currency"`
-	TaxTotal      string            `json:"tax_total"`
-	Items         []LineItemRequest `json:"items"`
-}
-
-// UpdateInvoiceRequest binds the payload for updating an invoice.
-type UpdateInvoiceRequest struct {
-	QuotationID *string `json:"quotation_id"`
-	DealID      *string `json:"deal_id"`
-	ContactID   *string `json:"contact_id"`
-	CompanyID   *string `json:"company_id"`
-	IssueDate   *string `json:"issue_date"`
-	DueDate     *string `json:"due_date"`
-}
-
-// MarkInvoicePaidRequest binds the payload for POST .../invoices/:id/mark-paid.
-type MarkInvoicePaidRequest struct {
-	AmountPaid string `json:"amount_paid" binding:"required"`
+// SendQuotationRequest: channel kosong/manual = tandai terkirim manual (kontrak
+// lama tanpa body); email/whatsapp = kirim lewat kanal.
+type SendQuotationRequest struct {
+	Channel         string `json:"channel" binding:"omitempty,oneof=manual email whatsapp"`
+	Mode            string `json:"mode" binding:"omitempty,oneof=text pdf text_pdf"`
+	ClientRequestID string `json:"client_request_id" binding:"max=100"`
+	Recipient       string `json:"recipient" binding:"max=255"`
+	Message         string `json:"message" binding:"max=2000"`
+	MailboxID       string `json:"mailbox_id"`
+	WASessionID     string `json:"wa_session_id"`
 }
 
 // IntegrationListQuery binds query parameters for listing integrations.

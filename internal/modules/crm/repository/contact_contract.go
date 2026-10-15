@@ -62,4 +62,7 @@ type ContactRepository interface {
 	Update(context.Context, coretenant.Scope, string, UpdateContactParams) (domain.Contact, error)
 	Delete(context.Context, coretenant.Scope, string, string) error
 	Restore(context.Context, coretenant.Scope, string, string) error
+	// FindActiveByPhone returns the most recently updated non-deleted contact
+	// whose phone_normalized matches (WhatsApp matching), or pgx.ErrNoRows.
+	FindActiveByPhone(ctx context.Context, scope coretenant.Scope, phoneNormalized string) (domain.Contact, error)
 }

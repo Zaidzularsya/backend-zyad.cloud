@@ -1,3 +1,5 @@
+> **DIGANTIKAN (R4-S5, Okt 2026):** plan, subscription, dan billing platform lama sudah dihapus. Mesin yang berlaku sekarang: katalog produk + contract + receivable + `organization_entitlements`. Lihat `docs/superpowers/specs/2026-10-06-self-serve-product-unification-design.md`. Dokumen ini disimpan sebagai riwayat.
+
 # MASTER PROMPT — Generate Development Documentation for Plan, Billing, Subscription, Entitlement & Quota Module
 
 > **Catatan riwayat (refactor domain-split)**: Ini adalah requirement/prompt asal yang memicu pembuatan

@@ -24,10 +24,11 @@ import (
 	assethandler "zyad.cloud/internal/modules/asset/handler"
 	assetrepo "zyad.cloud/internal/modules/asset/repository"
 	assetservice "zyad.cloud/internal/modules/asset/service"
-	billinghandler "zyad.cloud/internal/modules/billing/handler"
-	billingrepo "zyad.cloud/internal/modules/billing/repository"
-	billingservice "zyad.cloud/internal/modules/billing/service"
+	cataloghandler "zyad.cloud/internal/modules/catalog/handler"
+	catalogrepo "zyad.cloud/internal/modules/catalog/repository"
+	catalogservice "zyad.cloud/internal/modules/catalog/service"
 	crmhandler "zyad.cloud/internal/modules/crm/handler"
+	crmquotationpdf "zyad.cloud/internal/modules/crm/quotationpdf"
 	crmrepo "zyad.cloud/internal/modules/crm/repository"
 	crmservice "zyad.cloud/internal/modules/crm/service"
 	financehandler "zyad.cloud/internal/modules/finance/handler"
@@ -36,25 +37,30 @@ import (
 	landinghandler "zyad.cloud/internal/modules/landing/handler"
 	landingrepo "zyad.cloud/internal/modules/landing/repository"
 	landingservice "zyad.cloud/internal/modules/landing/service"
+	landingtemplates "zyad.cloud/internal/modules/landing/templates"
+	mailboxhandler "zyad.cloud/internal/modules/mailbox/handler"
+	mailboxrepo "zyad.cloud/internal/modules/mailbox/repository"
+	mailboxservice "zyad.cloud/internal/modules/mailbox/service"
 	organizationhandler "zyad.cloud/internal/modules/organization/handler"
 	organizationrepo "zyad.cloud/internal/modules/organization/repository"
 	organizationservice "zyad.cloud/internal/modules/organization/service"
 	producthandler "zyad.cloud/internal/modules/product/handler"
 	productrepo "zyad.cloud/internal/modules/product/repository"
 	productservice "zyad.cloud/internal/modules/product/service"
-	subscriptionhandler "zyad.cloud/internal/modules/subscription/handler"
-	subscriptionrepo "zyad.cloud/internal/modules/subscription/repository"
-	subscriptionservice "zyad.cloud/internal/modules/subscription/service"
+	receivablehandler "zyad.cloud/internal/modules/receivable/handler"
 	userhandler "zyad.cloud/internal/modules/user/handler"
 	userrepo "zyad.cloud/internal/modules/user/repository"
 	userservice "zyad.cloud/internal/modules/user/service"
+	whatsapphandler "zyad.cloud/internal/modules/whatsapp/handler"
+	whatsapprepo "zyad.cloud/internal/modules/whatsapp/repository"
+	whatsappservice "zyad.cloud/internal/modules/whatsapp/service"
 	"zyad.cloud/internal/platform/database"
 	"zyad.cloud/internal/platform/doku"
 	"zyad.cloud/internal/platform/logger"
 	"zyad.cloud/internal/platform/mail"
 	redisplatform "zyad.cloud/internal/platform/redis"
 	"zyad.cloud/internal/platform/storage"
-	"zyad.cloud/internal/platform/whatsapp"
+	"zyad.cloud/internal/shared/publiclink"
 )
 
 type App struct {
@@ -91,31 +97,8 @@ func New(ctx context.Context) (*App, error) {
 	permService := permissionservice.New(permRepo)
 	permHandler := permissionhandler.New(permService)
 
-	productPlanRepo := productrepo.NewPlanRepository(db)
 	productFeatureRepo := productrepo.NewFeatureRepository(db)
-	productPlanEntitlementRepo := productrepo.NewPlanEntitlementRepository(db)
-	subscriptionRepo := subscriptionrepo.NewSubscriptionRepository(db)
-	billingInvoiceRepo := billingrepo.NewInvoiceRepository(db)
-	billingPaymentRepo := billingrepo.NewPaymentRepository(db)
-	subscriptionEntitlementSink := subscriptionrepo.NewEntitlementSink(db)
-
-	productPlanService := productservice.NewPlanService(productPlanRepo, productPlanEntitlementRepo)
 	productFeatureService := productservice.NewFeatureService(productFeatureRepo)
-	productPlanEntitlementService := productservice.NewPlanEntitlementService(
-		productPlanEntitlementRepo,
-		productFeatureRepo,
-	)
-	subscriptionService := subscriptionservice.NewSubscriptionService(
-		subscriptionRepo,
-		productPlanEntitlementRepo,
-		subscriptionEntitlementSink,
-	)
-	billingInvoiceService := billingservice.NewInvoiceService(billingInvoiceRepo)
-	billingPaymentService := billingservice.NewPaymentService(
-		billingPaymentRepo,
-		billingInvoiceRepo,
-		subscriptionUpgradeActivatorAdapter{subscriptions: subscriptionService},
-	)
 	dokuClient := doku.NewClientFromConfig(doku.Config{
 		BaseURL:     cfg.Doku.BaseURL,
 		ClientID:    cfg.Doku.ClientID,
@@ -126,27 +109,8 @@ func New(ctx context.Context) (*App, error) {
 	if baseURL := strings.TrimRight(strings.TrimSpace(cfg.App.URL), "/"); baseURL != "" {
 		dokuNotificationURL = baseURL + "/api/v1/webhooks/doku"
 	}
-	billingPaymentService.SetDokuCheckout(dokuClient, cfg.App.FrontendURL, dokuNotificationURL)
-	dokuWebhookHandler := billinghandler.NewDokuWebhookHandler(
-		billingPaymentService,
-		cfg.Doku.ClientID,
-		cfg.Doku.SecretKey,
-		log,
-	)
 	platformProductHandler := producthandler.NewPlatformProductHandler(
-		productPlanService,
 		productFeatureService,
-		productPlanEntitlementService,
-		permService,
-	)
-	publicProductHandler := producthandler.NewPublicProductHandler(productPlanService)
-	platformSubscriptionHandler := subscriptionhandler.NewPlatformSubscriptionHandler(
-		subscriptionService,
-		permService,
-	)
-	platformBillingHandler := billinghandler.NewPlatformBillingHandler(
-		billingInvoiceService,
-		billingPaymentService,
 		permService,
 	)
 
@@ -167,7 +131,7 @@ func New(ctx context.Context) (*App, error) {
 		preferenceRepo,
 		templateRenderer,
 		notificationdispatcher.NewEmailDispatcher(mail.NewMailerFromConfig(cfg.Mail)),
-		notificationdispatcher.NewWhatsAppDispatcher(whatsapp.NewNoopClient()),
+		notificationdispatcher.NewWhatsAppDispatcher(NewWhatsAppNotificationClient(cfg, db, log)),
 		notificationdispatcher.NewNoopDispatcher(domain.ChannelInApp),
 		notificationdispatcher.NewNoopDispatcher(domain.ChannelDiscord),
 	)
@@ -209,11 +173,6 @@ func New(ctx context.Context) (*App, error) {
 	organizationOnboardingService := organizationservice.NewOnboardingService(
 		organizationrepo.NewOnboardingRepository(db),
 	)
-	defaultSubscriptions := defaultSubscriptionProvisioner{
-		plans:         productPlanService,
-		subscriptions: subscriptionService,
-	}
-	organizationOnboardingService.SetDefaultSubscriptionProvisioner(defaultSubscriptions)
 	authService.SetGoogleWorkspaceProvisioner(
 		googleWorkspaceProvisioner{onboarding: organizationOnboardingService},
 	)
@@ -248,16 +207,15 @@ func New(ctx context.Context) (*App, error) {
 		permService,
 		permService,
 	)
-	subscriptionGuardService := subscriptionservice.NewSubscriptionGuardService(
-		subscriptionRepo,
+	entitlementGuard := organizationservice.NewEntitlementGuard(
 		organizationEntitlementRuntimeService,
-		subscriptionservice.WithOrganizationTypeResolver(organizationrepo.NewOrganizationRepository(db)),
+		organizationservice.WithOrganizationTypeResolver(organizationrepo.NewOrganizationRepository(db)),
 	)
 	organizationSelfService := organizationservice.NewSelfService(
 		organizationrepo.NewSelfRepository(db),
 		organizationservice.NewMembershipService(
 			organizationMembershipRepository,
-			organizationservice.WithMembershipBillingGuard(subscriptionGuardService),
+			organizationservice.WithMembershipBillingGuard(entitlementGuard),
 		),
 		organizationMembershipRepository,
 	)
@@ -269,24 +227,12 @@ func New(ctx context.Context) (*App, error) {
 		organizationrepo.NewDomainRepository(db),
 		organizationservice.NewDNSDomainVerifier(nil),
 		cfg.MultiTenant.PlatformPrimaryDomain,
-		organizationservice.WithDomainBillingGuard(subscriptionGuardService),
+		organizationservice.WithDomainBillingGuard(entitlementGuard),
 	)
 	organizationDomainHandler := organizationhandler.NewDomainHandler(
 		organizationDomainService,
 		permService,
 	)
-	tenantBillingService := billingservice.NewTenantBillingService(
-		subscriptionService,
-		productPlanService,
-		billingInvoiceService,
-		organizationEntitlementService,
-	)
-	tenantBillingService.SetDefaultSubscriptionProvisioner(defaultSubscriptions)
-	tenantBillingHandler := billinghandler.NewTenantBillingHandler(
-		tenantBillingService,
-		permService,
-	)
-	tenantBillingHandler.SetCheckoutService(billingPaymentService)
 	organizationImpersonationHandler := organizationhandler.NewImpersonationHandler(
 		organizationservice.NewImpersonationService(
 			organizationrepo.NewImpersonationRepository(db),
@@ -301,6 +247,7 @@ func New(ctx context.Context) (*App, error) {
 	landingBrandingRepo := landingrepo.NewBrandingRepository(db)
 	landingVersionRepo := landingrepo.NewVersionRepository(db)
 	landingDocumentRepo := landingrepo.NewDocumentRepository(db)
+	landingPageTemplateRepo := landingrepo.NewPageTemplateRepository(db)
 	landingPlatformRepo := landingrepo.NewPlatformPageRepository(db)
 
 	landingVisibilitySvc, err := landingservice.NewVisibilityService(landingPageRepo, landingPlatformRepo, redisClient, cfg)
@@ -312,26 +259,33 @@ func New(ctx context.Context) (*App, error) {
 	landingPageSvc := landingservice.NewPageService(
 		landingPageRepo,
 		landingSectionRepo,
-		landingservice.WithLandingPageQuotaGuard(subscriptionGuardService),
+		landingservice.WithLandingPageQuotaGuard(entitlementGuard),
 		landingservice.WithLandingPageBrandingRepo(landingBrandingRepo),
 	)
 	landingSectionSvc := landingservice.NewSectionService(
 		landingSectionRepo,
-		landingservice.WithLandingSectionQuotaGuard(subscriptionGuardService),
+		landingservice.WithLandingSectionQuotaGuard(entitlementGuard),
 	)
 	landingDocumentSvc := landingservice.NewDocumentService(landingDocumentRepo, landingPageRepo)
+	landingPageTemplateSvc := landingservice.NewPageTemplateService(landingPageTemplateRepo, landingDocumentRepo, landingPageRepo)
+	// Seeder galeri template: kegagalan hanya dicatat, tidak menghentikan API.
+	if seeds, seedErr := landingtemplates.LoadSeeds(); seedErr != nil {
+		log.Error("load page template seeds", "error", seedErr)
+	} else if seedErr := landingservice.SeedPageTemplates(ctx, landingPageTemplateRepo, seeds, log); seedErr != nil {
+		log.Error("seed page templates", "error", seedErr)
+	}
 
 	landingDomainRepo := landingrepo.NewDomainRepository(db)
 	landingDomainSvc := landingservice.NewDomainService(
 		landingDomainRepo,
 		landingPageRepo,
 		db,
-		landingservice.WithLandingDomainFeatureGate(subscriptionGuardService),
+		landingservice.WithLandingDomainFeatureGate(entitlementGuard),
 	)
 	landingBrandingSvc := landingservice.NewBrandingService(landingBrandingRepo)
 	landingFormSvc := landingservice.NewFormService(landingFormRepo)
 	landingSubmissionRepo := landingrepo.NewSubmissionRepository(db)
-	landingSubmissionSvc := landingservice.NewSubmissionService(landingSubmissionRepo, landingFormRepo)
+	// landingSubmissionSvc is built after the CRM services (it needs the lead sink).
 
 	landingReusableRepo := landingrepo.NewReusableRepository(db)
 	landingMediaRepo := landingrepo.NewMediaRepository(db)
@@ -341,7 +295,7 @@ func New(ctx context.Context) (*App, error) {
 	landingTemplateSvc := landingservice.NewTemplateService(
 		landingReusableRepo,
 		landingSectionRepo,
-		landingservice.WithTemplateSectionQuotaGuard(subscriptionGuardService),
+		landingservice.WithTemplateSectionQuotaGuard(entitlementGuard),
 	)
 	mediaStorage, err := buildMediaStorage(cfg.Storage)
 	if err != nil {
@@ -395,10 +349,10 @@ func New(ctx context.Context) (*App, error) {
 	landingAdminPageHandler := landinghandler.NewAdminPageHandler(landingPageSvc, landingVisibilitySvc, landingRevisionSvc, landingPublishSvc)
 	landingAdminSectionHandler := landinghandler.NewAdminSectionHandler(landingSectionSvc, landingRevisionSvc)
 	landingAdminDocumentHandler := landinghandler.NewAdminDocumentHandler(landingDocumentSvc)
+	landingAdminPageTemplateHandler := landinghandler.NewAdminPageTemplateHandler(landingPageTemplateSvc)
 	landingAdminBrandingHandler := landinghandler.NewAdminBrandingHandler(landingBrandingSvc)
 	landingAdminDomainHandler := landinghandler.NewAdminDomainHandler(landingDomainSvc)
 	landingAdminFormHandler := landinghandler.NewAdminFormHandler(landingFormSvc)
-	landingAdminSubmissionHandler := landinghandler.NewAdminSubmissionHandler(landingSubmissionSvc)
 	landingAdminCTAHandler := landinghandler.NewAdminCTAHandler(landingCTASvc)
 	landingAdminTemplateHandler := landinghandler.NewAdminTemplateHandler(landingTemplateSvc)
 	landingAdminMediaHandler := landinghandler.NewAdminMediaHandler(landingMediaSvc)
@@ -412,52 +366,233 @@ func New(ctx context.Context) (*App, error) {
 	landingResolverSvc := landingservice.NewResolverService(db, landingResolverRepo, landingVersionRepo, landingPageRepo, landingSectionRepo, landingFormRepo, landingBrandingRepo, landingReusableRepo, landingDocumentRepo, landingPublishSvc)
 	landingAnalyticsRepo := landingrepo.NewAnalyticsRepository(db)
 	landingAnalyticsSvc := landingservice.NewAnalyticsService(landingAnalyticsRepo, landingPageRepo, db)
-	publicLandingHandler := landinghandler.NewPublicLandingHandler(landingResolverSvc, landingVisibilitySvc, landingSubmissionSvc, landingAnalyticsSvc)
 
-	crmEntitlementChecker := subscriptionEntitlementChecker{guard: subscriptionGuardService}
+	crmEntitlementChecker := entitlementChecker{guard: entitlementGuard}
 	crmCompanyRepo := crmrepo.NewCompanyRepository(db)
 	crmContactRepo := crmrepo.NewContactRepository(db)
 	crmLeadRepo := crmrepo.NewLeadRepository(db)
-	crmCompanySvc := crmservice.NewCompanyService(crmCompanyRepo)
 	crmContactSvc := crmservice.NewContactService(
 		crmContactRepo,
-		crmservice.WithContactQuotaGuard(subscriptionGuardService),
+		crmservice.WithContactQuotaGuard(entitlementGuard),
 	)
+	crmMemberRepo := crmrepo.NewMemberRepository(db)
+	crmPipelineRepo := crmrepo.NewPipelineRepository(db)
 	crmLeadSvc := crmservice.NewLeadService(
 		crmLeadRepo,
 		crmContactRepo,
 		crmCompanyRepo,
-		crmservice.WithLeadContactQuotaGuard(subscriptionGuardService),
+		crmservice.WithLeadContactQuotaGuard(entitlementGuard),
+		crmservice.WithLeadOwnerValidator(crmMemberRepo),
+		crmservice.WithLeadDealPipelines(crmPipelineRepo),
+		crmservice.WithLeadConvertedHook(whatsappservice.NewLeadConversionRelinker(whatsapprepo.NewConversationRepository(db))),
 	)
-	crmPipelineRepo := crmrepo.NewPipelineRepository(db)
+	crmMemberSvc := crmservice.NewMemberService(crmMemberRepo)
+	crmLeadAttachmentSvc := crmservice.NewLeadAttachmentService(
+		crmrepo.NewLeadAttachmentRepository(db),
+		crmLeadRepo,
+		assetSvc,
+	)
+	crmContactAttachmentSvc := crmservice.NewContactAttachmentService(
+		crmrepo.NewContactAttachmentRepository(db),
+		crmContactRepo,
+		assetSvc,
+	)
 	crmDealRepo := crmrepo.NewDealRepository(db)
 	crmPipelineSvc := crmservice.NewPipelineService(
 		crmPipelineRepo,
-		crmservice.WithPipelineFeatureGate(subscriptionGuardService),
+		crmservice.WithPipelineFeatureGate(entitlementGuard),
 	)
 	crmDealSvc := crmservice.NewDealService(
 		crmDealRepo,
 		crmPipelineRepo,
 		crmservice.WithDealContactSync(crmContactRepo),
+		crmservice.WithDealSourceLeads(crmLeadRepo),
 	)
 	crmActivityRepo := crmrepo.NewActivityRepository(db)
 	crmActivitySvc := crmservice.NewActivityService(crmActivityRepo, crmLeadRepo, crmContactRepo, crmCompanyRepo, crmDealRepo)
+
+	// Landing forms create CRM leads through crm's FormLeadIntake; tenants need
+	// the crm.lead_form feature, platform organizations are exempt.
+	landingSubmissionSvc := landingservice.NewSubmissionService(
+		landingSubmissionRepo, landingFormRepo, landingPageRepo,
+		landingLeadSink{intake: crmservice.NewFormLeadIntake(crmLeadRepo, crmLeadSvc, crmActivitySvc)},
+		crmEntitlementChecker,
+	)
+	landingAdminSubmissionHandler := landinghandler.NewAdminSubmissionHandler(landingSubmissionSvc)
+	publicLandingHandler := landinghandler.NewPublicLandingHandler(landingResolverSvc, landingVisibilitySvc, landingSubmissionSvc, landingAnalyticsSvc, redisClient)
 	crmQuotationRepo := crmrepo.NewQuotationRepository(db)
-	crmInvoiceRepo := crmrepo.NewInvoiceRepository(db)
 	crmDocumentCounterRepo := crmrepo.NewDocumentCounterRepository(db)
-	crmQuotationSvc := crmservice.NewQuotationService(crmQuotationRepo, crmDocumentCounterRepo)
-	crmInvoiceSvc := crmservice.NewInvoiceService(crmInvoiceRepo, crmQuotationRepo, crmDocumentCounterRepo)
 	crmIntegrationRepo := crmrepo.NewIntegrationRepository(db)
 	crmIntegrationSvc := crmservice.NewIntegrationService(crmIntegrationRepo, cfg.App.Secret)
-	crmCompanyHandler := crmhandler.NewCompanyHandler(crmCompanySvc)
 	crmContactHandler := crmhandler.NewContactHandler(crmContactSvc)
 	crmLeadHandler := crmhandler.NewLeadHandler(crmLeadSvc)
+	crmLeadAttachmentHandler := crmhandler.NewLeadAttachmentHandler(crmLeadAttachmentSvc)
+	crmContactAttachmentHandler := crmhandler.NewContactAttachmentHandler(crmContactAttachmentSvc)
+	catalogProductService := catalogservice.NewProductService(
+		catalogrepo.NewProductRepository(db),
+		catalogFeatureRegistry{features: productrepo.NewFeatureRepository(db)},
+	)
+	// Paket gratis workspace = fitur produk FREE di katalog platform (R4-S3); tidak lagi customer_subscriptions.
+	defaultAccess := defaultAccessProvisioner{
+		scopes: newPlatformScopeResolver(organizationrepo.NewOrganizationRepository(db)), products: catalogProductService,
+		features: catalogFeatureRegistry{features: productrepo.NewFeatureRepository(db)},
+		writer:   organizationservice.NewContractEntitlementService(organizationrepo.NewEntitlementRepository(db)),
+		sku:      cfg.SelfServe.FreeProductSKU,
+	}
+	organizationOnboardingService.SetDefaultAccessProvisioner(defaultAccess)
+	catalogProductHandler := cataloghandler.NewProductHandler(catalogProductService)
+	catalogFeatureHandler := cataloghandler.NewFeatureHandler(catalogProductService)
+	catalogPublicListingHandler := cataloghandler.NewPublicListingHandler(catalogservice.NewPublicListingService(
+		catalogrepo.NewProductRepository(db),
+		catalogFeatureRegistry{features: productrepo.NewFeatureRepository(db)},
+		newPlatformScopeResolver(organizationrepo.NewOrganizationRepository(db)),
+	))
+	catalogCategoryHandler := cataloghandler.NewCategoryHandler(catalogservice.NewCategoryService(catalogrepo.NewCategoryRepository(db)))
+	mailboxRepo := mailboxrepo.NewMailboxRepository(db)
+	mailMessageRepo := mailboxrepo.NewMessageRepository(db)
+	mailboxSvc := mailboxservice.NewMailboxService(mailboxRepo, mailMessageRepo, assetSvc, mailboxservice.MailboxServiceOptions{
+		SecretKey:         cfg.App.Secret,
+		AllowPrivateHosts: cfg.Mail.MailboxAllowPrivateHosts,
+	})
+	mailMessageSvc := mailboxservice.NewMessageService(
+		mailboxRepo, mailMessageRepo, assetSvc,
+		mailboxservice.NewCRMGateway(crmLeadRepo, crmContactRepo, crmActivityRepo),
+		mailboxservice.MessageServiceOptions{
+			SecretKey:         cfg.App.Secret,
+			AllowPrivateHosts: cfg.Mail.MailboxAllowPrivateHosts,
+			Log:               log,
+		},
+	)
+	mailboxHandler := mailboxhandler.NewHandler(
+		mailboxSvc,
+		mailMessageSvc,
+		// "Sync now" from the API, independent of the worker's own interval
+		// (cmd/worker runs the same service on a timer).
+		NewMailSyncServiceWithStorage(cfg, db, assetSvc, log),
+	)
+	crmLeadDashboardHandler := crmhandler.NewLeadDashboardHandler(crmservice.NewLeadDashboardService(crmrepo.NewLeadDashboardRepository(db)))
+	crmSettingsHandler := crmhandler.NewCRMSettingsHandler(crmservice.NewCRMSettingsService(crmrepo.NewCRMSettingsRepository(db)))
+	crmMemberHandler := crmhandler.NewMemberHandler(crmMemberSvc)
 	crmPipelineHandler := crmhandler.NewPipelineHandler(crmPipelineSvc)
 	crmDealHandler := crmhandler.NewDealHandler(crmDealSvc)
 	crmActivityHandler := crmhandler.NewActivityHandler(crmActivitySvc)
-	crmQuotationHandler := crmhandler.NewQuotationHandler(crmQuotationSvc)
-	crmInvoiceHandler := crmhandler.NewInvoiceHandler(crmInvoiceSvc)
 	crmIntegrationHandler := crmhandler.NewIntegrationHandler(crmIntegrationSvc)
+
+	whatsappSessionSvc := NewWhatsAppSessionService(cfg, db, entitlementGuard, log)
+	whatsappSessionHandler := whatsapphandler.NewSessionHandler(whatsappSessionSvc)
+	whatsappWebhookHandler := NewWhatsAppWebhookHandler(cfg, db, log)
+	whatsappBus := NewWhatsAppRealtimeBus(redisClient, log)
+	whatsappConversationSvc := NewWhatsAppConversationService(cfg, db, redisClient, whatsappBus, log)
+	whatsappConversationHandler := whatsapphandler.NewConversationHandler(whatsappConversationSvc)
+	if whatsappBus != nil {
+		whatsappConversationHandler.WithStream(whatsappBus)
+	}
+
+	// Link publik dokumen (quotation sekarang, invoice di rilis berikutnya).
+	publicLinkSvc := publiclink.NewService(publiclink.NewRepository(db), cfg.App.Secret)
+	crmQuotationResponseRepo := crmrepo.NewQuotationResponseRepository(db)
+
+	// Modul receivable (penagihan tenant). Hanya bergantung pada port; kanal kirim, link publik, dan
+	// notifikasi dirakit di sini. Service-nya dibagikan ke modul lain (S4: sales order) lewat receivableModule.
+	receivableModule := buildReceivable(receivableBuild{
+		DB: db, Assets: assetSvc, Links: publicLinkSvc, Mailboxes: mailboxSvc, Messages: mailMessageSvc,
+		WhatsApp: whatsappConversationSvc, Entitlements: crmEntitlementChecker, Permissions: permService,
+		Publisher: notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts),
+		Members:   crmMemberRepo, Issuers: crmrepo.NewQuotationIssuerRepository(db),
+		AppName: cfg.App.Name, FrontendURL: cfg.App.FrontendURL, NotificationLocale: cfg.Notification.DefaultLocale,
+		RateCounter: redisClient, Doku: dokuClient, DokuNotificationURL: dokuNotificationURL,
+	})
+	// Webhook DOKU (URL tetap /webhooks/doku) hanya melayani invoice receivable (RCV-).
+	dokuWebhookHandler := receivablehandler.NewDokuWebhookHandler(
+		receivableModule.OnlinePayment, cfg.Doku.ClientID, cfg.Doku.SecretKey, log,
+	)
+
+	// Sales order (S4): dirakit setelah receivable (penagihan) dan sebelum quotation service karena hook
+	// approve menunjuk ke SalesOrderService.
+	crmReceivableDocs := crmReceivableReader{invoices: receivableModule.Invoices, contracts: receivableModule.Contracts}
+	crmSalesOrderRepo := crmrepo.NewSalesOrderRepository(db)
+	crmWonEvaluator := crmservice.NewWonEvaluator(crmSalesOrderRepo, crmDealSvc, crmReceivableDocs, crmReceivableDocs, crmActivityRepo)
+	crmSalesOrderSvc := crmservice.NewSalesOrderService(crmSalesOrderRepo, receivableModule.Billing, crmservice.SalesOrderDeps{
+		Counters: crmDocumentCounterRepo, Contacts: crmContactRepo, Companies: crmCompanyRepo, Deals: crmDealRepo,
+		Members: crmMemberRepo, Activities: crmActivityRepo, Invoices: crmReceivableDocs, Contracts: crmReceivableDocs,
+		Canceller: crmReceivableDocs,
+		Notifier:  notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts),
+		AppName:   cfg.App.Name, FrontendURL: cfg.App.FrontendURL, Locale: cfg.Notification.DefaultLocale,
+	}, crmWonEvaluator, time.Now)
+	crmTenantAccess := withBillingSuspend(newCRMTenantAccess(db, receivableModule.Invoices, receivableModule.Contracts, defaultAccess), cfg, db, receivableModule.Invoices)
+	receivableModule.Listeners.Add(crmservice.NewReceivableListener(crmSalesOrderRepo, crmWonEvaluator, crmActivityRepo).
+		WithTenantAccess(crmTenantAccess).WithReactivation(crmTenantAccess, cfg.SelfServe.GraceDays))
+	// Tautan company ↔ workspace (R4-S3): mengubah tautan memindahkan entitlement contract.
+	crmCompanySvc := crmservice.NewCompanyService(crmCompanyRepo,
+		crmservice.WithWorkspaceLinking(workspaceDirectory{orgs: organizationrepo.NewOrganizationRepository(db)}, crmTenantAccess))
+	crmCompanyHandler := crmhandler.NewCompanyHandler(crmCompanySvc)
+	crmSalesOrderHandler := crmhandler.NewSalesOrderHandler(crmSalesOrderSvc, crmhandler.SalesOrderRefs{Invoices: crmReceivableDocs, Contracts: crmReceivableDocs})
+	crmDealOrdersHandler := crmhandler.NewDealOrdersHandler(crmSalesOrderHandler, crmWonEvaluator)
+
+	// Quotation service dibuat setelah mailbox & WhatsApp karena memakai keduanya sebagai kanal kirim.
+	crmQuotationSvc := crmservice.NewQuotationService(crmQuotationRepo, crmDocumentCounterRepo,
+		crmservice.WithQuotationApprovedHook(crmSalesOrderSvc),
+		crmservice.WithQuotationLinks(crmservice.QuotationLinkDeps{
+			Links:       publicLinkSvc,
+			FrontendURL: cfg.App.FrontendURL,
+			Responses:   crmQuotationResponseRepo,
+		}),
+		crmservice.WithQuotationCatalog(catalogProductService),
+		crmservice.WithQuotationDeals(crmDealRepo),
+		crmservice.WithQuotationDocuments(crmservice.QuotationDocumentDeps{
+			Issuers:    crmrepo.NewQuotationIssuerRepository(db),
+			Contacts:   crmContactRepo,
+			Companies:  crmCompanyRepo,
+			Activities: crmActivityRepo,
+			Files:      assetSvc,
+			Renderer:   crmquotationpdf.NewRenderer(),
+		}),
+		// Kanal kirim: adapter di modul mailbox & whatsapp (CRM tidak mengimpor mereka).
+		crmservice.WithQuotationChannels(crmservice.QuotationChannelDeps{
+			Sends:    crmrepo.NewQuotationSendRepository(db),
+			Email:    mailboxservice.NewQuotationMailer(mailboxSvc, mailMessageSvc),
+			WhatsApp: whatsappservice.NewQuotationSender(whatsappConversationSvc, crmEntitlementChecker),
+		}),
+	)
+	crmQuotationHandler := crmhandler.NewQuotationHandler(crmQuotationSvc)
+	// Halaman publik penawaran: scope tenant dibangun dari baris link lewat
+	// resolver worker (identitas public-document-link), lalu query CRM berjalan di bawah RLS.
+	crmPublicQuotationSvc := crmservice.NewPublicQuotationService(
+		publicLinkSvc,
+		organizationservice.NewWorkerResolver(organizationrepo.NewOrganizationRepository(db), crmservice.PublicLinkIdentity),
+		crmQuotationSvc,
+		crmQuotationResponseRepo,
+		crmrepo.NewQuotationIssuerRepository(db),
+		crmActivityRepo,
+		crmservice.NewQuotationNotifier(
+			notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts),
+			crmDealRepo, crmMemberRepo, cfg.App.Name, cfg.App.FrontendURL, cfg.Notification.DefaultLocale,
+		),
+		crmSalesOrderSvc, // QuotationApprovedHook: buat SO draft
+		time.Now,
+	)
+	crmPublicQuotationHandler := crmhandler.NewPublicQuotationHandler(crmPublicQuotationSvc, redisClient)
+
+	// Checkout self-serve (R4-S2): bot/pipeline di-resolve lazily saat request pertama sehingga seeder
+	// boleh dijalankan setelah API hidup.
+	selfServePlatformScopes := newPlatformScopeResolver(organizationrepo.NewOrganizationRepository(db))
+	selfServeSvc := &selfServeResolver{
+		db: db, cfg: selfServeRuntimeConfig{BotEmail: cfg.SelfServe.BotEmail, DealOwnerEmail: cfg.SelfServe.DealOwnerEmail},
+		pipeline: crmPipelineRepo,
+		build: func(sc crmservice.SelfServeConfig) crmservice.SelfServeService {
+			return crmservice.NewSelfServeService(crmservice.SelfServeDeps{
+				Leads: crmLeadSvc, Companies: crmCompanyRepo, Contacts: crmContactRepo,
+				Deals:     selfServeDeals{repo: crmDealRepo, svc: crmDealSvc},
+				Pipelines: crmPipelineRepo, Quotations: crmQuotationSvc, Orders: crmSalesOrderSvc,
+				Invoices: receivableModule.Invoices, Products: catalogProductService,
+				Buyers:        selfServeBuyers{users: userRepo, orgs: organizationrepo.NewOrganizationRepository(db)},
+				Subscriptions: selfServeSubscriptions{orders: crmSalesOrderRepo, contracts: crmReceivableDocs, products: catalogProductService},
+				Locker:        crmrepo.NewAdvisoryLocker(db),
+			}, sc, time.Now)
+		},
+	}
+	crmSelfServeHandler := crmhandler.NewSelfServeHandler(selfServeSvc, selfServePlatformScopes, permService).
+		WithSubscription(withSubscriptionView(crmTenantAccess, cfg, db, receivableModule.Invoices, receivableModule.Contracts, catalogProductService), cfg.SelfServe.GraceDays)
 
 	router, err := newRouter(Dependencies{
 		Config:                           cfg,
@@ -471,10 +606,6 @@ func New(ctx context.Context) (*App, error) {
 		NotificationVariableHandler:      variableHandler,
 		PermissionHandler:                permHandler,
 		PlatformProductHandler:           platformProductHandler,
-		PublicProductHandler:             publicProductHandler,
-		PlatformSubscriptionHandler:      platformSubscriptionHandler,
-		PlatformBillingHandler:           platformBillingHandler,
-		TenantBillingHandler:             tenantBillingHandler,
 		DokuWebhookHandler:               dokuWebhookHandler,
 		OrganizationDomainHandler:        organizationDomainHandler,
 		OrganizationEntitlementHandler:   organizationEntitlementHandler,
@@ -488,6 +619,7 @@ func New(ctx context.Context) (*App, error) {
 		LandingAdminPageHandler:          landingAdminPageHandler,
 		LandingAdminSectionHandler:       landingAdminSectionHandler,
 		LandingAdminDocumentHandler:      landingAdminDocumentHandler,
+		LandingAdminPageTemplateHandler:  landingAdminPageTemplateHandler,
 		LandingAdminBrandingHandler:      landingAdminBrandingHandler,
 		LandingAdminDomainHandler:        landingAdminDomainHandler,
 		LandingAdminFormHandler:          landingAdminFormHandler,
@@ -506,12 +638,36 @@ func New(ctx context.Context) (*App, error) {
 		CRMCompanyHandler:                crmCompanyHandler,
 		CRMContactHandler:                crmContactHandler,
 		CRMLeadHandler:                   crmLeadHandler,
+		CRMLeadAttachmentHandler:         crmLeadAttachmentHandler,
+		CRMContactAttachmentHandler:      crmContactAttachmentHandler,
+		MailboxHandler:                   mailboxHandler,
+		CatalogProductHandler:            catalogProductHandler,
+		CatalogCategoryHandler:           catalogCategoryHandler,
+		CatalogFeatureHandler:            catalogFeatureHandler,
+		CatalogPublicListingHandler:      catalogPublicListingHandler,
+		CRMLeadDashboardHandler:          crmLeadDashboardHandler,
+		CRMSettingsHandler:               crmSettingsHandler,
+		CRMMemberHandler:                 crmMemberHandler,
 		CRMPipelineHandler:               crmPipelineHandler,
 		CRMDealHandler:                   crmDealHandler,
 		CRMActivityHandler:               crmActivityHandler,
 		CRMQuotationHandler:              crmQuotationHandler,
-		CRMInvoiceHandler:                crmInvoiceHandler,
+		CRMSalesOrderHandler:             crmSalesOrderHandler,
+		CRMDealOrdersHandler:             crmDealOrdersHandler,
+		ReceivableContractHandler:        receivableModule.ContractHandler,
+		ReceivableOverviewHandler:        receivableModule.OverviewHandler,
+		CRMPublicQuotationHandler:        crmPublicQuotationHandler,
+		CRMSelfServeHandler:              crmSelfServeHandler,
+		ReceivableAccountHandler:         receivableModule.AccountHandler,
+		ReceivableInvoiceHandler:         receivableModule.InvoiceHandler,
+		ReceivablePaymentHandler:         receivableModule.PaymentHandler,
+		ReceivableSettingsHandler:        receivableModule.SettingsHandler,
+		ReceivablePublicInvoiceHandler:   receivableModule.PublicHandler,
 		CRMIntegrationHandler:            crmIntegrationHandler,
+		WhatsAppEntitlementChecker:       crmEntitlementChecker,
+		WhatsAppSessionHandler:           whatsappSessionHandler,
+		WhatsAppWebhookHandler:           whatsappWebhookHandler,
+		WhatsAppConversationHandler:      whatsappConversationHandler,
 		AdminAssetHandler:                adminAssetHandler,
 		PlatformAssetHandler:             platformAssetHandler,
 		PlatformFinanceCoAHandler:        platformFinanceCoAHandler,
@@ -566,6 +722,24 @@ func buildMediaStorage(cfg config.StorageConfig) (storage.MediaStorage, error) {
 	default:
 		return nil, fmt.Errorf("unknown storage driver %q", cfg.Driver)
 	}
+}
+
+// NewAssetService builds a standalone asset service from just config/db/log
+// — everything internal/app's own big constructor needs to wire it inline,
+// factored out so cmd/worker (mail sync's attachment storage) can build the
+// same thing without duplicating it.
+func NewAssetService(cfg config.Config, db *database.Pool, log *slog.Logger) (assetservice.AssetService, error) {
+	mediaStorage, err := buildMediaStorage(cfg.Storage)
+	if err != nil {
+		return nil, err
+	}
+	return assetservice.NewAssetService(
+		assetrepo.NewAssetRepository(db),
+		landingrepo.NewMediaRepository(db),
+		assetservice.WithAssetObjectStorage(mediaStorage),
+		assetservice.WithAssetEntitlementFinder(organizationrepo.NewEntitlementRepository(db)),
+		assetservice.WithAssetLogger(log),
+	), nil
 }
 
 func Run(ctx context.Context) error {

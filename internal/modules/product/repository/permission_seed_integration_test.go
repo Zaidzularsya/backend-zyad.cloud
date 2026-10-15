@@ -16,14 +16,8 @@ func TestProductPermissionSeedIntegration(t *testing.T) {
 	defer cancel()
 
 	requiredPermissions := []string{
-		"platform.product.plan.read",
-		"platform.product.plan.manage",
-		"platform.product.plan_price.read",
-		"platform.product.plan_price.manage",
 		"platform.product.feature.read",
 		"platform.product.feature.manage",
-		"platform.product.entitlement.read",
-		"platform.product.entitlement.manage",
 	}
 
 	for _, permission := range requiredPermissions {
@@ -43,10 +37,8 @@ func TestProductPermissionSeedIntegration(t *testing.T) {
 	}
 
 	platformPermissions := []string{
-		"platform.product.plan.read",
-		"platform.product.plan.manage",
-		"platform.product.plan_price.read",
-		"platform.product.plan_price.manage",
+		"platform.product.feature.read",
+		"platform.product.feature.manage",
 	}
 	for _, permission := range platformPermissions {
 		var count int

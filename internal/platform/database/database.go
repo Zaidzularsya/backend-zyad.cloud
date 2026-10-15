@@ -26,6 +26,12 @@ func Connect(ctx context.Context, cfg config.DatabaseConfig, logger *slog.Logger
 		cfg.ConnectTimeoutSeconds = 5
 	}
 	poolCfg.ConnConfig.ConnectTimeout = time.Duration(cfg.ConnectTimeoutSeconds) * time.Second
+	// Almost every timestamp column is "timestamp without time zone" and many
+	// default to now(). Pin the session to UTC so now() stores UTC wall-clock
+	// regardless of the server's TimeZone (Asia/Jakarta on our boxes), matching
+	// what Go writes with time.Now().UTC() and how the API reads it back.
+	// Business-day logic must use an explicit timezone, never the session's.
+	poolCfg.ConnConfig.RuntimeParams["timezone"] = "UTC"
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {

@@ -121,3 +121,7 @@ func TestDocumentServiceSaveMapsMissingPageToNotFound(t *testing.T) {
 		t.Fatalf("expected PAGE_NOT_FOUND, got %v", err)
 	}
 }
+
+func (s *documentPageRepoStub) SetHomepage(context.Context, coretenant.Scope, string) error {
+	return nil
+}

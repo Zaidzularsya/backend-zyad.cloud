@@ -2,10 +2,12 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/crm/domain"
@@ -42,7 +44,7 @@ func (r *companyRepository) withTx(ctx context.Context, scope coretenant.Scope, 
 const companyColumns = `
 	id, organization_id, name, industry, website, phone, email, address,
 	size_range, notes, tags, owner_user_id, created_by, updated_by,
-	created_at, updated_at, deleted_at
+	created_at, updated_at, deleted_at, tenant_organization_id
 `
 
 func scanCompany(row pgx.Row) (domain.Company, error) {
@@ -53,7 +55,7 @@ func scanCompany(row pgx.Row) (domain.Company, error) {
 	err := row.Scan(
 		&c.ID, &c.OrganizationID, &c.Name, &industry, &website, &phone, &email, &c.Address,
 		&sizeRange, &notes, &c.Tags, &ownerUserID, &createdBy, &updatedBy,
-		&c.CreatedAt, &c.UpdatedAt, &c.DeletedAt,
+		&c.CreatedAt, &c.UpdatedAt, &c.DeletedAt, &c.TenantOrganizationID,
 	)
 	if err != nil {
 		return domain.Company{}, err
@@ -94,15 +96,21 @@ func (r *companyRepository) Create(ctx context.Context, scope coretenant.Scope, 
 	if !scope.IsValid() {
 		return domain.Company{}, coretenant.ErrInvalidScope
 	}
+	var company domain.Company
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var err error
+		company, err = insertCompanyTx(ctx, tx, scope, params)
+		return err
+	})
+	if err != nil {
+		return domain.Company{}, err
+	}
+	return company, nil
+}
 
-	query := `
-		INSERT INTO crm_companies (
-			organization_id, name, industry, website, phone, email, address,
-			size_range, notes, tags, owner_user_id, created_by
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
-		) RETURNING ` + companyColumns
-
+// insertCompanyTx menulis satu crm_companies di transaksi pemanggil
+// (dipakai Create dan convert lead).
+func insertCompanyTx(ctx context.Context, tx pgx.Tx, scope coretenant.Scope, params CreateCompanyParams) (domain.Company, error) {
 	address := params.Address
 	if address == nil {
 		address = map[string]any{}
@@ -111,30 +119,27 @@ func (r *companyRepository) Create(ctx context.Context, scope coretenant.Scope, 
 	if tags == nil {
 		tags = []string{}
 	}
-
-	var company domain.Company
-	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
-		var scanErr error
-		company, scanErr = scanCompany(tx.QueryRow(ctx, query,
-			scope.OrganizationID(),
-			params.Name,
-			nullableString(params.Industry),
-			nullableString(params.Website),
-			nullableString(params.Phone),
-			nullableString(params.Email),
-			address,
-			nullableString(params.SizeRange),
-			nullableString(params.Notes),
-			tags,
-			nullableString(params.OwnerUserID),
-			nullableString(params.CreatedBy),
-		))
-		return scanErr
-	})
-	if err != nil {
-		return domain.Company{}, err
-	}
-	return company, nil
+	return scanCompany(tx.QueryRow(ctx, `
+		INSERT INTO crm_companies (
+			organization_id, name, industry, website, phone, email, address,
+			size_range, notes, tags, owner_user_id, created_by, tenant_organization_id
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+		) RETURNING `+companyColumns,
+		scope.OrganizationID(),
+		params.Name,
+		nullableString(params.Industry),
+		nullableString(params.Website),
+		nullableString(params.Phone),
+		nullableString(params.Email),
+		address,
+		nullableString(params.SizeRange),
+		nullableString(params.Notes),
+		tags,
+		nullableString(params.OwnerUserID),
+		nullableString(params.CreatedBy),
+		nullableString(params.TenantOrganizationID),
+	))
 }
 
 func (r *companyRepository) FindByID(ctx context.Context, scope coretenant.Scope, id string) (domain.Company, error) {
@@ -339,4 +344,71 @@ func nullableString(value string) interface{} {
 		return nil
 	}
 	return value
+}
+
+func (r *companyRepository) FindCandidatesByName(ctx context.Context, scope coretenant.Scope, needle string, limit int) ([]domain.Company, error) {
+	if !scope.IsValid() {
+		return nil, coretenant.ErrInvalidScope
+	}
+	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(needle)
+	var out []domain.Company
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, "SELECT "+companyColumns+` FROM crm_companies
+			WHERE organization_id = $1 AND deleted_at IS NULL AND lower(name) LIKE '%' || $2 || '%' ESCAPE '\'
+			ORDER BY name LIMIT $3`, scope.OrganizationID(), escaped, limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			c, err := scanCompany(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, c)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+func (r *companyRepository) FindByTenantOrganization(ctx context.Context, scope coretenant.Scope, tenantOrgID string) (domain.Company, error) {
+	if !scope.IsValid() {
+		return domain.Company{}, coretenant.ErrInvalidScope
+	}
+	var company domain.Company
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var err error
+		company, err = scanCompany(tx.QueryRow(ctx, `SELECT `+companyColumns+` FROM crm_companies
+			WHERE organization_id = $1 AND tenant_organization_id = $2 AND deleted_at IS NULL`,
+			scope.OrganizationID(), tenantOrgID))
+		return err
+	})
+	if err != nil {
+		return domain.Company{}, err
+	}
+	return company, nil
+}
+
+func (r *companyRepository) SetTenantOrganization(ctx context.Context, scope coretenant.Scope, companyID, tenantOrgID, updatedBy string) (domain.Company, error) {
+	if !scope.IsValid() {
+		return domain.Company{}, coretenant.ErrInvalidScope
+	}
+	var company domain.Company
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var err error
+		company, err = scanCompany(tx.QueryRow(ctx, `UPDATE crm_companies
+			SET tenant_organization_id = NULLIF($3::text, '')::uuid, updated_by = $4, updated_at = NOW()
+			WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL
+			RETURNING `+companyColumns, companyID, scope.OrganizationID(), tenantOrgID, nullableString(updatedBy)))
+		return err
+	})
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "idx_crm_companies_tenant_org_unique" {
+		return domain.Company{}, ErrWorkspaceAlreadyLinked
+	}
+	if err != nil {
+		return domain.Company{}, err
+	}
+	return company, nil
 }

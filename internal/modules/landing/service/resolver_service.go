@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 	"zyad.cloud/internal/core/tenant"
@@ -64,6 +66,34 @@ func (s *resolverService) ResolveBySlug(ctx context.Context, scope tenant.Scope,
 	}
 
 	return s.resolvePageData(ctx, scope, page, previewToken)
+}
+
+// fallbackHomepageSlug is the legacy platform marketing page seeded by
+// migration 000035; it keeps "/" alive when no is_homepage page is published.
+const fallbackHomepageSlug = "public-marketing"
+
+func (s *resolverService) ResolveHomepage(ctx context.Context, scope tenant.Scope) (ResolvedPage, error) {
+	page, err := s.resolverRepo.ResolveHomepage(ctx, scope)
+	switch {
+	case err == nil:
+		resolved, resolveErr := s.resolvePageData(ctx, scope, page, "")
+		if resolveErr == nil {
+			return resolved, nil
+		}
+		if !errors.Is(resolveErr, ErrPageNotPublished) && !errors.Is(resolveErr, ErrPageNotFound) {
+			// Unlike "not published", an unexpected error means a configured
+			// homepage is broken; falling back keeps "/" alive but must not be silent.
+			slog.Warn("landing homepage resolve failed, falling back to default page",
+				"page_id", page.ID,
+				"organization_id", scope.OrganizationID(),
+				"error_type", fmt.Sprintf("%T", resolveErr),
+			)
+		}
+	case !errors.Is(err, pgx.ErrNoRows):
+		return ResolvedPage{}, err
+	}
+
+	return s.ResolveBySlug(ctx, scope, fallbackHomepageSlug, "")
 }
 
 func (s *resolverService) ResolveByDomain(ctx context.Context, scope tenant.Scope, customDomain string, previewToken string) (ResolvedPage, error) {
@@ -186,6 +216,7 @@ func (s *resolverService) resolveGrapesPage(ctx context.Context, scope tenant.Sc
 		CTAs:         s.resolveCTAs(ctx, scope),
 		PricingPlans: s.resolvePricingPlans(ctx, scope),
 		IsDraft:      isDraftPreview,
+		Forms:        s.resolveActiveFormsWithFields(ctx, scope, page.ID),
 	}
 
 	if !isDraftPreview {
@@ -215,10 +246,35 @@ func (s *resolverService) resolveSections(ctx context.Context, scope tenant.Scop
 	return sections
 }
 
+// resolveActiveFormsWithFields returns the page's active forms with their
+// fields, which is what a GrapesJS lead-form block needs to render. Inactive
+// forms are left out so the public page never offers a form that would reject
+// the submission.
+func (s *resolverService) resolveActiveFormsWithFields(ctx context.Context, scope tenant.Scope, pageID string) []domain.LandingForm {
+	all := s.resolveForms(ctx, scope, pageID)
+	active := make([]domain.LandingForm, 0, len(all))
+	for _, form := range all {
+		if !form.IsActive {
+			continue
+		}
+		if fields, err := s.formRepo.ListFieldsByForm(ctx, scope, form.ID); err == nil {
+			form.Fields = fields
+		}
+		active = append(active, form)
+	}
+	return active
+}
+
 func (s *resolverService) resolveForms(ctx context.Context, scope tenant.Scope, pageID string) []domain.LandingForm {
 	forms, err := s.resolverRepo.ResolveForms(ctx, scope, pageID)
 	if err != nil {
 		return []domain.LandingForm{}
+	}
+	// The public payload must not reveal the CRM routing config (PIC user id,
+	// lead flag); the admin API returns it from the form service instead.
+	for i := range forms {
+		forms[i].LeadOwnerUserID = ""
+		forms[i].CreateCRMLead = false
 	}
 	return forms
 }

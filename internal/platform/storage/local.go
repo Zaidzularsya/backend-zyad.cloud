@@ -123,6 +123,27 @@ func (p *LocalProvider) OpenPublic(_ context.Context, key string) (io.ReadCloser
 	return file, contentType, nil
 }
 
+// Open membuka object apa pun (termasuk private) untuk dibaca backend;
+// pemanggil wajib sudah memvalidasi kepemilikan tenant.
+func (p *LocalProvider) Open(_ context.Context, key string) (io.ReadCloser, string, error) {
+	target, err := p.resolve(key)
+	if err != nil {
+		return nil, "", err
+	}
+	f, err := os.Open(target)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, "", ErrObjectNotFound
+		}
+		return nil, "", fmt.Errorf("open storage file: %w", err)
+	}
+	contentType := mime.TypeByExtension(filepath.Ext(target))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	return f, contentType, nil
+}
+
 func (p *LocalProvider) resolve(key string) (string, error) {
 	cleaned := cleanObjectKey(key)
 	if cleaned == "" {

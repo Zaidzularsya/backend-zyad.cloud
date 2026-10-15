@@ -25,6 +25,14 @@ type CreateSubmissionParams struct {
 	IdempotencyKey string
 }
 
+// UpdateCRMSyncParams records the outcome of syncing a submission to a CRM
+// lead. LeadID/Error empty are stored as NULL.
+type UpdateCRMSyncParams struct {
+	LeadID string
+	Status domain.CRMSyncStatus
+	Error  string
+}
+
 type UpdateSubmissionParams struct {
 	Status *domain.SubmissionStatus
 }
@@ -48,7 +56,10 @@ type SubmissionRepository interface {
 	Create(context.Context, coretenant.Scope, CreateSubmissionParams) (domain.LandingSubmission, error)
 	FindByID(context.Context, coretenant.Scope, string) (domain.LandingSubmission, error)
 	List(context.Context, coretenant.Scope, SubmissionFilter) ([]domain.LandingSubmission, error)
+	// FindByIdempotencyKey returns pgx.ErrNoRows when no live submission has the key.
+	FindByIdempotencyKey(context.Context, coretenant.Scope, string) (domain.LandingSubmission, error)
 	Update(context.Context, coretenant.Scope, string, UpdateSubmissionParams) (domain.LandingSubmission, error)
+	UpdateCRMSync(context.Context, coretenant.Scope, string, UpdateCRMSyncParams) (domain.LandingSubmission, error)
 	Delete(context.Context, coretenant.Scope, string) error
 
 	// Submission Note Operations
