@@ -1,0 +1,9 @@
+{
+  "slug": "event",
+  "name": "Event / webinar",
+  "description": "Detail acara, agenda, dan pendaftaran.",
+  "category": "acara",
+  "sort_order": 140,
+  "platform_only": false,
+  "version": 1
+}

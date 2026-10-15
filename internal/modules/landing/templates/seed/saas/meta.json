@@ -1,0 +1,9 @@
+{
+  "slug": "saas",
+  "name": "SaaS landing",
+  "description": "Hero asimetris, fitur utama + pendukung, dan ajakan bertindak.",
+  "category": "teknologi-isp",
+  "sort_order": 100,
+  "platform_only": false,
+  "version": 1
+}

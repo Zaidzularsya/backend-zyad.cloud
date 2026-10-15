@@ -1,0 +1,9 @@
+{
+  "slug": "zyad-marketing",
+  "name": "Zyad Marketing",
+  "description": "Halaman marketing Zyad Cloud: alur produk, harga dari katalog, dan form konsultasi.",
+  "category": "platform",
+  "sort_order": 5,
+  "platform_only": true,
+  "version": 1
+}
