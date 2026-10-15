@@ -169,3 +169,12 @@ func TestPageTemplateHandler_PatchPartial(t *testing.T) {
 		t.Errorf("other fields must be nil: %+v", in)
 	}
 }
+
+func TestPageTemplateHandler_AllRouteNotShadowedByID(t *testing.T) {
+	svc := &fakePageTemplateService{items: []domain.PageTemplate{{ID: "1", Slug: "a", Status: domain.PageTemplateStatusDraft}}}
+	r := templateRouter(t, coretenant.OrganizationTypePlatform, NewAdminPageTemplateHandler(svc))
+	rec := doTemplateRequest(r, http.MethodGet, "/admin/landing-templates/all", "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"status":"draft"`) {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	}
+}
