@@ -28,6 +28,7 @@ const (
 	PermissionPreview               = "landing.preview"
 	PermissionIntegrationRead       = "landing.integration.read"
 	PermissionIntegrationManage     = "landing.integration.manage"
+	PermissionPageTemplateManage    = "landing.page_template.manage"
 )
 
 var Permissions = []string{
@@ -58,4 +59,5 @@ var Permissions = []string{
 	PermissionPreview,
 	PermissionIntegrationRead,
 	PermissionIntegrationManage,
+	PermissionPageTemplateManage,
 }
