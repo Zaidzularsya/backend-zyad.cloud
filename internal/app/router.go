@@ -191,6 +191,9 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.LandingAdminDocumentHandler != nil {
 		deps.LandingAdminDocumentHandler.RegisterRoutes(protected, deps.PermissionChecker)
 	}
+	if deps.LandingAdminPageTemplateHandler != nil {
+		deps.LandingAdminPageTemplateHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
 	if deps.LandingAdminBrandingHandler != nil {
 		deps.LandingAdminBrandingHandler.RegisterRoutes(protected, deps.PermissionChecker)
 	}

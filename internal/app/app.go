@@ -37,6 +37,7 @@ import (
 	landinghandler "zyad.cloud/internal/modules/landing/handler"
 	landingrepo "zyad.cloud/internal/modules/landing/repository"
 	landingservice "zyad.cloud/internal/modules/landing/service"
+	landingtemplates "zyad.cloud/internal/modules/landing/templates"
 	mailboxhandler "zyad.cloud/internal/modules/mailbox/handler"
 	mailboxrepo "zyad.cloud/internal/modules/mailbox/repository"
 	mailboxservice "zyad.cloud/internal/modules/mailbox/service"
@@ -246,6 +247,7 @@ func New(ctx context.Context) (*App, error) {
 	landingBrandingRepo := landingrepo.NewBrandingRepository(db)
 	landingVersionRepo := landingrepo.NewVersionRepository(db)
 	landingDocumentRepo := landingrepo.NewDocumentRepository(db)
+	landingPageTemplateRepo := landingrepo.NewPageTemplateRepository(db)
 	landingPlatformRepo := landingrepo.NewPlatformPageRepository(db)
 
 	landingVisibilitySvc, err := landingservice.NewVisibilityService(landingPageRepo, landingPlatformRepo, redisClient, cfg)
@@ -265,6 +267,13 @@ func New(ctx context.Context) (*App, error) {
 		landingservice.WithLandingSectionQuotaGuard(entitlementGuard),
 	)
 	landingDocumentSvc := landingservice.NewDocumentService(landingDocumentRepo, landingPageRepo)
+	landingPageTemplateSvc := landingservice.NewPageTemplateService(landingPageTemplateRepo, landingDocumentRepo, landingPageRepo)
+	// Seeder galeri template: kegagalan hanya dicatat, tidak menghentikan API.
+	if seeds, seedErr := landingtemplates.LoadSeeds(); seedErr != nil {
+		log.Error("load page template seeds", "error", seedErr)
+	} else if seedErr := landingservice.SeedPageTemplates(ctx, landingPageTemplateRepo, seeds, log); seedErr != nil {
+		log.Error("seed page templates", "error", seedErr)
+	}
 
 	landingDomainRepo := landingrepo.NewDomainRepository(db)
 	landingDomainSvc := landingservice.NewDomainService(
@@ -340,6 +349,7 @@ func New(ctx context.Context) (*App, error) {
 	landingAdminPageHandler := landinghandler.NewAdminPageHandler(landingPageSvc, landingVisibilitySvc, landingRevisionSvc, landingPublishSvc)
 	landingAdminSectionHandler := landinghandler.NewAdminSectionHandler(landingSectionSvc, landingRevisionSvc)
 	landingAdminDocumentHandler := landinghandler.NewAdminDocumentHandler(landingDocumentSvc)
+	landingAdminPageTemplateHandler := landinghandler.NewAdminPageTemplateHandler(landingPageTemplateSvc)
 	landingAdminBrandingHandler := landinghandler.NewAdminBrandingHandler(landingBrandingSvc)
 	landingAdminDomainHandler := landinghandler.NewAdminDomainHandler(landingDomainSvc)
 	landingAdminFormHandler := landinghandler.NewAdminFormHandler(landingFormSvc)
@@ -609,6 +619,7 @@ func New(ctx context.Context) (*App, error) {
 		LandingAdminPageHandler:          landingAdminPageHandler,
 		LandingAdminSectionHandler:       landingAdminSectionHandler,
 		LandingAdminDocumentHandler:      landingAdminDocumentHandler,
+		LandingAdminPageTemplateHandler:  landingAdminPageTemplateHandler,
 		LandingAdminBrandingHandler:      landingAdminBrandingHandler,
 		LandingAdminDomainHandler:        landingAdminDomainHandler,
 		LandingAdminFormHandler:          landingAdminFormHandler,
