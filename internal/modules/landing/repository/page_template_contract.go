@@ -40,9 +40,9 @@ type UpdatePageTemplateParams struct {
 	UpdatedBy                   string
 }
 
-// PageTemplateRepository mengakses tabel global landing_page_templates
+// PlatformPageTemplateRepository mengakses tabel global landing_page_templates
 // (tanpa scope tenant dan tanpa RLS; visibilitas dijaga di service).
-type PageTemplateRepository interface {
+type PlatformPageTemplateRepository interface {
 	// List tidak mengisi HTML/CSS; urut sort_order, name.
 	List(ctx context.Context, f PageTemplateListFilter) ([]domain.PageTemplate, error)
 	// FindByID mengembalikan pgx.ErrNoRows bila tidak ada (termasuk id bukan uuid).

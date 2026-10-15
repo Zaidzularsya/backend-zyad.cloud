@@ -20,12 +20,12 @@ const pageTemplateColumns = `id::text, slug, name, description, category, sort_o
 	platform_only, source, seed_version, seed_modified, source_page_id::text,
 	COALESCE(created_by::text, ''), COALESCE(updated_by::text, ''), created_at, updated_at`
 
-type pageTemplateRepository struct {
+type platformPageTemplateStore struct {
 	db *database.Pool
 }
 
-func NewPageTemplateRepository(db *database.Pool) PageTemplateRepository {
-	return &pageTemplateRepository{db: db}
+func NewPageTemplateRepository(db *database.Pool) PlatformPageTemplateRepository {
+	return &platformPageTemplateStore{db: db}
 }
 
 func scanPageTemplate(row pgx.Row, withBody bool) (domain.PageTemplate, error) {
@@ -47,7 +47,7 @@ func scanPageTemplate(row pgx.Row, withBody bool) (domain.PageTemplate, error) {
 	return t, nil
 }
 
-func (r *pageTemplateRepository) List(ctx context.Context, f PageTemplateListFilter) ([]domain.PageTemplate, error) {
+func (r *platformPageTemplateStore) List(ctx context.Context, f PageTemplateListFilter) ([]domain.PageTemplate, error) {
 	var where []string
 	var args []any
 	if len(f.Statuses) > 0 {
@@ -84,23 +84,23 @@ func (r *pageTemplateRepository) List(ctx context.Context, f PageTemplateListFil
 	return items, rows.Err()
 }
 
-func (r *pageTemplateRepository) findOne(ctx context.Context, column, value string) (domain.PageTemplate, error) {
+func (r *platformPageTemplateStore) findOne(ctx context.Context, column, value string) (domain.PageTemplate, error) {
 	query := "SELECT " + pageTemplateColumns + ", html, css FROM landing_page_templates WHERE " + column + " = $1"
 	return scanPageTemplate(r.db.QueryRow(ctx, query, value), true)
 }
 
-func (r *pageTemplateRepository) FindByID(ctx context.Context, id string) (domain.PageTemplate, error) {
+func (r *platformPageTemplateStore) FindByID(ctx context.Context, id string) (domain.PageTemplate, error) {
 	// Dibandingkan sebagai text agar id yang bukan uuid menjadi "tidak ada", bukan error SQL.
 	// Tabel kecil (puluhan baris), jadi tidak memakai index PK.
 	query := "SELECT " + pageTemplateColumns + ", html, css FROM landing_page_templates WHERE id::text = $1"
 	return scanPageTemplate(r.db.QueryRow(ctx, query, id), true)
 }
 
-func (r *pageTemplateRepository) FindBySlug(ctx context.Context, slug string) (domain.PageTemplate, error) {
+func (r *platformPageTemplateStore) FindBySlug(ctx context.Context, slug string) (domain.PageTemplate, error) {
 	return r.findOne(ctx, "slug", slug)
 }
 
-func (r *pageTemplateRepository) Create(ctx context.Context, p CreatePageTemplateParams) (domain.PageTemplate, error) {
+func (r *platformPageTemplateStore) Create(ctx context.Context, p CreatePageTemplateParams) (domain.PageTemplate, error) {
 	var createdBy *string
 	if p.CreatedBy != "" {
 		createdBy = &p.CreatedBy
@@ -126,7 +126,7 @@ func (r *pageTemplateRepository) Create(ctx context.Context, p CreatePageTemplat
 	return t, nil
 }
 
-func (r *pageTemplateRepository) Update(ctx context.Context, id string, p UpdatePageTemplateParams) (domain.PageTemplate, error) {
+func (r *platformPageTemplateStore) Update(ctx context.Context, id string, p UpdatePageTemplateParams) (domain.PageTemplate, error) {
 	sets := []string{"updated_at = now()"}
 	args := []any{id}
 	add := func(column string, value any) {
@@ -174,7 +174,7 @@ func (r *pageTemplateRepository) Update(ctx context.Context, id string, p Update
 	return scanPageTemplate(r.db.QueryRow(ctx, query, args...), true)
 }
 
-func (r *pageTemplateRepository) WithSeedLock(ctx context.Context, fn func(ctx context.Context) error) error {
+func (r *platformPageTemplateStore) WithSeedLock(ctx context.Context, fn func(ctx context.Context) error) error {
 	conn, err := r.db.Acquire(ctx)
 	if err != nil {
 		return err
