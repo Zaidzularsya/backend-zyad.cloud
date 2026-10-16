@@ -483,10 +483,34 @@ Blok GrapesJS "Pricing Katalog" menampilkan produk publik dari Sales → Produk 
 
 Blok GrapesJS "Form Konsultasi" (kategori Conversion, tersedia untuk semua org; satu per halaman) memasang sentinel `<div data-zyad-slot="lead-form" data-zyad-config='{"form_id":"<uuid form>"}'>`. Slot publik `LeadFormSlot.vue` membaca form dari `Forms` di resolve.
 
-- **Form standar** (tombol "Buat form standar"): key `konsultasi` (akhiran `-2`, `-3` bila dipakai), submit "Kirim", sukses "Terima kasih! Tim kami akan menghubungi Anda dalam 1 hari kerja.", field `name`, `email`, `phone` (wajib), `company`, `company_size` (select), `interest`, `message`, `consent` (wajib).
+- **Form baru** (tombol "Buat form baru" + preset): key `konsultasi` (akhiran `-2`, `-3` bila dipakai), submit "Kirim", sukses "Terima kasih! Tim kami akan menghubungi Anda dalam 1 hari kerja.". Semua preset membuat 8 field (`name`, `email`, `phone` wajib; `company`, `company_size` select, `interest`, `message`; `consent` wajib) dan hanya berbeda status 4 field yang bisa diatur: **Ringkas** (default; semuanya disembunyikan), **Standar** (`company` dan `message` tampil), **Lengkap** (semuanya tampil). Field disembunyikan = `type: hidden` dengan tipe asli di `validation.original_type`; nilai `default_value`-nya diisi server saat submit.
 - **Perilaku:** validasi klien; honeypot `website`; tombol nonaktif saat kirim; `Idempotency-Key` dibuat per percobaan dan dipakai ulang untuk retry payload yang sama (key baru bila input berubah); `interest` terisi dari konteks halaman (mis. dari tombol "Hubungi sales" pricing katalog); `page_url` dan UTM ikut terkirim. BE selalu mewajibkan `consent=true`, jadi form tanpa field `consent` mendapat checkbox persetujuan bawaan.
 - **Redirect:** hanya `/path` internal atau `http(s)://`; selain itu diabaikan.
 - **Status sinkron CRM per submission:** `skipped | created | merged | failed`; lihat `docs/reference-crm.md` (Lead dari form landing). Admin melihat dan mengirim ulang di halaman **Submissions** (menu Landing; permission `landing.submission.read`/`update`). Keterbatasan BE: daftar tanpa total/pencarian (paginasi "Sebelumnya/Berikutnya").
+
+### Konfigurasi tampilan `data-zyad-config`
+
+Gaya disimpan **per blok per halaman** di atribut sentinel (data/perilaku form ada di tabel form). Dibaca `readLeadFormPresentation()` (`frontend/src/features/landing/renderer/lead-form/lead-form-presentation.ts`) dengan validasi ketat: nilai tidak valid jatuh ke default tanpa error, warna hanya `^#[0-9a-fA-F]{6}$` (nilai dipakai sebagai variabel CSS, jadi bukan jalur injeksi). Blok lama `{"form_id":"…"}` dibaca sebagai Kartu/inline/tema ikut halaman.
+
+```json
+{"form_id":"<uuid>","style":"kartu|minimal|glass|split|inline","display":"inline|popup",
+ "accent":null,"background":null,"text":null,"radius":"page|sm|md|lg","columns":2,"inherit_font":true,
+ "split":{"title":"≤80","points":["≤60 (maks 3)"]},
+ "popup":{"label":"≤30","icon":"chat|whatsapp","position":"right|left","title":"≤80"}}
+```
+
+- **Gaya:** Kartu (default), Minimal (input garis bawah, tombol outline pil), Glass (untuk latar foto/gelap; teks terang, mengabaikan `--tp-ink`), Split (judul + 3 poin di kiri, form di kanan), Ringkas satu baris (field + tombol sebaris). `columns` hanya untuk Kartu/Minimal/Glass.
+- **Tema:** variabel `--zy-lf-*` jatuh ke token template bila ada: `--tp-btn-bg`/`--tp-primary` (aksen), `--tp-btn-fg`/`--tp-on-primary` (teks tombol), `--tp-ink` (teks), `--tp-muted`, `--tp-line`, `--tp-radius`; tanpa token memakai default gaya (Kartu: navy `#0b1f3a`/putih), jadi halaman lama tidak berubah. Nilai custom di-set inline sebagai `--zy-lf-*-custom`. Panel memperingatkan bila kontras < 4.5:1.
+- **Popup:** lihat bawah.
+
+### Mode popup
+
+`display: "popup"` → sentinel tidak memakan ruang; slot merender **launcher** `position: fixed` di pojok (z-index 40) dan **dialog** (z-index 1000) yang di-Teleport ke `.zy-overlay-root` di tingkat shadow root (supaya tidak terpengaruh `transform` section beranimasi). Dialog: `role="dialog"`, `aria-modal`, Esc/klik latar menutup, fokus awal ke field pertama dan kembali ke launcher, Tab terkunci, scroll halaman dikunci, bottom sheet di < 640px. Token tema (`--tp-*`) dan font disalin dari sentinel ke overlay karena overlay berada di luar pohon halaman.
+
+- **Anchor `#konsultasi`:** klik link `#konsultasi` (dan CTA "Hubungi sales" di Katalog Pricing) membuka popup bila halaman punya; tanpa popup tetap scroll ke anchor. Hanya `#konsultasi` yang membuka popup.
+- **Singleton:** blok `lead-form` satu per halaman (`SINGLETON_SLOTS` di editor; renderer hanya memasang sentinel pertama), jadi satu halaman memakai inline **atau** popup. Tidak ada buka otomatis (timer/exit-intent).
+- **Setelah kirim (`after_submit`):** `message` (pesan sukses), `redirect` (`redirectTarget`), `whatsapp` (pesan sukses + tombol "Lanjut chat di WhatsApp" → `https://wa.me/<nomor>?text=…`, template default "Halo, saya {nama}. Saya tertarik dengan {minat}.", `{minat}` kosong → "layanan Anda"). Nomor kosong pada mode whatsapp diperlakukan sebagai pesan sukses.
+- **Field wajib dari server:** `422` dengan `data.missing_fields` → error per field bila field ada di layar; bila tidak (halaman basi) tampil "Form diperbarui. Muat ulang halaman untuk melanjutkan.".
 
 ## Animasi (R5-S2)
 
