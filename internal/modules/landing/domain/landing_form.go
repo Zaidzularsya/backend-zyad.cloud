@@ -37,6 +37,24 @@ func (t FormFieldType) IsValid() bool {
 	}
 }
 
+// AfterSubmitAction menentukan apa yang terjadi di browser setelah form berhasil dikirim.
+type AfterSubmitAction string
+
+const (
+	AfterSubmitMessage  AfterSubmitAction = "message"
+	AfterSubmitRedirect AfterSubmitAction = "redirect"
+	AfterSubmitWhatsApp AfterSubmitAction = "whatsapp"
+)
+
+func (a AfterSubmitAction) IsValid() bool {
+	switch a {
+	case AfterSubmitMessage, AfterSubmitRedirect, AfterSubmitWhatsApp:
+		return true
+	default:
+		return false
+	}
+}
+
 type LandingForm struct {
 	ID             string
 	LandingPageID  string
@@ -51,6 +69,10 @@ type LandingForm struct {
 	CreateCRMLead bool
 	// LeadOwnerUserID: PIC lead; kosong -> pembuat halaman (landing_pages.created_by).
 	LeadOwnerUserID string
+	// AfterSubmit: pesan sukses, redirect, atau lanjut ke WhatsApp.
+	AfterSubmit     AfterSubmitAction
+	WhatsAppNumber  string // digit saja, format internasional tanpa '+'
+	WhatsAppMessage string // template pesan; kosong = template default di frontend
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	Fields          []LandingFormField
@@ -66,7 +88,9 @@ type LandingFormField struct {
 	Options     []string
 	Validation  map[string]any
 	IsRequired  bool
-	SortOrder   int
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// DefaultValue dipakai server untuk field hidden bila pengunjung tidak mengirim nilai.
+	DefaultValue string
+	SortOrder    int
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }

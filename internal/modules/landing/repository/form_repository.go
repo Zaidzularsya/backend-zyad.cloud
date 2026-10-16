@@ -48,13 +48,15 @@ func (r *formRepository) Create(ctx context.Context, scope coretenant.Scope, par
 		INSERT INTO landing_forms (
 			organization_id, landing_page_id, name, key, description,
 			submit_label, success_message, redirect_url, is_active, created_by,
-			create_crm_lead, lead_owner_user_id
+			create_crm_lead, lead_owner_user_id,
+			after_submit, whatsapp_number, whatsapp_message
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
 		) RETURNING
 			id, landing_page_id, name, key, description,
 			submit_label, success_message, redirect_url, is_active,
 			create_crm_lead, COALESCE(lead_owner_user_id::text, ''),
+			after_submit, COALESCE(whatsapp_number, ''), COALESCE(whatsapp_message, ''),
 			created_at, updated_at
 	`
 
@@ -66,6 +68,11 @@ func (r *formRepository) Create(ctx context.Context, scope coretenant.Scope, par
 	var leadOwner interface{} = nil
 	if params.LeadOwnerUserID != "" {
 		leadOwner = params.LeadOwnerUserID
+	}
+
+	afterSubmit := params.AfterSubmit
+	if afterSubmit == "" {
+		afterSubmit = domain.AfterSubmitMessage
 	}
 
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
@@ -82,10 +89,14 @@ func (r *formRepository) Create(ctx context.Context, scope coretenant.Scope, par
 			createdBy,
 			params.CreateCRMLead,
 			leadOwner,
+			afterSubmit,
+			nullIfEmpty(params.WhatsAppNumber),
+			nullIfEmpty(params.WhatsAppMessage),
 		).Scan(
 			&form.ID, &form.LandingPageID, &form.Name, &form.Key, &form.Description,
 			&form.SubmitLabel, &form.SuccessMessage, &form.RedirectURL, &form.IsActive,
 			&form.CreateCRMLead, &form.LeadOwnerUserID,
+			&form.AfterSubmit, &form.WhatsAppNumber, &form.WhatsAppMessage,
 			&form.CreatedAt, &form.UpdatedAt,
 		)
 	})
@@ -107,6 +118,7 @@ func (r *formRepository) FindByID(ctx context.Context, scope coretenant.Scope, i
 			id, landing_page_id, name, key, description,
 			submit_label, success_message, redirect_url, is_active,
 			create_crm_lead, COALESCE(lead_owner_user_id::text, ''),
+			after_submit, COALESCE(whatsapp_number, ''), COALESCE(whatsapp_message, ''),
 			created_at, updated_at
 		FROM landing_forms
 		WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL
@@ -119,6 +131,7 @@ func (r *formRepository) FindByID(ctx context.Context, scope coretenant.Scope, i
 			&form.ID, &form.LandingPageID, &form.Name, &form.Key, &form.Description,
 			&form.SubmitLabel, &form.SuccessMessage, &form.RedirectURL, &form.IsActive,
 			&form.CreateCRMLead, &form.LeadOwnerUserID,
+			&form.AfterSubmit, &form.WhatsAppNumber, &form.WhatsAppMessage,
 			&form.CreatedAt, &form.UpdatedAt,
 		)
 	})
@@ -140,6 +153,7 @@ func (r *formRepository) FindByKey(ctx context.Context, scope coretenant.Scope, 
 			id, landing_page_id, name, key, description,
 			submit_label, success_message, redirect_url, is_active,
 			create_crm_lead, COALESCE(lead_owner_user_id::text, ''),
+			after_submit, COALESCE(whatsapp_number, ''), COALESCE(whatsapp_message, ''),
 			created_at, updated_at
 		FROM landing_forms
 		WHERE landing_page_id = $1 AND lower(key) = lower($2) AND organization_id = $3 AND deleted_at IS NULL
@@ -152,6 +166,7 @@ func (r *formRepository) FindByKey(ctx context.Context, scope coretenant.Scope, 
 			&form.ID, &form.LandingPageID, &form.Name, &form.Key, &form.Description,
 			&form.SubmitLabel, &form.SuccessMessage, &form.RedirectURL, &form.IsActive,
 			&form.CreateCRMLead, &form.LeadOwnerUserID,
+			&form.AfterSubmit, &form.WhatsAppNumber, &form.WhatsAppMessage,
 			&form.CreatedAt, &form.UpdatedAt,
 		)
 	})
@@ -173,6 +188,7 @@ func (r *formRepository) ListByPage(ctx context.Context, scope coretenant.Scope,
 			id, landing_page_id, name, key, description,
 			submit_label, success_message, redirect_url, is_active,
 			create_crm_lead, COALESCE(lead_owner_user_id::text, ''),
+			after_submit, COALESCE(whatsapp_number, ''), COALESCE(whatsapp_message, ''),
 			created_at, updated_at
 		FROM landing_forms
 		WHERE landing_page_id = $1 AND organization_id = $2 AND deleted_at IS NULL
@@ -194,6 +210,7 @@ func (r *formRepository) ListByPage(ctx context.Context, scope coretenant.Scope,
 				&form.ID, &form.LandingPageID, &form.Name, &form.Key, &form.Description,
 				&form.SubmitLabel, &form.SuccessMessage, &form.RedirectURL, &form.IsActive,
 				&form.CreateCRMLead, &form.LeadOwnerUserID,
+				&form.AfterSubmit, &form.WhatsAppNumber, &form.WhatsAppMessage,
 				&form.CreatedAt, &form.UpdatedAt,
 			)
 			if err != nil {
@@ -266,6 +283,21 @@ func (r *formRepository) Update(ctx context.Context, scope coretenant.Scope, id 
 		query += fmt.Sprintf(", lead_owner_user_id = $%d", argCount)
 		argCount++
 	}
+	if params.AfterSubmit != nil {
+		args = append(args, *params.AfterSubmit)
+		query += fmt.Sprintf(", after_submit = $%d", argCount)
+		argCount++
+	}
+	if params.WhatsAppNumber != nil {
+		args = append(args, nullIfEmpty(*params.WhatsAppNumber))
+		query += fmt.Sprintf(", whatsapp_number = $%d", argCount)
+		argCount++
+	}
+	if params.WhatsAppMessage != nil {
+		args = append(args, nullIfEmpty(*params.WhatsAppMessage))
+		query += fmt.Sprintf(", whatsapp_message = $%d", argCount)
+		argCount++
+	}
 	if params.UpdatedBy != "" {
 		args = append(args, params.UpdatedBy)
 		query += fmt.Sprintf(", updated_by = $%d", argCount)
@@ -278,6 +310,7 @@ func (r *formRepository) Update(ctx context.Context, scope coretenant.Scope, id 
 		id, landing_page_id, name, key, description,
 		submit_label, success_message, redirect_url, is_active,
 		create_crm_lead, COALESCE(lead_owner_user_id::text, ''),
+			after_submit, COALESCE(whatsapp_number, ''), COALESCE(whatsapp_message, ''),
 		created_at, updated_at
 	`
 
@@ -288,6 +321,7 @@ func (r *formRepository) Update(ctx context.Context, scope coretenant.Scope, id 
 			&form.ID, &form.LandingPageID, &form.Name, &form.Key, &form.Description,
 			&form.SubmitLabel, &form.SuccessMessage, &form.RedirectURL, &form.IsActive,
 			&form.CreateCRMLead, &form.LeadOwnerUserID,
+			&form.AfterSubmit, &form.WhatsAppNumber, &form.WhatsAppMessage,
 			&form.CreatedAt, &form.UpdatedAt,
 		)
 	})
@@ -332,12 +366,12 @@ func (r *formRepository) CreateField(ctx context.Context, scope coretenant.Scope
 	query := `
 		INSERT INTO landing_form_fields (
 			organization_id, form_id, field_key, field_type, label,
-			placeholder, options, validation, is_required, sort_order
+			placeholder, options, validation, is_required, default_value, sort_order
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 		) RETURNING
 			id, form_id, field_key, field_type, label,
-			placeholder, options, validation, is_required, sort_order,
+			placeholder, options, validation, is_required, COALESCE(default_value, ''), sort_order,
 			created_at, updated_at
 	`
 
@@ -363,10 +397,11 @@ func (r *formRepository) CreateField(ctx context.Context, scope coretenant.Scope
 			options,
 			validation,
 			params.IsRequired,
+			nullIfEmpty(params.DefaultValue),
 			params.SortOrder,
 		).Scan(
 			&field.ID, &field.FormID, &field.Key, &field.Type, &field.Label,
-			&field.Placeholder, &field.Options, &field.Validation, &field.IsRequired, &field.SortOrder,
+			&field.Placeholder, &field.Options, &field.Validation, &field.IsRequired, &field.DefaultValue, &field.SortOrder,
 			&field.CreatedAt, &field.UpdatedAt,
 		)
 	})
@@ -386,7 +421,7 @@ func (r *formRepository) FindFieldByID(ctx context.Context, scope coretenant.Sco
 	query := `
 		SELECT
 			id, form_id, field_key, field_type, label,
-			placeholder, options, validation, is_required, sort_order,
+			placeholder, options, validation, is_required, COALESCE(default_value, ''), sort_order,
 			created_at, updated_at
 		FROM landing_form_fields
 		WHERE id = $1 AND organization_id = $2
@@ -397,7 +432,7 @@ func (r *formRepository) FindFieldByID(ctx context.Context, scope coretenant.Sco
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, query, id, scope.OrganizationID()).Scan(
 			&field.ID, &field.FormID, &field.Key, &field.Type, &field.Label,
-			&field.Placeholder, &field.Options, &field.Validation, &field.IsRequired, &field.SortOrder,
+			&field.Placeholder, &field.Options, &field.Validation, &field.IsRequired, &field.DefaultValue, &field.SortOrder,
 			&field.CreatedAt, &field.UpdatedAt,
 		)
 	})
@@ -417,7 +452,7 @@ func (r *formRepository) ListFieldsByForm(ctx context.Context, scope coretenant.
 	query := `
 		SELECT
 			id, form_id, field_key, field_type, label,
-			placeholder, options, validation, is_required, sort_order,
+			placeholder, options, validation, is_required, COALESCE(default_value, ''), sort_order,
 			created_at, updated_at
 		FROM landing_form_fields
 		WHERE form_id = $1 AND organization_id = $2
@@ -437,7 +472,7 @@ func (r *formRepository) ListFieldsByForm(ctx context.Context, scope coretenant.
 			var field domain.LandingFormField
 			err := rows.Scan(
 				&field.ID, &field.FormID, &field.Key, &field.Type, &field.Label,
-				&field.Placeholder, &field.Options, &field.Validation, &field.IsRequired, &field.SortOrder,
+				&field.Placeholder, &field.Options, &field.Validation, &field.IsRequired, &field.DefaultValue, &field.SortOrder,
 				&field.CreatedAt, &field.UpdatedAt,
 			)
 			if err != nil {
@@ -495,7 +530,7 @@ func (r *formRepository) UpdateField(ctx context.Context, scope coretenant.Scope
 	query += fmt.Sprintf(" WHERE id = $%d AND organization_id = $%d RETURNING ", argCount, argCount+1)
 	query += `
 		id, form_id, field_key, field_type, label,
-		placeholder, options, validation, is_required, sort_order,
+		placeholder, options, validation, is_required, COALESCE(default_value, ''), sort_order,
 		created_at, updated_at
 	`
 
@@ -504,7 +539,7 @@ func (r *formRepository) UpdateField(ctx context.Context, scope coretenant.Scope
 	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, query, args...).Scan(
 			&field.ID, &field.FormID, &field.Key, &field.Type, &field.Label,
-			&field.Placeholder, &field.Options, &field.Validation, &field.IsRequired, &field.SortOrder,
+			&field.Placeholder, &field.Options, &field.Validation, &field.IsRequired, &field.DefaultValue, &field.SortOrder,
 			&field.CreatedAt, &field.UpdatedAt,
 		)
 	})
@@ -572,4 +607,12 @@ func (r *formRepository) DeleteField(ctx context.Context, scope coretenant.Scope
 	})
 
 	return err
+}
+
+// nullIfEmpty memetakan "" ke NULL untuk kolom teks opsional.
+func nullIfEmpty(v string) interface{} {
+	if v == "" {
+		return nil
+	}
+	return v
 }
