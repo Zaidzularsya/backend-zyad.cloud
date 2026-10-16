@@ -577,4 +577,4 @@ Spec: `docs/superpowers/specs/2026-10-16-lead-form-flex-design.md`. Panel blok F
 4. **Setelah kirim** (`GrapesLeadFormAfterSubmit.vue`) — pesan sukses / redirect / WhatsApp (nomor dinormalisasi seperti server) dan judul tombol. Aksi redirect/whatsapp baru dikirim ke server setelah inputnya valid.
 5. **Penerusan ke CRM** — toggle dan PIC lead.
 
-Pratinjau kanvas memakai `LeadFormView` (komponen yang sama dengan halaman publik, dinonaktifkan) lewat `createApp`, sehingga identik dengan hasil publish; CSS disuntik ke dokumen kanvas. Diagram alur dan aturan server: `docs/reference-landing-page.md` (Slot Form Konsultasi) dan `docs/landing-page-public-api-contract.md`.
+Pratinjau kanvas memakai `LeadFormView` (komponen yang sama dengan halaman publik, dinonaktifkan) lewat `createApp`, sehingga identik dengan hasil publish; CSS disuntik ke dokumen kanvas. Aturan server: `docs/reference-landing-page.md` (Slot Form Konsultasi) dan `docs/landing-page-public-api-contract.md`.
