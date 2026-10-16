@@ -104,6 +104,23 @@ func (s *submissionService) submit(ctx context.Context, scope coretenant.Scope, 
 	}
 	params.LandingPageID = form.LandingPageID
 
+	// Honeypot dicek sebelum key asing dibuang, karena "_honey" bukan field form.
+	if val, ok := params.SubmittedData["_honey"]; ok && val != "" {
+		return domain.LandingSubmission{}, form, ErrSpamDetected
+	}
+
+	// Aturan submit server: buang key asing, isi default field hidden, cek field wajib.
+	fields, err := s.formRepo.ListFieldsByForm(ctx, scope, form.ID)
+	if err != nil {
+		return domain.LandingSubmission{}, form, err
+	}
+	form.Fields = fields
+	prepared, err := prepareSubmittedData(fields, params.SubmittedData)
+	if err != nil {
+		return domain.LandingSubmission{}, form, err
+	}
+	params.SubmittedData = prepared
+
 	// 2. Generate Idempotency Key (Hash of payload + form_id + time bucket to prevent duplicate within a window)
 	// Alternatively, just trust the client's IdempotencyKey if provided.
 	clientKey := params.IdempotencyKey != ""
@@ -118,11 +135,7 @@ func (s *submissionService) submit(ctx context.Context, scope coretenant.Scope, 
 		params.IdempotencyKey = hex.EncodeToString(hash[:])
 	}
 
-	// 3. Spam Detection Logic (Honeypot)
-	// If the frontend sends a honeypot field (e.g. "_honey" or "website_url" that should be empty)
-	if val, ok := params.SubmittedData["_honey"]; ok && val != "" {
-		return domain.LandingSubmission{}, form, ErrSpamDetected
-	}
+	// 3. Spam detection (honeypot) sudah dicek di atas, sebelum key asing dibuang.
 
 	// 4. Set Initial Status
 	if params.Status == "" {
@@ -201,9 +214,11 @@ func (s *submissionService) syncToCRM(ctx context.Context, scope coretenant.Scop
 		return record(repository.UpdateCRMSyncParams{Status: domain.CRMSyncFailed, Error: truncateSyncError(message)})
 	}
 
-	// Notes need the field labels, which FindByID does not load.
-	if fields, err := s.formRepo.ListFieldsByForm(ctx, scope, form.ID); err == nil {
-		form.Fields = fields
+	// Notes need the field labels, which FindByID does not load (submit already loaded them).
+	if form.Fields == nil {
+		if fields, err := s.formRepo.ListFieldsByForm(ctx, scope, form.ID); err == nil {
+			form.Fields = fields
+		}
 	}
 
 	// The page is only needed for the owner fallback.

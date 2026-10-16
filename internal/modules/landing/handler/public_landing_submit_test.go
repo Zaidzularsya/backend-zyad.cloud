@@ -242,3 +242,13 @@ func TestPublicSubmit_PlatformFlagAndIdempotencyKeyForwarded(t *testing.T) {
 		t.Fatal("isPlatformOrg = true for customer tenant")
 	}
 }
+
+func TestPublicSubmit_MissingFields422(t *testing.T) {
+	err := fmt.Errorf("wrapped: %w", &service.ErrMissingRequired{Keys: []string{"email"}})
+	router := newSubmitRouter(t, &submissionServiceStub{submitErr: err}, nil, coretenant.OrganizationTypeCustomer)
+	rec := postSubmit(router, "form-1", "")
+	body := rec.Body.String()
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(body, "VALIDATION_ERROR") || !strings.Contains(body, `"missing_fields":["email"]`) {
+		t.Fatalf("status = %d body=%s", rec.Code, body)
+	}
+}

@@ -18,6 +18,7 @@ import (
 	"zyad.cloud/internal/modules/landing/dto"
 	"zyad.cloud/internal/modules/landing/repository"
 	"zyad.cloud/internal/modules/landing/service"
+	"zyad.cloud/internal/shared/response"
 )
 
 type PublicLandingHandler struct {
@@ -294,6 +295,7 @@ func (h *PublicLandingHandler) SubmitForm(c *gin.Context) {
 		return
 	}
 	isPlatformOrg := tenantContext.OrganizationType() == coretenant.OrganizationTypePlatform
+	var missing *service.ErrMissingRequired
 	result, err := h.submissionSvc.SubmitPublic(c.Request.Context(), scope, params, isPlatformOrg)
 	if err != nil {
 		switch {
@@ -301,6 +303,8 @@ func (h *PublicLandingHandler) SubmitForm(c *gin.Context) {
 			corehttp.Fail(c, coreerrors.New("LANDING_FORM_NOT_FOUND", "form was not found", http.StatusNotFound))
 		case errors.Is(err, service.ErrSpamDetected):
 			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "invalid submission", http.StatusUnprocessableEntity))
+		case errors.As(err, &missing):
+			response.ErrorWithData(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "Field wajib belum diisi.", gin.H{"missing_fields": missing.Keys})
 		case errors.Is(err, service.ErrInvalidSubmission):
 			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
 		default:
