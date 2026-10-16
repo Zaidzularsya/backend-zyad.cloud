@@ -78,6 +78,9 @@ type FormResponse struct {
 	IsActive        bool           `json:"is_active"`
 	CreateCRMLead   bool           `json:"create_crm_lead"`
 	LeadOwnerUserID *string        `json:"lead_owner_user_id"`
+	AfterSubmit     string         `json:"after_submit"`
+	WhatsAppNumber  *string        `json:"whatsapp_number"`
+	WhatsAppMessage *string        `json:"whatsapp_message"`
 	Consent         map[string]any `json:"consent,omitempty"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
@@ -85,15 +88,16 @@ type FormResponse struct {
 
 // FormFieldResponse represents form input field metadata.
 type FormFieldResponse struct {
-	ID          string         `json:"id"`
-	Key         string         `json:"key"`
-	Type        string         `json:"type"`
-	Label       string         `json:"label"`
-	Placeholder string         `json:"placeholder"`
-	Options     []string       `json:"options"`
-	Validation  map[string]any `json:"validation"`
-	Required    bool           `json:"required"`
-	SortOrder   int            `json:"sort_order"`
+	ID           string         `json:"id"`
+	Key          string         `json:"key"`
+	Type         string         `json:"type"`
+	Label        string         `json:"label"`
+	Placeholder  string         `json:"placeholder"`
+	Options      []string       `json:"options"`
+	Validation   map[string]any `json:"validation"`
+	Required     bool           `json:"required"`
+	DefaultValue string         `json:"default_value"`
+	SortOrder    int            `json:"sort_order"`
 }
 
 // SubmissionResponse represents a client form entry.
