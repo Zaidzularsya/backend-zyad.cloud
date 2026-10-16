@@ -2518,7 +2518,10 @@ paths:
               type: object
       responses:
         "200":
-          description: Form created successfully
+          description: >-
+            Form created successfully. Body menerima after_submit (message|redirect|whatsapp),
+            whatsapp_number (dinormalisasi ke digit 62...), whatsapp_message (maks 500).
+            422 VALIDATION_ERROR untuk after_submit tidak lengkap atau nomor WA tidak valid.
   /api/v1/admin/landing-pages/{id}/forms/{formId}:
     patch:
       summary: Update landing page form
@@ -2548,7 +2551,10 @@ paths:
               type: object
       responses:
         "200":
-          description: Form updated successfully
+          description: >-
+            Form updated successfully. Field after_submit, whatsapp_number, whatsapp_message sama dengan
+            create. 422 LANDING_FORM_CORE_FIELDS bila create_crm_lead diaktifkan tetapi field
+            name/email/phone belum ada, tampil, dan wajib.
     delete:
       summary: Delete landing page form
       operationId: deleteLandingPageForm
@@ -3644,6 +3650,8 @@ paths:
           schema:
             type: string
       description: >-
+        Server membuang key yang bukan field form (selain page_url dan consent), mengisi
+        default_value untuk field hidden yang kosong, lalu memeriksa field wajib.
         Body: fields (maks 50 key, nilai string maks 5000 karakter), consent (wajib true),
         website (honeypot, harus kosong), context (referrer, utm_*). Body maks 64 KiB.
         Rate limit 5 permintaan per menit per IP dan form. Sukses mengembalikan reference,
@@ -3662,7 +3670,9 @@ paths:
         "413":
           description: Body melebihi 64 KiB
         "422":
-          description: VALIDATION_ERROR (consent, honeypot, batas input)
+          description: >-
+            VALIDATION_ERROR (consent, honeypot, batas input). Field wajib kosong:
+            VALIDATION_ERROR dengan data.missing_fields (daftar key field).
         "429":
           description: RATE_LIMITED
   /api/v1/public/landing/forms/{formKey}/uploads:

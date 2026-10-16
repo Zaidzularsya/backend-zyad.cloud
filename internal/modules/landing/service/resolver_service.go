@@ -258,7 +258,7 @@ func (s *resolverService) resolveActiveFormsWithFields(ctx context.Context, scop
 			continue
 		}
 		if fields, err := s.formRepo.ListFieldsByForm(ctx, scope, form.ID); err == nil {
-			form.Fields = fields
+			form.Fields = withoutDefaultValues(fields)
 		}
 		active = append(active, form)
 	}
@@ -277,6 +277,18 @@ func (s *resolverService) resolveForms(ctx context.Context, scope tenant.Scope, 
 		forms[i].CreateCRMLead = false
 	}
 	return forms
+}
+
+// withoutDefaultValues returns a copy of fields with DefaultValue cleared. The default of a hidden
+// field (for example an internal campaign tag) is applied server-side on submit and must never
+// reach the public payload.
+func withoutDefaultValues(fields []domain.LandingFormField) []domain.LandingFormField {
+	out := make([]domain.LandingFormField, len(fields))
+	for i, f := range fields {
+		f.DefaultValue = ""
+		out[i] = f
+	}
+	return out
 }
 
 func snapshotHasItems(snapshot map[string]any, key string) bool {

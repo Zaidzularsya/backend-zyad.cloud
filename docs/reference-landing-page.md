@@ -306,6 +306,12 @@ Target awal per organization, bukan hard limit permanen:
 
 API list wajib pagination. Export besar memakai streaming atau async job, bukan memuat seluruh data ke memory.
 
+## Form Konsultasi Fleksibel (S1 backend)
+
+Spec: `docs/superpowers/specs/2026-10-16-lead-form-flex-design.md`. Aturan tulis ada di
+`service/form_rules.go` (field inti, default field, `after_submit`, normalisasi nomor WA) dan aturan submit di
+`service/submission_rules.go` (`prepareSubmittedData`). Kontrak API: `docs/landing-page-public-api-contract.md`.
+
 ## Suggested Data Model
 
 ```txt
