@@ -40,6 +40,14 @@ func registerCRMQuotaMeters(reg *organizationservice.QuotaMeterRegistry, db *dat
 	reg.Register(crmdomain.FeatureCRMMaxPipelines, scopedCountMeter{db: db, query: `SELECT COUNT(*) FROM crm_pipelines WHERE organization_id = $1 AND deleted_at IS NULL AND archived_at IS NULL`})
 }
 
+// registerDomainQuotaMeters registers the total-domain meter: all domains of
+// the organization that are not soft-deleted, excluding the global 'platform'
+// type (not tenant-created), so Free's cap of 1 means one platform subdomain.
+func registerDomainQuotaMeters(reg *organizationservice.QuotaMeterRegistry, db *database.Pool) {
+	reg.Register(organizationservice.FeatureDomainMaxDomains, scopedCountMeter{db: db, query: `SELECT COUNT(*) FROM organization_domains
+		WHERE organization_id = $1 AND deleted_at IS NULL AND type IN ('subdomain', 'custom')`})
+}
+
 // registerMonthlyQuotaMeters registers the meters of the *PerMonth features.
 // They count rows created since periodStart (the first day of the current
 // month in business time, see organizationservice.PeriodStart), so unlike the
@@ -71,6 +79,7 @@ func newCRMQuotaEnforcer(guard *organizationservice.EntitlementGuard, db *databa
 	meters := organizationservice.NewQuotaMeterRegistry()
 	registerCRMQuotaMeters(meters, db)
 	registerMonthlyQuotaMeters(meters, db)
+	registerDomainQuotaMeters(meters, db)
 	return organizationservice.NewQuotaEnforcer(
 		guard,
 		catalogFeatureRegistry{features: productrepo.NewFeatureRepository(db)},

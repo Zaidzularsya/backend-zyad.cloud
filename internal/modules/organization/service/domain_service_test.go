@@ -7,6 +7,7 @@ import (
 	"time"
 
 	coreauth "zyad.cloud/internal/core/auth"
+	"zyad.cloud/internal/modules/organization"
 	"zyad.cloud/internal/modules/organization/dto"
 	"zyad.cloud/internal/modules/organization/model"
 	"zyad.cloud/internal/modules/organization/repository"
@@ -615,5 +616,61 @@ func TestDomainServiceCreateCustomPropagatesQuotaExceededAsIs(t *testing.T) {
 	}
 	if store.createParams.OrganizationID != "" {
 		t.Fatalf("Create() should not persist domain when quota is exceeded: %#v", store.createParams)
+	}
+}
+
+// domainRoomStub mimics QuotaEnforcer.RequireRoom for a standing cap of
+// `limit` domains: it counts the domains the store currently holds.
+type domainRoomStub struct {
+	store      *domainStoreStub
+	limit      int
+	featureKey string
+	calls      int
+}
+
+func (r *domainRoomStub) RequireRoom(_ context.Context, _ string, featureKey string) error {
+	r.calls++
+	r.featureKey = featureKey
+	if len(r.store.domains) >= r.limit {
+		return organization.QuotaExceededError()
+	}
+	return nil
+}
+
+func TestFreeCanBindOneSubdomainSecondRejected(t *testing.T) {
+	store := &domainStoreStub{}
+	room := &domainRoomStub{store: store, limit: 1}
+	service := NewDomainService(store, nil, "example.test", WithDomainQuotaEnforcer(room))
+	const orgID = "11111111-1111-1111-1111-111111111111"
+	request := dto.CreateDomainRequest{Type: "subdomain", CanonicalHost: "acme.example.test"}
+
+	if _, err := service.Create(context.Background(), orgID, request, ""); err != nil {
+		t.Fatalf("first subdomain Create() error = %v", err)
+	}
+	if room.featureKey != FeatureDomainMaxDomains {
+		t.Fatalf("featureKey = %q, want %q", room.featureKey, FeatureDomainMaxDomains)
+	}
+
+	// The first domain now exists; the second must be refused.
+	store.domains = []model.OrganizationDomain{{ID: "d1", Type: model.DomainTypeSubdomain}}
+	store.createParams = repository.CreateDomainParams{}
+	request.CanonicalHost = "acme2.example.test"
+	_, err := service.Create(context.Background(), orgID, request, "")
+	if !organization.IsQuotaExceeded(err) {
+		t.Fatalf("second subdomain Create() error = %v, want QUOTA_EXCEEDED", err)
+	}
+	if store.createParams.CanonicalHost != "" {
+		t.Fatalf("second subdomain must not be persisted: %#v", store.createParams)
+	}
+}
+
+func TestCustomDomainCountsAgainstTotalDomainQuota(t *testing.T) {
+	store := &domainStoreStub{domains: []model.OrganizationDomain{{ID: "d1", Type: model.DomainTypeSubdomain}}}
+	room := &domainRoomStub{store: store, limit: 1}
+	service := NewDomainService(store, nil, "example.test", WithDomainQuotaEnforcer(room), WithDomainBillingGuard(&domainBillingGuardStub{}))
+	_, err := service.Create(context.Background(), "11111111-1111-1111-1111-111111111111",
+		dto.CreateDomainRequest{Type: "custom", CanonicalHost: "www.example.com"}, "")
+	if !organization.IsQuotaExceeded(err) {
+		t.Fatalf("Create() error = %v, want QUOTA_EXCEEDED", err)
 	}
 }

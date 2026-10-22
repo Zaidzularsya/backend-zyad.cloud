@@ -228,6 +228,7 @@ func New(ctx context.Context) (*App, error) {
 		organizationservice.NewDNSDomainVerifier(nil),
 		cfg.MultiTenant.PlatformPrimaryDomain,
 		organizationservice.WithDomainBillingGuard(entitlementGuard),
+		organizationservice.WithDomainQuotaEnforcer(newCRMQuotaEnforcer(entitlementGuard, db)),
 	)
 	organizationDomainHandler := organizationhandler.NewDomainHandler(
 		organizationDomainService,
