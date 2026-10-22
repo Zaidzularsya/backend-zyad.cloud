@@ -12,6 +12,7 @@ import (
 	crmdomain "zyad.cloud/internal/modules/crm/domain"
 	crmrepo "zyad.cloud/internal/modules/crm/repository"
 	organizationservice "zyad.cloud/internal/modules/organization/service"
+	receivabledomain "zyad.cloud/internal/modules/receivable/domain"
 	"zyad.cloud/internal/platform/database"
 	"zyad.cloud/internal/platform/database/testutil"
 )
@@ -59,7 +60,7 @@ func meterFixture(t *testing.T) (*database.Pool, coretenant.Scope, *organization
 		}
 		defer tx.Rollback(cctx)
 		_, _ = tx.Exec(cctx, "SELECT set_config('app.organization_id', $1, true)", orgID)
-		for _, table := range []string{"crm_activities", "crm_playbook_runs", "crm_leads", "crm_deals", "crm_companies", "crm_pipeline_stages", "crm_pipelines"} {
+		for _, table := range []string{"receivable_invoices", "receivable_accounts", "crm_sales_orders", "crm_quotations", "crm_activities", "crm_playbook_runs", "crm_leads", "crm_deals", "crm_companies", "crm_pipeline_stages", "crm_pipelines"} {
 			_, _ = tx.Exec(cctx, "DELETE FROM "+table+" WHERE organization_id = $1", orgID)
 		}
 		_ = tx.Commit(cctx)
@@ -68,6 +69,7 @@ func meterFixture(t *testing.T) (*database.Pool, coretenant.Scope, *organization
 
 	reg := organizationservice.NewQuotaMeterRegistry()
 	registerCRMQuotaMeters(reg, db)
+	registerMonthlyQuotaMeters(reg, db)
 	return db, scope, reg
 }
 
@@ -254,4 +256,145 @@ func mustMeter(t *testing.T, reg *organizationservice.QuotaMeterRegistry, key st
 		t.Fatalf("meter %s not registered", key)
 	}
 	return m
+}
+
+// ---- monthly meters (quotations, sales orders, invoices) ----
+
+// monthlyMeterUsed evaluates a monthly meter with the same period start the
+// QuotaEnforcer computes for the given "now".
+func monthlyMeterUsed(t *testing.T, reg *organizationservice.QuotaMeterRegistry, scope coretenant.Scope, key string, now time.Time) int64 {
+	t.Helper()
+	periodStart, err := organizationservice.PeriodStart("monthly", now)
+	if err != nil {
+		t.Fatalf("PeriodStart: %v", err)
+	}
+	meter, ok := reg.Get(key)
+	if !ok {
+		t.Fatalf("meter %s not registered", key)
+	}
+	used, err := meter.Used(context.Background(), scope.OrganizationID(), periodStart)
+	if err != nil {
+		t.Fatalf("Used(%s): %v", key, err)
+	}
+	return used
+}
+
+// execScoped runs one statement inside an RLS-scoped transaction and returns the
+// first column of its RETURNING row, if any.
+func execScoped(t *testing.T, db *database.Pool, scope coretenant.Scope, query string, args ...any) string {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", scope.OrganizationID()); err != nil {
+		t.Fatal(err)
+	}
+	var id string
+	if err := tx.QueryRow(ctx, query, args...).Scan(&id); err != nil {
+		t.Fatalf("%s: %v", query, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// insertQuotation inserts a quotation created at the given UTC instant.
+// revisionOf and deleted are optional.
+func insertQuotation(t *testing.T, db *database.Pool, scope coretenant.Scope, number string, createdAt time.Time, revisionOf *string, deleted bool) string {
+	t.Helper()
+	var deletedAt *time.Time
+	if deleted {
+		deletedAt = &createdAt
+	}
+	return execScoped(t, db, scope, `
+		INSERT INTO crm_quotations (organization_id, quotation_number, created_at, revision_of_id, deleted_at)
+		VALUES ($1, $2, $3, $4, $5) RETURNING id::text`,
+		scope.OrganizationID(), number, createdAt, revisionOf, deletedAt)
+}
+
+func TestQuotationMeterCountsOnlyCurrentMonth(t *testing.T) {
+	db, scope, reg := meterFixture(t)
+	insertQuotation(t, db, scope, "QUO-A", time.Date(2026, 10, 10, 5, 0, 0, 0, time.UTC), nil, false)
+	insertQuotation(t, db, scope, "QUO-B", time.Date(2026, 10, 20, 5, 0, 0, 0, time.UTC), nil, false)
+	insertQuotation(t, db, scope, "QUO-C", time.Date(2026, 11, 3, 5, 0, 0, 0, time.UTC), nil, false)
+
+	now := time.Date(2026, 11, 15, 5, 0, 0, 0, time.UTC)
+	if got := monthlyMeterUsed(t, reg, scope, crmdomain.FeatureCRMMaxQuotationsPerMonth, now); got != 1 {
+		t.Fatalf("Used in November = %d, want 1", got)
+	}
+}
+
+// The month boundary is midnight WIB (UTC+7): 2026-10-31 17:00 UTC is already November.
+func TestQuotationMeterMonthBoundaryUsesBusinessTime(t *testing.T) {
+	db, scope, reg := meterFixture(t)
+	insertQuotation(t, db, scope, "QUO-BEFORE", time.Date(2026, 10, 31, 16, 59, 0, 0, time.UTC), nil, false)
+	insertQuotation(t, db, scope, "QUO-AFTER", time.Date(2026, 10, 31, 17, 0, 0, 0, time.UTC), nil, false)
+
+	now := time.Date(2026, 11, 15, 5, 0, 0, 0, time.UTC)
+	if got := monthlyMeterUsed(t, reg, scope, crmdomain.FeatureCRMMaxQuotationsPerMonth, now); got != 1 {
+		t.Fatalf("Used = %d, want 1 (only the row at/after 2026-11-01 00:00 WIB)", got)
+	}
+}
+
+func TestQuotationMeterExcludesRevisionsAndDeleted(t *testing.T) {
+	db, scope, reg := meterFixture(t)
+	at := time.Date(2026, 11, 5, 5, 0, 0, 0, time.UTC)
+	original := insertQuotation(t, db, scope, "QUO-1", at, nil, false)
+	insertQuotation(t, db, scope, "QUO-1-R1", at, &original, false) // revision: not a new quotation
+	insertQuotation(t, db, scope, "QUO-2", at, nil, true)           // soft-deleted
+	insertQuotation(t, db, scope, "QUO-3", at, nil, false)
+
+	if got := monthlyMeterUsed(t, reg, scope, crmdomain.FeatureCRMMaxQuotationsPerMonth, time.Date(2026, 11, 15, 5, 0, 0, 0, time.UTC)); got != 2 {
+		t.Fatalf("Used = %d, want 2 (revision and deleted excluded)", got)
+	}
+}
+
+func TestSalesOrderMeterCountsOnlyCurrentMonthAndExcludesCancelled(t *testing.T) {
+	db, scope, reg := meterFixture(t)
+	orders := []struct {
+		number, status string
+		at             time.Time
+	}{
+		{"SO-1", "draft", time.Date(2026, 10, 10, 5, 0, 0, 0, time.UTC)},    // previous month
+		{"SO-2", "draft", time.Date(2026, 11, 2, 5, 0, 0, 0, time.UTC)},     // counts
+		{"SO-3", "confirmed", time.Date(2026, 11, 3, 5, 0, 0, 0, time.UTC)}, // counts
+		{"SO-4", "cancelled", time.Date(2026, 11, 4, 5, 0, 0, 0, time.UTC)}, // frees room
+	}
+	for _, o := range orders {
+		qid := insertQuotation(t, db, scope, "Q-"+o.number, o.at, nil, false)
+		execScoped(t, db, scope, `
+			INSERT INTO crm_sales_orders (organization_id, so_number, quotation_id, status, created_at)
+			VALUES ($1, $2, $3, $4, $5) RETURNING id::text`,
+			scope.OrganizationID(), o.number, qid, o.status, o.at)
+	}
+	if got := monthlyMeterUsed(t, reg, scope, crmdomain.FeatureCRMMaxSalesOrdersPerMonth, time.Date(2026, 11, 15, 5, 0, 0, 0, time.UTC)); got != 2 {
+		t.Fatalf("Used = %d, want 2", got)
+	}
+}
+
+func TestInvoiceMeterCountsOnlyCurrentMonthAndExcludesVoid(t *testing.T) {
+	db, scope, reg := meterFixture(t)
+	account := execScoped(t, db, scope, `INSERT INTO receivable_accounts (organization_id, name) VALUES ($1, 'Budi') RETURNING id::text`, scope.OrganizationID())
+	invoices := []struct {
+		status, source string
+		at             time.Time
+	}{
+		{"issued", "manual", time.Date(2026, 10, 10, 5, 0, 0, 0, time.UTC)}, // previous month
+		{"draft", "manual", time.Date(2026, 11, 2, 5, 0, 0, 0, time.UTC)},   // counts (draft)
+		{"paid", "contract", time.Date(2026, 11, 3, 5, 0, 0, 0, time.UTC)},  // counts (billing run invoices are counted)
+		{"void", "manual", time.Date(2026, 11, 4, 5, 0, 0, 0, time.UTC)},    // frees room
+	}
+	for _, inv := range invoices {
+		execScoped(t, db, scope, `
+			INSERT INTO receivable_invoices (organization_id, account_id, status, source_type, created_at)
+			VALUES ($1, $2, $3, $4, $5) RETURNING id::text`,
+			scope.OrganizationID(), account, inv.status, inv.source, inv.at)
+	}
+	if got := monthlyMeterUsed(t, reg, scope, receivabledomain.FeatureReceivableMaxInvoicesPerMonth, time.Date(2026, 11, 15, 5, 0, 0, 0, time.UTC)); got != 2 {
+		t.Fatalf("Used = %d, want 2", got)
+	}
 }

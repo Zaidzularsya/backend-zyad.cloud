@@ -114,7 +114,13 @@ func (s *invoiceService) CreateAndIssue(ctx context.Context, scope coretenant.Sc
 			return domain.Invoice{}, err
 		}
 	}
-	draft, err := s.CreateDraft(ctx, scope, in, actorUserID)
+	// Quota policy: invoices from the recurring billing run (SourceContract) are counted by the
+	// receivable.max_invoices_per_month meter but never blocked. Rejecting one would silently
+	// drop the tenant's billing for that period; the run has no user to show an error to and
+	// the contract would be retried every hour. Invoices from a sales order (BillOrder,
+	// BillDelivery) are enforced like manual ones; an idempotent re-issue returned above.
+	enforceQuota := in.SourceType != domain.SourceContract
+	draft, err := s.createDraft(ctx, scope, in, actorUserID, enforceQuota)
 	if errors.Is(err, repository.ErrDuplicateSource) && idempotent {
 		// Balapan: pemanggil lain membuat invoice sumber yang sama lebih dulu.
 		existing, findErr := s.invoices.FindBySource(ctx, scope, string(in.SourceType), in.SourceID, in.IdempotencyKey)

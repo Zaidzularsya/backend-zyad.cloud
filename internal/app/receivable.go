@@ -170,6 +170,10 @@ type receivableBuild struct {
 	// Doku & DokuNotificationURL: klien dan URL webhook yang sama dengan billing (S6).
 	Doku                doku.Client
 	DokuNotificationURL string
+	// InvoiceQuota enforces receivable.max_invoices_per_month on manual/API and
+	// sales-order invoices. Nil in the worker: its only invoice source, the contract
+	// billing run, is deliberately never blocked (see invoiceService.CreateAndIssue).
+	InvoiceQuota receivableservice.QuotaRoomRequirer
 }
 
 // receivableModule menampung handler untuk router dan service yang dibagikan ke modul lain
@@ -220,7 +224,7 @@ func buildReceivable(b receivableBuild) receivableModule {
 		Accounts: accountRepo, Invoices: invoiceRepo, Counters: counterRepo, Settings: settingsRepo, Issuers: issuer,
 		Files: b.Assets, Renderer: docpdf.NewRenderer(), Links: b.Links, Sender: sendSvc, Members: members,
 		Listeners: listeners, FrontendURL: b.FrontendURL,
-	})
+	}, receivableservice.WithInvoiceQuotaEnforcer(b.InvoiceQuota))
 	accountSvc := receivableservice.NewAccountService(accountRepo)
 	paymentSvc := receivableservice.NewPaymentService(receivableservice.PaymentDeps{
 		Payments: paymentRepo, Invoices: invoiceSvc, Listeners: listeners,

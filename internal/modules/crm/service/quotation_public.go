@@ -93,7 +93,16 @@ type PublicQuotationService struct {
 	activities repository.ActivityRepository
 	notifier   QuotationResponseNotifier
 	hook       QuotationApprovedHook
+	orderRoom  SalesOrderRoomChecker
 	now        func() time.Time
+}
+
+// WithOrderRoom makes a customer approval fail with QUOTA_EXCEEDED, before the
+// response is recorded, when the tenant has no room for the sales order that
+// approval creates.
+func (s *PublicQuotationService) WithOrderRoom(c SalesOrderRoomChecker) *PublicQuotationService {
+	s.orderRoom = c
+	return s
 }
 
 func NewPublicQuotationService(links LinkResolver, scopes PublicScopeResolver, quotations QuotationService,
@@ -247,6 +256,11 @@ func (s *PublicQuotationService) respond(ctx context.Context, token string, acti
 	}
 	if d.state != PublicQuotationStateActive {
 		return PublicQuotationView{}, ErrQuotationNotRespondable
+	}
+	if action == domain.QuotationResponseApproved && s.orderRoom != nil {
+		if err := s.orderRoom.RequireRoomForQuotation(ctx, d.scope, d.q.ID); err != nil {
+			return PublicQuotationView{}, err
+		}
 	}
 	q, resp, err := s.responses.Respond(ctx, d.scope, repository.RecordResponseParams{
 		QuotationID: d.q.ID, LinkID: d.link.ID, Action: action, Categories: in.Categories, Note: in.Note,

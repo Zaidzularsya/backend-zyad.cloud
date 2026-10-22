@@ -507,6 +507,7 @@ func New(ctx context.Context) (*App, error) {
 		Members:   crmMemberRepo, Issuers: crmrepo.NewQuotationIssuerRepository(db),
 		AppName: cfg.App.Name, FrontendURL: cfg.App.FrontendURL, NotificationLocale: cfg.Notification.DefaultLocale,
 		RateCounter: redisClient, Doku: dokuClient, DokuNotificationURL: dokuNotificationURL,
+		InvoiceQuota: crmQuotaEnforcer,
 	})
 	// Webhook DOKU (URL tetap /webhooks/doku) hanya melayani invoice receivable (RCV-).
 	dokuWebhookHandler := receivablehandler.NewDokuWebhookHandler(
@@ -524,7 +525,7 @@ func New(ctx context.Context) (*App, error) {
 		Canceller: crmReceivableDocs,
 		Notifier:  notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts),
 		AppName:   cfg.App.Name, FrontendURL: cfg.App.FrontendURL, Locale: cfg.Notification.DefaultLocale,
-	}, crmWonEvaluator, time.Now)
+	}, crmWonEvaluator, time.Now, crmservice.WithSalesOrderQuotaEnforcer(crmQuotaEnforcer))
 	crmTenantAccess := withBillingSuspend(newCRMTenantAccess(db, receivableModule.Invoices, receivableModule.Contracts, defaultAccess), cfg, db, receivableModule.Invoices)
 	receivableModule.Listeners.Add(crmservice.NewReceivableListener(crmSalesOrderRepo, crmWonEvaluator, crmActivityRepo).
 		WithTenantAccess(crmTenantAccess).WithReactivation(crmTenantAccess, cfg.SelfServe.GraceDays))
@@ -539,6 +540,9 @@ func New(ctx context.Context) (*App, error) {
 	// Quotation service dibuat setelah mailbox & WhatsApp karena memakai keduanya sebagai kanal kirim.
 	crmQuotationSvc := crmservice.NewQuotationService(crmQuotationRepo, crmDocumentCounterRepo,
 		crmservice.WithQuotationApprovedHook(crmSalesOrderSvc),
+		crmservice.WithQuotationQuotaEnforcer(crmQuotaEnforcer),
+		// Approving creates the sales order, so its room is checked before the state changes.
+		crmservice.WithQuotationOrderRoom(crmSalesOrderSvc.(crmservice.SalesOrderRoomChecker)),
 		crmservice.WithQuotationLinks(crmservice.QuotationLinkDeps{
 			Links:       publicLinkSvc,
 			FrontendURL: cfg.App.FrontendURL,
@@ -577,7 +581,7 @@ func New(ctx context.Context) (*App, error) {
 		),
 		crmSalesOrderSvc, // QuotationApprovedHook: buat SO draft
 		time.Now,
-	)
+	).WithOrderRoom(crmSalesOrderSvc.(crmservice.SalesOrderRoomChecker))
 	crmPublicQuotationHandler := crmhandler.NewPublicQuotationHandler(crmPublicQuotationSvc, redisClient)
 
 	// Checkout self-serve (R4-S2): bot/pipeline di-resolve lazily saat request pertama sehingga seeder

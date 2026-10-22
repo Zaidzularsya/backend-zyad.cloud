@@ -17,6 +17,7 @@ import (
 	"zyad.cloud/internal/modules/crm/domain"
 	"zyad.cloud/internal/modules/crm/dto"
 	"zyad.cloud/internal/modules/crm/service"
+	"zyad.cloud/internal/modules/organization"
 )
 
 const (
@@ -63,6 +64,14 @@ func (h *PublicQuotationHandler) RegisterRoutes(api *gin.RouterGroup) {
 	group.POST("/:token/revision", perToken, h.RequestRevision)
 }
 
+// isQuotaExceeded reports a tenant quota/entitlement refusal raised while a
+// customer approves a quotation (the sales order it creates has no room).
+func isQuotaExceeded(err error) bool {
+	var appErr *coreerrors.AppError
+	return errors.As(err, &appErr) &&
+		(appErr.Code == organization.ErrCodeQuotaExceeded || appErr.Code == organization.ErrCodeFeatureNotEnabled)
+}
+
 func failPublicQuotation(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrLinkInvalid):
@@ -71,6 +80,8 @@ func failPublicQuotation(c *gin.Context, err error) {
 		corehttp.Fail(c, coreerrors.New("QUOTATION_NOT_RESPONDABLE", "Penawaran ini sudah tidak menunggu respons.", http.StatusConflict))
 	case errors.Is(err, service.ErrInvalidResponse):
 		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+	case isQuotaExceeded(err):
+		corehttp.Fail(c, coreerrors.New(organization.ErrCodeQuotaExceeded, "Penawaran ini belum dapat disetujui saat ini. Silakan hubungi penerbit penawaran.", http.StatusConflict))
 	default:
 		// Detail hanya di log; path berisi token sehingga jangan dicatat.
 		slog.ErrorContext(c.Request.Context(), "public quotation failed", "error", err)

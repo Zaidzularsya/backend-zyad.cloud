@@ -37,15 +37,52 @@ type salesOrderService struct {
 	billing receivableservice.OrderBilling
 	deps    SalesOrderDeps
 	won     DealWonEvaluator
+	quota   QuotaRoomRequirer
 	now     func() time.Time
 }
 
+// SalesOrderServiceOption configures optional behaviour of the sales order service.
+type SalesOrderServiceOption func(*salesOrderService)
+
+// WithSalesOrderQuotaEnforcer enforces crm.max_sales_orders_per_month when a
+// sales order is created from an approved quotation. Confirm, cancel, delivery
+// and billing retries never consult it.
+func WithSalesOrderQuotaEnforcer(quota QuotaRoomRequirer) SalesOrderServiceOption {
+	return func(s *salesOrderService) { s.quota = quota }
+}
+
 func NewSalesOrderService(repo repository.SalesOrderRepository, billing receivableservice.OrderBilling, deps SalesOrderDeps,
-	won DealWonEvaluator, now func() time.Time) SalesOrderService {
+	won DealWonEvaluator, now func() time.Time, opts ...SalesOrderServiceOption) SalesOrderService {
 	if now == nil {
 		now = time.Now
 	}
-	return &salesOrderService{repo: repo, billing: billing, deps: deps, won: won, now: now}
+	s := &salesOrderService{repo: repo, billing: billing, deps: deps, won: won, now: now}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// SalesOrderRoomChecker lets the quotation flows verify, before they change the
+// quotation's state, that approving it can still create its sales order.
+type SalesOrderRoomChecker interface {
+	RequireRoomForQuotation(ctx context.Context, scope coretenant.Scope, quotationID string) error
+}
+
+var _ SalesOrderRoomChecker = (*salesOrderService)(nil)
+
+// RequireRoomForQuotation is idempotent like QuotationApproved: when the
+// quotation already has a sales order nothing new will be created, so no room is needed.
+func (s *salesOrderService) RequireRoomForQuotation(ctx context.Context, scope coretenant.Scope, quotationID string) error {
+	if s.quota == nil {
+		return nil
+	}
+	if _, err := s.repo.FindByQuotation(ctx, scope, quotationID); err == nil {
+		return nil
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	return s.quota.RequireRoom(ctx, scope.OrganizationID(), domain.FeatureCRMMaxSalesOrdersPerMonth)
 }
 
 func notFound(err error) error {
@@ -60,6 +97,13 @@ func (s *salesOrderService) QuotationApproved(ctx context.Context, scope coreten
 		return nil
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return err
+	}
+	// Defense in depth: the quotation flows already ran RequireRoomForQuotation before
+	// approving. This also covers hook callers that bypass them (self-serve checkout).
+	if s.quota != nil {
+		if err := s.quota.RequireRoom(ctx, scope.OrganizationID(), domain.FeatureCRMMaxSalesOrdersPerMonth); err != nil {
+			return err
+		}
 	}
 	seq, err := s.deps.Counters.NextNumber(ctx, scope, "sales_order")
 	if err != nil {

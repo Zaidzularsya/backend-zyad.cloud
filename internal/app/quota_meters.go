@@ -8,6 +8,7 @@ import (
 	crmdomain "zyad.cloud/internal/modules/crm/domain"
 	organizationservice "zyad.cloud/internal/modules/organization/service"
 	productrepo "zyad.cloud/internal/modules/product/repository"
+	receivabledomain "zyad.cloud/internal/modules/receivable/domain"
 	"zyad.cloud/internal/platform/database"
 )
 
@@ -39,11 +40,37 @@ func registerCRMQuotaMeters(reg *organizationservice.QuotaMeterRegistry, db *dat
 	reg.Register(crmdomain.FeatureCRMMaxPipelines, scopedCountMeter{db: db, query: `SELECT COUNT(*) FROM crm_pipelines WHERE organization_id = $1 AND deleted_at IS NULL AND archived_at IS NULL`})
 }
 
+// registerMonthlyQuotaMeters registers the meters of the *PerMonth features.
+// They count rows created since periodStart (the first day of the current
+// month in business time, see organizationservice.PeriodStart), so unlike the
+// standing caps above the count resets by itself every month.
+//
+//   - quotations: deleted_at IS NULL AND revision_of_id IS NULL. A revision
+//     (Revise) supersedes its predecessor, so it is NOT a new quotation: revising
+//     is never penalised and a quotation counts once, in the month it was first
+//     created. Soft-deleted quotations free their room, like deleted leads.
+//   - sales orders: status <> 'cancelled' (the table has no deleted_at). Orders are
+//     created automatically from approved quotations; a cancelled one frees room.
+//   - invoices: status <> 'void' (the table has no deleted_at). Drafts count (they
+//     are real documents the tenant created), voided ones free room. Invoices from
+//     the recurring billing run ARE counted here even though they are never blocked.
+func registerMonthlyQuotaMeters(reg *organizationservice.QuotaMeterRegistry, db *database.Pool) {
+	reg.Register(crmdomain.FeatureCRMMaxQuotationsPerMonth, scopedMonthlyCountMeter{db: db, query: `SELECT COUNT(*) FROM crm_quotations
+		WHERE organization_id = $1 AND deleted_at IS NULL AND revision_of_id IS NULL AND created_at >= $2`})
+	reg.Register(crmdomain.FeatureCRMMaxSalesOrdersPerMonth, scopedMonthlyCountMeter{db: db, query: `SELECT COUNT(*) FROM crm_sales_orders
+		WHERE organization_id = $1 AND status <> 'cancelled' AND created_at >= $2`})
+	reg.Register(receivabledomain.FeatureReceivableMaxInvoicesPerMonth, scopedMonthlyCountMeter{db: db, query: `SELECT COUNT(*) FROM receivable_invoices
+		WHERE organization_id = $1 AND status <> 'void' AND created_at >= $2`})
+}
+
 // newCRMQuotaEnforcer builds the QuotaEnforcer used by every CRM creation path
 // (API services and the worker's WhatsApp auto-lead), with the CRM meters registered.
+// It also carries the monthly quotation / sales order / invoice meters, so the same
+// enforcer can be handed to the receivable module.
 func newCRMQuotaEnforcer(guard *organizationservice.EntitlementGuard, db *database.Pool) *organizationservice.QuotaEnforcer {
 	meters := organizationservice.NewQuotaMeterRegistry()
 	registerCRMQuotaMeters(meters, db)
+	registerMonthlyQuotaMeters(meters, db)
 	return organizationservice.NewQuotaEnforcer(
 		guard,
 		catalogFeatureRegistry{features: productrepo.NewFeatureRepository(db)},
@@ -72,6 +99,36 @@ func (m scopedCountMeter) Used(ctx context.Context, organizationID string, _ *ti
 	}
 	var total int64
 	if err := tx.QueryRow(ctx, m.query, organizationID).Scan(&total); err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+// scopedMonthlyCountMeter is scopedCountMeter for monthly features: the query
+// takes $1 = organization id and $2 = period start. created_at columns are
+// "timestamp without time zone" holding UTC (the session is pinned to UTC), while
+// periodStart is midnight in business time, so it is converted to UTC first;
+// otherwise the driver would drop the zone and shift the boundary by the offset.
+type scopedMonthlyCountMeter struct {
+	db    *database.Pool
+	query string
+}
+
+func (m scopedMonthlyCountMeter) Used(ctx context.Context, organizationID string, periodStart *time.Time) (int64, error) {
+	if periodStart == nil {
+		return 0, fmt.Errorf("monthly quota meter requires a period start")
+	}
+	tx, err := m.db.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", organizationID); err != nil {
+		return 0, err
+	}
+	var total int64
+	if err := tx.QueryRow(ctx, m.query, organizationID, periodStart.UTC()).Scan(&total); err != nil {
 		return 0, err
 	}
 	return total, nil
