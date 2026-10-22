@@ -20,6 +20,7 @@ type OrganizationEntitlementService interface {
 		dto.EntitlementListQuery,
 	) ([]dto.EffectiveFeatureResponse, dto.PaginationMeta, error)
 	CheckUsage(context.Context, string, dto.UsageQuery) (dto.UsageResponse, error)
+	Summary(context.Context, string) ([]dto.EntitlementSummaryItem, error)
 	UpsertPlatformOverride(
 		context.Context,
 		string,
@@ -58,6 +59,7 @@ func (h *EntitlementHandler) RegisterRoutes(router *gin.RouterGroup) {
 	)
 	organizationGroup.GET("/features", h.ListFeatures)
 	organizationGroup.GET("/usage", h.CheckUsage)
+	organizationGroup.GET("/entitlements/summary", h.Summary)
 
 	platformGroup := router.Group("/platform/organizations")
 	platformGroup.Use(middleware.RequirePlatformTenant())
@@ -92,6 +94,22 @@ func (h *EntitlementHandler) ListFeatures(c *gin.Context) {
 		return
 	}
 	response.JSON(c, http.StatusOK, "organization features retrieved successfully", items, meta)
+}
+
+// Summary returns the per-feature entitlement and usage overview. The
+// organization comes from the verified tenant context only.
+func (h *EntitlementHandler) Summary(c *gin.Context) {
+	tenantContext, err := middleware.RequireTenantContext(c)
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	items, err := h.service.Summary(c.Request.Context(), tenantContext.OrganizationID())
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	corehttp.OK(c, "organization entitlement summary retrieved successfully", items)
 }
 
 func (h *EntitlementHandler) CheckUsage(c *gin.Context) {

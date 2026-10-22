@@ -203,7 +203,16 @@ func New(ctx context.Context) (*App, error) {
 		organizationEntitlementRuntimeService,
 	)
 	organizationEntitlementHandler := organizationhandler.NewEntitlementHandler(
-		organizationEntitlementService,
+		entitlementAPIFacade{
+			EntitlementAPIService: organizationEntitlementService,
+			EntitlementSummaryService: organizationservice.NewEntitlementSummaryService(
+				organizationEntitlementRepository,
+				catalogFeatureRegistry{features: productrepo.NewFeatureRepository(db)},
+				newQuotaMeterRegistry(db),
+				organizationrepo.NewOrganizationRepository(db),
+				time.Now,
+			),
+		},
 		permService,
 		permService,
 	)
@@ -770,4 +779,11 @@ func (a *App) cleanup() {
 	if a.db != nil {
 		a.db.Close()
 	}
+}
+
+// entitlementAPIFacade combines the entitlement API service with the summary
+// service so one value satisfies the handler's OrganizationEntitlementService.
+type entitlementAPIFacade struct {
+	*organizationservice.EntitlementAPIService
+	*organizationservice.EntitlementSummaryService
 }

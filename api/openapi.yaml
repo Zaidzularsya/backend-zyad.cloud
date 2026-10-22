@@ -1030,6 +1030,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/organization/entitlements/summary:
+    get:
+      summary: Summarize entitlements and quota usage of the current organization
+      description: >
+        Requires `organization.feature.read` and an active customer organization.
+        The organization is always the one from the authenticated tenant context;
+        no organization parameter is accepted. Platform organizations are rejected
+        by the customer-tenant guard.
+      operationId: getCurrentOrganizationEntitlementSummary
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Organization entitlement summary retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationEntitlementSummaryEnvelope"
+        "403":
+          description: Feature read permission is missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/organization/usage:
     get:
       summary: Get current organization usage for a feature metric period
@@ -10591,6 +10617,53 @@ components:
             $ref: "#/components/schemas/EffectiveOrganizationFeature"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
+    OrganizationEntitlementSummaryEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/EntitlementSummaryItem"
+    EntitlementSummaryItem:
+      type: object
+      required: [feature_key, module, name, unit, state, limit, used, remaining, reset_strategy, at_limit]
+      properties:
+        feature_key:
+          type: string
+        module:
+          type: string
+        name:
+          type: string
+        unit:
+          type: string
+        state:
+          type: string
+          enum: [unlimited, quota, hidden]
+        limit:
+          type: integer
+          format: int64
+          nullable: true
+          description: Quota limit; only set when state is quota.
+        used:
+          type: integer
+          format: int64
+          nullable: true
+          description: Current usage; null when state is not quota or the feature has no usage meter.
+        remaining:
+          type: integer
+          format: int64
+          nullable: true
+          description: Limit minus used (not below zero); null when used is unknown.
+        reset_strategy:
+          type: string
+          enum: [never, monthly]
+        at_limit:
+          type: boolean
     OrganizationUsageEnvelope:
       type: object
       required: [success, message, data]

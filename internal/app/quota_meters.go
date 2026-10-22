@@ -71,19 +71,25 @@ func registerMonthlyQuotaMeters(reg *organizationservice.QuotaMeterRegistry, db 
 		WHERE organization_id = $1 AND status <> 'void' AND created_at >= $2`})
 }
 
+// newQuotaMeterRegistry registers every quota meter. The enforcer and the
+// entitlement summary both build from it so they always agree on usage.
+func newQuotaMeterRegistry(db *database.Pool) *organizationservice.QuotaMeterRegistry {
+	meters := organizationservice.NewQuotaMeterRegistry()
+	registerCRMQuotaMeters(meters, db)
+	registerMonthlyQuotaMeters(meters, db)
+	registerDomainQuotaMeters(meters, db)
+	return meters
+}
+
 // newCRMQuotaEnforcer builds the QuotaEnforcer used by every CRM creation path
 // (API services and the worker's WhatsApp auto-lead), with the CRM meters registered.
 // It also carries the monthly quotation / sales order / invoice meters, so the same
 // enforcer can be handed to the receivable module.
 func newCRMQuotaEnforcer(guard *organizationservice.EntitlementGuard, db *database.Pool) *organizationservice.QuotaEnforcer {
-	meters := organizationservice.NewQuotaMeterRegistry()
-	registerCRMQuotaMeters(meters, db)
-	registerMonthlyQuotaMeters(meters, db)
-	registerDomainQuotaMeters(meters, db)
 	return organizationservice.NewQuotaEnforcer(
 		guard,
 		catalogFeatureRegistry{features: productrepo.NewFeatureRepository(db)},
-		meters,
+		newQuotaMeterRegistry(db),
 		time.Now,
 	)
 }
