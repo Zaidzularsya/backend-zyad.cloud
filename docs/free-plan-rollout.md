@@ -59,12 +59,25 @@ Jalankan dari `backend/` dengan `.env` environment target, mis. `go run ./cmd/ac
 ## Rollback
 
 - Kode: kembalikan ke release sebelumnya (symlink release lama + `pm2 startOrReload`).
-- Set fitur FREE: `free-plan --apply` menimpa produk FREE dari kode (`FreePlanFeatures()`), jadi memulihkan
-  set lama berarti menerapkan **nilai sebelumnya** (simpan output dry-run sebelum `--apply`; kembalikan nilai
-  itu di kode atau di UI katalog lalu re-provision dengan kode yang membawa nilai tersebut). Jangan
-  "pulihkan lewat UI lalu `--apply`" dengan kode ini — `--apply` akan menimpanya lagi.
-- **Jangan pernah** menjalankan migration down `000158`–`000160` selama kode ini live: key yang hilang dari
-  registry membuat setiap create yang dijaga kuota gagal 500 `QUOTA_ENFORCER_MISCONFIGURED`.
+- Set fitur FREE: mengedit produk di UI katalog **tidak** me-re-provision organisasi yang sudah ada (entitlement
+  mereka snapshot yang dibekukan); satu-satunya re-provision massal adalah `free-plan --apply`, dan nilainya
+  diambil dari **kode** (`FreePlanFeatures()`), bukan dari katalog. Jadi memulihkan set lama berarti
+  menerapkan **nilai sebelumnya** di kode (simpan output dry-run sebelum `--apply`) lalu menjalankan
+  `--apply` dengan kode itu. Jangan "pulihkan lewat UI lalu `--apply`" — `--apply` akan menimpanya lagi.
+- **Jangan pernah** menjalankan migration down `000158`–`000160` selama kode ini live: untuk organisasi yang
+  **punya** baris entitlement untuk key itu, key yang hilang dari registry membuat setiap create yang dijaga
+  kuota gagal 500 `QUOTA_ENFORCER_MISCONFIGURED`. Organisasi tanpa baris untuk key baru tidak terdampak (sudah
+  diputuskan uncapped sebelum lookup registry).
+
+## Celah yang diketahui / keputusan sadar
+
+- Pembuatan subdomain tidak digerbang `domain.enabled` (hanya custom domain). Organisasi **tanpa** baris efektif
+  `domain.max_domains` (mis. provisioning default gagal — tercatat di log, tidak di-retry) dapat membuat subdomain
+  tanpa batas — sama seperti sebelum fitur ini.
+- Restore contact kini dicek kuota `crm.max_contacts` (seperti lead/company/deal/pipeline). Restore halaman
+  landing tidak perlu dicek: itu hanya mengubah status `archived` → `draft` pada halaman yang belum dihapus,
+  dan halaman arsip sudah dihitung oleh `landing.max_pages`; halaman yang dihapus (soft delete) tidak punya
+  jalur restore.
 
 ## Catatan storage
 
