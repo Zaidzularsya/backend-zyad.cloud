@@ -252,7 +252,10 @@ type CurrentUser struct {
 	Profile         CurrentUserProfile
 	Roles           []string
 	Permissions     []string
-	Session         CurrentSession
+	// ActiveOrganizationPermissions: permission dari role org pada organisasi
+	// aktif sesi. Hanya untuk tampilan UI; tidak dipakai sebagai guard global.
+	ActiveOrganizationPermissions []string
+	Session                       CurrentSession
 }
 
 type CurrentUserProfile struct {
@@ -1249,9 +1252,10 @@ func currentUserResponse(user CurrentUser) dto.CurrentUserResponse {
 			Timezone:   user.Profile.Timezone,
 			Language:   user.Profile.Language,
 		},
-		Roles:               user.Roles,
-		Permissions:         user.Permissions,
-		CurrentOrganization: nil,
+		Roles:                         user.Roles,
+		Permissions:                   user.Permissions,
+		ActiveOrganizationPermissions: user.ActiveOrganizationPermissions,
+		CurrentOrganization:           nil,
 		Session: dto.CurrentSession{
 			ID:         user.Session.ID,
 			DeviceName: user.Session.DeviceName,

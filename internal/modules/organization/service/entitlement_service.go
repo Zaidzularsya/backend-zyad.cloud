@@ -92,6 +92,11 @@ func (s *EntitlementService) EvaluateFeature(
 		!entitlement.IsEffective(now) {
 		return FeatureEvaluation{}, nil
 	}
+	// Grant boolean `false` (LimitsFromValue) disimpan sebagai baris aktif
+	// dengan enabled=false; baris itu menandai fitur tidak termasuk paket.
+	if enabled, ok := entitlement.Limits["enabled"].(bool); ok && !enabled {
+		return FeatureEvaluation{}, nil
+	}
 	if entitlement.Limits == nil {
 		entitlement.Limits = map[string]any{}
 	}

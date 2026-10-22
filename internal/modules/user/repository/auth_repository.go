@@ -768,8 +768,13 @@ func (r *AuthRepository) FindCurrentUser(ctx context.Context, userID string, ses
 	if err != nil {
 		return service.CurrentUser{}, err
 	}
+	organizationPermissions, err := r.activeOrganizationPermissionSlugs(ctx, user.ID, sessionID)
+	if err != nil {
+		return service.CurrentUser{}, err
+	}
 	user.Roles = roles
 	user.Permissions = permissions
+	user.ActiveOrganizationPermissions = organizationPermissions
 
 	return user, nil
 }
@@ -861,6 +866,52 @@ func (r *AuthRepository) roleSlugs(ctx context.Context, userID string) ([]string
 		WHERE ur.user_id = $1
 		ORDER BY 1
 	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanStrings(rows)
+}
+
+// activeOrganizationPermissionSlugs mengembalikan permission dari role org
+// (mis. organization_owner) pada organisasi aktif sesi. Sengaja dipisah dari
+// permissionSlugs: field Permissions tetap hanya role global agar guard
+// permission global tidak ikut meloloskan owner tenant; UI memakai gabungan
+// keduanya untuk menampilkan aksi, sedangkan backend tetap memeriksa per-org.
+func (r *AuthRepository) activeOrganizationPermissionSlugs(ctx context.Context, userID string, sessionID string) ([]string, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT DISTINCT permission_slug
+		FROM (
+			SELECT COALESCE(NULLIF(p.slug, ''), p.permission_name) AS permission_slug
+			FROM sessions s
+			JOIN user_roles ur ON ur.user_id = s.user_id
+				AND ur.organization_id = s.active_organization_id
+			JOIN role_permissions rp ON rp.role_id = ur.role_id
+			JOIN permissions p ON p.id = rp.permission_id
+			WHERE s.id = $2
+				AND s.user_id = $1
+			UNION
+			SELECT COALESCE(NULLIF(p.slug, ''), p.permission_name) AS permission_slug
+			FROM sessions s
+			JOIN user_permissions up ON up.user_id = s.user_id
+				AND up.organization_id = s.active_organization_id
+			JOIN permissions p ON p.id = up.permission_id
+			WHERE s.id = $2
+				AND s.user_id = $1
+				AND up.effect = 'allow'
+			EXCEPT
+			SELECT COALESCE(NULLIF(p.slug, ''), p.permission_name) AS permission_slug
+			FROM sessions s
+			JOIN user_permissions up ON up.user_id = s.user_id
+				AND up.organization_id = s.active_organization_id
+			JOIN permissions p ON p.id = up.permission_id
+			WHERE s.id = $2
+				AND s.user_id = $1
+				AND up.effect = 'deny'
+		) permissions
+		ORDER BY permission_slug
+	`, userID, sessionID)
 	if err != nil {
 		return nil, err
 	}
