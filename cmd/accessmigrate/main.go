@@ -9,7 +9,7 @@
 //
 //	accessmigrate free-plan            # DRY-RUN (default): cetak rencana, tidak menulis apa pun
 //	accessmigrate free-plan --apply    # selaraskan produk FREE + re-provision workspace ber-akses default
-//	accessmigrate audit-quota          # baca-saja: produk/contract tanpa key kuota baru
+//	accessmigrate audit-quota          # baca-saja, informasional: produk/contract tanpa key kuota baru (uncapped)
 package main
 
 import (

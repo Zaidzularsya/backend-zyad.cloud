@@ -107,6 +107,9 @@ func (s *EntitlementSummaryService) Summary(ctx context.Context, organizationID 
 			if err := s.fill(ctx, organizationID, def, ent, &item); err != nil {
 				return nil, err
 			}
+		} else if IsUncappedWhenAbsent(def.Key) {
+			// Same rule as QuotaEnforcer.RequireRoom: no row for a new quota key = uncapped.
+			item.State = SummaryStateUnlimited
 		}
 		items = append(items, item)
 	}
@@ -121,6 +124,10 @@ func (s *EntitlementSummaryService) fill(ctx context.Context, organizationID str
 		return nil
 	}
 	if def.ValueType != "integer" {
+		return nil
+	}
+	// An explicit enabled=false row means "not in the plan" (see EvaluateFeature).
+	if enabled, ok := ent.Limits["enabled"].(bool); ok && !enabled {
 		return nil
 	}
 	limit, err := guardLimit(ent.Limits, "limit")

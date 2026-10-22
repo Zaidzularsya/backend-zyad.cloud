@@ -7,6 +7,7 @@ import (
 
 	crmdomain "zyad.cloud/internal/modules/crm/domain"
 	landingdomain "zyad.cloud/internal/modules/landing/domain"
+	organizationrepo "zyad.cloud/internal/modules/organization/repository"
 	organizationservice "zyad.cloud/internal/modules/organization/service"
 	productrepo "zyad.cloud/internal/modules/product/repository"
 	receivabledomain "zyad.cloud/internal/modules/receivable/domain"
@@ -124,6 +125,7 @@ func newQuotaMeterRegistry(db *database.Pool) *organizationservice.QuotaMeterReg
 func newCRMQuotaEnforcer(guard *organizationservice.EntitlementGuard, db *database.Pool) *organizationservice.QuotaEnforcer {
 	return organizationservice.NewQuotaEnforcer(
 		guard,
+		organizationrepo.NewEntitlementRepository(db),
 		catalogFeatureRegistry{features: productrepo.NewFeatureRepository(db)},
 		newQuotaMeterRegistry(db),
 		time.Now,

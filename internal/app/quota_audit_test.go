@@ -1,11 +1,14 @@
 package app
 
 import (
+	"bytes"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	catalogdomain "zyad.cloud/internal/modules/catalog/domain"
+	organizationservice "zyad.cloud/internal/modules/organization/service"
 )
 
 func auditProduct(sku string, active bool, keys ...string) catalogdomain.Product {
@@ -17,7 +20,7 @@ func auditProduct(sku string, active bool, keys ...string) catalogdomain.Product
 }
 
 func TestBuildQuotaAudit(t *testing.T) {
-	all := append([]string{}, newQuotaFeatureKeys...)
+	all := organizationservice.UncappedWhenAbsentQuotaKeys()
 	products := []catalogdomain.Product{
 		auditProduct("FREE", true, "crm.enabled"),                 // Free is never audited
 		auditProduct("PRO", true, "crm.enabled", "crm.max_leads"), // missing 7
@@ -59,5 +62,17 @@ func TestBuildQuotaAuditSkipsDefaultOnlyOrgs(t *testing.T) {
 	rows := []AuditEntitlementRow{{OrgID: "3", OrgSlug: "free-only", Source: "default", FeatureKey: "crm.enabled"}}
 	if r := BuildQuotaAudit("FREE", nil, rows); len(r.Orgs) != 0 {
 		t.Fatalf("orgs = %+v", r.Orgs)
+	}
+}
+
+func TestWriteQuotaAuditReportIsInformational(t *testing.T) {
+	var buf bytes.Buffer
+	WriteQuotaAuditReport(&buf, QuotaAuditReport{Orgs: []AuditOrgGap{{Slug: "acme", Sources: []string{"contract:c-1"}, Missing: []string{"crm.max_leads"}}}})
+	out := buf.String()
+	if strings.Contains(out, "FEATURE_NOT_ENABLED") {
+		t.Fatalf("report must not claim tenants are locked out:\n%s", out)
+	}
+	if !strings.Contains(out, "uncapped") {
+		t.Fatalf("report must say missing keys are uncapped:\n%s", out)
 	}
 }

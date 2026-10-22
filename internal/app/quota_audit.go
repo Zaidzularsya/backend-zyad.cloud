@@ -5,15 +5,12 @@ import (
 	"strings"
 
 	catalogdomain "zyad.cloud/internal/modules/catalog/domain"
+	organizationservice "zyad.cloud/internal/modules/organization/service"
 )
 
-// newQuotaFeatureKeys adalah key kuota baru (migration 000158/000159). Produk berbayar/contract yang tidak
-// membawa satu pun dari key ini akan menerima FEATURE_NOT_ENABLED saat membuat data terkait.
-var newQuotaFeatureKeys = []string{
-	"crm.max_leads", "crm.max_companies", "crm.max_deals", "crm.max_pipelines",
-	"crm.max_quotations_per_month", "crm.max_sales_orders_per_month",
-	"receivable.max_invoices_per_month", "domain.max_domains",
-}
+// Key kuota baru (migration 000158/000159) didefinisikan di satu tempat:
+// organizationservice.UncappedWhenAbsentQuotaKeys. Produk/contract yang tidak membawa key itu TIDAK
+// terkunci — tenant-nya tidak dibatasi (uncapped) untuk key tersebut. Audit ini murni informasi.
 
 // AuditEntitlementRow: satu baris entitlement aktif organisasi customer (hasil query baca-saja).
 type AuditEntitlementRow struct {
@@ -38,7 +35,7 @@ type QuotaAuditReport struct {
 
 func missingQuotaKeys(have map[string]bool) []string {
 	var missing []string
-	for _, k := range newQuotaFeatureKeys {
+	for _, k := range organizationservice.UncappedWhenAbsentQuotaKeys() {
 		if !have[k] {
 			missing = append(missing, k)
 		}
@@ -47,7 +44,7 @@ func missingQuotaKeys(have map[string]bool) []string {
 }
 
 // BuildQuotaAudit mengelompokkan produk non-FREE aktif dan organisasi ber-sumber contract/plan yang belum
-// memiliki key kuota baru. Murni; tidak menulis dan tidak mengisi otomatis (itu keputusan bisnis).
+// memiliki key kuota baru (artinya: tidak dibatasi/uncapped untuk key itu). Murni; tidak menulis dan tidak mengisi otomatis (itu keputusan bisnis).
 func BuildQuotaAudit(freeSKU string, products []catalogdomain.Product, rows []AuditEntitlementRow) QuotaAuditReport {
 	var report QuotaAuditReport
 	for _, p := range products {

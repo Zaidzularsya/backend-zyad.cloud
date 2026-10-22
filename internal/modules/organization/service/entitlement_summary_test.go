@@ -102,7 +102,9 @@ func TestSummaryAtLimitFlag(t *testing.T) {
 }
 
 func TestSummaryMissingEntitlementIsHidden(t *testing.T) {
-	items := summaryFor(t, false, []catalogdomain.FeatureDef{boolDef, intDef}, nil, 0)
+	// crm.max_contacts is a pre-existing key: absent => hidden (crm.max_leads would be uncapped).
+	contactsDef := catalogdomain.FeatureDef{Key: "crm.max_contacts", Module: "crm", ValueType: "integer", ResetStrategy: "never", IsActive: true}
+	items := summaryFor(t, false, []catalogdomain.FeatureDef{boolDef, contactsDef}, nil, 0)
 	if len(items) != 2 || items[0].State != "hidden" || items[1].State != "hidden" {
 		t.Fatalf("items = %+v", items)
 	}
@@ -131,5 +133,34 @@ func TestSummarySortedByModuleThenKey(t *testing.T) {
 	got := items[0].FeatureKey + items[1].FeatureKey + items[2].FeatureKey
 	if got != "a.xa.yz.b" {
 		t.Fatalf("order = %s", got)
+	}
+}
+
+var dealsDef = catalogdomain.FeatureDef{Key: "crm.max_deals", Module: "crm", Name: "Deal", ValueType: "integer", Unit: "deal", ResetStrategy: "never", IsActive: true}
+
+func TestSummaryAbsentNewKeyIsUnlimited(t *testing.T) {
+	items := summaryFor(t, false, []catalogdomain.FeatureDef{dealsDef}, nil, 0)
+	it := items[0]
+	if it.State != "unlimited" || it.Limit != nil || it.Used != nil || it.Remaining != nil || it.AtLimit {
+		t.Fatalf("item = %+v", it)
+	}
+}
+
+func TestSummaryExplicitlyDisabledNewKeyIsHidden(t *testing.T) {
+	items := summaryFor(t, false, []catalogdomain.FeatureDef{dealsDef},
+		[]organizationmodel.Entitlement{ent("crm.max_deals", map[string]any{"value": false, "enabled": false})}, 0)
+	if items[0].State != "hidden" {
+		t.Fatalf("item = %+v", items[0])
+	}
+}
+
+func TestSummaryAbsentLegacyKeyStaysHidden(t *testing.T) {
+	contactsDef := catalogdomain.FeatureDef{Key: "crm.max_contacts", Module: "crm", ValueType: "integer", ResetStrategy: "never", IsActive: true}
+	pagesDef := catalogdomain.FeatureDef{Key: "landing.max_pages", Module: "landing", ValueType: "integer", ResetStrategy: "never", IsActive: true}
+	items := summaryFor(t, false, []catalogdomain.FeatureDef{contactsDef, pagesDef}, nil, 0)
+	for _, it := range items {
+		if it.State != "hidden" {
+			t.Fatalf("item = %+v", it)
+		}
 	}
 }

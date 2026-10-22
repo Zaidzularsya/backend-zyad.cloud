@@ -110,8 +110,8 @@ func RunFreePlan(ctx context.Context, cfg config.Config, db *database.Pool, appl
 	return err
 }
 
-// RunQuotaAudit mencetak produk non-FREE dan organisasi contract/plan yang belum membawa key kuota baru.
-// Baca-saja.
+// RunQuotaAudit mencetak produk non-FREE dan organisasi contract/plan yang belum membawa key kuota baru
+// (tenant itu tidak dibatasi/uncapped untuk key tersebut). Baca-saja, informasional.
 func RunQuotaAudit(ctx context.Context, cfg config.Config, db *database.Pool, out io.Writer) error {
 	registry := catalogFeatureRegistry{features: productrepo.NewFeatureRepository(db)}
 	products := catalogservice.NewProductService(catalogrepo.NewProductRepository(db), registry)
@@ -165,7 +165,7 @@ func RunQuotaAudit(ctx context.Context, cfg config.Config, db *database.Pool, ou
 
 // WriteQuotaAuditReport mencetak hasil audit.
 func WriteQuotaAuditReport(w io.Writer, r QuotaAuditReport) {
-	fmt.Fprintln(w, "AUDIT (baca-saja): key kuota baru yang belum dibawa produk/entitlement berbayar")
+	fmt.Fprintln(w, "AUDIT (baca-saja, informasional): key kuota baru yang belum dibawa produk/entitlement berbayar")
 	fmt.Fprintf(w, "\nProduk katalog non-FREE aktif tanpa kuota lengkap: %d\n", len(r.Products))
 	for _, p := range r.Products {
 		fmt.Fprintf(w, "  %s (%s) belum punya: %v\n", p.SKU, p.Name, p.Missing)
@@ -174,5 +174,6 @@ func WriteQuotaAuditReport(w io.Writer, r QuotaAuditReport) {
 	for _, o := range r.Orgs {
 		fmt.Fprintf(w, "  %s sumber=%v belum punya: %v\n", o.Slug, o.Sources, o.Missing)
 	}
-	fmt.Fprintln(w, "\nCatatan: tenant di atas menerima FEATURE_NOT_ENABLED saat membuat data terkait sampai kuota diberikan (keputusan bisnis; tidak ada back-fill otomatis).")
+	fmt.Fprintln(w, "\nCatatan: tenant di atas TIDAK terkunci — untuk key yang belum dibawa mereka uncapped (tanpa batas).")
+	fmt.Fprintln(w, "Tambahkan key ke produk/contract hanya bila tenant itu memang ingin dibatasi (keputusan bisnis; tidak ada back-fill otomatis).")
 }
