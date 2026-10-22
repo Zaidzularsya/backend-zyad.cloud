@@ -2,19 +2,69 @@
 
 Definisi nilai Free ada di `internal/app/free_plan.go` (`FreePlanFeatures()`), mengikuti spec
 `docs/superpowers/specs/2026-10-22-entitlement-upgrade-ux-design.md` §4. Produk katalog platform ber-SKU
-`SELF_SERVE_FREE_PRODUCT_SKU` (default `FREE`) harus sudah ada; subcommand hanya menyelaraskan fiturnya.
+`SELF_SERVE_FREE_PRODUCT_SKU` (default `FREE`) **harus sudah ada** di environment target; `free-plan` gagal
+dengan error bila produk itu tidak ditemukan (buat dulu lewat UI katalog).
+
+## Perilaku key kuota baru
+
+Delapan key kuota baru (`crm.max_leads`, `crm.max_companies`, `crm.max_deals`, `crm.max_pipelines`,
+`crm.max_quotations_per_month`, `crm.max_sales_orders_per_month`, `receivable.max_invoices_per_month`,
+`domain.max_domains`; daftar tunggal: `organizationservice.UncappedWhenAbsentQuotaKeys()`):
+
+- organisasi **tanpa** baris entitlement untuk key itu: **tidak dibatasi** (create diizinkan, summary `unlimited`);
+- baris dengan `enabled=false`: `FEATURE_NOT_ENABLED`;
+- baris dengan limit: ditegakkan (`QUOTA_EXCEEDED` saat penuh).
+
+Key lama (`crm.max_contacts`, `landing.max_pages`, `users.max_users`, `storage.max_bytes`, …) tidak berubah.
+Akibatnya men-deploy kode ini **sebelum** `free-plan --apply` tidak mengunci siapa pun: tenant Free hanya
+belum dibatasi sampai `--apply` dijalankan.
+
+## Prasyarat (wajib sebelum deploy ke environment mana pun)
+
+1. Test integrasi meter dan migration up/down **belum pernah dijalankan di mana pun**. Jalankan di database
+   scratch (env `TEST_DB_*`, lihat README "Integration Test Database"), bukan DB dev/produksi:
+
+   ```bash
+   cd backend
+   go test -tags integration ./internal/app/ -run Meter
+   ```
+
+   lalu uji `migrate` up → down → up untuk `000158`–`000160` di database scratch yang sama.
+2. Produk `FREE` ada di katalog platform environment target.
+3. Pastikan key berikut **ACTIVE** di registry environment target: `crm.enabled`, `receivable.enabled`,
+   `landing.enabled`, `domain.enabled`, `whatsapp.enabled`. Frontend menyembunyikan menu modul yang key-nya
+   tidak muncul di summary (summary hanya memuat fitur registry yang aktif).
 
 ## Urutan rollout
 
-1. Jalankan migration sampai `000160` (registry key kuota baru + `storage.max_bytes`).
-2. `accessmigrate audit-quota` (baca-saja): daftar produk/contract berbayar yang belum membawa key kuota baru.
-   Tenant tersebut menerima `FEATURE_NOT_ENABLED` saat membuat data terkait sampai kuota diberikan.
-3. `accessmigrate free-plan` (DRY-RUN secara default): tinjau perubahan fitur produk FREE dan limit per organisasi.
-4. `accessmigrate free-plan --apply`: memperbarui fitur produk FREE lalu memanggil `ProvisionDefaultAccess`
-   untuk organisasi ber-akses `default` yang berubah. Idempoten; workspace dengan contract aktif dilewati.
+1. **Deploy release.** Migration `000158`–`000160` hanya menambah registry fitur dan ikut otomatis:
+   `deploy/deploy.sh` menjalankan `./migrate -direction up` sebelum `pm2 startOrReload`. Bukan langkah manual.
+2. `accessmigrate audit-quota` (baca-saja, informasional): daftar produk non-FREE dan organisasi
+   contract/plan yang belum membawa key kuota baru — mereka **uncapped** untuk key tersebut, tidak terkunci.
+   Tambahkan key ke produk/contract hanya bila tenant itu memang ingin dibatasi (keputusan bisnis).
+3. `accessmigrate free-plan` (DRY-RUN, default): tinjau perubahan fitur produk FREE dan limit per organisasi.
+   Baca baris `-> (none)`: key itu akan **dihapus** dari produk FREE.
+4. `accessmigrate free-plan --apply`:
+   - mengganti **seluruh** set fitur produk FREE dengan `FreePlanFeatures()`;
+   - memanggil `ProvisionDefaultAccess` untuk organisasi ber-akses `default` yang berubah; entitlement
+     sumber `default` untuk key yang tidak ada di `FreePlanFeatures()` di-expire;
+   - organisasi dengan contract aktif, organisasi plan, dan organisasi platform tidak disentuh;
+   - tenant yang sudah melebihi limit baru tetap menyimpan semua datanya; mereka hanya tidak bisa membuat data
+     baru sampai di bawah limit atau upgrade;
+   - mencetak `APPLIED` hanya bila semua organisasi berhasil; kegagalan sebagian mencetak `done/total` dan
+     keluar dengan error (aman diulang, idempoten).
 
-Jalankan dari `backend/` dengan `.env` environment target (`go run ./cmd/accessmigrate free-plan`).
-Rollback: kembalikan fitur produk FREE lewat UI katalog lalu jalankan `free-plan --apply` lagi.
+Jalankan dari `backend/` dengan `.env` environment target, mis. `go run ./cmd/accessmigrate free-plan`.
+
+## Rollback
+
+- Kode: kembalikan ke release sebelumnya (symlink release lama + `pm2 startOrReload`).
+- Set fitur FREE: `free-plan --apply` menimpa produk FREE dari kode (`FreePlanFeatures()`), jadi memulihkan
+  set lama berarti menerapkan **nilai sebelumnya** (simpan output dry-run sebelum `--apply`; kembalikan nilai
+  itu di kode atau di UI katalog lalu re-provision dengan kode yang membawa nilai tersebut). Jangan
+  "pulihkan lewat UI lalu `--apply`" dengan kode ini — `--apply` akan menimpanya lagi.
+- **Jangan pernah** menjalankan migration down `000158`–`000160` selama kode ini live: key yang hilang dari
+  registry membuat setiap create yang dijaga kuota gagal 500 `QUOTA_ENFORCER_MISCONFIGURED`.
 
 ## Catatan storage
 
