@@ -70,6 +70,17 @@ type entitlementOrganizationCheckerStub struct {
 	organizationID string
 	permissions    []string
 	err            error
+	globalErr      error
+	globalCalls    int
+}
+
+func (s *entitlementOrganizationCheckerStub) Can(
+	_ context.Context,
+	_ string,
+	_ []string,
+) error {
+	s.globalCalls++
+	return s.globalErr
 }
 
 func (s *entitlementOrganizationCheckerStub) CanOrganization(
@@ -197,7 +208,8 @@ func TestSummaryReturnsItemsForActiveTenant(t *testing.T) {
 
 func TestSummaryRequiresFeatureReadPermission(t *testing.T) {
 	service := &entitlementHandlerServiceStub{}
-	checker := &entitlementOrganizationCheckerStub{err: coreerrors.New("forbidden", "forbidden", http.StatusForbidden)}
+	forbidden := coreerrors.New("forbidden", "forbidden", http.StatusForbidden)
+	checker := &entitlementOrganizationCheckerStub{err: forbidden, globalErr: forbidden}
 	router := entitlementHandlerRouter(t, service, checker, &platformPermissionChecker{}, coretenant.OrganizationTypeCustomer)
 
 	recorder := httptest.NewRecorder()
@@ -229,10 +241,66 @@ func TestSummaryUsesTenantOrganizationNotQueryParam(t *testing.T) {
 	}
 }
 
+func TestSummaryPlatformOrganizationReturnsOK(t *testing.T) {
+	service := &entitlementHandlerServiceStub{}
+	router := entitlementHandlerRouter(t, service, &entitlementOrganizationCheckerStub{}, &platformPermissionChecker{}, coretenant.OrganizationTypePlatform)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/organization/entitlements/summary", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if service.organizationID != handlerOrganizationID {
+		t.Fatalf("organization = %q", service.organizationID)
+	}
+}
+
+func TestSummaryAllowsGlobalPermission(t *testing.T) {
+	service := &entitlementHandlerServiceStub{}
+	checker := &entitlementOrganizationCheckerStub{
+		err: coreerrors.New("forbidden", "forbidden", http.StatusForbidden),
+	}
+	router := entitlementHandlerRouter(t, service, checker, &platformPermissionChecker{}, coretenant.OrganizationTypePlatform)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/organization/entitlements/summary", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if checker.globalCalls != 1 || service.organizationID != handlerOrganizationID {
+		t.Fatalf("globalCalls=%d org=%q", checker.globalCalls, service.organizationID)
+	}
+}
+
+func TestSummaryDeniedWithoutOrganizationOrGlobalPermission(t *testing.T) {
+	service := &entitlementHandlerServiceStub{}
+	forbidden := coreerrors.New("forbidden", "forbidden", http.StatusForbidden)
+	checker := &entitlementOrganizationCheckerStub{err: forbidden, globalErr: forbidden}
+	router := entitlementHandlerRouter(t, service, checker, &platformPermissionChecker{}, coretenant.OrganizationTypePlatform)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/organization/entitlements/summary", nil))
+	if recorder.Code != http.StatusForbidden || service.organizationID != "" {
+		t.Fatalf("status = %d org=%q", recorder.Code, service.organizationID)
+	}
+}
+
+func TestFeaturesAndUsageRejectPlatformOrganization(t *testing.T) {
+	for _, path := range []string{"/organization/features", "/organization/usage?feature_key=x"} {
+		service := &entitlementHandlerServiceStub{}
+		router := entitlementHandlerRouter(t, service, &entitlementOrganizationCheckerStub{}, &platformPermissionChecker{}, coretenant.OrganizationTypePlatform)
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusForbidden || service.organizationID != "" {
+			t.Fatalf("%s: status = %d org=%q", path, recorder.Code, service.organizationID)
+		}
+	}
+}
+
 func entitlementHandlerRouter(
 	t *testing.T,
 	service OrganizationEntitlementService,
-	checker permissionmiddleware.OrganizationPermissionChecker,
+	checker permissionmiddleware.CombinedPermissionChecker,
 	platformChecker permissionmiddleware.PermissionChecker,
 	organizationType coretenant.OrganizationType,
 ) *gin.Engine {

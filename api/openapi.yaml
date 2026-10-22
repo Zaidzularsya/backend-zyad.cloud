@@ -1034,10 +1034,11 @@ paths:
     get:
       summary: Summarize entitlements and quota usage of the current organization
       description: >
-        Requires `organization.feature.read` and an active customer organization.
-        The organization is always the one from the authenticated tenant context;
-        no organization parameter is accepted. Platform organizations are rejected
-        by the customer-tenant guard.
+        Requires `organization.feature.read`, granted either in the current
+        organization or globally. Available to customer and platform
+        organizations; the platform organization receives every feature as
+        `unlimited`. The organization is always the one from the authenticated
+        tenant context; no organization parameter is accepted.
       operationId: getCurrentOrganizationEntitlementSummary
       tags:
         - Organizations

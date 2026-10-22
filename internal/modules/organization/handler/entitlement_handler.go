@@ -31,13 +31,13 @@ type OrganizationEntitlementService interface {
 
 type EntitlementHandler struct {
 	service             OrganizationEntitlementService
-	checker             permissionmiddleware.OrganizationPermissionChecker
+	checker             permissionmiddleware.CombinedPermissionChecker
 	platformPermChecker permissionmiddleware.PermissionChecker
 }
 
 func NewEntitlementHandler(
 	service OrganizationEntitlementService,
-	checker permissionmiddleware.OrganizationPermissionChecker,
+	checker permissionmiddleware.CombinedPermissionChecker,
 	platformPermChecker permissionmiddleware.PermissionChecker,
 ) *EntitlementHandler {
 	return &EntitlementHandler{
@@ -59,7 +59,19 @@ func (h *EntitlementHandler) RegisterRoutes(router *gin.RouterGroup) {
 	)
 	organizationGroup.GET("/features", h.ListFeatures)
 	organizationGroup.GET("/usage", h.CheckUsage)
-	organizationGroup.GET("/entitlements/summary", h.Summary)
+
+	// The summary is also served to the platform organization (everything
+	// unlimited) because CRM/landing/billing pages are shared with it.
+	summaryGroup := router.Group("/organization")
+	summaryGroup.Use(
+		middleware.RequireActiveTenant(),
+		middleware.RequireCustomerOrPlatformTenant(),
+		permissionmiddleware.RequireOrganizationOrGlobal(
+			h.checker,
+			"organization.feature.read",
+		),
+	)
+	summaryGroup.GET("/entitlements/summary", h.Summary)
 
 	platformGroup := router.Group("/platform/organizations")
 	platformGroup.Use(middleware.RequirePlatformTenant())
