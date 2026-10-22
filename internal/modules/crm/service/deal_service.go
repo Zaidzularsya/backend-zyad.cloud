@@ -106,7 +106,14 @@ func (s *dealService) Delete(ctx context.Context, scope coretenant.Scope, id str
 	return crmmodule.MapNotFound(s.repo.Delete(ctx, scope, id, deletedBy), "DEAL_NOT_FOUND", "deal not found or already deleted")
 }
 
+// Restore needs room like Create. A restored won/lost deal is not counted by
+// the meter, but the check stays simple (the deleted row's status is not read).
 func (s *dealService) Restore(ctx context.Context, scope coretenant.Scope, id string, restoredBy string) error {
+	if s.quota != nil {
+		if err := s.quota.RequireRoom(ctx, scope.OrganizationID(), domain.FeatureCRMMaxDeals); err != nil {
+			return err
+		}
+	}
 	return crmmodule.MapNotFound(s.repo.Restore(ctx, scope, id, restoredBy), "DEAL_NOT_FOUND", "deal not found or not deleted")
 }
 

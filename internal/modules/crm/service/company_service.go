@@ -74,7 +74,13 @@ func (s *companyService) Delete(ctx context.Context, scope coretenant.Scope, id 
 	return crmmodule.MapNotFound(s.repo.Delete(ctx, scope, id, deletedBy), "COMPANY_NOT_FOUND", "company not found or already deleted")
 }
 
+// Restore brings the company back into the active count, so it needs room like Create.
 func (s *companyService) Restore(ctx context.Context, scope coretenant.Scope, id string, restoredBy string) error {
+	if s.quota != nil {
+		if err := s.quota.RequireRoom(ctx, scope.OrganizationID(), domain.FeatureCRMMaxCompanies); err != nil {
+			return err
+		}
+	}
 	return crmmodule.MapNotFound(s.repo.Restore(ctx, scope, id, restoredBy), "COMPANY_NOT_FOUND", "company not found or not deleted")
 }
 

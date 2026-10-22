@@ -97,7 +97,20 @@ func (s *pipelineService) Delete(ctx context.Context, scope coretenant.Scope, id
 	return crmmodule.MapNotFound(s.repo.Delete(ctx, scope, id, deletedBy), "PIPELINE_NOT_FOUND", "pipeline not found or already deleted")
 }
 
+// Restore needs room like Create, with the same "first pipeline is free" rule:
+// with no active pipeline the restored one becomes the organization's only one.
 func (s *pipelineService) Restore(ctx context.Context, scope coretenant.Scope, id string, restoredBy string) error {
+	if s.quota != nil {
+		activeCount, err := s.repo.CountActive(ctx, scope)
+		if err != nil {
+			return err
+		}
+		if activeCount > 0 {
+			if err := s.quota.RequireRoom(ctx, scope.OrganizationID(), domain.FeatureCRMMaxPipelines); err != nil {
+				return err
+			}
+		}
+	}
 	return crmmodule.MapNotFound(s.repo.Restore(ctx, scope, id, restoredBy), "PIPELINE_NOT_FOUND", "pipeline not found or not deleted")
 }
 
