@@ -6,6 +6,7 @@ import (
 	"time"
 
 	crmdomain "zyad.cloud/internal/modules/crm/domain"
+	landingdomain "zyad.cloud/internal/modules/landing/domain"
 	organizationservice "zyad.cloud/internal/modules/organization/service"
 	productrepo "zyad.cloud/internal/modules/product/repository"
 	receivabledomain "zyad.cloud/internal/modules/receivable/domain"
@@ -28,7 +29,7 @@ import (
 //   - pipelines: deleted_at IS NULL and archived_at IS NULL, matching
 //     PipelineRepository.CountActive (the "first pipeline is free" rule).
 //
-// Contacts (crm.max_contacts) are enforced by ContactService and not metered here.
+// Contacts (crm.max_contacts) are metered in registerCoreQuotaMeters.
 func registerCRMQuotaMeters(reg *organizationservice.QuotaMeterRegistry, db *database.Pool) {
 	reg.Register(crmdomain.FeatureCRMMaxLeads, scopedCountMeter{db: db, query: fmt.Sprintf(
 		`SELECT COUNT(*) FROM crm_leads WHERE organization_id = $1 AND deleted_at IS NULL AND status NOT IN ('%s', '%s')`,
@@ -38,6 +39,40 @@ func registerCRMQuotaMeters(reg *organizationservice.QuotaMeterRegistry, db *dat
 		`SELECT COUNT(*) FROM crm_deals WHERE organization_id = $1 AND deleted_at IS NULL AND status = '%s'`,
 		crmdomain.DealStatusOpen)})
 	reg.Register(crmdomain.FeatureCRMMaxPipelines, scopedCountMeter{db: db, query: `SELECT COUNT(*) FROM crm_pipelines WHERE organization_id = $1 AND deleted_at IS NULL AND archived_at IS NULL`})
+}
+
+// Feature keys whose enforcement lives in modules that keep the key as a
+// private constant (membership_service.go, asset_service.go).
+const (
+	featureUsersMaxUsers   = "users.max_users"
+	featureStorageMaxBytes = "storage.max_bytes"
+)
+
+// registerCoreQuotaMeters registers the meters of the standing caps that were
+// enforced before the summary existed. Each query mirrors its enforcement
+// site exactly, so displayed usage equals enforced usage.
+//
+//   - crm.max_contacts: mirrors ContactService.requireCreateQuota, which calls
+//     contactRepository.Count with an empty filter: organization_id = $1 AND
+//     deleted_at IS NULL (crm/repository/contact_repository.go buildContactWhere).
+//   - landing.max_pages: mirrors pageService.requireCreateQuota, which counts
+//     pageRepo.List with IsTemplate=false: organization_id = $1 AND
+//     deleted_at IS NULL AND is_template = false (landing/repository/page_repository.go).
+//   - users.max_users: mirrors MembershipService.requireInviteCapacity, which
+//     counts memberships with status 'active' and removed_at IS NULL. Pending
+//     invitations are NOT counted (they are a different status).
+//   - storage.max_bytes: mirrors assetService.usedBytes, the sum of size_bytes of
+//     non-deleted rows in asset_objects plus landing_media_assets (same two
+//     queries as the asset and landing media repositories' SumSizeBytes).
+func registerCoreQuotaMeters(reg *organizationservice.QuotaMeterRegistry, db *database.Pool) {
+	reg.Register(crmdomain.FeatureCRMMaxContacts, scopedCountMeter{db: db, query: `SELECT COUNT(*) FROM crm_contacts WHERE organization_id = $1 AND deleted_at IS NULL`})
+	reg.Register(landingdomain.FeatureLandingMaxPages, scopedCountMeter{db: db, query: `SELECT COUNT(*) FROM landing_pages
+		WHERE organization_id = $1 AND deleted_at IS NULL AND is_template = false`})
+	reg.Register(featureUsersMaxUsers, scopedCountMeter{db: db, query: `SELECT COUNT(*) FROM organization_memberships
+		WHERE organization_id = $1 AND status = 'active' AND removed_at IS NULL`})
+	reg.Register(featureStorageMaxBytes, scopedCountMeter{db: db, query: `SELECT
+		(SELECT COALESCE(SUM(size_bytes), 0) FROM asset_objects WHERE organization_id = $1 AND deleted_at IS NULL)
+		+ (SELECT COALESCE(SUM(size_bytes), 0) FROM landing_media_assets WHERE organization_id = $1 AND deleted_at IS NULL)`})
 }
 
 // registerDomainQuotaMeters registers the total-domain meter: all domains of
@@ -78,6 +113,7 @@ func newQuotaMeterRegistry(db *database.Pool) *organizationservice.QuotaMeterReg
 	registerCRMQuotaMeters(meters, db)
 	registerMonthlyQuotaMeters(meters, db)
 	registerDomainQuotaMeters(meters, db)
+	registerCoreQuotaMeters(meters, db)
 	return meters
 }
 
