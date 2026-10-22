@@ -12517,6 +12517,10 @@ components:
           enum: [boolean, integer, decimal, string]
         unit:
           type: string
+        reset_strategy:
+          type: string
+          enum: [never, monthly, yearly, custom]
+          description: Read-only registry metadata; `never` means a total (non-resetting) limit.
     CatalogProductFeatureInput:
       type: object
       required: [feature_key, value]

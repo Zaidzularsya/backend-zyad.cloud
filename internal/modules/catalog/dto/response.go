@@ -44,6 +44,8 @@ type FeatureDefResponse struct {
 	Module    string `json:"module"`
 	ValueType string `json:"value_type"`
 	Unit      string `json:"unit,omitempty"`
+	// ResetStrategy: never|monthly|yearly|custom, read-only registry metadata.
+	ResetStrategy string `json:"reset_strategy"`
 }
 
 func ProductFromDomain(p domain.Product) ProductResponse {
