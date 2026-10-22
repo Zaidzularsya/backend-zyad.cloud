@@ -89,6 +89,13 @@ func (s *EntitlementGuard) RequireFeature(
 	return entitlement, nil
 }
 
+// IsPlatformOrganization reports whether the organization is exempt from
+// entitlements and quotas. Callers that do expensive work before RequireQuota
+// (e.g. usage counting) use it to skip that work for platform organizations.
+func (s *EntitlementGuard) IsPlatformOrganization(ctx context.Context, organizationID string) (bool, error) {
+	return s.isPlatformOrganization(ctx, organizationID)
+}
+
 func (s *EntitlementGuard) isPlatformOrganization(ctx context.Context, organizationID string) (bool, error) {
 	if s.organizations == nil {
 		return false, nil

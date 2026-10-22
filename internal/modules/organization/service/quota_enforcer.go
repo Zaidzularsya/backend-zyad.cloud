@@ -37,6 +37,15 @@ func NewQuotaEnforcer(guard *EntitlementGuard, features FeatureDefReader, meters
 // Platform organizations are bypassed by the underlying guard.
 func (e *QuotaEnforcer) RequireRoom(ctx context.Context, organizationID, featureKey string) error {
 	featureKey = strings.TrimSpace(featureKey)
+	// Platform organizations are exempt from every limit: return before any
+	// meter/registry/period work so misconfiguration or COUNT cost never applies.
+	isPlatform, err := e.guard.IsPlatformOrganization(ctx, organizationID)
+	if err != nil {
+		return err
+	}
+	if isPlatform {
+		return nil
+	}
 	meter, ok := e.meters.Get(featureKey)
 	if !ok {
 		return quotaConfigError(fmt.Sprintf("quota meter for %s is not registered", featureKey))

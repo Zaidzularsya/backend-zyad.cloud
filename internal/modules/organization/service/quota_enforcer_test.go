@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -99,8 +98,34 @@ func TestRequireRoomUnknownMeterReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("want error")
 	}
-	var appErr *coreerrors.AppError
-	if errors.As(err, &appErr) && appErr.Code == "QUOTA_EXCEEDED" {
-		t.Fatalf("unexpected quota error: %v", err)
+	assertAppErrorCode(t, err, "QUOTA_ENFORCER_MISCONFIGURED")
+}
+
+func platformGuard() *EntitlementGuard {
+	return NewEntitlementGuard(stubEntitlementEvaluator{}, WithOrganizationTypeResolver(stubOrganizationTypeResolver{
+		organization: organizationmodel.Organization{Type: coretenant.OrganizationTypePlatform},
+	}))
+}
+
+func TestRequireRoomPlatformOrgSkipsRegistries(t *testing.T) {
+	e := NewQuotaEnforcer(platformGuard(), fakeFeatureDefs{}, NewQuotaMeterRegistry(), time.Now)
+	if err := e.RequireRoom(context.Background(), "org-1", "crm.max_leads"); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestRequireRoomPlatformOrgDoesNotCallMeter(t *testing.T) {
+	calls := 0
+	meters := NewQuotaMeterRegistry()
+	meters.Register("crm.max_leads", fakeMeter{used: 9999, calledCount: &calls})
+	defs := fakeFeatureDefs{defs: map[string]catalogdomain.FeatureDef{
+		"crm.max_leads": {Key: "crm.max_leads", ResetStrategy: "yearly"},
+	}}
+	e := NewQuotaEnforcer(platformGuard(), defs, meters, time.Now)
+	if err := e.RequireRoom(context.Background(), "org-1", "crm.max_leads"); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("meter called %d times, want 0", calls)
 	}
 }
