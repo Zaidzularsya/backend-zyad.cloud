@@ -591,7 +591,7 @@ func New(ctx context.Context) (*App, error) {
 		),
 		crmSalesOrderSvc, // QuotationApprovedHook: buat SO draft
 		time.Now,
-	).WithOrderRoom(crmSalesOrderSvc.(crmservice.SalesOrderRoomChecker))
+	)
 	crmPublicQuotationHandler := crmhandler.NewPublicQuotationHandler(crmPublicQuotationSvc, redisClient)
 
 	// Checkout self-serve (R4-S2): bot/pipeline di-resolve lazily saat request pertama sehingga seeder

@@ -1,10 +1,14 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
+
 	"zyad.cloud/internal/modules/organization"
 
 	coretenant "zyad.cloud/internal/core/tenant"
@@ -186,27 +190,44 @@ func TestApproveQuotationRejectedBeforeStateChangeWhenSalesOrderQuotaFull(t *tes
 	}
 }
 
-func TestPublicApproveRejectedBeforeResponseWhenSalesOrderQuotaFull(t *testing.T) {
+// A customer's public approval is never refused because of the tenant's sales
+// order quota: the quotation is approved, the SO is still created (and counted
+// by the meter) and a warning is logged for the tenant.
+func TestPublicApproveCreatesSalesOrderEvenWhenSalesOrderQuotaFull(t *testing.T) {
 	h := newPublicHarness(t)
 	room := &fakeRoom{fullKeys: map[string]bool{domain.FeatureCRMMaxSalesOrdersPerMonth: true}}
 	so := newQuotaSOHarness(t, room)
-	h.svc.WithOrderRoom(so.svc.(SalesOrderRoomChecker))
+	svc := NewPublicQuotationService(h.links, publicScopes{}, h.stub, &publicResponses{stub: h.stub}, fakeIssuer{}, h.activities,
+		h.notifier, so.svc, func() time.Time { return h.now })
 
-	_, err := h.svc.Approve(context.Background(), "tok1", PublicResponseInput{ResponderName: "Budi Santoso"})
-	if !isQuotaExceeded(err) {
-		t.Fatalf("Approve() error = %v, want QUOTA_EXCEEDED", err)
-	}
-	if h.stub.q.Status != domain.QuotationStatusSent {
-		t.Fatalf("quotation status = %s, want unchanged (sent)", h.stub.q.Status)
-	}
-	if h.hook.calls != 0 || h.notifier.calls != 0 || len(h.activities.created) != 0 {
-		t.Error("side effects emitted for a rejected approval")
-	}
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(prev)
 
-	// Requesting a revision never creates an order, so it is not blocked.
-	if _, err := h.svc.RequestRevision(context.Background(), "tok1", PublicResponseInput{
-		ResponderName: "Budi", Categories: []domain.RevisionCategory{domain.RevisionPrice}}); err != nil {
-		t.Fatalf("RequestRevision() error = %v", err)
+	view, err := svc.Approve(context.Background(), "tok1", PublicResponseInput{ResponderName: "Budi Santoso"})
+	if err != nil {
+		t.Fatalf("Approve() error = %v, want nil (customer approval is never blocked)", err)
+	}
+	if view.Status != domain.QuotationStatusApproved || h.stub.q.Status != domain.QuotationStatusApproved {
+		t.Fatalf("quotation status = %s / %s, want approved", view.Status, h.stub.q.Status)
+	}
+	if len(so.repo.byID) != 1 {
+		t.Fatalf("sales orders = %d, want 1 (created despite full quota)", len(so.repo.byID))
+	}
+	out := logs.String()
+	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "quotation_id=q1") ||
+		!strings.Contains(out, "organization_id=11111111-1111-1111-1111-111111111111") {
+		t.Fatalf("missing quota warning, logs:\n%s", out)
+	}
+}
+
+// Outside a customer approval the defense-in-depth check still refuses.
+func TestSalesOrderHookStillEnforcedOutsideCustomerApproval(t *testing.T) {
+	room := &fakeRoom{fullKeys: map[string]bool{domain.FeatureCRMMaxSalesOrdersPerMonth: true}}
+	h := newQuotaSOHarness(t, room)
+	if err := h.svc.QuotationApproved(soCtx, soScope, h.q1, "u-sales"); !isQuotaExceeded(err) {
+		t.Fatalf("QuotationApproved() error = %v, want QUOTA_EXCEEDED", err)
 	}
 }
 

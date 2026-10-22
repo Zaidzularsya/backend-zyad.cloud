@@ -64,8 +64,10 @@ func (h *PublicQuotationHandler) RegisterRoutes(api *gin.RouterGroup) {
 	group.POST("/:token/revision", perToken, h.RequestRevision)
 }
 
-// isQuotaExceeded reports a tenant quota/entitlement refusal raised while a
-// customer approves a quotation (the sales order it creates has no room).
+// isQuotaExceeded reports a tenant quota/entitlement refusal. The public
+// approval path no longer raises one (a customer approval is never refused by
+// the tenant's sales order quota); the mapping stays only as a defensive,
+// customer-neutral message should a refusal ever surface here.
 func isQuotaExceeded(err error) bool {
 	var appErr *coreerrors.AppError
 	return organization.IsQuotaExceeded(err) || (errors.As(err, &appErr) && appErr.Code == organization.ErrCodeFeatureNotEnabled)

@@ -94,6 +94,21 @@ func notFound(err error) error {
 
 // ---- hook approve ----
 
+// customerApprovalKey marks a context whose QuotationApproved call comes from
+// the customer's public approval link (not from tenant staff).
+type customerApprovalKey struct{}
+
+// withCustomerApproval is only set by PublicQuotationService; the key is
+// unexported so no other package can opt out of the sales order quota.
+func withCustomerApproval(ctx context.Context) context.Context {
+	return context.WithValue(ctx, customerApprovalKey{}, true)
+}
+
+func isCustomerApproval(ctx context.Context) bool {
+	v, _ := ctx.Value(customerApprovalKey{}).(bool)
+	return v
+}
+
 func (s *salesOrderService) QuotationApproved(ctx context.Context, scope coretenant.Scope, q domain.Quotation, actorUserID string) error {
 	if existing, err := s.repo.FindByQuotation(ctx, scope, q.ID); err == nil {
 		_ = existing // idempoten: SO sudah ada, tanpa nomor/aktivitas/notifikasi baru
@@ -101,11 +116,17 @@ func (s *salesOrderService) QuotationApproved(ctx context.Context, scope coreten
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
-	// Defense in depth: the quotation flows already ran RequireRoomForQuotation before
-	// approving. This also covers hook callers that bypass them (self-serve checkout).
+	// Defense in depth: the staff quotation flows already ran RequireRoomForQuotation
+	// before approving. This also covers hook callers that bypass them (self-serve
+	// checkout). A customer's public approval is the exception: it is never refused,
+	// the order is created (and counted by the meter) and the overrun is logged.
 	if s.quota != nil {
 		if err := s.quota.RequireRoom(ctx, scope.OrganizationID(), domain.FeatureCRMMaxSalesOrdersPerMonth); err != nil {
-			return err
+			if !isCustomerApproval(ctx) {
+				return err
+			}
+			slog.WarnContext(ctx, "sales order created from customer approval despite sales order quota",
+				"organization_id", scope.OrganizationID(), "quotation_id", q.ID, "error", err)
 		}
 	}
 	seq, err := s.deps.Counters.NextNumber(ctx, scope, "sales_order")

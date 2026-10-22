@@ -93,16 +93,7 @@ type PublicQuotationService struct {
 	activities repository.ActivityRepository
 	notifier   QuotationResponseNotifier
 	hook       QuotationApprovedHook
-	orderRoom  SalesOrderRoomChecker
 	now        func() time.Time
-}
-
-// WithOrderRoom makes a customer approval fail with QUOTA_EXCEEDED, before the
-// response is recorded, when the tenant has no room for the sales order that
-// approval creates.
-func (s *PublicQuotationService) WithOrderRoom(c SalesOrderRoomChecker) *PublicQuotationService {
-	s.orderRoom = c
-	return s
 }
 
 func NewPublicQuotationService(links LinkResolver, scopes PublicScopeResolver, quotations QuotationService,
@@ -257,11 +248,9 @@ func (s *PublicQuotationService) respond(ctx context.Context, token string, acti
 	if d.state != PublicQuotationStateActive {
 		return PublicQuotationView{}, ErrQuotationNotRespondable
 	}
-	if action == domain.QuotationResponseApproved && s.orderRoom != nil {
-		if err := s.orderRoom.RequireRoomForQuotation(ctx, d.scope, d.q.ID); err != nil {
-			return PublicQuotationView{}, err
-		}
-	}
+	// A customer's approval is never refused because of the tenant's sales
+	// order quota (ruling I3): the order is still created and counted; the hook
+	// only logs a warning (see withCustomerApproval).
 	q, resp, err := s.responses.Respond(ctx, d.scope, repository.RecordResponseParams{
 		QuotationID: d.q.ID, LinkID: d.link.ID, Action: action, Categories: in.Categories, Note: in.Note,
 		ResponderName: in.ResponderName, IP: in.IP, UserAgent: truncateRunes(in.UserAgent, 500),
@@ -278,7 +267,7 @@ func (s *PublicQuotationService) respond(ctx context.Context, token string, acti
 		}
 	}
 	if action == domain.QuotationResponseApproved && s.hook != nil {
-		if err := s.hook.QuotationApproved(ctx, d.scope, q, ""); err != nil {
+		if err := s.hook.QuotationApproved(withCustomerApproval(ctx), d.scope, q, ""); err != nil {
 			slog.WarnContext(ctx, "quotation approved hook failed", "quotation_id", q.ID, "error", err)
 		}
 	}
