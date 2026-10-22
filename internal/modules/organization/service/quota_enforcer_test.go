@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -137,12 +138,16 @@ func TestRequireRoomPlatformOrgDoesNotCallMeter(t *testing.T) {
 type fakePresence struct {
 	ent    organizationmodel.Entitlement
 	absent bool
+	err    error
 	calls  *int
 }
 
 func (f fakePresence) FindEffective(_ context.Context, _ string, _ string, _ time.Time) (organizationmodel.Entitlement, error) {
 	if f.calls != nil {
 		*f.calls++
+	}
+	if f.err != nil {
+		return organizationmodel.Entitlement{}, f.err
 	}
 	if f.absent {
 		return organizationmodel.Entitlement{}, pgx.ErrNoRows
@@ -202,4 +207,26 @@ func TestRequireRoomLegacyKeyAbsentStillNotEnabled(t *testing.T) {
 			t.Fatalf("%s: presence lookup called %d times, want 0", key, calls)
 		}
 	}
+}
+
+// Fail closed: a broken presence lookup must never be read as "no row" (uncapped).
+func TestRequireRoomPresenceLookupErrorFailsClosed(t *testing.T) {
+	presence := fakePresence{err: errors.New("connection reset")}
+	e := customerEnforcer("crm.max_leads", presence, stubEntitlementEvaluator{err: notEntitledErr}, 0)
+	err := e.RequireRoom(context.Background(), "org-1", "crm.max_leads")
+	assertAppErrorCode(t, err, "ENTITLEMENT_EVALUATION_FAILED")
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Status != http.StatusInternalServerError {
+		t.Fatalf("err = %v, want 500", err)
+	}
+}
+
+func TestRequireRoomNilPresenceFinderIsMisconfigured(t *testing.T) {
+	guard := NewEntitlementGuard(stubEntitlementEvaluator{}, WithOrganizationTypeResolver(stubOrganizationTypeResolver{
+		organization: organizationmodel.Organization{Type: coretenant.OrganizationTypeCustomer},
+	}))
+	meters := NewQuotaMeterRegistry()
+	meters.Register("crm.max_leads", fakeMeter{})
+	e := NewQuotaEnforcer(guard, nil, fakeFeatureDefs{}, meters, time.Now)
+	assertAppErrorCode(t, e.RequireRoom(context.Background(), "org-1", "crm.max_leads"), "QUOTA_ENFORCER_MISCONFIGURED")
 }
