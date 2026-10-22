@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -162,5 +163,37 @@ func TestSummaryAbsentLegacyKeyStaysHidden(t *testing.T) {
 		if it.State != "hidden" {
 			t.Fatalf("item = %+v", it)
 		}
+	}
+}
+
+func TestSummaryMeterErrorDegradesOnlyThatItem(t *testing.T) {
+	meters := NewQuotaMeterRegistry()
+	meters.Register("crm.max_leads", fakeMeter{used: 3})
+	meters.Register("crm.max_deals", fakeMeter{err: errors.New("relation does not exist")})
+	svc := NewEntitlementSummaryService(
+		fakeEntitlementLister{items: []organizationmodel.Entitlement{
+			ent("crm.max_leads", map[string]any{"limit": int64(10)}),
+			ent("crm.max_deals", map[string]any{"limit": int64(5)}),
+		}},
+		fakeFeatureDefLister{defs: []catalogdomain.FeatureDef{intDef, dealsDef}},
+		meters,
+		stubOrganizationTypeResolver{organization: organizationmodel.Organization{Type: coretenant.OrganizationTypeCustomer}},
+		time.Now,
+	)
+	items, err := svc.Summary(context.Background(), "org-1")
+	if err != nil {
+		t.Fatalf("Summary must not fail on one meter error: %v", err)
+	}
+	byKey := map[string]dto.EntitlementSummaryItem{}
+	for _, it := range items {
+		byKey[it.FeatureKey] = it
+	}
+	deals := byKey["crm.max_deals"]
+	if deals.State != "quota" || deals.Limit == nil || *deals.Limit != 5 || deals.Used != nil || deals.Remaining != nil || deals.AtLimit {
+		t.Fatalf("degraded item = %+v", deals)
+	}
+	leads := byKey["crm.max_leads"]
+	if leads.Used == nil || *leads.Used != 3 {
+		t.Fatalf("healthy item = %+v", leads)
 	}
 }

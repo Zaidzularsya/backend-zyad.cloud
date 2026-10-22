@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -150,7 +151,11 @@ func (s *EntitlementSummaryService) fill(ctx context.Context, organizationID str
 	}
 	used, err := meter.Used(ctx, organizationID, start)
 	if err != nil {
-		return err
+		// One broken meter must not take the whole summary down: report the
+		// limit without usage (used/remaining nil, at_limit false) and move on.
+		slog.WarnContext(ctx, "entitlement summary: quota meter failed, usage omitted",
+			"feature_key", def.Key, "organization_id", organizationID, "error", err)
+		return nil
 	}
 	remaining := *limit - used
 	if remaining < 0 {
