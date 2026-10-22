@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -74,5 +75,25 @@ func TestWriteQuotaAuditReportIsInformational(t *testing.T) {
 	}
 	if !strings.Contains(out, "uncapped") {
 		t.Fatalf("report must say missing keys are uncapped:\n%s", out)
+	}
+}
+
+func TestWriteFreePlanApplyResult(t *testing.T) {
+	var ok bytes.Buffer
+	if err := writeFreePlanApplyResult(&ok, 3, 3, nil); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(ok.String(), "APPLIED") || !strings.Contains(ok.String(), "3 organisasi") {
+		t.Fatalf("success output = %q", ok.String())
+	}
+
+	var partial bytes.Buffer
+	failure := errors.New("org b: provision default: boom")
+	err := writeFreePlanApplyResult(&partial, 1, 3, failure)
+	if !errors.Is(err, failure) {
+		t.Fatalf("err = %v, want the provisioning error", err)
+	}
+	if strings.Contains(partial.String(), "APPLIED") || !strings.Contains(partial.String(), "1/3") {
+		t.Fatalf("partial output = %q", partial.String())
 	}
 }

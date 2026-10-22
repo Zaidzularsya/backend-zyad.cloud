@@ -106,8 +106,19 @@ func RunFreePlan(ctx context.Context, cfg config.Config, db *database.Pool, appl
 		return fmt.Errorf("update fitur produk Free: %w", err)
 	}
 	n, err := ApplyFreePlan(ctx, plan, workerDefaultAccess(cfg, db))
-	fmt.Fprintf(out, "\nAPPLIED: produk Free diperbarui; re-provision %d organisasi\n", n)
-	return err
+	return writeFreePlanApplyResult(out, n, len(plan.Orgs), err)
+}
+
+// writeFreePlanApplyResult mencetak APPLIED hanya bila semua organisasi berhasil di-re-provision; pada
+// kegagalan sebagian mencetak done/total lalu mengembalikan error-nya.
+func writeFreePlanApplyResult(out io.Writer, done, total int, err error) error {
+	if err != nil {
+		fmt.Fprintf(out, "\nGAGAL SEBAGIAN: produk Free sudah diperbarui; re-provision %d/%d organisasi sebelum error: %v\n",
+			done, total, err)
+		return err
+	}
+	fmt.Fprintf(out, "\nAPPLIED: produk Free diperbarui; re-provision %d organisasi\n", done)
+	return nil
 }
 
 // RunQuotaAudit mencetak produk non-FREE dan organisasi contract/plan yang belum membawa key kuota baru
