@@ -7,6 +7,7 @@ import (
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/crm/domain"
 	"zyad.cloud/internal/modules/crm/repository"
+	"zyad.cloud/internal/modules/organization"
 )
 
 // Restore brings a soft-deleted row back into the active count, so it must
@@ -151,5 +152,54 @@ func TestLeadUpdateActiveStatusChangeIgnoresQuota(t *testing.T) {
 	}
 	if len(room.keys) != 0 {
 		t.Fatalf("enforcer consulted for a non-terminal transition: %v", room.keys)
+	}
+}
+
+type restoreContactRepo struct {
+	repository.ContactRepository
+	active   int64
+	restored int
+}
+
+func (f *restoreContactRepo) Count(context.Context, coretenant.Scope, repository.ContactListFilter) (int64, error) {
+	return f.active, nil
+}
+
+func (f *restoreContactRepo) Restore(context.Context, coretenant.Scope, string, string) error {
+	f.restored++
+	return nil
+}
+
+// limitQuotaGuard mimics EntitlementGuard.RequireQuotaValue with a fixed limit.
+type limitQuotaGuard struct {
+	limit int64
+	keys  []string
+}
+
+func (g *limitQuotaGuard) RequireQuotaValue(_ context.Context, _ string, featureKey, _ string, used, delta int64) error {
+	g.keys = append(g.keys, featureKey)
+	if used+delta > g.limit {
+		return organization.QuotaExceededError()
+	}
+	return nil
+}
+
+func TestContactRestoreRequiresRoom(t *testing.T) {
+	repo := &restoreContactRepo{active: 100}
+	guard := &limitQuotaGuard{limit: 100}
+	svc := NewContactService(repo, WithContactQuotaGuard(guard))
+	if err := svc.Restore(context.Background(), testScope(t), "c1", "u1"); !isQuotaExceeded(err) {
+		t.Fatalf("full: Restore() error = %v, want QUOTA_EXCEEDED", err)
+	}
+	if repo.restored != 0 {
+		t.Fatal("full: repository Restore called despite full quota")
+	}
+	if len(guard.keys) != 1 || guard.keys[0] != domain.FeatureCRMMaxContacts {
+		t.Fatalf("guard keys = %v", guard.keys)
+	}
+
+	repo.active = 99
+	if err := svc.Restore(context.Background(), testScope(t), "c1", "u1"); err != nil || repo.restored != 1 {
+		t.Fatalf("with room: err=%v restored=%d", err, repo.restored)
 	}
 }
