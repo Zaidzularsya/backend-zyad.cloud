@@ -19,6 +19,7 @@ type leadService struct {
 	ownerCheck   LeadOwnerValidator
 	onConvert    LeadConvertedHook
 	pipelineRepo repository.PipelineRepository
+	quota        QuotaRoomRequirer
 }
 
 // annualRevenuePattern mengikuti batas kolom numeric(18,2): maks 16 digit
@@ -33,6 +34,24 @@ func WithLeadContactQuotaGuard(guard ContactQuotaGuard) LeadServiceOption {
 	return func(service *leadService) {
 		service.quotaGuard = guard
 	}
+}
+
+// WithLeadQuotaEnforcer enforces crm.max_leads in Create, and also
+// crm.max_companies / crm.max_deals when Convert creates a new company or deal
+// (those rows bypass CompanyService/DealService). Update, Get and List never
+// consult it.
+func WithLeadQuotaEnforcer(quota QuotaRoomRequirer) LeadServiceOption {
+	return func(service *leadService) {
+		service.quota = quota
+	}
+}
+
+// requireRoom is a no-op when no enforcer is wired (tests, legacy callers).
+func (s *leadService) requireRoom(ctx context.Context, scope coretenant.Scope, featureKey string) error {
+	if s.quota == nil {
+		return nil
+	}
+	return s.quota.RequireRoom(ctx, scope.OrganizationID(), featureKey)
 }
 
 // WithLeadOwnerValidator mewajibkan owner_user_id (create/update/assign)
@@ -81,6 +100,9 @@ func (s *leadService) Create(ctx context.Context, scope coretenant.Scope, params
 		return domain.Lead{}, err
 	}
 	if err := s.requireOwnerMember(ctx, scope, params.OwnerUserID); err != nil {
+		return domain.Lead{}, err
+	}
+	if err := s.requireRoom(ctx, scope, domain.FeatureCRMMaxLeads); err != nil {
 		return domain.Lead{}, err
 	}
 	return s.repo.Create(ctx, scope, params)

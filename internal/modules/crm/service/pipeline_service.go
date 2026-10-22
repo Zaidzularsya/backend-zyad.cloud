@@ -19,6 +19,7 @@ type PipelineFeatureGate interface {
 type pipelineService struct {
 	repo    repository.PipelineRepository
 	feature PipelineFeatureGate
+	quota   QuotaRoomRequirer
 }
 
 type PipelineServiceOption func(*pipelineService)
@@ -26,6 +27,15 @@ type PipelineServiceOption func(*pipelineService)
 func WithPipelineFeatureGate(gate PipelineFeatureGate) PipelineServiceOption {
 	return func(service *pipelineService) {
 		service.feature = gate
+	}
+}
+
+// WithPipelineQuotaEnforcer enforces crm.max_pipelines in Create only. The
+// first pipeline stays free (see Create), so the enforcer is consulted only
+// when the organization already has an active pipeline.
+func WithPipelineQuotaEnforcer(quota QuotaRoomRequirer) PipelineServiceOption {
+	return func(service *pipelineService) {
+		service.quota = quota
 	}
 }
 
@@ -42,14 +52,21 @@ func NewPipelineService(repo repository.PipelineRepository, options ...PipelineS
 // plan doesn't include the crm.pipeline feature. Only the 2nd+ pipeline is
 // gated. See docs/reference-crm.md "Entitlement Enforcement".
 func (s *pipelineService) Create(ctx context.Context, scope coretenant.Scope, params repository.CreatePipelineParams) (domain.Pipeline, error) {
-	if s.feature != nil {
+	if s.feature != nil || s.quota != nil {
 		activeCount, err := s.repo.CountActive(ctx, scope)
 		if err != nil {
 			return domain.Pipeline{}, err
 		}
 		if activeCount > 0 {
-			if _, err := s.feature.RequireFeature(ctx, scope.OrganizationID(), domain.FeatureCRMPipeline); err != nil {
-				return domain.Pipeline{}, err
+			if s.feature != nil {
+				if _, err := s.feature.RequireFeature(ctx, scope.OrganizationID(), domain.FeatureCRMPipeline); err != nil {
+					return domain.Pipeline{}, err
+				}
+			}
+			if s.quota != nil {
+				if err := s.quota.RequireRoom(ctx, scope.OrganizationID(), domain.FeatureCRMMaxPipelines); err != nil {
+					return domain.Pipeline{}, err
+				}
 			}
 		}
 	}

@@ -368,6 +368,9 @@ func New(ctx context.Context) (*App, error) {
 	landingAnalyticsSvc := landingservice.NewAnalyticsService(landingAnalyticsRepo, landingPageRepo, db)
 
 	crmEntitlementChecker := entitlementChecker{guard: entitlementGuard}
+	// One enforcer for every "total" CRM quota (leads, companies, deals,
+	// pipelines); contacts keep their own guard.
+	crmQuotaEnforcer := newCRMQuotaEnforcer(entitlementGuard, db)
 	crmCompanyRepo := crmrepo.NewCompanyRepository(db)
 	crmContactRepo := crmrepo.NewContactRepository(db)
 	crmLeadRepo := crmrepo.NewLeadRepository(db)
@@ -382,6 +385,7 @@ func New(ctx context.Context) (*App, error) {
 		crmContactRepo,
 		crmCompanyRepo,
 		crmservice.WithLeadContactQuotaGuard(entitlementGuard),
+		crmservice.WithLeadQuotaEnforcer(crmQuotaEnforcer),
 		crmservice.WithLeadOwnerValidator(crmMemberRepo),
 		crmservice.WithLeadDealPipelines(crmPipelineRepo),
 		crmservice.WithLeadConvertedHook(whatsappservice.NewLeadConversionRelinker(whatsapprepo.NewConversationRepository(db))),
@@ -401,12 +405,14 @@ func New(ctx context.Context) (*App, error) {
 	crmPipelineSvc := crmservice.NewPipelineService(
 		crmPipelineRepo,
 		crmservice.WithPipelineFeatureGate(entitlementGuard),
+		crmservice.WithPipelineQuotaEnforcer(crmQuotaEnforcer),
 	)
 	crmDealSvc := crmservice.NewDealService(
 		crmDealRepo,
 		crmPipelineRepo,
 		crmservice.WithDealContactSync(crmContactRepo),
 		crmservice.WithDealSourceLeads(crmLeadRepo),
+		crmservice.WithDealQuotaEnforcer(crmQuotaEnforcer),
 	)
 	crmActivityRepo := crmrepo.NewActivityRepository(db)
 	crmActivitySvc := crmservice.NewActivityService(crmActivityRepo, crmLeadRepo, crmContactRepo, crmCompanyRepo, crmDealRepo)
@@ -524,7 +530,8 @@ func New(ctx context.Context) (*App, error) {
 		WithTenantAccess(crmTenantAccess).WithReactivation(crmTenantAccess, cfg.SelfServe.GraceDays))
 	// Tautan company ↔ workspace (R4-S3): mengubah tautan memindahkan entitlement contract.
 	crmCompanySvc := crmservice.NewCompanyService(crmCompanyRepo,
-		crmservice.WithWorkspaceLinking(workspaceDirectory{orgs: organizationrepo.NewOrganizationRepository(db)}, crmTenantAccess))
+		crmservice.WithWorkspaceLinking(workspaceDirectory{orgs: organizationrepo.NewOrganizationRepository(db)}, crmTenantAccess),
+		crmservice.WithCompanyQuotaEnforcer(crmQuotaEnforcer))
 	crmCompanyHandler := crmhandler.NewCompanyHandler(crmCompanySvc)
 	crmSalesOrderHandler := crmhandler.NewSalesOrderHandler(crmSalesOrderSvc, crmhandler.SalesOrderRefs{Invoices: crmReceivableDocs, Contracts: crmReceivableDocs})
 	crmDealOrdersHandler := crmhandler.NewDealOrdersHandler(crmSalesOrderHandler, crmWonEvaluator)

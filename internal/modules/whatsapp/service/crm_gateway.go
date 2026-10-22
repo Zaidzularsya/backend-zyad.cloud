@@ -10,9 +10,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	coreerrors "zyad.cloud/internal/core/errors"
 	coretenant "zyad.cloud/internal/core/tenant"
 	crmdomain "zyad.cloud/internal/modules/crm/domain"
 	crmrepo "zyad.cloud/internal/modules/crm/repository"
+	"zyad.cloud/internal/modules/organization"
 	"zyad.cloud/internal/modules/whatsapp/domain"
 	"zyad.cloud/internal/modules/whatsapp/repository"
 )
@@ -27,6 +29,16 @@ type CRMMatch struct {
 	EntityID    string
 	Name        string
 	OwnerUserID string
+}
+
+// ErrAutoLeadSkipped means the organization has no lead quota left (or no
+// lead entitlement), so no lead was auto-created. It is not a processing
+// failure: the message must still be stored, just without a lead.
+var ErrAutoLeadSkipped = errors.New("whatsapp: auto-create lead skipped, lead quota unavailable")
+
+// LeadQuotaRequirer is satisfied by organization QuotaEnforcer.
+type LeadQuotaRequirer interface {
+	RequireRoom(ctx context.Context, organizationID, featureKey string) error
 }
 
 type CreateLeadInput struct {
@@ -79,6 +91,16 @@ type CRMGateway struct {
 	contacts   crmrepo.ContactRepository
 	activities crmrepo.ActivityRepository
 	members    crmrepo.MemberRepository
+	leadQuota  LeadQuotaRequirer
+}
+
+// CRMGatewayOption customizes NewCRMGateway.
+type CRMGatewayOption func(*CRMGateway)
+
+// WithLeadQuota makes CreateLead honour crm.max_leads, because the gateway
+// inserts leads through the repository and bypasses crm LeadService.
+func WithLeadQuota(quota LeadQuotaRequirer) CRMGatewayOption {
+	return func(g *CRMGateway) { g.leadQuota = quota }
 }
 
 var (
@@ -91,8 +113,13 @@ func NewCRMGateway(
 	contacts crmrepo.ContactRepository,
 	activities crmrepo.ActivityRepository,
 	members crmrepo.MemberRepository,
+	options ...CRMGatewayOption,
 ) *CRMGateway {
-	return &CRMGateway{leads: leads, contacts: contacts, activities: activities, members: members}
+	gateway := &CRMGateway{leads: leads, contacts: contacts, activities: activities, members: members}
+	for _, option := range options {
+		option(gateway)
+	}
+	return gateway
 }
 
 func (m *CRMGateway) MatchPhone(ctx context.Context, scope coretenant.Scope, phoneNormalized string) (CRMMatch, bool, error) {
@@ -124,6 +151,15 @@ func (m *CRMGateway) MatchPhone(ctx context.Context, scope coretenant.Scope, pho
 }
 
 func (m *CRMGateway) CreateLead(ctx context.Context, scope coretenant.Scope, input CreateLeadInput) (CRMMatch, error) {
+	if m.leadQuota != nil {
+		if err := m.leadQuota.RequireRoom(ctx, scope.OrganizationID(), crmdomain.FeatureCRMMaxLeads); err != nil {
+			var appErr *coreerrors.AppError
+			if errors.As(err, &appErr) && (appErr.Code == organization.ErrCodeQuotaExceeded || appErr.Code == organization.ErrCodeFeatureNotEnabled) {
+				return CRMMatch{}, ErrAutoLeadSkipped
+			}
+			return CRMMatch{}, err
+		}
+	}
 	lead, err := m.leads.Create(ctx, scope, crmrepo.CreateLeadParams{
 		ContactName: input.ContactName,
 		Phone:       input.Phone,
