@@ -206,7 +206,7 @@ func TestSummaryReturnsItemsForActiveTenant(t *testing.T) {
 	}
 }
 
-func TestSummaryRequiresFeatureReadPermission(t *testing.T) {
+func TestSummaryMemberWithoutFeatureReadGetsOK(t *testing.T) {
 	service := &entitlementHandlerServiceStub{}
 	forbidden := coreerrors.New("forbidden", "forbidden", http.StatusForbidden)
 	checker := &entitlementOrganizationCheckerStub{err: forbidden, globalErr: forbidden}
@@ -214,15 +214,82 @@ func TestSummaryRequiresFeatureReadPermission(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/organization/entitlements/summary", nil))
-	if recorder.Code != http.StatusForbidden {
+	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
 	}
-	if len(checker.permissions) != 1 || checker.permissions[0] != "organization.feature.read" {
-		t.Fatalf("permissions = %#v", checker.permissions)
+	if service.organizationID != handlerOrganizationID {
+		t.Fatalf("organization = %q, want tenant org", service.organizationID)
 	}
-	if service.organizationID != "" {
-		t.Fatalf("service must not be called, got %q", service.organizationID)
+	if len(checker.permissions) != 0 || checker.globalCalls != 0 {
+		t.Fatalf("summary must not check permissions: %#v", checker)
 	}
+}
+
+func TestSummaryUnauthenticatedDenied(t *testing.T) {
+	service := &entitlementHandlerServiceStub{}
+	router := summaryRouterWith(t, service, "", handlerMembershipID)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/organization/entitlements/summary", nil))
+	if recorder.Code != http.StatusUnauthorized || service.organizationID != "" {
+		t.Fatalf("status = %d org=%q", recorder.Code, service.organizationID)
+	}
+}
+
+func TestSummaryNonMemberDenied(t *testing.T) {
+	service := &entitlementHandlerServiceStub{}
+	// A host-resolved context (e.g. subdomain) carries no membership.
+	router := summaryRouterWith(t, service, handlerUserID, "")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/organization/entitlements/summary", nil))
+	if recorder.Code != http.StatusForbidden || service.organizationID != "" {
+		t.Fatalf("status = %d org=%q", recorder.Code, service.organizationID)
+	}
+}
+
+func TestSummaryWithoutTenantContextDenied(t *testing.T) {
+	service := &entitlementHandlerServiceStub{}
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) { permissionmiddleware.SetUserID(c, handlerUserID); c.Next() })
+	NewEntitlementHandler(service, &entitlementOrganizationCheckerStub{}, &platformPermissionChecker{}).RegisterRoutes(router.Group(""))
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/organization/entitlements/summary", nil))
+	if recorder.Code != http.StatusForbidden || service.organizationID != "" {
+		t.Fatalf("status = %d org=%q", recorder.Code, service.organizationID)
+	}
+}
+
+// summaryRouterWith builds a router whose tenant context is resolved from the
+// subdomain when membershipID is empty (no membership), else from the session.
+func summaryRouterWith(t *testing.T, service OrganizationEntitlementService, userID, membershipID string) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		input := coretenant.VerifiedContextInput{
+			OrganizationID:     handlerOrganizationID,
+			OrganizationSlug:   "acme",
+			OrganizationType:   coretenant.OrganizationTypeCustomer,
+			OrganizationStatus: coretenant.OrganizationStatusActive,
+			ResolutionSource:   coretenant.ResolutionSourceSubdomain,
+			DataPlacement:      coretenant.DataPlacementShared,
+		}
+		if membershipID != "" {
+			input.MembershipID, input.MembershipStatus, input.MembershipVersion = membershipID, "active", 1
+			input.ResolutionSource = coretenant.ResolutionSourceSession
+		}
+		tenantContext, err := coretenant.NewVerifiedContext(input)
+		if err != nil {
+			t.Fatalf("create tenant context: %v", err)
+		}
+		middleware.SetTenantContext(c, tenantContext)
+		if userID != "" {
+			permissionmiddleware.SetUserID(c, userID)
+		}
+		c.Next()
+	})
+	NewEntitlementHandler(service, &entitlementOrganizationCheckerStub{}, &platformPermissionChecker{}).RegisterRoutes(router.Group(""))
+	return router
 }
 
 func TestSummaryUsesTenantOrganizationNotQueryParam(t *testing.T) {
@@ -252,36 +319,6 @@ func TestSummaryPlatformOrganizationReturnsOK(t *testing.T) {
 	}
 	if service.organizationID != handlerOrganizationID {
 		t.Fatalf("organization = %q", service.organizationID)
-	}
-}
-
-func TestSummaryAllowsGlobalPermission(t *testing.T) {
-	service := &entitlementHandlerServiceStub{}
-	checker := &entitlementOrganizationCheckerStub{
-		err: coreerrors.New("forbidden", "forbidden", http.StatusForbidden),
-	}
-	router := entitlementHandlerRouter(t, service, checker, &platformPermissionChecker{}, coretenant.OrganizationTypePlatform)
-
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/organization/entitlements/summary", nil))
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body.String())
-	}
-	if checker.globalCalls != 1 || service.organizationID != handlerOrganizationID {
-		t.Fatalf("globalCalls=%d org=%q", checker.globalCalls, service.organizationID)
-	}
-}
-
-func TestSummaryDeniedWithoutOrganizationOrGlobalPermission(t *testing.T) {
-	service := &entitlementHandlerServiceStub{}
-	forbidden := coreerrors.New("forbidden", "forbidden", http.StatusForbidden)
-	checker := &entitlementOrganizationCheckerStub{err: forbidden, globalErr: forbidden}
-	router := entitlementHandlerRouter(t, service, checker, &platformPermissionChecker{}, coretenant.OrganizationTypePlatform)
-
-	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/organization/entitlements/summary", nil))
-	if recorder.Code != http.StatusForbidden || service.organizationID != "" {
-		t.Fatalf("status = %d org=%q", recorder.Code, service.organizationID)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	coreerrors "zyad.cloud/internal/core/errors"
 	corehttp "zyad.cloud/internal/core/http"
 	"zyad.cloud/internal/core/middleware"
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
@@ -61,15 +62,14 @@ func (h *EntitlementHandler) RegisterRoutes(router *gin.RouterGroup) {
 	organizationGroup.GET("/usage", h.CheckUsage)
 
 	// The summary is also served to the platform organization (everything
-	// unlimited) because CRM/landing/billing pages are shared with it.
+	// unlimited) because CRM/landing/billing pages are shared with it. Every
+	// member may read it (spec 7b.3): no permission, but the caller must be an
+	// authenticated, active member of the tenant organization.
 	summaryGroup := router.Group("/organization")
 	summaryGroup.Use(
 		middleware.RequireActiveTenant(),
 		middleware.RequireCustomerOrPlatformTenant(),
-		permissionmiddleware.RequireOrganizationOrGlobal(
-			h.checker,
-			"organization.feature.read",
-		),
+		requireTenantMember(),
 	)
 	summaryGroup.GET("/entitlements/summary", h.Summary)
 
@@ -83,6 +83,35 @@ func (h *EntitlementHandler) RegisterRoutes(router *gin.RouterGroup) {
 		),
 		h.UpsertPlatformOverride,
 	)
+}
+
+// requireTenantMember admits only an authenticated user whose tenant context
+// was resolved through an active membership (session/header/default
+// membership). Host-resolved contexts carry no membership and are refused.
+func requireTenantMember() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if permissionmiddleware.UserID(c) == "" {
+			corehttp.Fail(c, coreerrors.New("UNAUTHORIZED", "user context is required", http.StatusUnauthorized))
+			c.Abort()
+			return
+		}
+		tenantContext, err := middleware.RequireTenantContext(c)
+		if err != nil {
+			corehttp.Fail(c, err)
+			c.Abort()
+			return
+		}
+		if tenantContext.MembershipID() == "" || tenantContext.MembershipStatus() != "active" {
+			corehttp.Fail(c, coreerrors.New(
+				"ORGANIZATION_ACCESS_DENIED",
+				"user does not have an active membership in the organization",
+				http.StatusForbidden,
+			))
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
 }
 
 func (h *EntitlementHandler) ListFeatures(c *gin.Context) {
