@@ -222,6 +222,50 @@ func TestPublicApproveCreatesSalesOrderEvenWhenSalesOrderQuotaFull(t *testing.T)
 	}
 }
 
+type errRoom struct{ err error }
+
+func (r errRoom) RequireRoom(context.Context, string, string) error { return r.err }
+
+func captureLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return &logs
+}
+
+func TestCustomerApprovalQuotaExceededLogsWarnAndCreates(t *testing.T) {
+	h := newQuotaSOHarness(t, errRoom{err: organization.QuotaExceededError()})
+	logs := captureLogs(t)
+	if err := h.svc.QuotationApproved(withCustomerApproval(soCtx), soScope, h.q1, ""); err != nil {
+		t.Fatalf("QuotationApproved() error = %v", err)
+	}
+	if len(h.repo.byID) != 1 {
+		t.Fatalf("sales orders = %d, want 1", len(h.repo.byID))
+	}
+	out := logs.String()
+	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "sales order quota exceeded on customer approval; creating anyway") {
+		t.Fatalf("logs:\n%s", out)
+	}
+}
+
+func TestCustomerApprovalOtherQuotaErrorLogsErrorCodeAndCreates(t *testing.T) {
+	h := newQuotaSOHarness(t, errRoom{err: organization.FeatureNotEnabledError()})
+	logs := captureLogs(t)
+	if err := h.svc.QuotationApproved(withCustomerApproval(soCtx), soScope, h.q1, ""); err != nil {
+		t.Fatalf("QuotationApproved() error = %v", err)
+	}
+	if len(h.repo.byID) != 1 {
+		t.Fatalf("sales orders = %d, want 1", len(h.repo.byID))
+	}
+	out := logs.String()
+	if !strings.Contains(out, "level=ERROR") || !strings.Contains(out, "sales order quota check failed on customer approval; creating anyway") ||
+		!strings.Contains(out, "error_code=FEATURE_NOT_ENABLED") || strings.Contains(out, "quota exceeded on customer approval") {
+		t.Fatalf("logs:\n%s", out)
+	}
+}
+
 // Outside a customer approval the defense-in-depth check still refuses.
 func TestSalesOrderHookStillEnforcedOutsideCustomerApproval(t *testing.T) {
 	room := &fakeRoom{fullKeys: map[string]bool{domain.FeatureCRMMaxSalesOrdersPerMonth: true}}

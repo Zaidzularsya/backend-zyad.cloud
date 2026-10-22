@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"zyad.cloud/internal/core/businesstime"
+	coreerrors "zyad.cloud/internal/core/errors"
 	notificationdomain "zyad.cloud/internal/core/notification/domain"
 	notificationpublisher "zyad.cloud/internal/core/notification/publisher"
 	coretenant "zyad.cloud/internal/core/tenant"
@@ -104,6 +105,25 @@ func withCustomerApproval(ctx context.Context) context.Context {
 	return context.WithValue(ctx, customerApprovalKey{}, true)
 }
 
+// logCustomerApprovalQuotaError keeps the two cases apart in logs: a full
+// quota is expected (WARN); any other refusal (FEATURE_NOT_ENABLED from an
+// explicit enabled=false row, meter/DB failure, misconfiguration) is not (ERROR,
+// with its code). Neither blocks the customer's approval.
+func logCustomerApprovalQuotaError(ctx context.Context, organizationID, quotationID string, err error) {
+	if organization.IsQuotaExceeded(err) {
+		slog.WarnContext(ctx, "sales order quota exceeded on customer approval; creating anyway",
+			"organization_id", organizationID, "quotation_id", quotationID)
+		return
+	}
+	code := "UNKNOWN"
+	var appErr *coreerrors.AppError
+	if errors.As(err, &appErr) {
+		code = appErr.Code
+	}
+	slog.ErrorContext(ctx, "sales order quota check failed on customer approval; creating anyway",
+		"organization_id", organizationID, "quotation_id", quotationID, "error_code", code, "error", err)
+}
+
 func isCustomerApproval(ctx context.Context) bool {
 	v, _ := ctx.Value(customerApprovalKey{}).(bool)
 	return v
@@ -125,8 +145,7 @@ func (s *salesOrderService) QuotationApproved(ctx context.Context, scope coreten
 			if !isCustomerApproval(ctx) {
 				return err
 			}
-			slog.WarnContext(ctx, "sales order created from customer approval despite sales order quota",
-				"organization_id", scope.OrganizationID(), "quotation_id", q.ID, "error", err)
+			logCustomerApprovalQuotaError(ctx, scope.OrganizationID(), q.ID, err)
 		}
 	}
 	seq, err := s.deps.Counters.NextNumber(ctx, scope, "sales_order")
