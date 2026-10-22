@@ -18,6 +18,7 @@ import (
 	notificationpublisher "zyad.cloud/internal/core/notification/publisher"
 	coretenant "zyad.cloud/internal/core/tenant"
 	crmmodule "zyad.cloud/internal/modules/crm"
+	"zyad.cloud/internal/modules/organization"
 	"zyad.cloud/internal/modules/crm/domain"
 	"zyad.cloud/internal/modules/crm/repository"
 	receivabledomain "zyad.cloud/internal/modules/receivable/domain"
@@ -30,6 +31,8 @@ const (
 
 	soStartDateMaxPastDays = 30
 	billingFailedMessage   = "Penagihan gagal dibuat. Coba lagi beberapa saat."
+	// billingQuotaMessage tells the user retrying right away is pointless: the monthly invoice quota is full.
+	billingQuotaMessage = "Kuota invoice bulan ini habis. Upgrade paket atau tunggu bulan berikutnya, lalu coba lagi."
 )
 
 type salesOrderService struct {
@@ -378,10 +381,14 @@ func (s *salesOrderService) bill(ctx context.Context, scope coretenant.Scope, so
 	res, err := s.billing.BillOrder(ctx, scope, billingRequest(so, userID, orderLines(so.Items)))
 	if err != nil {
 		slog.ErrorContext(ctx, "sales order billing failed", "sales_order_id", so.ID, "error", err)
-		failed, setErr := s.repo.SetBillingResult(ctx, scope, so.ID, domain.BillingFailed, billingFailedMessage, "", "", "")
+		message := billingFailedMessage
+		if organization.IsQuotaExceeded(err) {
+			message = billingQuotaMessage // status stays failed, so RetryBilling works once there is room
+		}
+		failed, setErr := s.repo.SetBillingResult(ctx, scope, so.ID, domain.BillingFailed, message, "", "", "")
 		if setErr != nil {
 			slog.ErrorContext(ctx, "sales order: record billing failure failed", "sales_order_id", so.ID, "error", setErr)
-			so.BillingStatus, so.BillingError = domain.BillingFailed, billingFailedMessage
+			so.BillingStatus, so.BillingError = domain.BillingFailed, message
 			return so
 		}
 		return failed

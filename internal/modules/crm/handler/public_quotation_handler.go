@@ -68,8 +68,7 @@ func (h *PublicQuotationHandler) RegisterRoutes(api *gin.RouterGroup) {
 // customer approves a quotation (the sales order it creates has no room).
 func isQuotaExceeded(err error) bool {
 	var appErr *coreerrors.AppError
-	return errors.As(err, &appErr) &&
-		(appErr.Code == organization.ErrCodeQuotaExceeded || appErr.Code == organization.ErrCodeFeatureNotEnabled)
+	return organization.IsQuotaExceeded(err) || (errors.As(err, &appErr) && appErr.Code == organization.ErrCodeFeatureNotEnabled)
 }
 
 func failPublicQuotation(c *gin.Context, err error) {

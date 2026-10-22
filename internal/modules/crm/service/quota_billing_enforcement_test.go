@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
+	"zyad.cloud/internal/modules/organization"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/crm/domain"
@@ -205,5 +207,28 @@ func TestPublicApproveRejectedBeforeResponseWhenSalesOrderQuotaFull(t *testing.T
 	if _, err := h.svc.RequestRevision(context.Background(), "tok1", PublicResponseInput{
 		ResponderName: "Budi", Categories: []domain.RevisionCategory{domain.RevisionPrice}}); err != nil {
 		t.Fatalf("RequestRevision() error = %v", err)
+	}
+}
+
+// A full invoice quota must not look like a transient failure: the order stays
+// retryable (billing_status=failed) but carries a message that says why.
+func TestConfirmBillingQuotaFullStoresQuotaMessageAndStaysRetryable(t *testing.T) {
+	h := newSOHarness(t)
+	so := h.draft(t)
+	h.fill(t, so.ID, "2026-10-05")
+	h.billing.err = fmt.Errorf("create invoice: %w", organization.QuotaExceededError())
+
+	got, err := h.svc.Confirm(soCtx, soScope, so.ID, "u1")
+	if err != nil || got.Status != domain.SalesOrderConfirmed || got.BillingStatus != domain.BillingFailed {
+		t.Fatalf("got=%+v err=%v", got, err)
+	}
+	if got.BillingError != billingQuotaMessage || got.BillingError == billingFailedMessage {
+		t.Fatalf("BillingError = %q, want quota message", got.BillingError)
+	}
+
+	h.billing.err = nil // room again (new month / upgrade)
+	got, err = h.svc.RetryBilling(soCtx, soScope, so.ID, "u1")
+	if err != nil || got.BillingStatus != domain.BillingDone {
+		t.Fatalf("retry got=%+v err=%v", got, err)
 	}
 }

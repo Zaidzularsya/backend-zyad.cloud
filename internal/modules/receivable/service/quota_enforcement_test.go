@@ -131,7 +131,7 @@ func TestInvoicePaymentNotBlockedWhenInvoiceQuotaFull(t *testing.T) {
 // a non-payable invoice is only logged for manual refund). The closest
 // post-creation operations that must keep working for an invoice created
 // earlier are: provider (DOKU) payments, issuing an existing draft, and void.
-func TestCreditNoteAndRefundNotBlockedWhenInvoiceQuotaFull(t *testing.T) {
+func TestPostCreationOpsNotBlockedWhenInvoiceQuotaFull(t *testing.T) {
 	room := &invoiceRoom{}
 	h := harnessWithQuota(t, room)
 	draft := h.draft(t, InvoiceInput{Lines: []LineInput{line("Paket", "100000")}})
