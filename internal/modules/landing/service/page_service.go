@@ -209,6 +209,12 @@ func (s *pageService) Duplicate(ctx context.Context, scope coretenant.Scope, par
 		return domain.LandingPage{}, err
 	}
 
+	// The copy is a new member page (IsTemplate=false), so it counts against
+	// landing.max_pages exactly like Create and InstantiateFromTemplate.
+	if err := s.requireCreateQuota(ctx, scope); err != nil {
+		return domain.LandingPage{}, err
+	}
+
 	// 2. Load sections first so quota can be checked before creating the duplicate page.
 	sections, err := s.sectionRepo.ListByPage(ctx, scope, originalPage.ID)
 	if err != nil {

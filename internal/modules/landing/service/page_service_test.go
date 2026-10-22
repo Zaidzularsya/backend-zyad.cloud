@@ -10,6 +10,7 @@ import (
 	coretenant "zyad.cloud/internal/core/tenant"
 	landingdomain "zyad.cloud/internal/modules/landing/domain"
 	"zyad.cloud/internal/modules/landing/repository"
+	"zyad.cloud/internal/modules/organization"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -677,5 +678,36 @@ func TestPageServiceUpdateSetHomepageNotFoundMaps404(t *testing.T) {
 	var appErr *coreerrors.AppError
 	if !errors.As(err, &appErr) || appErr.Status != http.StatusNotFound {
 		t.Fatalf("error = %v, want 404 AppError", err)
+	}
+}
+
+func TestDuplicateRejectedWhenPageQuotaFull(t *testing.T) {
+	pageRepo := &pageServicePageRepoStub{
+		listTotal:    3,
+		findByIDPage: landingdomain.LandingPage{ID: "page-source", Name: "Source", Slug: "source-page"},
+	}
+	svc := NewPageService(pageRepo, &pageServiceSectionRepoStub{}, WithLandingPageQuotaGuard(capQuotaGuard{limit: 3}))
+
+	_, err := svc.Duplicate(context.Background(), mustLandingScope(t), DuplicatePageParams{PageID: "page-source", UserID: "user-1"})
+	if !organization.IsQuotaExceeded(err) {
+		t.Fatalf("Duplicate() error = %v, want QUOTA_EXCEEDED", err)
+	}
+	if pageRepo.createCalled {
+		t.Fatal("Duplicate() must not create a page when the page quota is full")
+	}
+}
+
+func TestDuplicateAllowedWhenRoom(t *testing.T) {
+	pageRepo := &pageServicePageRepoStub{
+		listTotal:    2,
+		findByIDPage: landingdomain.LandingPage{ID: "page-source", Name: "Source", Slug: "source-page"},
+	}
+	svc := NewPageService(pageRepo, &pageServiceSectionRepoStub{}, WithLandingPageQuotaGuard(capQuotaGuard{limit: 3}))
+
+	if _, err := svc.Duplicate(context.Background(), mustLandingScope(t), DuplicatePageParams{PageID: "page-source", UserID: "user-1"}); err != nil {
+		t.Fatalf("Duplicate() error = %v", err)
+	}
+	if !pageRepo.createCalled {
+		t.Fatal("Duplicate() should create the page when there is room")
 	}
 }
