@@ -93,6 +93,11 @@ func (s *contactService) Delete(ctx context.Context, scope coretenant.Scope, id 
 	return crmmodule.MapNotFound(s.repo.Delete(ctx, scope, id, deletedBy), "CONTACT_NOT_FOUND", "contact not found or already deleted")
 }
 
+// Restore brings the contact back into the crm.max_contacts count, so it needs
+// room like Create (otherwise delete+create+restore loops past the cap).
 func (s *contactService) Restore(ctx context.Context, scope coretenant.Scope, id string, restoredBy string) error {
+	if err := s.requireCreateQuota(ctx, scope); err != nil {
+		return err
+	}
 	return crmmodule.MapNotFound(s.repo.Restore(ctx, scope, id, restoredBy), "CONTACT_NOT_FOUND", "contact not found or not deleted")
 }

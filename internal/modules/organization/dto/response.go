@@ -189,3 +189,19 @@ type ImpersonationSessionResponse struct {
 	Metadata             map[string]any `json:"metadata"`
 	IsActive             bool           `json:"is_active"`
 }
+
+// EntitlementSummaryItem is one row of the tenant's entitlement/quota summary.
+// State is "unlimited", "quota" or "hidden"; Limit/Used/Remaining are only
+// set when State is "quota" (Used/Remaining may be nil when no meter exists).
+type EntitlementSummaryItem struct {
+	FeatureKey    string `json:"feature_key"`
+	Module        string `json:"module"`
+	Name          string `json:"name"`
+	Unit          string `json:"unit"`
+	State         string `json:"state"`
+	Limit         *int64 `json:"limit"`
+	Used          *int64 `json:"used"`
+	Remaining     *int64 `json:"remaining"`
+	ResetStrategy string `json:"reset_strategy"`
+	AtLimit       bool   `json:"at_limit"`
+}

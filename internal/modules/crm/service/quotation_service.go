@@ -43,7 +43,32 @@ type quotationService struct {
 	channels     *QuotationChannelDeps
 	links        *QuotationLinkDeps
 	approvedHook QuotationApprovedHook
+	quota        QuotaRoomRequirer
+	orderRoom    SalesOrderRoomChecker
 	now          func() time.Time
+}
+
+// WithQuotationQuotaEnforcer enforces crm.max_quotations_per_month in Create
+// only. Revise, Update, Send, Approve and Reject never consult it: a revision
+// replaces its predecessor (see the quotation meter) and must stay possible
+// for tenants at their limit.
+func WithQuotationQuotaEnforcer(quota QuotaRoomRequirer) QuotationServiceOption {
+	return func(s *quotationService) { s.quota = quota }
+}
+
+// WithQuotationOrderRoom makes Approve and AcceptOnline verify that a sales
+// order can still be created BEFORE the quotation changes state, because the
+// approval creates the sales order automatically (crm.max_sales_orders_per_month).
+func WithQuotationOrderRoom(c SalesOrderRoomChecker) QuotationServiceOption {
+	return func(s *quotationService) { s.orderRoom = c }
+}
+
+// requireOrderRoom is a no-op without a checker (legacy callers and tests).
+func (s *quotationService) requireOrderRoom(ctx context.Context, scope coretenant.Scope, quotationID string) error {
+	if s.orderRoom == nil {
+		return nil
+	}
+	return s.orderRoom.RequireRoomForQuotation(ctx, scope, quotationID)
 }
 
 func WithQuotationCatalog(p CatalogProducts) QuotationServiceOption {
@@ -192,6 +217,12 @@ func (s *quotationService) Create(ctx context.Context, scope coretenant.Scope, i
 	if err != nil {
 		return domain.Quotation{}, err
 	}
+	// Checked before NextNumber so a rejected create does not burn a document number.
+	if s.quota != nil {
+		if err := s.quota.RequireRoom(ctx, scope.OrganizationID(), domain.FeatureCRMMaxQuotationsPerMonth); err != nil {
+			return domain.Quotation{}, err
+		}
+	}
 	number := strings.TrimSpace(input.QuotationNumber)
 	if number == "" {
 		seq, err := s.numberRepo.NextNumber(ctx, scope, "quotation")
@@ -307,6 +338,9 @@ func (s *quotationService) Send(ctx context.Context, scope coretenant.Scope, id 
 }
 
 func (s *quotationService) Approve(ctx context.Context, scope coretenant.Scope, id string, updatedBy string) (domain.Quotation, error) {
+	if err := s.requireOrderRoom(ctx, scope, id); err != nil {
+		return domain.Quotation{}, err
+	}
 	quotation, err := s.repo.Approve(ctx, scope, id, updatedBy)
 	if err != nil {
 		return domain.Quotation{}, crmmodule.MapNotFound(err, "QUOTATION_NOT_SENT", "quotation not found, already deleted, or not sent")
@@ -344,6 +378,9 @@ func (s *quotationService) AcceptOnline(ctx context.Context, scope coretenant.Sc
 	}
 	if q.Status != domain.QuotationStatusDraft {
 		return domain.Quotation{}, ErrNotSelfServeQuotation
+	}
+	if err := s.requireOrderRoom(ctx, scope, id); err != nil {
+		return domain.Quotation{}, err
 	}
 	accepted, err := s.repo.AcceptSelfServe(ctx, scope, id, actorUserID)
 	if err != nil {

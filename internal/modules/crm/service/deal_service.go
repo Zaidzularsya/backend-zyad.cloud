@@ -14,6 +14,7 @@ type dealService struct {
 	pipelineRepo repository.PipelineRepository
 	contactRepo  repository.ContactRepository
 	leadRepo     repository.LeadRepository
+	quota        QuotaRoomRequirer
 }
 
 type DealServiceOption func(*dealService)
@@ -25,6 +26,11 @@ func WithDealContactSync(repo repository.ContactRepository) DealServiceOption {
 	return func(s *dealService) {
 		s.contactRepo = repo
 	}
+}
+
+// WithDealQuotaEnforcer enforces crm.max_deals in Create only.
+func WithDealQuotaEnforcer(quota QuotaRoomRequirer) DealServiceOption {
+	return func(s *dealService) { s.quota = quota }
 }
 
 // WithDealSourceLeads membuat GetDetail menyertakan lead asal deal.
@@ -58,6 +64,11 @@ func (s *dealService) validateStageInPipeline(ctx context.Context, scope coreten
 func (s *dealService) Create(ctx context.Context, scope coretenant.Scope, params repository.CreateDealParams) (domain.Deal, error) {
 	if err := s.validateStageInPipeline(ctx, scope, params.PipelineID, params.StageID); err != nil {
 		return domain.Deal{}, err
+	}
+	if s.quota != nil {
+		if err := s.quota.RequireRoom(ctx, scope.OrganizationID(), domain.FeatureCRMMaxDeals); err != nil {
+			return domain.Deal{}, err
+		}
 	}
 	return s.repo.Create(ctx, scope, params)
 }
@@ -95,7 +106,14 @@ func (s *dealService) Delete(ctx context.Context, scope coretenant.Scope, id str
 	return crmmodule.MapNotFound(s.repo.Delete(ctx, scope, id, deletedBy), "DEAL_NOT_FOUND", "deal not found or already deleted")
 }
 
+// Restore needs room like Create. A restored won/lost deal is not counted by
+// the meter, but the check stays simple (the deleted row's status is not read).
 func (s *dealService) Restore(ctx context.Context, scope coretenant.Scope, id string, restoredBy string) error {
+	if s.quota != nil {
+		if err := s.quota.RequireRoom(ctx, scope.OrganizationID(), domain.FeatureCRMMaxDeals); err != nil {
+			return err
+		}
+	}
 	return crmmodule.MapNotFound(s.repo.Restore(ctx, scope, id, restoredBy), "DEAL_NOT_FOUND", "deal not found or not deleted")
 }
 

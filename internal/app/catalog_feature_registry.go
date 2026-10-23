@@ -25,7 +25,7 @@ func (r catalogFeatureRegistry) ListActive(ctx context.Context) ([]domain.Featur
 	}
 	out := make([]domain.FeatureDef, 0, len(rows))
 	for _, f := range rows {
-		out = append(out, toFeatureDef(f.Key, f.Module, f.Name, string(f.ValueType), f.Unit, f.IsActive))
+		out = append(out, toFeatureDef(f.Key, f.Module, f.Name, string(f.ValueType), f.Unit, string(f.ResetStrategy), f.IsActive))
 	}
 	return out, nil
 }
@@ -42,7 +42,7 @@ func (r catalogFeatureRegistry) FindByKeys(ctx context.Context, keys []string) (
 	out := make(map[string]domain.FeatureDef, len(keys))
 	for _, f := range rows {
 		if want[f.Key] {
-			out[f.Key] = toFeatureDef(f.Key, f.Module, f.Name, string(f.ValueType), f.Unit, f.IsActive)
+			out[f.Key] = toFeatureDef(f.Key, f.Module, f.Name, string(f.ValueType), f.Unit, string(f.ResetStrategy), f.IsActive)
 		}
 	}
 	return out, nil
@@ -65,6 +65,6 @@ func (r catalogFeatureRegistry) all(ctx context.Context, f productrepo.FeatureLi
 	}
 }
 
-func toFeatureDef(key, module, name, valueType, unit string, active bool) domain.FeatureDef {
-	return domain.FeatureDef{Key: key, Module: module, Name: name, ValueType: valueType, Unit: unit, IsActive: active}
+func toFeatureDef(key, module, name, valueType, unit, resetStrategy string, active bool) domain.FeatureDef {
+	return domain.FeatureDef{Key: key, Module: module, Name: name, ValueType: valueType, Unit: unit, ResetStrategy: resetStrategy, IsActive: active}
 }

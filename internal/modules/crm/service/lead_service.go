@@ -19,6 +19,7 @@ type leadService struct {
 	ownerCheck   LeadOwnerValidator
 	onConvert    LeadConvertedHook
 	pipelineRepo repository.PipelineRepository
+	quota        QuotaRoomRequirer
 }
 
 // annualRevenuePattern mengikuti batas kolom numeric(18,2): maks 16 digit
@@ -33,6 +34,24 @@ func WithLeadContactQuotaGuard(guard ContactQuotaGuard) LeadServiceOption {
 	return func(service *leadService) {
 		service.quotaGuard = guard
 	}
+}
+
+// WithLeadQuotaEnforcer enforces crm.max_leads in Create, and also
+// crm.max_companies / crm.max_deals when Convert creates a new company or deal
+// (those rows bypass CompanyService/DealService). Update, Get and List never
+// consult it.
+func WithLeadQuotaEnforcer(quota QuotaRoomRequirer) LeadServiceOption {
+	return func(service *leadService) {
+		service.quota = quota
+	}
+}
+
+// requireRoom is a no-op when no enforcer is wired (tests, legacy callers).
+func (s *leadService) requireRoom(ctx context.Context, scope coretenant.Scope, featureKey string) error {
+	if s.quota == nil {
+		return nil
+	}
+	return s.quota.RequireRoom(ctx, scope.OrganizationID(), featureKey)
 }
 
 // WithLeadOwnerValidator mewajibkan owner_user_id (create/update/assign)
@@ -81,6 +100,9 @@ func (s *leadService) Create(ctx context.Context, scope coretenant.Scope, params
 		return domain.Lead{}, err
 	}
 	if err := s.requireOwnerMember(ctx, scope, params.OwnerUserID); err != nil {
+		return domain.Lead{}, err
+	}
+	if err := s.requireRoom(ctx, scope, domain.FeatureCRMMaxLeads); err != nil {
 		return domain.Lead{}, err
 	}
 	return s.repo.Create(ctx, scope, params)
@@ -140,6 +162,9 @@ func (s *leadService) Update(ctx context.Context, scope coretenant.Scope, id str
 			return domain.Lead{}, err
 		}
 	}
+	if err := s.requireRoomToReactivate(ctx, scope, id, params.Status); err != nil {
+		return domain.Lead{}, err
+	}
 	lead, err := s.repo.Update(ctx, scope, id, params)
 	if err != nil {
 		return domain.Lead{}, crmmodule.MapNotFound(err, "LEAD_NOT_FOUND", "lead not found or already deleted")
@@ -147,11 +172,33 @@ func (s *leadService) Update(ctx context.Context, scope coretenant.Scope, id str
 	return s.withPlaybook(ctx, scope, lead)
 }
 
+// requireRoomToReactivate: a status change that takes an unqualified/converted
+// lead back to a working status re-enters the active lead count (see the
+// crm.max_leads meter), so it needs room. Other edits stay unguarded. The new
+// status is never terminal here (Update rejects those above).
+func (s *leadService) requireRoomToReactivate(ctx context.Context, scope coretenant.Scope, id string, status *domain.LeadStatus) error {
+	if s.quota == nil || status == nil {
+		return nil
+	}
+	current, err := s.repo.FindByID(ctx, scope, id)
+	if err != nil {
+		return crmmodule.MapNotFound(err, "LEAD_NOT_FOUND", "lead not found or already deleted")
+	}
+	if current.Status != domain.LeadStatusUnqualified && current.Status != domain.LeadStatusConverted {
+		return nil
+	}
+	return s.requireRoom(ctx, scope, domain.FeatureCRMMaxLeads)
+}
+
 func (s *leadService) Delete(ctx context.Context, scope coretenant.Scope, id string, deletedBy string) error {
 	return crmmodule.MapNotFound(s.repo.Delete(ctx, scope, id, deletedBy), "LEAD_NOT_FOUND", "lead not found or already deleted")
 }
 
+// Restore brings the lead back into the active count, so it needs room like Create.
 func (s *leadService) Restore(ctx context.Context, scope coretenant.Scope, id string, restoredBy string) error {
+	if err := s.requireRoom(ctx, scope, domain.FeatureCRMMaxLeads); err != nil {
+		return err
+	}
 	return crmmodule.MapNotFound(s.repo.Restore(ctx, scope, id, restoredBy), "LEAD_NOT_FOUND", "lead not found or not deleted")
 }
 

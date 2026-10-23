@@ -156,12 +156,12 @@ func TestUpdateProductPartialListingIs422WithoutService(t *testing.T) {
 }
 
 func TestListFeaturesPlatformOnly(t *testing.T) {
-	svc := &fakeProductService{features: []domain.FeatureDef{{Key: "crm", Name: "CRM", ValueType: "boolean"}}}
+	svc := &fakeProductService{features: []domain.FeatureDef{{Key: "crm", Name: "CRM", ValueType: "boolean", ResetStrategy: "never"}}}
 	if code := do(productRouter(t, coretenant.OrganizationTypeCustomer, svc), http.MethodGet, "/features", ""); code != http.StatusForbidden {
 		t.Fatalf("customer code = %d", code)
 	}
 	code, body := doBody(productRouter(t, coretenant.OrganizationTypePlatform, svc), http.MethodGet, "/features", "")
-	if code != http.StatusOK || !strings.Contains(body, `"value_type":"boolean"`) {
+	if code != http.StatusOK || !strings.Contains(body, `"value_type":"boolean"`) || !strings.Contains(body, `"reset_strategy":"never"`) {
 		t.Fatalf("platform code=%d body=%s", code, body)
 	}
 }

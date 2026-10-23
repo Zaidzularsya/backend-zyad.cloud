@@ -248,6 +248,9 @@ func (s *PublicQuotationService) respond(ctx context.Context, token string, acti
 	if d.state != PublicQuotationStateActive {
 		return PublicQuotationView{}, ErrQuotationNotRespondable
 	}
+	// A customer's approval is never refused because of the tenant's sales
+	// order quota (ruling I3): the order is still created and counted; the hook
+	// only logs a warning (see withCustomerApproval).
 	q, resp, err := s.responses.Respond(ctx, d.scope, repository.RecordResponseParams{
 		QuotationID: d.q.ID, LinkID: d.link.ID, Action: action, Categories: in.Categories, Note: in.Note,
 		ResponderName: in.ResponderName, IP: in.IP, UserAgent: truncateRunes(in.UserAgent, 500),
@@ -264,7 +267,7 @@ func (s *PublicQuotationService) respond(ctx context.Context, token string, acti
 		}
 	}
 	if action == domain.QuotationResponseApproved && s.hook != nil {
-		if err := s.hook.QuotationApproved(ctx, d.scope, q, ""); err != nil {
+		if err := s.hook.QuotationApproved(withCustomerApproval(ctx), d.scope, q, ""); err != nil {
 			slog.WarnContext(ctx, "quotation approved hook failed", "quotation_id", q.ID, "error", err)
 		}
 	}
