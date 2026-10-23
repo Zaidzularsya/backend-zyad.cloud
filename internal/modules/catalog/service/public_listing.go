@@ -83,7 +83,7 @@ func (s *PublicListingService) TenantListings(ctx context.Context, scope coreten
 		return empty, err
 	}
 	canCheckout := s.tenantCanCheckout(ctx, scope.OrganizationID())
-	return buildPublicCatalog(products, func(p domain.Product) bool { return canCheckout && checkoutEnabled(p) })
+	return buildPublicCatalog(products, func(p domain.Product) bool { return canCheckout && tenantCheckoutEnabled(p) })
 }
 
 func (s *PublicListingService) tenantCanCheckout(ctx context.Context, organizationID string) bool {
@@ -196,9 +196,15 @@ func priceWithTax(p domain.Product) (string, error) {
 	return net.Add(net, tax).FloatString(2), nil
 }
 
-// checkoutEnabled: hanya langganan prabayar berharga dan berfitur yang bisa dibeli mandiri.
+// checkoutEnabled (platform): hanya langganan prabayar berharga dan berfitur yang bisa dibeli mandiri.
 func checkoutEnabled(p domain.Product) bool {
+	return tenantCheckoutEnabled(p) && len(p.Features) > 0
+}
+
+// tenantCheckoutEnabled: produk tenant boleh tanpa fitur (spec §4.2: pelanggan tetap mendapat login,
+// info produk, tagihan, payment); syarat langganan prabayar berharga tetap berlaku.
+func tenantCheckoutEnabled(p domain.Product) bool {
 	price, ok := new(big.Rat).SetString(p.BasePrice)
 	return ok && price.Sign() > 0 && p.Pricing.ChargeType == pricing.Recurring &&
-		p.Pricing.PaymentTiming == pricing.Prepaid && len(p.Features) > 0
+		p.Pricing.PaymentTiming == pricing.Prepaid
 }

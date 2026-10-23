@@ -350,9 +350,8 @@ func TestTenantCheckout_ProductNeedingUpdateRejected(t *testing.T) {
 
 func TestTenantCheckout_ProductNotCheckoutCapableRejected(t *testing.T) {
 	for name, mutate := range map[string]func(*catalogdomain.Product){
-		"not public":  func(p *catalogdomain.Product) { p.IsPublic = false },
-		"inactive":    func(p *catalogdomain.Product) { p.IsActive = false },
-		"no features": func(p *catalogdomain.Product) { p.Features = nil },
+		"not public": func(p *catalogdomain.Product) { p.IsPublic = false },
+		"inactive":   func(p *catalogdomain.Product) { p.IsActive = false },
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := newTCWorld()
@@ -448,4 +447,30 @@ type failingChain struct{ err error }
 
 func (f failingChain) Checkout(context.Context, coretenant.Scope, SelfServeCheckoutRequest) (SelfServeCheckoutResult, error) {
 	return SelfServeCheckoutResult{}, f.err
+}
+
+// Spec §4.2: produk tenant tanpa entitlement (mis. paket WiFi) sah dibeli.
+func TestTenantCheckout_FeaturelessProductEndToEnd(t *testing.T) {
+	w := newTCWorld()
+	p := w.products[tcTenantA][tcProdA1]
+	p.Features = nil
+	w.products[tcTenantA][tcProdA1] = p
+	res, err := newTC(w).Checkout(context.Background(), tcScope(tcTenantA), TenantCheckoutInput{GoogleCredential: "cred-rina", ProductID: tcProdA1})
+	if err != nil {
+		t.Fatalf("checkout: %v", err)
+	}
+	if res.InvoiceURL == "" || w.workspaceCreate != 1 || len(w.checkouts) != 1 || len(w.links) != 1 {
+		t.Fatalf("res=%+v workspaces=%d checkouts=%d links=%d", res, w.workspaceCreate, len(w.checkouts), len(w.links))
+	}
+}
+
+func TestTenantCheckout_PostpaidProductRejected(t *testing.T) {
+	w := newTCWorld()
+	p := w.products[tcTenantA][tcProdA1]
+	p.Pricing.PaymentTiming = "postpaid"
+	w.products[tcTenantA][tcProdA1] = p
+	_, err := newTC(w).Checkout(context.Background(), tcScope(tcTenantA), TenantCheckoutInput{GoogleCredential: "cred-rina", ProductID: tcProdA1})
+	if code, status := tcAppErr(t, err); code != "TENANT_PRODUCT_UNAVAILABLE" || status != http.StatusUnprocessableEntity {
+		t.Fatalf("code=%s status=%d", code, status)
+	}
 }

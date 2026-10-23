@@ -58,7 +58,7 @@ func TestSelfServeResolver_Tenant_UsesOwnerAndDefaultPipeline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg != (SelfServeConfig{BotUserID: "owner-1", DealOwnerUserID: "owner-1", PipelineID: "oldest"}) {
+	if cfg != (SelfServeConfig{BotUserID: "owner-1", DealOwnerUserID: "owner-1", PipelineID: "oldest", TenantScope: true}) {
 		t.Fatalf("cfg = %+v", cfg)
 	}
 	// pipeline sistem "self_serve" menang atas default.

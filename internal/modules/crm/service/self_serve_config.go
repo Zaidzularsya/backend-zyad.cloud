@@ -84,7 +84,7 @@ func (r tenantSelfServeResolver) Resolve(ctx context.Context, scope coretenant.S
 	if err != nil {
 		return SelfServeConfig{}, err
 	}
-	return SelfServeConfig{BotUserID: owners[0].UserID, DealOwnerUserID: owners[0].UserID, PipelineID: pipelineID}, nil
+	return SelfServeConfig{BotUserID: owners[0].UserID, DealOwnerUserID: owners[0].UserID, PipelineID: pipelineID, TenantScope: true}, nil
 }
 
 func (r tenantSelfServeResolver) pipelineID(ctx context.Context, scope coretenant.Scope) (string, error) {

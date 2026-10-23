@@ -23,7 +23,11 @@ type ssWorld struct {
 	failOnce map[string]bool // "lead.create", "convert", "quote.create", "quote.accept", "so.approve", "so.confirm", "link"
 	locked   bool
 	subscr   bool
-	paid     bool
+	// activeProducts: produk yang sudah punya contract aktif di company (pemeriksaan scope tenant).
+	activeProducts map[string]bool
+	featureChecks  int
+	productChecks  int
+	paid           bool
 
 	products map[string]catalogdomain.Product
 	contacts []domain.Contact // contact yang ada di CRM (milik company tertentu)
@@ -71,7 +75,12 @@ func (w *ssWorld) Buyer(context.Context, string) (string, string, string, error)
 }
 func (w *ssWorld) WorkspaceName(context.Context, string) (string, error) { return "Studio Rina", nil }
 func (w *ssWorld) HasActiveFeatureContract(context.Context, coretenant.Scope, string) (bool, error) {
+	w.featureChecks++
 	return w.subscr, nil
+}
+func (w *ssWorld) HasActiveContractForProduct(_ context.Context, _ coretenant.Scope, _, productID string) (bool, error) {
+	w.productChecks++
+	return w.activeProducts[productID], nil
 }
 
 // ---- catalog / pipeline
@@ -597,5 +606,91 @@ func TestSelfServe_Platform_Unchanged(t *testing.T) {
 	}
 	if len(w.calls) != 0 {
 		t.Fatalf("calls = %v, want none", w.calls)
+	}
+}
+
+// newTenantSS: rantai yang sama, tetapi resolver menandai scope tenant (produk tanpa fitur sah).
+func newTenantSS(t *testing.T) (SelfServeService, *ssWorld) {
+	t.Helper()
+	w := &ssWorld{failOnce: map[string]bool{}, activeProducts: map[string]bool{}, products: map[string]catalogdomain.Product{
+		"p-free": newProduct("p-free", "WIFI-10"),
+	}}
+	svc := NewSelfServeService(SelfServeDeps{
+		Leads: w, Companies: w, Contacts: w, Deals: w, Pipelines: w, Quotations: quotationsAdapter{w}, Orders: w, Invoices: w,
+		Products: w, Buyers: w, Subscriptions: w, Locker: w,
+	}, StaticSelfServeConfig(SelfServeConfig{BotUserID: "bot", DealOwnerUserID: "owner", PipelineID: "pipe", TenantScope: true}),
+		func() time.Time { return time.Date(2026, 10, 7, 3, 0, 0, 0, time.UTC) })
+	return svc, w
+}
+
+func TestCheckoutTenantScopeAcceptsFeaturelessProduct(t *testing.T) {
+	svc, w := newTenantSS(t)
+	p := w.products["p-free"]
+	p.Features = nil
+	w.products["p-free"] = p
+	res, err := svc.Checkout(context.Background(), ssScope(), ssReq)
+	if err != nil {
+		t.Fatalf("featureless tenant product must be purchasable: %v", err)
+	}
+	if res.InvoiceURL == "" || w.count("so.confirm") != 1 {
+		t.Fatalf("res=%+v calls=%v", res, w.calls)
+	}
+}
+
+func TestCheckoutTenantScopeStillRequiresRecurringPrepaidPriced(t *testing.T) {
+	for name, m := range map[string]func(*catalogdomain.Product){
+		"postpaid": func(p *catalogdomain.Product) { p.Pricing.PaymentTiming = pricing.Postpaid },
+		"one_time": func(p *catalogdomain.Product) {
+			p.Pricing = pricing.Attributes{ChargeType: pricing.OneTime, PaymentTiming: pricing.Prepaid}
+		},
+		"harga 0": func(p *catalogdomain.Product) { p.BasePrice = "0" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc, w := newTenantSS(t)
+			p := w.products["p-free"]
+			p.Features = nil
+			m(&p)
+			w.products["p-free"] = p
+			if _, err := svc.Checkout(context.Background(), ssScope(), ssReq); !errors.Is(err, ErrSelfServeProductUnavailable) {
+				t.Fatalf("err = %v", err)
+			}
+		})
+	}
+}
+
+func TestCheckoutTenantScopeRejectsRepurchaseOfActiveProduct(t *testing.T) {
+	svc, w := newTenantSS(t)
+	p := w.products["p-free"]
+	p.Features = nil
+	w.products["p-free"] = p
+	w.company = &domain.Company{ID: "co1", Name: "Studio Rina"}
+	w.activeProducts["p-free"] = true
+	if _, err := svc.Checkout(context.Background(), ssScope(), ssReq); !errors.Is(err, ErrSelfServeAlreadySubscribed) {
+		t.Fatalf("err = %v", err)
+	}
+	if w.count("lead.create") != 0 || w.featureChecks != 0 || w.productChecks != 1 {
+		t.Fatalf("tenant scope must use the per-product check only: %v", w.calls)
+	}
+}
+
+func TestCheckoutTenantScopeAllowsOtherProductWhileOneIsActive(t *testing.T) {
+	svc, w := newTenantSS(t)
+	w.company = &domain.Company{ID: "co1", Name: "Studio Rina"}
+	w.activeProducts["p-other"] = true
+	if _, err := svc.Checkout(context.Background(), ssScope(), ssReq); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// Regresi: scope platform tetap memakai pemeriksaan kontrak berfitur, bukan per produk.
+func TestCheckoutPlatformScopeUsesFeatureSubscriptionCheck(t *testing.T) {
+	svc, w := newSS(t)
+	w.company = &domain.Company{ID: "co1", Name: "Studio Rina"}
+	w.subscr = true
+	if _, err := svc.Checkout(context.Background(), ssScope(), ssReq); !errors.Is(err, ErrSelfServeAlreadySubscribed) {
+		t.Fatalf("err = %v", err)
+	}
+	if w.productChecks != 0 || w.featureChecks != 1 {
+		t.Fatalf("platform scope must not use the per-product check: %v", w.calls)
 	}
 }

@@ -39,6 +39,9 @@ type BuyerDirectory interface {
 type SubscriptionLookup interface {
 	// HasActiveFeatureContract: true bila company punya SO dengan contract aktif yang memuat produk berfitur.
 	HasActiveFeatureContract(ctx context.Context, scope coretenant.Scope, companyID string) (bool, error)
+	// HasActiveContractForProduct: true bila company punya SO dengan contract aktif yang memuat produk ini
+	// (dipakai scope tenant, di mana produk tanpa fitur juga sah).
+	HasActiveContractForProduct(ctx context.Context, scope coretenant.Scope, companyID, productID string) (bool, error)
 }
 
 // Locker: kunci eksklusif per kunci string (advisory lock Postgres).
@@ -46,7 +49,12 @@ type Locker interface {
 	TryLock(ctx context.Context, key string) (unlock func(), ok bool, err error)
 }
 
-type SelfServeConfig struct{ BotUserID, DealOwnerUserID, PipelineID string }
+type SelfServeConfig struct {
+	BotUserID, DealOwnerUserID, PipelineID string
+	// TenantScope: rantai berjalan di CRM tenant (bukan platform). Produk tanpa fitur sah, dan pemeriksaan
+	// "sudah berlangganan" memakai produk yang sama, bukan kontrak berfitur. Nilai nol = aturan platform.
+	TenantScope bool
+}
 
 // SelfServeConfigResolver menentukan bot, pemilik deal, dan pipeline untuk satu scope CRM.
 // Gagal dengan ErrSelfServeNotConfigured (atau galat lain) bila scope itu belum siap menerima checkout.

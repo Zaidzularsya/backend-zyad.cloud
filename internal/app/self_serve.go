@@ -43,8 +43,8 @@ func (b selfServeBuyers) WorkspaceName(ctx context.Context, organizationID strin
 	return org.Name, nil
 }
 
-// selfServeSubscriptions: company dianggap sudah berlangganan bila punya SO confirmed/completed dengan
-// contract aktif yang memuat produk berfitur.
+// selfServeSubscriptions: pemeriksaan "sudah berlangganan" dari SO confirmed/completed dengan contract
+// aktif — berfitur (platform) atau produk yang sama (tenant).
 type selfServeSubscriptions struct {
 	orders    crmrepo.SalesOrderRepository
 	contracts crmReceivableReader
@@ -52,6 +52,36 @@ type selfServeSubscriptions struct {
 }
 
 func (s selfServeSubscriptions) HasActiveFeatureContract(ctx context.Context, scope coretenant.Scope, companyID string) (bool, error) {
+	return s.anyActiveContractProduct(ctx, scope, companyID, func(ids []string) (bool, error) {
+		products, err := s.products.FindByIDs(ctx, scope, ids)
+		if err != nil {
+			return false, err
+		}
+		for _, p := range products {
+			if len(p.Features) > 0 {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+}
+
+// HasActiveContractForProduct: company punya SO confirmed/completed dengan contract aktif yang memuat
+// produk ini (scope tenant: produk tanpa fitur juga dihitung).
+func (s selfServeSubscriptions) HasActiveContractForProduct(ctx context.Context, scope coretenant.Scope, companyID, productID string) (bool, error) {
+	return s.anyActiveContractProduct(ctx, scope, companyID, func(ids []string) (bool, error) {
+		for _, id := range ids {
+			if id == productID {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+}
+
+// anyActiveContractProduct memanggil match dengan id produk tiap SO confirmed/completed yang contract-nya
+// aktif, berhenti pada kecocokan pertama. Semua query memakai scope (organization_id) pemanggil.
+func (s selfServeSubscriptions) anyActiveContractProduct(ctx context.Context, scope coretenant.Scope, companyID string, match func(ids []string) (bool, error)) (bool, error) {
 	list, _, err := s.orders.List(ctx, scope, crmrepo.SalesOrderListFilter{CompanyID: companyID, Limit: 200})
 	if err != nil {
 		return false, err
@@ -80,14 +110,9 @@ func (s selfServeSubscriptions) HasActiveFeatureContract(ctx context.Context, sc
 		if len(ids) == 0 {
 			continue
 		}
-		products, err := s.products.FindByIDs(ctx, scope, ids)
-		if err != nil {
-			return false, err
-		}
-		for _, p := range products {
-			if len(p.Features) > 0 {
-				return true, nil
-			}
+		ok, err := match(ids)
+		if err != nil || ok {
+			return ok, err
 		}
 	}
 	return false, nil

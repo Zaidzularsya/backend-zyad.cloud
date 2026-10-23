@@ -3824,7 +3824,8 @@ paths:
         accepted from the client). Unknown host returns 404; a host that resolves to the platform
         organization also returns 404 (use `/public/catalog/listings`). Products that no longer fit the
         tenant catalog rules (`needs_update`) are omitted. `checkout_enabled` is true only when the product
-        is checkout-capable (recurring, prepaid, priced, with features) AND the tenant has the
+        is checkout-capable (recurring, prepaid, priced; features are NOT required for tenant products,
+        unlike platform listings) AND the tenant has the
         `receivable.enabled` and `receivable.online_payment` entitlements. No authentication;
         `Cache-Control: public, max-age=60` with `Vary: Host, X-Forwarded-Host` (response depends on the host).
       operationId: listPublicTenantCatalog
@@ -3893,7 +3894,8 @@ paths:
         resolved from the request host (same host resolution as `/public/tenant-catalog`); any
         `organization_id` in the body or query is ignored. Order: the tenant must have
         `receivable.enabled` and `receivable.online_payment`; the product must belong to the tenant, be
-        public, active and checkout-capable (recurring, prepaid, priced, with features) and must not need
+        public, active and checkout-capable (recurring, prepaid, priced; a tenant product without features is
+        valid) and must not need
         updating against the current catalog rules; then the Google ID token is verified (unverified email
         is rejected) and the user is found or created with the same rules as `/auth/google`. The buyer gets
         one workspace per tenant (reused for later purchases from the same tenant; never a personal or
@@ -3962,7 +3964,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: SELF_SERVE_IN_PROGRESS (another checkout for this buyer is running), SELF_SERVE_ALREADY_SUBSCRIBED, AUTH_GOOGLE_EMAIL_CONFLICT, or a workspace link conflict
+          description: SELF_SERVE_IN_PROGRESS (another checkout for this buyer is running), SELF_SERVE_ALREADY_SUBSCRIBED (the buyer already has an active contract for this same product), AUTH_GOOGLE_EMAIL_CONFLICT, or a workspace link conflict
           content:
             application/json:
               schema:

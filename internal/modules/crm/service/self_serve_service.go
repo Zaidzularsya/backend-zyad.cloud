@@ -149,7 +149,7 @@ func (s *selfServeService) resumeOrReplaceDeal(ctx context.Context, c *chain, co
 		return &deal, &quote, nil // pilihan sama: lanjutkan
 	}
 	// Produk baru harus valid SEBELUM ada yang dibatalkan.
-	if err := validateSelfServeProduct(c.product); err != nil {
+	if err := validateSelfServeProduct(c.product, !c.cfg.TenantScope); err != nil {
 		return nil, nil, err
 	}
 	if quote.ID == "" {
@@ -200,11 +200,11 @@ func (s *selfServeService) alignDeal(ctx context.Context, c *chain, deal domain.
 
 // startChain membuat lead → company/contact → deal untuk pembeli yang belum punya deal open.
 func (s *selfServeService) startChain(ctx context.Context, c *chain, company domain.Company) (*domain.Deal, error) {
-	if err := validateSelfServeProduct(c.product); err != nil {
+	if err := validateSelfServeProduct(c.product, !c.cfg.TenantScope); err != nil {
 		return nil, err
 	}
 	if company.ID != "" {
-		subscribed, err := s.deps.Subscriptions.HasActiveFeatureContract(ctx, c.platform, company.ID)
+		subscribed, err := s.alreadySubscribed(ctx, c, company.ID)
 		if err != nil {
 			return nil, stepErr(SelfServeStepCompany, err)
 		}
@@ -407,10 +407,22 @@ func dealTitle(workspace string, p catalogdomain.Product) string {
 	return fmt.Sprintf("%s · %s (%s)", workspace, p.Name, p.Pricing.Frequency.Label())
 }
 
-// validateSelfServeProduct menerapkan R1: publik, aktif, langganan prabayar, berharga, dan berfitur.
-func validateSelfServeProduct(p *catalogdomain.Product) error {
+// alreadySubscribed: platform → company punya contract aktif berfitur (satu paket Zyad per workspace);
+// tenant → company sudah punya contract aktif untuk produk yang sama (produk tanpa fitur tidak pernah
+// terdeteksi oleh pemeriksaan berfitur, dan pelanggan tenant boleh punya beberapa produk berbeda).
+func (s *selfServeService) alreadySubscribed(ctx context.Context, c *chain, companyID string) (bool, error) {
+	if c.cfg.TenantScope {
+		return s.deps.Subscriptions.HasActiveContractForProduct(ctx, c.platform, companyID, c.req.ProductID)
+	}
+	return s.deps.Subscriptions.HasActiveFeatureContract(ctx, c.platform, companyID)
+}
+
+// validateSelfServeProduct menerapkan R1: publik, aktif, langganan prabayar, berharga, dan (bila
+// requireFeatures, yaitu scope platform) berfitur. Produk tenant boleh tanpa fitur (spec §4.2).
+func validateSelfServeProduct(p *catalogdomain.Product, requireFeatures bool) error {
 	if p == nil || p.DeletedAt != nil || !p.IsActive || !p.IsPublic ||
-		p.Pricing.ChargeType != pricing.Recurring || p.Pricing.PaymentTiming != pricing.Prepaid || len(p.Features) == 0 {
+		p.Pricing.ChargeType != pricing.Recurring || p.Pricing.PaymentTiming != pricing.Prepaid ||
+		(requireFeatures && len(p.Features) == 0) {
 		return ErrSelfServeProductUnavailable
 	}
 	price, ok := new(big.Rat).SetString(p.BasePrice)

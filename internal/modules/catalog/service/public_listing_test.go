@@ -260,3 +260,46 @@ func TestPlatformListingsUnaffectedByTenantGate(t *testing.T) {
 		t.Fatalf("got = %+v", got)
 	}
 }
+
+// Spec §4.2: produk tenant tanpa fitur bisa dibeli; aturan harga/recurring/prabayar tetap berlaku.
+func TestTenantListingsFeaturelessProductCheckout(t *testing.T) {
+	plain := tenantCard("plain")
+	postpaid := tenantCard("post")
+	postpaid.Pricing.PaymentTiming = pricing.Postpaid
+	oneTime := tenantCard("once")
+	oneTime.Pricing = pricing.Attributes{ChargeType: pricing.OneTime, PaymentTiming: pricing.Prepaid}
+	free := tenantCard("free")
+	free.BasePrice = "0.00"
+	repo := orgPublicRepo{byOrg: map[string][]domain.Product{orgA: {plain, postpaid, oneTime, free}}}
+	svc := NewPublicListingService(repo, newFakeRegistry(), fakeScopes{}).WithEntitlements(bothReceivable)
+	got, err := svc.TenantListings(context.Background(), tenantScope(t, orgA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{"plain": true, "post": false, "once": false, "free": false}
+	seen := 0
+	for _, l := range got.Categories[0].Listings {
+		for _, v := range l.Variants {
+			seen++
+			if v.CheckoutEnabled != want[v.ProductID] {
+				t.Errorf("%s: checkout_enabled = %v, want %v", v.ProductID, v.CheckoutEnabled, want[v.ProductID])
+			}
+		}
+	}
+	if seen != len(want) {
+		t.Fatalf("variants seen = %d", seen)
+	}
+}
+
+// Regresi: listing platform tetap mensyaratkan fitur.
+func TestPlatformListingsStillRequireFeatures(t *testing.T) {
+	repo := fakePublicRepo{products: []domain.Product{pub("p", "Zyad Cloud", 0, "pro", 0, pricing.Monthly, "100000.00")}}
+	svc := NewPublicListingService(repo, newFakeRegistry(), fakeScopes{}).WithEntitlements(bothReceivable)
+	got, err := svc.Listings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Categories[0].Listings[0].Variants[0].CheckoutEnabled {
+		t.Fatal("platform product without features must not be checkout_enabled")
+	}
+}

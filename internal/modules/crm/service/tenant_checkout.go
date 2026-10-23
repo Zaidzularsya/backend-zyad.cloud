@@ -165,7 +165,7 @@ func (s *tenantCheckoutService) requireTenantFeatures(ctx context.Context, tenan
 }
 
 // requireProduct: produk milik tenant (query berfilter organization_id tenant), publik, aktif,
-// bisa dibeli mandiri, dan tidak perlu diperbarui menurut katalog saat ini.
+// langganan prabayar berharga (fitur tidak wajib), dan tidak perlu diperbarui menurut katalog saat ini.
 func (s *tenantCheckoutService) requireProduct(ctx context.Context, tenant coretenant.Scope, productID string) error {
 	var id pgtype.UUID
 	if id.Scan(productID) != nil || !id.Valid {
@@ -179,7 +179,7 @@ func (s *tenantCheckoutService) requireProduct(ctx context.Context, tenant coret
 	if !found || p.DeletedAt != nil {
 		return errTenantProductNotFound()
 	}
-	if err := validateSelfServeProduct(&p); err != nil {
+	if err := validateSelfServeProduct(&p, false); err != nil { // produk tenant boleh tanpa fitur
 		return errTenantProductUnavailable()
 	}
 	stale, err := s.deps.ProductGate.ProductsNeedingUpdate(ctx, []catalogdomain.Product{p})
