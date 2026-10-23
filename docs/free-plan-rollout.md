@@ -79,6 +79,17 @@ Jalankan dari `backend/` dengan `.env` environment target, mis. `go run ./cmd/ac
   dan halaman arsip sudah dihitung oleh `landing.max_pages`; halaman yang dihapus (soft delete) tidak punya
   jalur restore.
 
+## Catatan receivable.online_payment
+
+`receivable.online_payment` ditambahkan ke paket Free (keputusan pemilik produk, 23 Okt 2026; spec
+`2026-10-23-tenant-products-entitlement-design.md` §8 keputusan 19): tenant Free dapat menagih pelanggannya secara
+online lewat checkout mandiri, dan semua pembayaran tetap masuk ke DOKU Zyad. Key sudah ada di registry, tanpa migration.
+
+- Perubahan ini baru berlaku di produksi setelah `accessmigrate free-plan` dry-run ditinjau, lalu `--apply`
+  dijalankan **atas permintaan eksplisit pemilik**. Agen/CI tidak boleh menjalankannya sendiri.
+- Tenant Free yang sudah ada **tidak berubah** sampai `--apply`; dry-run akan menampilkan baris
+  `receivable.online_payment (none) -> true`.
+
 ## Catatan WhatsApp
 
 `whatsapp.enabled` dipertahankan di paket Free (keputusan pemilik produk, 23 Okt 2026): produk FREE produksi

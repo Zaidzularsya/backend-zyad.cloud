@@ -53,6 +53,9 @@ func FreePlanFeatures() []catalogdomain.ProductFeature {
 
 		boolean("receivable.enabled", true),
 		integer("receivable.max_invoices_per_month", 10),
+		// Keputusan pemilik produk 23 Okt 2026: tenant Free boleh menagih pelanggannya online
+		// (checkout mandiri); semua pembayaran tetap masuk ke DOKU Zyad.
+		boolean("receivable.online_payment", true),
 
 		// WhatsApp tetap ada di Free: produk FREE produksi sudah memakainya dan modulnya ditegakkan
 		// kode (gerbang rute /app/whatsapp dan pengiriman dokumen). Sengaja tanpa whatsapp.max_sessions

@@ -31,6 +31,9 @@ func TestFreePlanFeaturesMatchSpecTable(t *testing.T) {
 		"crm.max_leads": "50", "crm.max_contacts": "100", "crm.max_companies": "50", "crm.max_deals": "25", "crm.max_pipelines": "1",
 		"crm.max_quotations_per_month": "10", "crm.max_sales_orders_per_month": "10",
 		"receivable.enabled": "true", "receivable.max_invoices_per_month": "10",
+		// Keputusan pemilik produk 23 Okt 2026 (spec §8 keputusan 19): tenant Free boleh menagih
+		// pelanggannya secara online; pembayaran tetap masuk ke DOKU Zyad.
+		"receivable.online_payment": "true",
 		// WhatsApp dipertahankan di Free (keputusan pemilik produk 23 Okt 2026: produk FREE produksi
 		// sudah memakainya dan modulnya ditegakkan kode). Tanpa kuota sesi di Free.
 		"whatsapp.enabled": "true",
@@ -52,6 +55,9 @@ func TestFreePlanFeaturesMatchSpecTable(t *testing.T) {
 		}
 	}
 	for key := range got {
+		if key == "receivable.online_payment" {
+			continue // fitur boolean, bukan key kuota payment
+		}
 		for _, forbidden := range []string{"payment", "credit_note", "refund", "catalog_product"} {
 			if strings.Contains(key, forbidden) {
 				t.Errorf("Free plan must not carry quota key %s", key)
