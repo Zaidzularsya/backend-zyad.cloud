@@ -616,6 +616,21 @@ func New(ctx context.Context) (*App, error) {
 	crmSelfServeHandler := crmhandler.NewSelfServeHandler(selfServeSvc, selfServePlatformScopes, permService).
 		WithSubscription(withSubscriptionView(crmTenantAccess, cfg, db, receivableModule.Invoices, receivableModule.Contracts, catalogProductService), cfg.SelfServe.GraceDays)
 
+	// Checkout publik pelanggan tenant (Bagian 2B): tenant dari host, pembeli dari Google, workspace
+	// per tenant-pembeli, rantai self-serve di scope tenant.
+	crmTenantCheckoutHandler := crmhandler.NewTenantCheckoutHandler(crmservice.NewTenantCheckoutService(crmservice.TenantCheckoutDeps{
+		Buyers:       googleBuyerAdapter{auth: authService},
+		Workspaces:   tenantBuyerWorkspaces{db: db, onboarding: organizationOnboardingService},
+		Products:     catalogProductService,
+		ProductGate:  catalogProductService,
+		Entitlements: crmEntitlementChecker,
+		Platforms:    selfServePlatformScopes,
+		Chain:        selfServeSvc,
+		Companies:    crmCompanyRepo,
+		Links:        crmCompanySvc,
+		Locker:       crmrepo.NewAdvisoryLocker(db),
+	}), redisClient)
+
 	router, err := newRouter(Dependencies{
 		Config:                           cfg,
 		Logger:                           log,
@@ -680,6 +695,7 @@ func New(ctx context.Context) (*App, error) {
 		ReceivableOverviewHandler:        receivableModule.OverviewHandler,
 		CRMPublicQuotationHandler:        crmPublicQuotationHandler,
 		CRMSelfServeHandler:              crmSelfServeHandler,
+		CRMTenantCheckoutHandler:         crmTenantCheckoutHandler,
 		ReceivableAccountHandler:         receivableModule.AccountHandler,
 		ReceivableInvoiceHandler:         receivableModule.InvoiceHandler,
 		ReceivablePaymentHandler:         receivableModule.PaymentHandler,

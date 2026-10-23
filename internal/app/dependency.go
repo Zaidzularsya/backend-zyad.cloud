@@ -83,6 +83,7 @@ type Dependencies struct {
 	CRMQuotationHandler              *crmhandler.QuotationHandler
 	CRMPublicQuotationHandler        *crmhandler.PublicQuotationHandler
 	CRMSelfServeHandler              *crmhandler.SelfServeHandler
+	CRMTenantCheckoutHandler         *crmhandler.TenantCheckoutHandler
 	CRMSalesOrderHandler             *crmhandler.SalesOrderHandler
 	CRMDealOrdersHandler             *crmhandler.DealOrdersHandler
 	ReceivableContractHandler        *receivablehandler.ContractHandler

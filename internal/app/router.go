@@ -405,6 +405,10 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		// Listing produk tenant: tenant dari host (sama dengan /public/landing/*).
 		deps.CatalogPublicListingHandler.RegisterTenantRoutes(publicModules)
 	}
+	if deps.CRMTenantCheckoutHandler != nil {
+		// Checkout publik tenant: tenant dari host (organization_id klien diabaikan), rate limit per IP & tenant.
+		deps.CRMTenantCheckoutHandler.RegisterRoutes(publicModules)
+	}
 	registerModuleRoutes(publicModules)
 	return router, nil
 }
