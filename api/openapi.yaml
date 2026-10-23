@@ -3815,6 +3815,76 @@ paths:
                                         tax_percent: {type: string}
                                         price_with_tax: {type: string}
                                         checkout_enabled: {type: boolean}
+  /api/v1/public/tenant-catalog:
+    get:
+      summary: List public products of the tenant that owns the request host
+      description: >-
+        Same card structure as `/public/catalog/listings`, but for the tenant organization resolved
+        from the request host (same host resolution as `/public/landing/*`; an organization id is never
+        accepted from the client). Unknown host returns 404; a host that resolves to the platform
+        organization also returns 404 (use `/public/catalog/listings`). Products that no longer fit the
+        tenant catalog rules (`needs_update`) are omitted. `checkout_enabled` is true only when the product
+        is checkout-capable (recurring, prepaid, priced, with features) AND the tenant has the
+        `receivable.enabled` and `receivable.online_payment` entitlements. No authentication;
+        `Cache-Control: public, max-age=60`.
+      operationId: listPublicTenantCatalog
+      tags:
+        - Public Product Catalog
+      responses:
+        "200":
+          description: Public listings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      categories:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id: {type: string, format: uuid}
+                            name: {type: string}
+                            position: {type: integer}
+                            listings:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  code: {type: string}
+                                  name: {type: string}
+                                  description: {type: string}
+                                  order: {type: integer}
+                                  benefits:
+                                    type: array
+                                    items:
+                                      type: object
+                                      properties:
+                                        label: {type: string}
+                                  variants:
+                                    type: array
+                                    items:
+                                      type: object
+                                      properties:
+                                        product_id: {type: string, format: uuid}
+                                        sku: {type: string}
+                                        charge_type: {type: string}
+                                        billing_frequency: {type: string}
+                                        payment_timing: {type: string}
+                                        currency: {type: string}
+                                        base_price: {type: string}
+                                        tax_percent: {type: string}
+                                        price_with_tax: {type: string}
+                                        checkout_enabled: {type: boolean}
+        "404":
+          description: Unknown host, or host belongs to the platform organization
   /api/v1/platform/product/features:
     get:
       summary: List billing features
