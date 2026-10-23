@@ -8,17 +8,19 @@ type PaginationMeta struct {
 }
 
 type FeatureResponse struct {
-	ID            string `json:"id"`
-	FeatureKey    string `json:"feature_key"`
-	Module        string `json:"module"`
-	Name          string `json:"name"`
-	Description   string `json:"description,omitempty"`
-	ValueType     string `json:"value_type"`
-	Unit          string `json:"unit,omitempty"`
-	ResetStrategy string `json:"reset_strategy"`
-	IsActive      bool   `json:"is_active"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
+	ID              string `json:"id"`
+	FeatureKey      string `json:"feature_key"`
+	Module          string `json:"module"`
+	Name            string `json:"name"`
+	Description     string `json:"description,omitempty"`
+	ValueType       string `json:"value_type"`
+	Unit            string `json:"unit,omitempty"`
+	ResetStrategy   string `json:"reset_strategy"`
+	IsActive        bool   `json:"is_active"`
+	TenantOfferable bool   `json:"tenant_offerable"`
+	TenantMax       *int   `json:"tenant_max"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
 }
 
 type FeatureListResponse struct {

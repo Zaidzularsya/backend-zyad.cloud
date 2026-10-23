@@ -14,6 +14,9 @@ type FeatureDef struct {
 	// ResetStrategy: never|monthly|yearly|custom (product_features.reset_strategy).
 	ResetStrategy string
 	IsActive      bool
+	// TenantOfferable/TenantMax: penanda katalog untuk produk yang dijual tenant.
+	TenantOfferable bool
+	TenantMax       *int
 }
 
 // FeatureLabel menghasilkan teks tampilan sebuah fitur. visible=false berarti

@@ -68,7 +68,7 @@ func registryFromMigrations(t *testing.T) map[string]string {
 	for _, file := range []string{
 		"000055_seed_billing_features_plans", "000061_seed_product_catalog", "000074_seed_crm_lead_form_feature",
 		"000128_seed_whatsapp_max_sessions_feature", "000144_create_receivable", "000158_entitlement_quota_features",
-		"000159_domain_max_domains_feature", "000160_storage_max_bytes_feature",
+		"000159_domain_max_domains_feature", "000160_storage_max_bytes_feature", "000161_tenant_offerable_features",
 	} {
 		data, err := os.ReadFile(filepath.Join("..", "..", "migrations", file+".up.sql"))
 		if err != nil {
@@ -113,5 +113,11 @@ func TestFreePlanFeatureValuesMatchRegistryValueTypes(t *testing.T) {
 		default:
 			t.Errorf("%s: unexpected registry type %q", f.FeatureKey, registry[f.FeatureKey])
 		}
+	}
+}
+
+func TestRegistryMigrationsIncludeLandingPageActivation(t *testing.T) {
+	if got := registryFromMigrations(t)["landing.page_activation"]; got != "boolean" {
+		t.Fatalf("landing.page_activation: want boolean in registry migrations, got %q", got)
 	}
 }

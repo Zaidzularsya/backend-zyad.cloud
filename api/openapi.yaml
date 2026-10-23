@@ -10835,6 +10835,13 @@ components:
           $ref: "#/components/schemas/ProductFeatureResetStrategy"
         is_active:
           type: boolean
+        tenant_offerable:
+          type: boolean
+          description: Whether tenants may offer this feature in their own products.
+        tenant_max:
+          type: integer
+          nullable: true
+          description: Maximum value a tenant may sell. Required for integer features when tenant_offerable is true; always null for other types.
         created_at:
           type: string
           format: date-time
@@ -11238,6 +11245,14 @@ components:
           $ref: "#/components/schemas/ProductFeatureResetStrategy"
         is_active:
           type: boolean
+        tenant_offerable:
+          type: boolean
+          default: false
+        tenant_max:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: Required when value_type is integer and tenant_offerable is true; ignored (stored as null) for other types.
     UpdateProductFeatureRequest:
       type: object
       minProperties: 1
@@ -11256,6 +11271,13 @@ components:
           $ref: "#/components/schemas/ProductFeatureResetStrategy"
         is_active:
           type: boolean
+        tenant_offerable:
+          type: boolean
+        tenant_max:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: Merged with the stored value; validated against the resulting value_type and tenant_offerable.
     ProductPlanEntitlementValueRequest:
       type: object
       required:

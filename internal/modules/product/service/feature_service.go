@@ -81,15 +81,22 @@ func (s *FeatureService) Create(ctx context.Context, request dto.CreateFeatureRe
 		return dto.FeatureResponse{}, validationError("feature name is required")
 	}
 
+	tenantMax, err := normalizeTenantOffer(valueType, request.TenantOfferable, request.TenantMax)
+	if err != nil {
+		return dto.FeatureResponse{}, err
+	}
+
 	feature, err := s.store.Create(ctx, repository.CreateFeatureParams{
-		Key:           request.FeatureKey,
-		Module:        request.Module,
-		Name:          request.Name,
-		Description:   request.Description,
-		ValueType:     valueType,
-		Unit:          request.Unit,
-		ResetStrategy: resetStrategy,
-		IsActive:      boolDefault(request.IsActive, true),
+		Key:             request.FeatureKey,
+		Module:          request.Module,
+		Name:            request.Name,
+		Description:     request.Description,
+		ValueType:       valueType,
+		Unit:            request.Unit,
+		ResetStrategy:   resetStrategy,
+		IsActive:        boolDefault(request.IsActive, true),
+		TenantOfferable: request.TenantOfferable,
+		TenantMax:       tenantMax,
 	})
 	if err != nil {
 		return dto.FeatureResponse{}, err
@@ -120,9 +127,46 @@ func (s *FeatureService) Update(ctx context.Context, id string, request dto.Upda
 		}
 		params.ResetStrategy = &resetStrategy
 	}
+	existing, err := s.store.FindByID(ctx, params.ID)
+	if err != nil {
+		return dto.FeatureResponse{}, mapFeatureError(err)
+	}
+	valueType := existing.ValueType
+	if params.ValueType != nil {
+		valueType = *params.ValueType
+	}
+	offerable := existing.TenantOfferable
+	if request.TenantOfferable != nil {
+		offerable = *request.TenantOfferable
+	}
+	maxValue := existing.TenantMax
+	if request.TenantMax != nil {
+		maxValue = request.TenantMax
+	}
+	params.TenantOfferable = offerable
+	params.TenantMax, err = normalizeTenantOffer(valueType, offerable, maxValue)
+	if err != nil {
+		return dto.FeatureResponse{}, err
+	}
 	feature, err := s.store.Update(ctx, params)
 	if err != nil {
 		return dto.FeatureResponse{}, mapFeatureError(err)
 	}
 	return featureResponse(feature), nil
+}
+
+// normalizeTenantOffer memvalidasi penanda katalog tenant. Fitur integer yang boleh
+// dijual tenant wajib punya batas atas positif; tipe lain tidak punya batas sehingga
+// nilai yang terkirim di-null (selaras dengan CHECK constraint di migration 000161).
+func normalizeTenantOffer(valueType model.FeatureValueType, offerable bool, tenantMax *int) (*int, error) {
+	if tenantMax != nil && *tenantMax <= 0 {
+		return nil, validationError("tenant_max must be greater than zero")
+	}
+	if valueType != model.FeatureValueTypeInteger {
+		return nil, nil
+	}
+	if offerable && tenantMax == nil {
+		return nil, validationError("tenant_max is required for an integer feature offerable by tenants")
+	}
+	return tenantMax, nil
 }
