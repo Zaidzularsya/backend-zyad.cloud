@@ -323,3 +323,75 @@ func TestSyncContractEndedWithoutPlatformProviderKeepsLegacyRestore(t *testing.T
 		t.Fatalf("restores=%v", f.writer.restores)
 	}
 }
+
+// --- Produk tenant (checkout self-serve tenant): pembuktian waktu aktif entitlement ---
+
+// Contract lahir di CRM tenant (scope bukan platform); snapshot fitur produk ada di item contract.
+func tenantProductFixture(items []ContractAccessItem) taFixture {
+	f := newTenantAccessFixture(items, true)
+	f.access.WithPlatformScope(taPlatform{id: tcPlatform})
+	return f
+}
+
+func TestSyncContract_TenantProduct_PrepaidWaitsForPayment(t *testing.T) {
+	snapshot := []domain.FeatureSnapshot{feature("tenant_max", "3"), feature("user.max", "10")}
+	f := tenantProductFixture([]ContractAccessItem{{Prepaid: true, Features: snapshot}})
+	scope := tcScope(tcTenantA)
+
+	// Contract baru + invoice awal belum lunas: belum ada grant.
+	for _, reason := range []SyncReason{SyncContractCreated, SyncWorkspaceLinked} {
+		if err := f.access.SyncContract(context.Background(), scope, "ctr-1", reason); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(f.writer.grants) != 0 {
+		t.Fatalf("unpaid prepaid tenant product was granted: %+v", f.writer.grants)
+	}
+
+	// Invoice lunas: grant memakai fitur snapshot produk, ke workspace pembeli.
+	f.contract.paid = true
+	if err := f.access.SyncContract(context.Background(), scope, "ctr-1", SyncInvoicePaid); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.writer.grants) != 1 || !reflect.DeepEqual(f.writer.grants[0], snapshot) || f.writer.orgs[0] != "ws-1" {
+		t.Fatalf("grants=%+v orgs=%v", f.writer.grants, f.writer.orgs)
+	}
+}
+
+func TestSyncContract_TenantProduct_PostpaidGrantsImmediately(t *testing.T) {
+	snapshot := []domain.FeatureSnapshot{feature("tenant_max", "3")}
+	f := tenantProductFixture([]ContractAccessItem{{Prepaid: false, Features: snapshot}})
+	if err := f.access.SyncContract(context.Background(), tcScope(tcTenantA), "ctr-1", SyncContractCreated); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.writer.grants) != 1 || !reflect.DeepEqual(f.writer.grants[0], snapshot) {
+		t.Fatalf("grants=%+v", f.writer.grants)
+	}
+}
+
+// TenantAccess tidak punya dependensi ke katalog produk hidup: grant hanya berasal dari snapshot di
+// contract. Katalog (tenant_max diturunkan / produk tak lagi ditawarkan) tidak bisa mengubah grant.
+func TestSyncContract_UsesProductSnapshotNotCurrentCatalog(t *testing.T) {
+	snapshot := []domain.FeatureSnapshot{feature("tenant_max", "10")}
+	f := tenantProductFixture([]ContractAccessItem{{Prepaid: false, Features: snapshot}})
+
+	if err := f.access.SyncContract(context.Background(), tcScope(tcTenantA), "ctr-1", SyncContractCreated); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.writer.grants) != 1 || string(f.writer.grants[0][0].Value) != "10" {
+		t.Fatalf("grant must equal snapshot value 10, got %+v", f.writer.grants)
+	}
+}
+
+func TestSyncContract_FeaturelessTenantProduct_NoGrant(t *testing.T) {
+	f := tenantProductFixture([]ContractAccessItem{{Prepaid: false}, {Prepaid: true}})
+	f.contract.paid = true
+	for _, reason := range []SyncReason{SyncContractCreated, SyncInvoicePaid} {
+		if err := f.access.SyncContract(context.Background(), tcScope(tcTenantA), "ctr-1", reason); err != nil {
+			t.Fatalf("featureless product must not error: %v", err)
+		}
+	}
+	if len(f.writer.grants) != 0 || len(f.writer.revokes) != 0 {
+		t.Fatalf("grants=%+v revokes=%v", f.writer.grants, f.writer.revokes)
+	}
+}
