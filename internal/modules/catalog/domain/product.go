@@ -49,6 +49,10 @@ type Product struct {
 
 	CategoryPosition int // hasil join, read-only (dipakai ListPublic)
 
+	// NeedsUpdate diturunkan saat dibaca (bukan kolom): produk tenant yang fiturnya
+	// tak lagi sesuai katalog. Selalu false untuk org platform.
+	NeedsUpdate bool
+
 	CreatedBy string
 	UpdatedBy string
 	CreatedAt time.Time

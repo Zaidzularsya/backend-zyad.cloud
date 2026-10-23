@@ -108,3 +108,16 @@ func TestPublicListingsPlatformMissingIsEmpty(t *testing.T) {
 		t.Fatalf("error lain harus diteruskan: %v", err)
 	}
 }
+
+func TestExcludeNeedsUpdate(t *testing.T) {
+	reg := newFakeRegistry()
+	good := pub("good", "Paket", 1, "a", 1, pricing.Monthly, "100", boolFeat("tcrm", true))
+	bad := pub("bad", "Paket", 1, "a", 1, pricing.Quarterly, "100", boolFeat("wa", true)) // wa tidak tenant_offerable
+	got, err := ExcludeNeedsUpdate(context.Background(), reg, []domain.Product{good, bad})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "good" {
+		t.Fatalf("got %+v", got)
+	}
+}

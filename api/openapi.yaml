@@ -12515,6 +12515,9 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CatalogProductFeature'
+        needs_update:
+          type: boolean
+          description: Derived on read, never stored. True for a non-platform product when a feature is inactive, no longer `tenant_offerable`, or above `tenant_max`; always false for the platform catalog. Existing contracts are not affected. Such products are excluded from public listing/checkout.
         created_at:
           type: string
           format: date-time

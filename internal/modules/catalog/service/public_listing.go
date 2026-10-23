@@ -31,7 +31,8 @@ func NewPublicListingService(products repository.ProductRepository, features Fea
 	return &PublicListingService{products: products, features: features, scopes: scopes}
 }
 
-// Listings menyusun produk publik platform: kategori → kartu (listing_code) → varian (frekuensi).
+// Listings menyusun produk publik platform (tidak pernah ditandai perlu diperbarui;
+// listing org non-platform wajib melewatkan produk lewat ExcludeNeedsUpdate): kategori → kartu (listing_code) → varian (frekuensi).
 func (s *PublicListingService) Listings(ctx context.Context) (dto.PublicCatalogResponse, error) {
 	empty := dto.PublicCatalogResponse{Categories: []dto.PublicCategory{}}
 	scope, err := s.scopes.PlatformScope(ctx)

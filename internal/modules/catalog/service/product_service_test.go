@@ -410,3 +410,93 @@ func TestUpdate_Tenant_Features(t *testing.T) {
 		t.Fatalf("listing err = %v", err)
 	}
 }
+
+func tenantCtx(t *testing.T, orgType coretenant.OrganizationType) context.Context {
+	t.Helper()
+	tc, err := coretenant.NewVerifiedContext(coretenant.VerifiedContextInput{
+		OrganizationID: "11111111-1111-1111-1111-111111111111", OrganizationSlug: "org-a",
+		OrganizationType: orgType, OrganizationStatus: coretenant.OrganizationStatusActive,
+		MembershipID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", MembershipStatus: "active", MembershipVersion: 1,
+		ResolutionSource: coretenant.ResolutionSourceSession, DataPlacement: coretenant.DataPlacementShared,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return coretenant.WithContext(context.Background(), tc)
+}
+
+type countingRegistry struct {
+	*fakeRegistry
+	calls int
+}
+
+func (c *countingRegistry) FindByKeys(ctx context.Context, keys []string) (map[string]domain.FeatureDef, error) {
+	c.calls++
+	return c.fakeRegistry.FindByKeys(ctx, keys)
+}
+
+func TestProductNeedsUpdateOnReads(t *testing.T) {
+	mk := func(id, key, val string) domain.Product {
+		return domain.Product{ID: id, Features: []domain.ProductFeature{{FeatureKey: key, Value: json.RawMessage(val)}}}
+	}
+	build := func() (*fakeProducts, *countingRegistry) {
+		reg := &countingRegistry{fakeRegistry: newFakeRegistry()}
+		// tusr max=10: 5 muat, 50 melebihi; tcrm offerable; wa tidak offerable.
+		all := []domain.Product{mk("ok", "tusr", "5"), mk("over", "tusr", "50"), mk("revoked", "wa", "true"), mk("okbool", "tcrm", "true")}
+		byID := map[string]domain.Product{}
+		for _, p := range all {
+			byID[p.ID] = p
+		}
+		over := all[1]
+		return &fakeProducts{existing: &over, byID: byID, listed: all}, reg
+	}
+	want := map[string]bool{"ok": false, "over": true, "revoked": true, "okbool": false}
+
+	t.Run("tenant list: satu FindByKeys", func(t *testing.T) {
+		repo, reg := build()
+		list, _, err := NewProductService(repo, reg).List(tenantCtx(t, coretenant.OrganizationTypeCustomer), scope(t), repository.ProductListFilter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range list {
+			if p.NeedsUpdate != want[p.ID] {
+				t.Errorf("%s NeedsUpdate=%v, want %v", p.ID, p.NeedsUpdate, want[p.ID])
+			}
+		}
+		if reg.calls != 1 {
+			t.Errorf("FindByKeys calls = %d, want 1", reg.calls)
+		}
+	})
+	t.Run("tenant get", func(t *testing.T) {
+		repo, reg := build()
+		p, err := NewProductService(repo, reg).Get(tenantCtx(t, coretenant.OrganizationTypeCustomer), scope(t), "over")
+		if err != nil || !p.NeedsUpdate {
+			t.Fatalf("p=%+v err=%v", p, err)
+		}
+	})
+	t.Run("platform selalu false", func(t *testing.T) {
+		repo, reg := build()
+		list, _, _ := NewProductService(repo, reg).List(tenantCtx(t, coretenant.OrganizationTypePlatform), scope(t), repository.ProductListFilter{})
+		for _, p := range list {
+			if p.NeedsUpdate {
+				t.Errorf("%s platform NeedsUpdate=true", p.ID)
+			}
+		}
+	})
+}
+
+// Kontrak yang sudah terjual tidak disentuh: service produk hanya punya repo produk
+// + registry fitur (tidak ada dependensi writer entitlement), dan jalur baca tidak
+// memanggil tulis apa pun pada repo produk.
+func TestProductReadsNeverWrite(t *testing.T) {
+	over := domain.Product{ID: "over", Features: []domain.ProductFeature{{FeatureKey: "tusr", Value: json.RawMessage(`50`)}}}
+	repo := &fakeProducts{existing: &over, byID: map[string]domain.Product{"over": over}, listed: []domain.Product{over}}
+	svc := NewProductService(repo, newFakeRegistry())
+	ctx := tenantCtx(t, coretenant.OrganizationTypeCustomer)
+	_, _ = svc.Get(ctx, scope(t), "over")
+	_, _, _ = svc.List(ctx, scope(t), repository.ProductListFilter{})
+	_, _ = svc.FindByIDs(ctx, scope(t), []string{"over"})
+	if len(repo.created) != 0 || len(repo.updated) != 0 {
+		t.Fatalf("jalur baca menulis: created=%d updated=%d", len(repo.created), len(repo.updated))
+	}
+}

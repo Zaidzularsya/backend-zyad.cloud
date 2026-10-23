@@ -90,13 +90,20 @@ func (s *productService) Create(ctx context.Context, scope coretenant.Scope, in 
 	return s.withLabels(ctx, p, err)
 }
 
+// isTenantOrg: true bila ctx membawa org non-platform. Tanpa tenant context (mis.
+// pemanggil internal) produk tidak ditandai, supaya tidak ada false alarm.
+func isTenantOrg(ctx context.Context) bool {
+	tc, err := coretenant.RequireContext(ctx)
+	return err == nil && tc.OrganizationType() != coretenant.OrganizationTypePlatform
+}
+
 // withLabels melewatkan error repository apa adanya, dan memperkaya label fitur bila sukses.
 func (s *productService) withLabels(ctx context.Context, p domain.Product, err error) (domain.Product, error) {
 	if err != nil {
 		return p, err
 	}
 	list := []domain.Product{p}
-	if err := fillFeatureLabels(ctx, s.features, list); err != nil {
+	if err := fillFeatureInfo(ctx, s.features, list, isTenantOrg(ctx)); err != nil {
 		return p, err
 	}
 	return list[0], nil
@@ -119,7 +126,7 @@ func (s *productService) List(ctx context.Context, scope coretenant.Scope, f rep
 	if err != nil {
 		return list, total, err
 	}
-	return list, total, fillFeatureLabels(ctx, s.features, list)
+	return list, total, fillFeatureInfo(ctx, s.features, list, isTenantOrg(ctx))
 }
 
 func (s *productService) FindByIDs(ctx context.Context, scope coretenant.Scope, ids []string) (map[string]domain.Product, error) {
@@ -131,7 +138,7 @@ func (s *productService) FindByIDs(ctx context.Context, scope coretenant.Scope, 
 	for _, p := range m {
 		list = append(list, p)
 	}
-	if err := fillFeatureLabels(ctx, s.features, list); err != nil {
+	if err := fillFeatureInfo(ctx, s.features, list, isTenantOrg(ctx)); err != nil {
 		return m, err
 	}
 	for _, p := range list {

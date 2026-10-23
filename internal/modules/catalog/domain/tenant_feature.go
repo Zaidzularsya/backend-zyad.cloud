@@ -46,3 +46,17 @@ func CheckTenantFeature(def FeatureDef, value json.RawMessage) error {
 	}
 	return ErrFeatureInvalidValue
 }
+
+// NeedsUpdate: produk tenant "perlu diperbarui" bila ada fitur yang definisinya
+// hilang atau tidak lagi lolos CheckTenantFeature (nonaktif, tidak tenant_offerable,
+// atau melebihi tenant_max). Diturunkan saat dibaca; org platform dikecualikan
+// oleh pemanggil. Tidak mengubah kontrak/entitlement yang sudah terjual.
+func NeedsUpdate(p Product, defs map[string]FeatureDef) bool {
+	for _, f := range p.Features {
+		def, ok := defs[f.FeatureKey]
+		if !ok || CheckTenantFeature(def, f.Value) != nil {
+			return true
+		}
+	}
+	return false
+}
