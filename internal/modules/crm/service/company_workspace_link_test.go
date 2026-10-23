@@ -17,6 +17,13 @@ type linkRepo struct {
 	company domain.Company
 	setErr  error
 	setTo   *string
+	// anyOrg: company (org mana pun, non-deleted) yang saat ini menautkan workspace; kosong = tidak ada.
+	anyOrg map[string]string
+}
+
+func (r *linkRepo) FindWorkspaceLinkAnyOrg(_ context.Context, ws string) (string, bool, error) {
+	id, ok := r.anyOrg[ws]
+	return id, ok, nil
 }
 
 func (r *linkRepo) FindByID(context.Context, coretenant.Scope, string) (domain.Company, error) {
@@ -187,11 +194,40 @@ func TestLinkWorkspaceBySystem_RejectsWorkspaceLinkedElsewhere(t *testing.T) {
 	repo.setErr = nil
 	repo.company.TenantOrganizationID = strPtr("ws-b")
 	err = svc.LinkWorkspaceBySystem(ctx, scope, "co-1", "ws-a")
-	if code, _ := appErrCode(t, err); code != "WORKSPACE_ALREADY_LINKED" {
-		t.Fatalf("code=%s", code)
+	if code, status := appErrCode(t, err); code != "COMPANY_ALREADY_LINKED" || status != http.StatusConflict {
+		t.Fatalf("code=%s status=%d", code, status)
 	}
 	if repo.setTo != nil {
 		t.Fatal("must not overwrite an existing link")
+	}
+}
+
+func TestLinkWorkspaceBySystem_RejectsCrossOrgDuplicate(t *testing.T) {
+	svc, repo, hook := newLinkService(domain.Company{ID: "co-1"})
+	// workspace sudah ditautkan oleh company di org CRM lain
+	repo.anyOrg = map[string]string{"ws-a": "co-other-org"}
+	err := svc.LinkWorkspaceBySystem(context.Background(), validTestScope(t, "tenant-1"), "co-1", "ws-a")
+	if code, status := appErrCode(t, err); code != "WORKSPACE_ALREADY_LINKED" || status != http.StatusConflict {
+		t.Fatalf("code=%s status=%d", code, status)
+	}
+	if repo.setTo != nil || len(hook.calls) != 0 {
+		t.Fatal("nothing may be written")
+	}
+}
+
+func TestLinkWorkspaceBySystem_SoftDeletedPriorLinkIgnored(t *testing.T) {
+	// repository tidak mengembalikan company soft-deleted, jadi anyOrg kosong -> tautan boleh dibuat
+	svc, repo, _ := newLinkService(domain.Company{ID: "co-1"})
+	if err := svc.LinkWorkspaceBySystem(context.Background(), validTestScope(t, "tenant-1"), "co-1", "ws-a"); err != nil {
+		t.Fatal(err)
+	}
+	if repo.setTo == nil || *repo.setTo != "ws-a" {
+		t.Fatalf("setTo=%v", repo.setTo)
+	}
+	// tautan oleh company yang sama sendiri tidak dianggap konflik
+	repo.anyOrg = map[string]string{"ws-b": "co-1"}
+	if err := svc.LinkWorkspaceBySystem(context.Background(), validTestScope(t, "tenant-1"), "co-1", "ws-b"); err != nil {
+		t.Fatalf("same-company link must pass: %v", err)
 	}
 }
 

@@ -126,6 +126,8 @@ type workspaceOwnerRepo struct{ db *database.Pool }
 
 func (r workspaceOwnerRepo) ListOwners(ctx context.Context, organizationID string) ([]crmdomain.OrganizationMember, error) {
 	// organization_memberships, user_roles, dan users tidak di bawah RLS: filter organisasi eksplisit.
+	// `ur.organization_id IS NULL` juga mencocokkan role owner yang diberikan global; ini diterima
+	// karena anggota aktif org tetap disyaratkan (m.status = 'active').
 	rows, err := r.db.Query(ctx, `
 		SELECT DISTINCT u.id, u.name, u.email
 		FROM organization_memberships m

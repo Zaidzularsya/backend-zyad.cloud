@@ -191,7 +191,14 @@ func (s *companyService) LinkWorkspaceBySystem(ctx context.Context, scope corete
 		if *current.TenantOrganizationID == workspaceOrgID {
 			return nil // idempoten
 		}
-		return coreerrors.New("WORKSPACE_ALREADY_LINKED", "company is already linked to another workspace", http.StatusConflict)
+		return coreerrors.New("COMPANY_ALREADY_LINKED", "company is already linked to another workspace", http.StatusConflict)
+	}
+	// Unique index hanya per org CRM; tanpa guard ini satu workspace bisa tertaut di beberapa org dan
+	// SyncContract masing-masing org akan menulis organization_entitlements workspace yang sama.
+	if linkedID, found, err := s.repo.FindWorkspaceLinkAnyOrg(ctx, workspaceOrgID); err != nil {
+		return err
+	} else if found && linkedID != companyID {
+		return coreerrors.New("WORKSPACE_ALREADY_LINKED", "workspace is already linked to another company", http.StatusConflict)
 	}
 	// Validasi customer, penanganan konflik unique index, dan hook sinkronisasi memakai jalur yang sama dengan tautan manual.
 	_, err = s.SetWorkspaceLink(ctx, scope, companyID, &workspaceOrgID, "")

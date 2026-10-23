@@ -412,3 +412,18 @@ func (r *companyRepository) SetTenantOrganization(ctx context.Context, scope cor
 	}
 	return company, nil
 }
+
+func (r *companyRepository) FindWorkspaceLinkAnyOrg(ctx context.Context, workspaceOrgID string) (string, bool, error) {
+	// Query lintas-org yang disengaja; filter tenant_organization_id dan deleted_at eksplisit, tanpa bergantung pada RLS.
+	var id string
+	err := r.db.QueryRow(ctx, `SELECT id FROM crm_companies
+		WHERE tenant_organization_id = $1::uuid AND deleted_at IS NULL
+		ORDER BY created_at LIMIT 1`, workspaceOrgID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return id, true, nil
+}

@@ -223,3 +223,30 @@ func TestConvertLeadNewCompanyLinkedToWorkspace(t *testing.T) {
 		t.Fatalf("find: %+v err=%v", found, err)
 	}
 }
+
+func TestFindWorkspaceLinkAnyOrg(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+	setupCRMOrganizations(t, db, tenants)
+	companies := repository.NewCompanyRepository(db)
+	workspace := tenants.B.OrganizationID
+
+	if _, found, err := companies.FindWorkspaceLinkAnyOrg(ctx, workspace); err != nil || found {
+		t.Fatalf("before link found=%v err=%v", found, err)
+	}
+	a, _ := companies.Create(ctx, tenants.A.Scope, repository.CreateCompanyParams{Name: "Studio Rina"})
+	if _, err := companies.SetTenantOrganization(ctx, tenants.A.Scope, a.ID, workspace, ""); err != nil {
+		t.Fatal(err)
+	}
+	if id, found, err := companies.FindWorkspaceLinkAnyOrg(ctx, workspace); err != nil || !found || id != a.ID {
+		t.Fatalf("linked id=%q found=%v err=%v", id, found, err)
+	}
+	// company soft-deleted tidak dihitung
+	if err := companies.Delete(ctx, tenants.A.Scope, a.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := companies.FindWorkspaceLinkAnyOrg(ctx, workspace); err != nil || found {
+		t.Fatalf("after soft delete found=%v err=%v", found, err)
+	}
+}
