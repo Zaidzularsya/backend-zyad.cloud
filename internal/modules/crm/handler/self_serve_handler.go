@@ -177,13 +177,14 @@ func (h *SelfServeHandler) Checkout(c *gin.Context) {
 		ProductID:            body.ProductID,
 	})
 	if err != nil {
-		h.fail(c, err)
+		failSelfServe(c, err)
 		return
 	}
 	corehttp.Created(c, "self-serve checkout ready", selfServeCheckoutResponse{InvoiceURL: result.InvoiceURL, DealID: result.DealID})
 }
 
-func (h *SelfServeHandler) fail(c *gin.Context, err error) {
+// failSelfServe memetakan galat rantai self-serve (dipakai checkout platform dan checkout tenant).
+func failSelfServe(c *gin.Context, err error) {
 	var step *service.SelfServeStepError
 	switch {
 	case errors.Is(err, service.ErrSelfServeProductUnavailable):
