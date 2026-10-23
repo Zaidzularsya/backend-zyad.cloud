@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	coretenant "zyad.cloud/internal/core/tenant"
+	"zyad.cloud/internal/modules/organization/model"
 	"zyad.cloud/internal/platform/database"
 )
 
@@ -64,48 +65,8 @@ func (r *OnboardingRepository) CreateWorkspace(
 		return MembershipOrganization{}, err
 	}
 
-	organization, err := createOrganizationTx(ctx, tx, CreateOrganizationParams{
-		Type:          coretenant.OrganizationTypeCustomer,
-		Slug:          params.Slug,
-		Name:          params.Name,
-		Status:        coretenant.OrganizationStatusActive,
-		Timezone:      params.Timezone,
-		Locale:        params.Locale,
-		Region:        params.Region,
-		DataPlacement: coretenant.DataPlacementShared,
-		Metadata:      params.Metadata,
-	})
+	organization, membership, err := createOwnedWorkspaceTx(ctx, tx, params)
 	if err != nil {
-		return MembershipOrganization{}, err
-	}
-
-	membership, err := createOwnerMembershipTx(
-		ctx,
-		tx,
-		organization.ID,
-		strings.TrimSpace(params.UserID),
-		strings.TrimSpace(params.UserID),
-		params.CorrelationAt,
-	)
-	if err != nil {
-		return MembershipOrganization{}, err
-	}
-
-	roleID, err := findOrganizationOwnerRole(ctx, tx)
-	if err != nil {
-		return MembershipOrganization{}, err
-	}
-	if _, err := replaceOrganizationRoles(
-		ctx,
-		tx,
-		membership,
-		[]string{roleID},
-		params.UserID,
-		params.CorrelationAt,
-	); err != nil {
-		return MembershipOrganization{}, err
-	}
-	if err := reloadMembership(ctx, tx, &membership); err != nil {
 		return MembershipOrganization{}, err
 	}
 
@@ -212,6 +173,101 @@ func (r *OnboardingRepository) CreateWorkspace(
 		RoleIDs:      roles.IDs,
 		RoleSlugs:    roles.Slugs,
 	}, nil
+}
+
+// CreateOwnedWorkspace membuat organisasi customer dengan user sebagai owner TANPA sesi: dipakai
+// checkout publik tenant (pembeli belum login). Tidak menyentuh tabel sessions dan tidak mencatat
+// organization_switched; audit workspace_onboarded tetap dicatat dengan source dari Metadata.
+func (r *OnboardingRepository) CreateOwnedWorkspace(
+	ctx context.Context,
+	params CreateWorkspaceParams,
+) (MembershipOrganization, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return MembershipOrganization{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	organization, membership, err := createOwnedWorkspaceTx(ctx, tx, params)
+	if err != nil {
+		return MembershipOrganization{}, err
+	}
+	if err := insertOrganizationAuditTx(
+		ctx,
+		tx,
+		organization,
+		membership,
+		params.UserID,
+		"workspace_onboarded",
+		map[string]any{"role_slug": "organization_owner", "source": "tenant_checkout"},
+		params.CorrelationAt,
+	); err != nil {
+		return MembershipOrganization{}, err
+	}
+	rolesByOrganization, err := listOrganizationRoles(ctx, tx, params.UserID, organization.ID)
+	if err != nil {
+		return MembershipOrganization{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return MembershipOrganization{}, err
+	}
+	roles := rolesByOrganization[organization.ID]
+	return MembershipOrganization{
+		Organization: organization,
+		Membership:   membership,
+		RoleIDs:      roles.IDs,
+		RoleSlugs:    roles.Slugs,
+	}, nil
+}
+
+// createOwnedWorkspaceTx: organisasi customer + membership owner + role organization_owner.
+func createOwnedWorkspaceTx(ctx context.Context, tx pgx.Tx, params CreateWorkspaceParams) (model.Organization, model.Membership, error) {
+	organization, err := createOrganizationTx(ctx, tx, CreateOrganizationParams{
+		Type:          coretenant.OrganizationTypeCustomer,
+		Slug:          params.Slug,
+		Name:          params.Name,
+		Status:        coretenant.OrganizationStatusActive,
+		Timezone:      params.Timezone,
+		Locale:        params.Locale,
+		Region:        params.Region,
+		DataPlacement: coretenant.DataPlacementShared,
+		Metadata:      params.Metadata,
+	})
+	if err != nil {
+		return model.Organization{}, model.Membership{}, err
+	}
+
+	membership, err := createOwnerMembershipTx(
+		ctx,
+		tx,
+		organization.ID,
+		strings.TrimSpace(params.UserID),
+		strings.TrimSpace(params.UserID),
+		params.CorrelationAt,
+	)
+	if err != nil {
+		return model.Organization{}, model.Membership{}, err
+	}
+
+	roleID, err := findOrganizationOwnerRole(ctx, tx)
+	if err != nil {
+		return model.Organization{}, model.Membership{}, err
+	}
+	if _, err := replaceOrganizationRoles(
+		ctx,
+		tx,
+		membership,
+		[]string{roleID},
+		params.UserID,
+		params.CorrelationAt,
+	); err != nil {
+		return model.Organization{}, model.Membership{}, err
+	}
+	if err := reloadMembership(ctx, tx, &membership); err != nil {
+		return model.Organization{}, model.Membership{}, err
+	}
+
+	return organization, membership, nil
 }
 
 func findOrganizationOwnerRole(ctx context.Context, tx pgx.Tx) (string, error) {

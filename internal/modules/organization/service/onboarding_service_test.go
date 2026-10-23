@@ -12,9 +12,19 @@ import (
 )
 
 type fakeOnboardingStore struct {
-	params repository.CreateWorkspaceParams
-	result repository.MembershipOrganization
-	err    error
+	params      repository.CreateWorkspaceParams
+	result      repository.MembershipOrganization
+	err         error
+	ownedCalled bool
+}
+
+func (s *fakeOnboardingStore) CreateOwnedWorkspace(
+	_ context.Context,
+	params repository.CreateWorkspaceParams,
+) (repository.MembershipOrganization, error) {
+	s.ownedCalled = true
+	s.params = params
+	return s.result, s.err
 }
 
 func (s *fakeOnboardingStore) CreateWorkspace(
@@ -147,5 +157,45 @@ func TestOnboardingServiceCreateWorkspaceProvisioningFailureIsNonFatal(t *testin
 	)
 	if err != nil {
 		t.Fatalf("CreateWorkspace() error = %v, want nil (provisioning is non-fatal)", err)
+	}
+}
+
+func TestOnboardingServiceCreateOwnedWorkspaceNeedsNoSessionAndSkipsDefaultAccess(t *testing.T) {
+	store := &fakeOnboardingStore{
+		result: repository.MembershipOrganization{
+			Organization: model.Organization{ID: "11111111-1111-1111-1111-111111111111"},
+		},
+	}
+	provisioner := &fakeDefaultAccessProvisioner{}
+	service := NewOnboardingService(store)
+	service.SetDefaultAccessProvisioner(provisioner)
+
+	id, err := service.CreateOwnedWorkspace(
+		context.Background(),
+		"33333333-3333-3333-3333-333333333333",
+		dto.CreateWorkspaceRequest{Name: " Rina ", Slug: "rina-ab12cd34", Metadata: map[string]any{"k": "v"}},
+		OnboardingMetadata{IPAddress: "203.0.113.1"},
+	)
+	if err != nil {
+		t.Fatalf("CreateOwnedWorkspace() error = %v", err)
+	}
+	if id != "11111111-1111-1111-1111-111111111111" || !store.ownedCalled {
+		t.Fatalf("id=%s ownedCalled=%v", id, store.ownedCalled)
+	}
+	if store.params.SessionID != "" || store.params.Name != "Rina" || store.params.Slug != "rina-ab12cd34" || store.params.Metadata["k"] != "v" {
+		t.Fatalf("params = %#v", store.params)
+	}
+	if len(provisioner.organizationIDs) != 0 {
+		t.Fatalf("default (Free) access must not be provisioned for a tenant buyer workspace: %v", provisioner.organizationIDs)
+	}
+}
+
+func TestOnboardingServiceCreateOwnedWorkspaceValidates(t *testing.T) {
+	service := NewOnboardingService(&fakeOnboardingStore{})
+	if _, err := service.CreateOwnedWorkspace(context.Background(), "not-a-uuid", dto.CreateWorkspaceRequest{Name: "A"}, OnboardingMetadata{}); err == nil {
+		t.Fatal("want invalid user id error")
+	}
+	if _, err := service.CreateOwnedWorkspace(context.Background(), "33333333-3333-3333-3333-333333333333", dto.CreateWorkspaceRequest{Name: "!!!"}, OnboardingMetadata{}); err == nil {
+		t.Fatal("want invalid slug error")
 	}
 }
