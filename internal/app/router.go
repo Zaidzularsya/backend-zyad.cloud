@@ -401,6 +401,10 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.PublicLandingHandler != nil {
 		deps.PublicLandingHandler.RegisterRoutes(publicModules)
 	}
+	if deps.CatalogPublicListingHandler != nil {
+		// Listing produk tenant: tenant dari host (sama dengan /public/landing/*).
+		deps.CatalogPublicListingHandler.RegisterTenantRoutes(publicModules)
+	}
 	registerModuleRoutes(publicModules)
 	return router, nil
 }

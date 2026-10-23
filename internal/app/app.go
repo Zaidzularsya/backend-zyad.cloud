@@ -462,7 +462,7 @@ func New(ctx context.Context) (*App, error) {
 		catalogrepo.NewProductRepository(db),
 		catalogFeatureRegistry{features: productrepo.NewFeatureRepository(db)},
 		newPlatformScopeResolver(organizationrepo.NewOrganizationRepository(db)),
-	))
+	).WithEntitlements(crmEntitlementChecker))
 	catalogCategoryHandler := cataloghandler.NewCategoryHandler(catalogservice.NewCategoryService(catalogrepo.NewCategoryRepository(db)))
 	mailboxRepo := mailboxrepo.NewMailboxRepository(db)
 	mailMessageRepo := mailboxrepo.NewMessageRepository(db)
