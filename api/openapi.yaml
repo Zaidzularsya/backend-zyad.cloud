@@ -3885,6 +3885,112 @@ paths:
                                         checkout_enabled: {type: boolean}
         "404":
           description: Unknown host, or host belongs to the platform organization
+  /api/v1/public/tenant-checkout:
+    post:
+      summary: Self-serve checkout of a tenant product with Google sign-up
+      description: >-
+        Public, unauthenticated checkout on the tenant's own domain. The tenant is the organization
+        resolved from the request host (same host resolution as `/public/tenant-catalog`); any
+        `organization_id` in the body or query is ignored. Order: the tenant must have
+        `receivable.enabled` and `receivable.online_payment`; the product must belong to the tenant, be
+        public, active and checkout-capable (recurring, prepaid, priced, with features) and must not need
+        updating against the current catalog rules; then the Google ID token is verified (unverified email
+        is rejected) and the user is found or created with the same rules as `/auth/google`. The buyer gets
+        one workspace per tenant (reused for later purchases from the same tenant; never a personal or
+        other-tenant workspace). The CRM chain company → lead → deal → quotation → sales order → invoice
+        runs in the tenant's CRM and the company is linked to the buyer's workspace. Idempotent: repeating
+        the call returns the same invoice link without duplicating records; a concurrent identical call
+        gets 409 `SELF_SERVE_IN_PROGRESS` and may retry. No session or token is issued: the buyer pays via
+        `invoice_url`, then signs in with Google through the normal login to reach the workspace.
+        Rate limited per client IP (10 per 10 minutes) and per tenant (100 per hour).
+      operationId: tenantCheckout
+      tags:
+        - Public Product Catalog
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [google_credential, product_id]
+              properties:
+                google_credential:
+                  type: string
+                  description: Google Identity Services ID token (JWT)
+                product_id:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Invoice link ready
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      invoice_url:
+                        type: string
+                        format: uri
+        "401":
+          description: AUTH_GOOGLE_TOKEN_INVALID, AUTH_GOOGLE_AUDIENCE_INVALID, or AUTH_GOOGLE_EMAIL_UNVERIFIED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: AUTH_GOOGLE_DISABLED, AUTH_REGISTRATION_DISABLED, or the Google user is not active
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Unknown host, host belongs to the platform organization (TENANT_CHECKOUT_NOT_FOUND), or product not found in this tenant (TENANT_PRODUCT_NOT_FOUND)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: SELF_SERVE_IN_PROGRESS (another checkout for this buyer is running), SELF_SERVE_ALREADY_SUBSCRIBED, AUTH_GOOGLE_EMAIL_CONFLICT, or a workspace link conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: VALIDATION_ERROR (missing field), TENANT_CHECKOUT_DISABLED (tenant lacks receivable.enabled / receivable.online_payment), or TENANT_PRODUCT_UNAVAILABLE (not public/active/checkout-capable, or needs updating)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: RATE_LIMITED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: SELF_SERVE_STEP_FAILED; `data.step` is one of company, lead, deal, quotation, sales_order, invoice. Safe to retry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: SELF_SERVE_NOT_CONFIGURED (tenant has no active owner or no usable pipeline)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/platform/product/features:
     get:
       summary: List billing features
