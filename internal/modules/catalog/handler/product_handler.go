@@ -17,7 +17,8 @@ import (
 )
 
 type ProductHandler struct {
-	svc service.ProductService
+	svc     service.ProductService
+	checker permissionmiddleware.CombinedPermissionChecker
 }
 
 func NewProductHandler(svc service.ProductService) *ProductHandler {
@@ -27,6 +28,7 @@ func NewProductHandler(svc service.ProductService) *ProductHandler {
 // RegisterRoutes registers product routes under the given parent group; the
 // parent applies the tenant & CRM entitlement guards.
 func (h *ProductHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker) {
+	h.checker = p
 	group := router.Group("/products")
 
 	group.GET("", permissionmiddleware.RequireOrganizationOrGlobal(p, "catalog_product.read"), h.List)
@@ -88,6 +90,25 @@ func isPlatformOrg(c *gin.Context) bool {
 	return err == nil && tc.OrganizationType() == coretenant.OrganizationTypePlatform
 }
 
+const manageEntitlementsPermission = "catalog_product.manage_entitlements"
+
+// hasManageEntitlements: izin di org aktif atau global, pola RequireOrganizationOrGlobal.
+func hasManageEntitlements(c *gin.Context, p permissionmiddleware.CombinedPermissionChecker) bool {
+	if p == nil {
+		return true
+	}
+	userID := permissionmiddleware.UserID(c)
+	tc, ok := coretenant.FromContext(c.Request.Context())
+	if userID == "" || !ok {
+		return false
+	}
+	perms := []string{manageEntitlementsPermission}
+	if p.CanOrganization(c.Request.Context(), userID, tc.OrganizationID(), perms) == nil {
+		return true
+	}
+	return p.Can(c.Request.Context(), userID, perms) == nil
+}
+
 func (h *ProductHandler) Create(c *gin.Context) {
 	scope, err := coretenant.RequireScope(c.Request.Context())
 	if err != nil {
@@ -112,10 +133,11 @@ func (h *ProductHandler) Create(c *gin.Context) {
 			Frequency:     pricing.Frequency(req.BillingFrequency),
 			PaymentTiming: pricing.PaymentTiming(req.PaymentTiming),
 		},
-		IsActive: req.IsActive == nil || *req.IsActive,
-		Platform: isPlatformOrg(c),
-		Listing:  repository.ListingParams{IsPublic: req.IsPublic, ListingCode: req.ListingCode, ListingOrder: req.ListingOrder},
-		Features: dto.FeatureValues(req.Features),
+		IsActive:              req.IsActive == nil || *req.IsActive,
+		Platform:              isPlatformOrg(c),
+		CanManageEntitlements: hasManageEntitlements(c, h.checker),
+		Listing:               repository.ListingParams{IsPublic: req.IsPublic, ListingCode: req.ListingCode, ListingOrder: req.ListingOrder},
+		Features:              dto.FeatureValues(req.Features),
 	}, permissionmiddleware.UserID(c))
 	if err != nil {
 		failCatalog(c, err)
@@ -152,6 +174,7 @@ func (h *ProductHandler) Update(c *gin.Context) {
 		features = &v
 	}
 	platform := isPlatformOrg(c)
+	canManage := hasManageEntitlements(c, h.checker)
 	h.respond(c, func(scope coretenant.Scope) (domain.Product, error) {
 		return h.svc.Update(c.Request.Context(), scope, c.Param("id"), repository.UpdateProductParams{
 			CategoryID:  req.CategoryID,
@@ -166,7 +189,7 @@ func (h *ProductHandler) Update(c *gin.Context) {
 			UpdatedBy:   permissionmiddleware.UserID(c),
 			Listing:     listing,
 			Features:    features,
-		}, platform)
+		}, platform, canManage)
 	})
 }
 

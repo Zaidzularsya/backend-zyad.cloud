@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"regexp"
 	"strings"
@@ -65,6 +66,29 @@ func validateListing(l repository.ListingParams, categoryID string) error {
 }
 
 func (s *productService) validateFeatures(ctx context.Context, features []repository.FeatureValue) error {
+	return s.validateFeaturesWith(ctx, features, nil)
+}
+
+// validateTenantFeatures: validasi dasar yang sama, ditambah batas katalog
+// (CheckTenantFeature) untuk org non-platform.
+func (s *productService) validateTenantFeatures(ctx context.Context, features []repository.FeatureValue) error {
+	return s.validateFeaturesWith(ctx, features, tenantFeatureCheck)
+}
+
+func tenantFeatureCheck(def domain.FeatureDef, value json.RawMessage) error {
+	switch err := domain.CheckTenantFeature(def, value); {
+	case err == nil:
+		return nil
+	case errors.Is(err, domain.ErrFeatureNotOfferable):
+		return ErrFeatureNotOfferable
+	case errors.Is(err, domain.ErrFeatureAboveMax):
+		return ErrFeatureAboveMax
+	default:
+		return ErrInvalidFeature
+	}
+}
+
+func (s *productService) validateFeaturesWith(ctx context.Context, features []repository.FeatureValue, check func(domain.FeatureDef, json.RawMessage) error) error {
 	if len(features) > maxProductFeatures {
 		return ErrInvalidFeature
 	}
@@ -88,6 +112,11 @@ func (s *productService) validateFeatures(ctx context.Context, features []reposi
 		def, ok := defs[f.FeatureKey]
 		if !ok || !def.IsActive || !ValidateFeatureValue(def, f.Value) {
 			return ErrInvalidFeature
+		}
+		if check != nil {
+			if err := check(def, f.Value); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

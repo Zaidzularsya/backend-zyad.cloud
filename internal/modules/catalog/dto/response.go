@@ -46,6 +46,8 @@ type FeatureDefResponse struct {
 	Unit      string `json:"unit,omitempty"`
 	// ResetStrategy: never|monthly|yearly|custom, read-only registry metadata.
 	ResetStrategy string `json:"reset_strategy"`
+	// TenantMax: batas atas integer untuk produk tenant; hanya terisi pada daftar fitur tenant.
+	TenantMax *int `json:"tenant_max,omitempty"`
 }
 
 func ProductFromDomain(p domain.Product) ProductResponse {

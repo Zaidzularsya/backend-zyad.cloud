@@ -102,7 +102,7 @@ func RunFreePlan(ctx context.Context, cfg config.Config, db *database.Pool, appl
 	for i, f := range target {
 		values[i] = catalogrepo.FeatureValue{FeatureKey: f.FeatureKey, Value: f.Value, Position: f.Position}
 	}
-	if _, err := products.Update(ctx, scope, product.ID, catalogrepo.UpdateProductParams{Features: &values, UpdatedBy: botID}, true); err != nil {
+	if _, err := products.Update(ctx, scope, product.ID, catalogrepo.UpdateProductParams{Features: &values, UpdatedBy: botID}, true, true); err != nil {
 		return fmt.Errorf("update fitur produk Free: %w", err)
 	}
 	n, err := ApplyFreePlan(ctx, plan, workerDefaultAccess(cfg, db))

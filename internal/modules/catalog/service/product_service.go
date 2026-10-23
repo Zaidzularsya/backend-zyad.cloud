@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"math/big"
+	"net/http"
 	"regexp"
 	"strings"
 	"unicode/utf8"
 
+	coreerrors "zyad.cloud/internal/core/errors"
 	coretenant "zyad.cloud/internal/core/tenant"
 	catalogmodule "zyad.cloud/internal/modules/catalog"
 	"zyad.cloud/internal/modules/catalog/domain"
@@ -41,6 +43,10 @@ func validText(v string, max int, required bool) bool {
 	return (!required || v != "") && utf8.RuneCountInString(v) <= max
 }
 
+func errManageEntitlementsForbidden() error {
+	return coreerrors.New("FORBIDDEN", "Izin catalog_product.manage_entitlements diperlukan untuk mengelola fitur produk", http.StatusForbidden)
+}
+
 func (s *productService) Create(ctx context.Context, scope coretenant.Scope, in ProductInput, userID string) (domain.Product, error) {
 	in.Name, in.Unit, in.SKU = strings.TrimSpace(in.Name), strings.TrimSpace(in.Unit), strings.TrimSpace(in.SKU)
 	if in.Unit == "" {
@@ -57,7 +63,7 @@ func (s *productService) Create(ctx context.Context, scope coretenant.Scope, in 
 		!ValidMoney(in.BasePrice) || !ValidPercent(in.TaxPercent) {
 		return domain.Product{}, ErrInvalidProduct
 	}
-	if !in.Platform && (in.Listing != (repository.ListingParams{}) || len(in.Features) > 0) {
+	if !in.Platform && in.Listing != (repository.ListingParams{}) {
 		return domain.Product{}, ErrPlatformOnly
 	}
 	if in.Platform {
@@ -65,6 +71,13 @@ func (s *productService) Create(ctx context.Context, scope coretenant.Scope, in 
 			return domain.Product{}, err
 		}
 		if err := s.validateFeatures(ctx, in.Features); err != nil {
+			return domain.Product{}, err
+		}
+	} else if len(in.Features) > 0 {
+		if !in.CanManageEntitlements {
+			return domain.Product{}, errManageEntitlementsForbidden()
+		}
+		if err := s.validateTenantFeatures(ctx, in.Features); err != nil {
 			return domain.Product{}, err
 		}
 	}
@@ -160,9 +173,14 @@ func (s *productService) validatePlatformUpdate(ctx context.Context, scope coret
 	return validateListing(listing, category)
 }
 
-func (s *productService) Update(ctx context.Context, scope coretenant.Scope, id string, in repository.UpdateProductParams, platform bool) (domain.Product, error) {
-	if !platform && (in.Listing != nil || in.Features != nil) {
+func (s *productService) Update(ctx context.Context, scope coretenant.Scope, id string, in repository.UpdateProductParams, platform, canManageEntitlements bool) (domain.Product, error) {
+	if !platform && in.Listing != nil {
 		return domain.Product{}, ErrPlatformOnly
+	}
+	// Mengirim features (termasuk [] = hapus semua) mengubah entitlement, jadi butuh
+	// permission; update yang tidak menyentuh features tidak.
+	if !platform && in.Features != nil && !canManageEntitlements {
+		return domain.Product{}, errManageEntitlementsForbidden()
 	}
 	if (in.Name != nil && !validText(*in.Name, 200, true)) || (in.Unit != nil && !validText(*in.Unit, 30, true)) ||
 		(in.SKU != nil && !validText(*in.SKU, 64, false)) ||
@@ -175,6 +193,11 @@ func (s *productService) Update(ctx context.Context, scope coretenant.Scope, id 
 			return domain.Product{}, ErrInvalidProduct
 		}
 		in.Pricing = &attrs
+	}
+	if !platform && in.Features != nil {
+		if err := s.validateTenantFeatures(ctx, *in.Features); err != nil {
+			return domain.Product{}, err
+		}
 	}
 	if platform {
 		if err := s.validatePlatformUpdate(ctx, scope, id, in); err != nil {

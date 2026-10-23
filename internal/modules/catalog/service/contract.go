@@ -14,9 +14,11 @@ var (
 	ErrInvalidProduct  = errors.New("name (max 200) and unit (max 30) are required; base_price must be a non-negative number with at most 2 decimals; tax_percent must be between 0 and 100; sku max 64; " + pricing.ErrInvalidAttributes.Error())
 	ErrInvalidCategory = errors.New("category name is required (max 100)")
 
-	ErrPlatformOnly   = errors.New("Fitur dan publikasi hanya untuk katalog platform")
-	ErrInvalidListing = errors.New("listing_code wajib (huruf kecil, angka, tanda -, maks 50) dan kategori wajib bila produk dipublikasikan")
-	ErrInvalidFeature = errors.New("fitur tidak dikenal/nonaktif, nilai tidak sesuai tipe, label > 200, atau lebih dari 30 fitur")
+	ErrPlatformOnly        = errors.New("Fitur dan publikasi hanya untuk katalog platform")
+	ErrInvalidListing      = errors.New("listing_code wajib (huruf kecil, angka, tanda -, maks 50) dan kategori wajib bila produk dipublikasikan")
+	ErrFeatureNotOfferable = domain.ErrFeatureNotOfferable
+	ErrFeatureAboveMax     = domain.ErrFeatureAboveMax
+	ErrInvalidFeature      = errors.New("fitur tidak dikenal/nonaktif, nilai tidak sesuai tipe, label > 200, atau lebih dari 30 fitur")
 )
 
 // FeatureRegistry membaca registry fitur (modul product); dirangkai di internal/app.
@@ -36,16 +38,19 @@ type ProductInput struct {
 	Pricing     pricing.Attributes
 	IsActive    bool
 
-	Platform bool // org pemanggil adalah org platform; fitur & listing hanya untuk platform
-	Listing  repository.ListingParams
-	Features []repository.FeatureValue
+	Platform bool // org pemanggil adalah org platform; listing hanya untuk platform
+	// CanManageEntitlements: pemegang catalog_product.manage_entitlements; syarat
+	// org non-platform melampirkan fitur (dibatasi katalog tenant_offerable/tenant_max).
+	CanManageEntitlements bool
+	Listing               repository.ListingParams
+	Features              []repository.FeatureValue
 }
 
 type ProductService interface {
 	Create(ctx context.Context, scope coretenant.Scope, in ProductInput, userID string) (domain.Product, error)
 	Get(ctx context.Context, scope coretenant.Scope, id string) (domain.Product, error)
 	List(ctx context.Context, scope coretenant.Scope, f repository.ProductListFilter) ([]domain.Product, int64, error)
-	Update(ctx context.Context, scope coretenant.Scope, id string, in repository.UpdateProductParams, platform bool) (domain.Product, error)
+	Update(ctx context.Context, scope coretenant.Scope, id string, in repository.UpdateProductParams, platform, canManageEntitlements bool) (domain.Product, error)
 	Delete(ctx context.Context, scope coretenant.Scope, id, userID string) error
 	// FindBySKU: produk aktif dengan SKU persis itu; label fitur terisi. Tidak ada → PRODUCT_NOT_FOUND.
 	FindBySKU(ctx context.Context, scope coretenant.Scope, sku string) (domain.Product, error)

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"testing"
 
+	coreerrors "zyad.cloud/internal/core/errors"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/catalog/domain"
 	"zyad.cloud/internal/modules/catalog/repository"
@@ -21,6 +23,8 @@ type fakeProducts struct {
 	listed   []domain.Product
 }
 
+var tenantMax = 10
+
 type fakeRegistry struct{ defs map[string]domain.FeatureDef }
 
 func newFakeRegistry() *fakeRegistry {
@@ -29,6 +33,8 @@ func newFakeRegistry() *fakeRegistry {
 		"users": {Key: "users", Name: "Jumlah user", ValueType: "integer", Unit: "user", IsActive: true},
 		"wa":    {Key: "wa", Name: "WhatsApp", ValueType: "boolean", IsActive: true},
 		"old":   {Key: "old", Name: "Lama", ValueType: "boolean", IsActive: false},
+		"tcrm":  {Key: "tcrm", Name: "CRM tenant", ValueType: "boolean", IsActive: true, TenantOfferable: true},
+		"tusr":  {Key: "tusr", Name: "User tenant", ValueType: "integer", IsActive: true, TenantOfferable: true, TenantMax: &tenantMax},
 	}}
 }
 
@@ -134,11 +140,11 @@ func TestUpdateProductValidatesOnlyProvidedFields(t *testing.T) {
 	repo := &fakeProducts{}
 	svc := NewProductService(repo, newFakeRegistry())
 	bad := "abc"
-	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{BasePrice: &bad}, false); !errors.Is(err, ErrInvalidProduct) {
+	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{BasePrice: &bad}, false, false); !errors.Is(err, ErrInvalidProduct) {
 		t.Fatalf("err = %v", err)
 	}
 	active := false
-	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{IsActive: &active}, false); err != nil {
+	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{IsActive: &active}, false, false); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -154,11 +160,11 @@ func TestCreateProductPricingDefaultsAndValidation(t *testing.T) {
 		t.Fatalf("recurring tanpa frekuensi err=%v", err)
 	}
 	bad := pricing.Attributes{ChargeType: pricing.OneTime, Frequency: pricing.Monthly}
-	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Pricing: &bad}, false); !errors.Is(err, ErrInvalidProduct) {
+	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Pricing: &bad}, false, false); !errors.Is(err, ErrInvalidProduct) {
 		t.Fatalf("update err=%v", err)
 	}
 	good := pricing.Attributes{ChargeType: pricing.Recurring, Frequency: pricing.Monthly}
-	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Pricing: &good}, false); err != nil {
+	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Pricing: &good}, false, false); err != nil {
 		t.Fatal(err)
 	}
 	if got := *repo.updated[len(repo.updated)-1].Pricing; got.PaymentTiming != pricing.Prepaid {
@@ -178,8 +184,9 @@ func TestCreateProductPlatformOnly(t *testing.T) {
 	}
 	in = base
 	in.Features = []repository.FeatureValue{{FeatureKey: "crm", Value: json.RawMessage(`true`)}}
-	if _, err := svc.Create(context.Background(), scope(t), in, "u"); !errors.Is(err, ErrPlatformOnly) {
-		t.Fatalf("features non-platform err = %v", err)
+	var ce *coreerrors.AppError
+	if _, err := svc.Create(context.Background(), scope(t), in, "u"); !errors.As(err, &ce) || ce.Code != "FORBIDDEN" {
+		t.Fatalf("features non-platform tanpa permission err = %v", err)
 	}
 	if _, err := svc.Create(context.Background(), scope(t), base, "u"); err != nil {
 		t.Fatalf("tanpa field baru harus sukses: %v", err)
@@ -189,7 +196,7 @@ func TestCreateProductPlatformOnly(t *testing.T) {
 	}
 	// Update: blok listing/fitur pada non-platform ditolak.
 	feats := []repository.FeatureValue{}
-	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Features: &feats}, false); !errors.Is(err, ErrPlatformOnly) {
+	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Features: &feats}, false, false); !errors.As(err, &ce) || ce.Code != "FORBIDDEN" {
 		t.Fatalf("update non-platform err = %v", err)
 	}
 }
@@ -217,7 +224,7 @@ func TestCreateProductListingRules(t *testing.T) {
 	cat := "c1"
 	repo.existing = &domain.Product{ID: "p1", CategoryID: &cat, IsPublic: true, ListingCode: "freelancer"}
 	empty := ""
-	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{CategoryID: &empty}, true); !errors.Is(err, ErrInvalidListing) {
+	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{CategoryID: &empty}, true, false); !errors.Is(err, ErrInvalidListing) {
 		t.Fatalf("hapus kategori produk publik err = %v", err)
 	}
 }
@@ -251,12 +258,12 @@ func TestCreateProductFeatureRules(t *testing.T) {
 	}
 	// Key dinonaktifkan setelah dipakai: menyimpan ulang dengan key itu ditolak.
 	feats := []repository.FeatureValue{{FeatureKey: "old", Value: yes}}
-	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Features: &feats}, true); !errors.Is(err, ErrInvalidFeature) {
+	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Features: &feats}, true, false); !errors.Is(err, ErrInvalidFeature) {
 		t.Fatalf("update dengan key nonaktif err = %v", err)
 	}
 	// Update tanpa menyentuh fitur tetap boleh.
 	name := "Baru"
-	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Name: &name}, true); err != nil {
+	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Name: &name}, true, false); err != nil {
 		t.Fatalf("update tanpa fitur: %v", err)
 	}
 }
@@ -319,4 +326,87 @@ func TestProductReadsFillLabels(t *testing.T) {
 	check("List", list[0].Features)
 	m, _ := svc.FindByIDs(context.Background(), scope(t), []string{"p1"})
 	check("FindByIDs", m["p1"].Features)
+}
+
+func TestCreate_Tenant_Features(t *testing.T) {
+	yes := json.RawMessage(`true`)
+	f := func(key string, v json.RawMessage) repository.FeatureValue {
+		return repository.FeatureValue{FeatureKey: key, Value: v}
+	}
+	many := make([]repository.FeatureValue, 31)
+	for i := range many {
+		many[i] = f("tcrm", yes)
+	}
+	cases := []struct {
+		name     string
+		canMng   bool
+		platform bool
+		feats    []repository.FeatureValue
+		want     error
+		wantCode string
+	}{
+		{"non-offerable", true, false, []repository.FeatureValue{f("crm", yes)}, ErrFeatureNotOfferable, ""},
+		{"di atas max", true, false, []repository.FeatureValue{f("tusr", json.RawMessage(`11`))}, ErrFeatureAboveMax, ""},
+		{"integer nol", true, false, []repository.FeatureValue{f("tusr", json.RawMessage(`0`))}, ErrInvalidFeature, ""},
+		{"boolean offerable", true, false, []repository.FeatureValue{f("tcrm", yes), f("tusr", json.RawMessage(`10`))}, nil, ""},
+		{"tanpa permission", false, false, []repository.FeatureValue{f("tcrm", yes)}, nil, "FORBIDDEN"},
+		{"31 fitur", true, false, many, ErrInvalidFeature, ""},
+		{"key duplikat", true, false, []repository.FeatureValue{f("tcrm", yes), f("tcrm", yes)}, ErrInvalidFeature, ""},
+		{"platform tidak dibatasi", false, true, []repository.FeatureValue{f("crm", yes), f("users", json.RawMessage(`999`))}, nil, ""},
+	}
+	for _, c := range cases {
+		repo := &fakeProducts{}
+		svc := NewProductService(repo, newFakeRegistry())
+		in := ProductInput{Name: "A", Unit: "pcs", BasePrice: "1", Platform: c.platform, CanManageEntitlements: c.canMng, Features: c.feats}
+		_, err := svc.Create(context.Background(), scope(t), in, "u")
+		switch {
+		case c.wantCode != "":
+			var ce *coreerrors.AppError
+			if !errors.As(err, &ce) || ce.Code != c.wantCode || ce.Status != http.StatusForbidden {
+				t.Errorf("%s: err = %v", c.name, err)
+			}
+		case !errors.Is(err, c.want) || (c.want == nil && err != nil):
+			t.Errorf("%s: err = %v, want %v", c.name, err, c.want)
+		}
+		if err != nil && len(repo.created) != 0 {
+			t.Errorf("%s: repo tidak boleh dipanggil", c.name)
+		}
+	}
+}
+
+func TestCreate_Tenant_ListingStillPlatformOnly(t *testing.T) {
+	svc := NewProductService(&fakeProducts{}, newFakeRegistry())
+	in := ProductInput{Name: "A", Unit: "pcs", BasePrice: "1", CanManageEntitlements: true, Listing: repository.ListingParams{IsPublic: true, ListingCode: "a"}}
+	if _, err := svc.Create(context.Background(), scope(t), in, "u"); !errors.Is(err, ErrPlatformOnly) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestUpdate_Tenant_Features(t *testing.T) {
+	svc := NewProductService(&fakeProducts{}, newFakeRegistry())
+	ctx := context.Background()
+	ok := []repository.FeatureValue{{FeatureKey: "tcrm", Value: json.RawMessage(`true`)}}
+	bad := []repository.FeatureValue{{FeatureKey: "crm", Value: json.RawMessage(`true`)}}
+	name := "Baru"
+	// tanpa fitur: tidak butuh permission
+	if _, err := svc.Update(ctx, scope(t), "p1", repository.UpdateProductParams{Name: &name}, false, false); err != nil {
+		t.Fatalf("update tanpa fitur: %v", err)
+	}
+	// kirim fitur tanpa permission -> 403
+	var ce *coreerrors.AppError
+	if _, err := svc.Update(ctx, scope(t), "p1", repository.UpdateProductParams{Features: &ok}, false, false); !errors.As(err, &ce) || ce.Code != "FORBIDDEN" {
+		t.Fatalf("tanpa permission err = %v", err)
+	}
+	// dengan permission, valid dan tidak valid
+	if _, err := svc.Update(ctx, scope(t), "p1", repository.UpdateProductParams{Features: &ok}, false, true); err != nil {
+		t.Fatalf("valid: %v", err)
+	}
+	if _, err := svc.Update(ctx, scope(t), "p1", repository.UpdateProductParams{Features: &bad}, false, true); !errors.Is(err, ErrFeatureNotOfferable) {
+		t.Fatalf("non-offerable err = %v", err)
+	}
+	// listing tetap platform-only
+	l := repository.ListingParams{IsPublic: true, ListingCode: "a"}
+	if _, err := svc.Update(ctx, scope(t), "p1", repository.UpdateProductParams{Listing: &l}, false, true); !errors.Is(err, ErrPlatformOnly) {
+		t.Fatalf("listing err = %v", err)
+	}
 }

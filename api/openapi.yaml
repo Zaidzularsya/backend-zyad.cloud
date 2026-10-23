@@ -6957,13 +6957,13 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/v1/app/catalog/features:
     get:
-      summary: List active product features (platform catalog)
+      summary: List active product features
       operationId: listCatalogFeatures
       tags:
       - Catalog
       security:
       - BearerAuth: []
-      description: 'Active entries of the feature registry, for the product form. Permission: `catalog_product.update`. Only platform organizations; others get 403 PLATFORM_ONLY.'
+      description: 'Active entries of the feature registry, for the product form. Permission: `catalog_product.update`. Platform organizations get every active feature. Other organizations additionally need `catalog_product.manage_entitlements` (403 FORBIDDEN otherwise) and get only `tenant_offerable` features, each integer feature with its `tenant_max`.'
       responses:
         '200':
           description: Success
@@ -6987,7 +6987,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: Forbidden (permission or PLATFORM_ONLY)
+          description: Forbidden (missing permission)
           content:
             application/json:
               schema:
@@ -12553,6 +12553,10 @@ components:
           type: string
           enum: [never, monthly, yearly, custom]
           description: Read-only registry metadata; `never` means a total (non-resetting) limit.
+        tenant_max:
+          type: integer
+          nullable: true
+          description: Upper bound a tenant may set for an integer feature. Only present in the list returned to non-platform organizations.
     CatalogProductFeatureInput:
       type: object
       required: [feature_key, value]
@@ -12622,6 +12626,7 @@ components:
         features:
           type: array
           maxItems: 30
+          description: 'Platform catalog is unrestricted by tenant caps. Non-platform organizations may send `features` only with permission `catalog_product.manage_entitlements` (otherwise 403 FORBIDDEN), limited to features marked `tenant_offerable` in the registry: boolean `true`/`false`, integer `1..tenant_max`; decimal/string features are rejected. Violations are 422 VALIDATION_ERROR (feature not offerable, value above `tenant_max`, invalid value).'
           items:
             $ref: '#/components/schemas/CatalogProductFeatureInput'
     CatalogProductUpdateRequest:
@@ -12668,7 +12673,7 @@ components:
           type: array
           maxItems: 30
           nullable: true
-          description: Omit/null leaves features unchanged; `[]` removes all. Platform catalog only.
+          description: 'Omit/null leaves features unchanged (no extra permission needed); `[]` removes all. Non-platform organizations may send `features` only with permission `catalog_product.manage_entitlements` (otherwise 403 FORBIDDEN), limited to features marked `tenant_offerable` in the registry: boolean `true`/`false`, integer `1..tenant_max`; decimal/string features are rejected. Violations are 422 VALIDATION_ERROR (feature not offerable, value above `tenant_max`, invalid value).'
           items:
             $ref: '#/components/schemas/CatalogProductFeatureInput'
     CatalogCategory:

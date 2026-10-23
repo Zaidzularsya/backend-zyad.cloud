@@ -15,7 +15,8 @@ import (
 func failCatalog(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, service.ErrInvalidProduct), errors.Is(err, service.ErrInvalidCategory),
-		errors.Is(err, service.ErrPlatformOnly), errors.Is(err, service.ErrInvalidListing), errors.Is(err, service.ErrInvalidFeature):
+		errors.Is(err, service.ErrPlatformOnly), errors.Is(err, service.ErrInvalidListing), errors.Is(err, service.ErrInvalidFeature),
+		errors.Is(err, service.ErrFeatureNotOfferable), errors.Is(err, service.ErrFeatureAboveMax):
 		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
 	case errors.Is(err, repository.ErrSKUExists):
 		corehttp.Fail(c, coreerrors.New("PRODUCT_SKU_EXISTS", "SKU sudah dipakai produk lain", http.StatusConflict))
