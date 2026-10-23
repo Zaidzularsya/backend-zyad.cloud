@@ -66,6 +66,9 @@ func (h *PublicListingHandler) TenantList(c *gin.Context) {
 		failCatalog(c, err)
 		return
 	}
+	// Respons bergantung pada host (dan X-Forwarded-Host bila dipercaya middleware):
+	// cache bersama wajib memisahkan per host agar katalog tenant A tak sampai ke B.
+	c.Header("Vary", "Host, X-Forwarded-Host")
 	c.Header("Cache-Control", "public, max-age=60")
 	corehttp.OK(c, "success", result)
 }

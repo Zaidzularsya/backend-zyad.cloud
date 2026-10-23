@@ -3826,7 +3826,7 @@ paths:
         tenant catalog rules (`needs_update`) are omitted. `checkout_enabled` is true only when the product
         is checkout-capable (recurring, prepaid, priced, with features) AND the tenant has the
         `receivable.enabled` and `receivable.online_payment` entitlements. No authentication;
-        `Cache-Control: public, max-age=60`.
+        `Cache-Control: public, max-age=60` with `Vary: Host, X-Forwarded-Host` (response depends on the host).
       operationId: listPublicTenantCatalog
       tags:
         - Public Product Catalog

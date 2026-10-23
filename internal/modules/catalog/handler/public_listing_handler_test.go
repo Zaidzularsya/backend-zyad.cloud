@@ -68,6 +68,21 @@ func listingRouter(t *testing.T, svc *fakeListingSvc) *gin.Engine {
 	return r
 }
 
+func varyOf(r http.Handler, host, path string) string {
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.Host = host
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w.Header().Get("Vary")
+}
+
+func TestTenantCatalogVaryOnHost(t *testing.T) {
+	v := varyOf(listingRouter(t, &fakeListingSvc{}), "a.example.com", "/public/tenant-catalog")
+	if !strings.Contains(v, "Host") || !strings.Contains(v, "X-Forwarded-Host") {
+		t.Fatalf("Vary = %q", v)
+	}
+}
+
 func getHost(r http.Handler, host, path string) (int, string) {
 	req := httptest.NewRequest(http.MethodGet, path, nil)
 	req.Host = host
