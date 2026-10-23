@@ -53,6 +53,11 @@ func FreePlanFeatures() []catalogdomain.ProductFeature {
 
 		boolean("receivable.enabled", true),
 		integer("receivable.max_invoices_per_month", 10),
+
+		// WhatsApp tetap ada di Free: produk FREE produksi sudah memakainya dan modulnya ditegakkan
+		// kode (gerbang rute /app/whatsapp dan pengiriman dokumen). Sengaja tanpa whatsapp.max_sessions
+		// di Free (produk FREE produksi tidak pernah membawanya).
+		boolean("whatsapp.enabled", true),
 	}
 	out := make([]catalogdomain.ProductFeature, len(entries))
 	for i, e := range entries {

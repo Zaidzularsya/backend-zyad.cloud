@@ -79,6 +79,14 @@ Jalankan dari `backend/` dengan `.env` environment target, mis. `go run ./cmd/ac
   dan halaman arsip sudah dihitung oleh `landing.max_pages`; halaman yang dihapus (soft delete) tidak punya
   jalur restore.
 
+## Catatan WhatsApp
+
+`whatsapp.enabled` dipertahankan di paket Free (keputusan pemilik produk, 23 Okt 2026): produk FREE produksi
+sudah memakainya dan modulnya ditegakkan kode (gerbang rute `/app/whatsapp` dan pengiriman dokumen).
+`FreePlanFeatures()` tidak membawa `whatsapp.max_sessions`, jadi sesi WhatsApp tidak dibatasi paket Free. Dry-run
+produksi sebelum perubahan ini menunjukkan `whatsapp.enabled true -> (none)`; setelah perubahan, baris itu tidak
+muncul lagi.
+
 ## Catatan storage
 
 Modul asset menegakkan `storage.max_bytes` (satuan byte); `media.max_storage_mb` tidak ditegakkan di kode mana pun.

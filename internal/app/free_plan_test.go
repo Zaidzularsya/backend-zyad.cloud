@@ -31,6 +31,9 @@ func TestFreePlanFeaturesMatchSpecTable(t *testing.T) {
 		"crm.max_leads": "50", "crm.max_contacts": "100", "crm.max_companies": "50", "crm.max_deals": "25", "crm.max_pipelines": "1",
 		"crm.max_quotations_per_month": "10", "crm.max_sales_orders_per_month": "10",
 		"receivable.enabled": "true", "receivable.max_invoices_per_month": "10",
+		// WhatsApp dipertahankan di Free (keputusan pemilik produk 23 Okt 2026: produk FREE produksi
+		// sudah memakainya dan modulnya ditegakkan kode). Tanpa kuota sesi di Free.
+		"whatsapp.enabled": "true",
 	}
 	got := freePlanByKey(t)
 	for key, value := range want {
