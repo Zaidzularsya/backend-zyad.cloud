@@ -55,9 +55,10 @@ func (i taInvoices) InvoiceStatus(context.Context, coretenant.Scope, string) (st
 }
 
 type taWriter struct {
-	grants  [][]domain.FeatureSnapshot
-	orgs    []string
-	revokes []string
+	grants   [][]domain.FeatureSnapshot
+	orgs     []string
+	revokes  []string
+	restores []bool
 }
 
 func (w *taWriter) GrantContract(_ context.Context, org, _, _ string, f []domain.FeatureSnapshot, _ string) error {
@@ -65,8 +66,9 @@ func (w *taWriter) GrantContract(_ context.Context, org, _, _ string, f []domain
 	w.grants = append(w.grants, f)
 	return nil
 }
-func (w *taWriter) RevokeContract(_ context.Context, org, contractID, _ string, _ string) error {
+func (w *taWriter) RevokeContract(_ context.Context, org, contractID, _ string, _ string, restoreDefault bool) error {
 	w.revokes = append(w.revokes, org+"/"+contractID)
+	w.restores = append(w.restores, restoreDefault)
 	return nil
 }
 
@@ -258,5 +260,66 @@ func TestWorkspaceUnlinkRevokesOnly(t *testing.T) {
 	}
 	if !reflect.DeepEqual(f.writer.revokes, []string{"ws-old/ctr-1"}) || len(f.writer.grants) != 0 {
 		t.Fatalf("revokes=%v grants=%v", f.writer.revokes, f.writer.grants)
+	}
+}
+
+type taPlatform struct{ id string }
+
+func (p taPlatform) PlatformScope(context.Context) (coretenant.Scope, error) {
+	return tcScope(p.id), nil
+}
+
+func TestSyncContractEndedRestoresDefaultOnlyInPlatformScope(t *testing.T) {
+	for name, tc := range map[string]struct {
+		scope   string
+		restore bool
+	}{
+		"platform scope": {tcPlatform, true},
+		"tenant scope":   {tcTenantA, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newTenantAccessFixture([]ContractAccessItem{{Prepaid: false, Features: []domain.FeatureSnapshot{feature("user.max", "5")}}}, true)
+			f.access.WithPlatformScope(taPlatform{id: tcPlatform})
+			f.contract.info.Status = "ended"
+			if err := f.access.SyncContract(context.Background(), tcScope(tc.scope), "ctr-1", SyncContractEnded); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(f.writer.revokes, []string{"ws-1/ctr-1"}) || !reflect.DeepEqual(f.writer.restores, []bool{tc.restore}) {
+				t.Fatalf("revokes=%v restores=%v", f.writer.revokes, f.writer.restores)
+			}
+		})
+	}
+}
+
+func TestWorkspaceUnlinkRestoresDefaultOnlyInPlatformScope(t *testing.T) {
+	for name, tc := range map[string]struct {
+		scope   string
+		restore bool
+	}{
+		"platform scope": {tcPlatform, true},
+		"tenant scope":   {tcTenantA, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newTenantAccessFixture([]ContractAccessItem{{Prepaid: false, Features: []domain.FeatureSnapshot{feature("user.max", "5")}}}, false)
+			f.access.WithPlatformScope(taPlatform{id: tcPlatform})
+			f.access.orders = taOrders{so: domain.SalesOrder{ID: "so-1", CompanyID: strPtr("co-1"), ContractID: "ctr-1"}}
+			if err := f.access.OnWorkspaceLinkChanged(context.Background(), tcScope(tc.scope), "co-1", strPtr("ws-old"), nil); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(f.writer.restores, []bool{tc.restore}) {
+				t.Fatalf("restores=%v", f.writer.restores)
+			}
+		})
+	}
+}
+
+func TestSyncContractEndedWithoutPlatformProviderKeepsLegacyRestore(t *testing.T) {
+	f := newTenantAccessFixture([]ContractAccessItem{{Prepaid: false, Features: []domain.FeatureSnapshot{feature("user.max", "5")}}}, true)
+	f.contract.info.Status = "ended"
+	if err := f.access.SyncContract(context.Background(), coretenant.Scope{}, "ctr-1", SyncContractEnded); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(f.writer.restores, []bool{true}) {
+		t.Fatalf("restores=%v", f.writer.restores)
 	}
 }

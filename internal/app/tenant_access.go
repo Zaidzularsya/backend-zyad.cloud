@@ -36,7 +36,7 @@ func newCRMTenantAccess(
 	return crmservice.NewTenantAccess(
 		crmrepo.NewSalesOrderRepository(db), crmrepo.NewCompanyRepository(db),
 		reader, crmReceivableReader{invoices: invoices, contracts: contracts}, writer,
-	)
+	).WithPlatformScope(newPlatformScopeResolver(organizationrepo.NewOrganizationRepository(db)))
 }
 
 // defaultAccessGranter mengembalikan paket gratis ke workspace (nil = tidak mengembalikan).
@@ -93,11 +93,13 @@ func (w tenantEntitlementWriter) GrantContract(
 	return w.svc.GrantContract(ctx, tenantOrgID, contractID, contractNumber, grants, actorUserID)
 }
 
+// RevokeContract mengembalikan paket gratis hanya bila restoreDefault (contract CRM platform); workspace
+// pelanggan tenant tidak pernah diberi paket Free platform.
 func (w tenantEntitlementWriter) RevokeContract(
-	ctx context.Context, tenantOrgID, contractID, contractNumber, actorUserID string,
+	ctx context.Context, tenantOrgID, contractID, contractNumber, actorUserID string, restoreDefault bool,
 ) error {
 	remaining, err := w.svc.RevokeContract(ctx, tenantOrgID, contractID, contractNumber, actorUserID)
-	if err != nil || remaining || w.defaults == nil {
+	if err != nil || remaining || !restoreDefault || w.defaults == nil {
 		return err
 	}
 	// Gagal mengembalikan paket gratis tidak menggagalkan pencabutan: dicatat, bisa diulang lewat sinkronisasi berikutnya.

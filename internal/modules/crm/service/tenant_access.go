@@ -48,8 +48,10 @@ type ContractAccessReader interface {
 // organization.ContractEntitlementService). Semua metode idempoten.
 type TenantEntitlementWriter interface {
 	GrantContract(ctx context.Context, tenantOrgID, contractID, contractNumber string, features []domain.FeatureSnapshot, actorUserID string) error
-	// RevokeContract mencabut fitur contract; bila workspace tidak punya contract lain, paket default dikembalikan.
-	RevokeContract(ctx context.Context, tenantOrgID, contractID, contractNumber string, actorUserID string) error
+	// RevokeContract mencabut fitur contract. Bila restoreDefault dan workspace tidak punya contract lain,
+	// paket default (Free platform) dikembalikan. restoreDefault hanya true untuk contract CRM platform:
+	// workspace pelanggan tenant tidak pernah menerima paket Free platform.
+	RevokeContract(ctx context.Context, tenantOrgID, contractID, contractNumber string, actorUserID string, restoreDefault bool) error
 }
 
 // ContractSyncer dipanggil listener setiap kali status bayar/contract berubah.
@@ -73,6 +75,26 @@ type TenantAccess struct {
 	actor    func(ctx context.Context) (string, error)
 
 	subscription SubscriptionReader // nil = ringkasan langganan nonaktif
+
+	platforms PlatformScopeProvider // nil = perilaku lama: setiap pencabutan boleh mengembalikan paket default
+}
+
+// WithPlatformScope membuat pengembalian paket default hanya berlaku untuk contract di CRM org platform.
+func (a *TenantAccess) WithPlatformScope(p PlatformScopeProvider) *TenantAccess {
+	a.platforms = p
+	return a
+}
+
+// restoreDefaultFor: paket default dikembalikan hanya bila contract berasal dari CRM org platform.
+func (a *TenantAccess) restoreDefaultFor(ctx context.Context, scope coretenant.Scope) (bool, error) {
+	if a.platforms == nil {
+		return true, nil
+	}
+	ps, err := a.platforms.PlatformScope(ctx)
+	if err != nil {
+		return false, fmt.Errorf("resolve platform scope: %w", err)
+	}
+	return ps.OrganizationID() == scope.OrganizationID(), nil
 }
 
 var _ ContractSyncer = (*TenantAccess)(nil)
@@ -118,7 +140,11 @@ func (a *TenantAccess) SyncContract(ctx context.Context, scope coretenant.Scope,
 	slog.DebugContext(ctx, "tenant access sync", "contract_id", contractID, "reason", string(reason), "tenant_organization_id", tenantOrgID)
 	switch receivabledomain.ContractStatus(info.Status) {
 	case receivabledomain.ContractEnded, receivabledomain.ContractCancelled:
-		return a.writer.RevokeContract(ctx, tenantOrgID, info.ID, info.Number, "")
+		restore, err := a.restoreDefaultFor(ctx, scope)
+		if err != nil {
+			return err
+		}
+		return a.writer.RevokeContract(ctx, tenantOrgID, info.ID, info.Number, "", restore)
 	}
 
 	paid, err := a.prepaidSettled(ctx, scope, info, so)
@@ -215,9 +241,13 @@ var _ WorkspaceLinkHook = (*TenantAccess)(nil)
 
 // OnWorkspaceLinkChanged memindahkan akses saat company ditautkan, diganti, atau dilepas dari workspace:
 // contract company dicabut dari workspace lama (yang lalu kembali ke paket default bila tidak punya contract
-// lain) dan diberikan ke workspace baru sesuai status bayarnya.
+// lain, hanya untuk scope platform) dan diberikan ke workspace baru sesuai status bayarnya.
 func (a *TenantAccess) OnWorkspaceLinkChanged(ctx context.Context, scope coretenant.Scope, companyID string, oldTenantOrgID, newTenantOrgID *string) error {
 	const pageSize = 200
+	restore, err := a.restoreDefaultFor(ctx, scope)
+	if err != nil {
+		return err
+	}
 	var errs []error
 	for offset := 0; ; offset += pageSize {
 		orders, total, err := a.orders.List(ctx, scope, repository.SalesOrderListFilter{CompanyID: companyID, Limit: pageSize, Offset: offset})
@@ -232,7 +262,7 @@ func (a *TenantAccess) OnWorkspaceLinkChanged(ctx context.Context, scope coreten
 				info, err := a.contracts.ContractAccess(ctx, scope, so.ContractID)
 				if err != nil {
 					errs = append(errs, fmt.Errorf("read contract %s: %w", so.ContractID, err))
-				} else if err := a.writer.RevokeContract(ctx, *oldTenantOrgID, info.ID, info.Number, ""); err != nil {
+				} else if err := a.writer.RevokeContract(ctx, *oldTenantOrgID, info.ID, info.Number, "", restore); err != nil {
 					errs = append(errs, fmt.Errorf("revoke contract %s: %w", so.ContractID, err))
 				}
 			}
