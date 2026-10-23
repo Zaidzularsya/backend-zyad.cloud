@@ -288,7 +288,7 @@ func newSS(t *testing.T) (SelfServeService, *ssWorld) {
 	svc := NewSelfServeService(SelfServeDeps{
 		Leads: w, Companies: w, Contacts: w, Deals: w, Pipelines: w, Quotations: quotationsAdapter{w}, Orders: w, Invoices: w,
 		Products: w, Buyers: w, Subscriptions: w, Locker: w,
-	}, SelfServeConfig{BotUserID: "bot", DealOwnerUserID: "owner", PipelineID: "pipe"},
+	}, StaticSelfServeConfig(SelfServeConfig{BotUserID: "bot", DealOwnerUserID: "owner", PipelineID: "pipe"}),
 		func() time.Time { return time.Date(2026, 10, 7, 3, 0, 0, 0, time.UTC) }) // 10:00 WIB
 	return svc, w
 }
@@ -543,5 +543,59 @@ func TestCheckoutProductDeactivatedBetweenClicks(t *testing.T) {
 	}
 	if w.count("so.cancel") != 0 || w.count("deal.lost") != 0 {
 		t.Fatalf("old deal must stay: %v", w.calls)
+	}
+}
+
+func newSSWithResolver(t *testing.T, r SelfServeConfigResolver) (SelfServeService, *ssWorld) {
+	t.Helper()
+	w := &ssWorld{failOnce: map[string]bool{}, products: map[string]catalogdomain.Product{"p-free": newProduct("p-free", "FREELANCER-M")}}
+	svc := NewSelfServeService(SelfServeDeps{
+		Leads: w, Companies: w, Contacts: w, Deals: w, Pipelines: w, Quotations: quotationsAdapter{w}, Orders: w, Invoices: w,
+		Products: w, Buyers: w, Subscriptions: w, Locker: w,
+	}, r, func() time.Time { return time.Date(2026, 10, 7, 3, 0, 0, 0, time.UTC) })
+	return svc, w
+}
+
+type scopedResolver map[string]SelfServeConfig
+
+func (m scopedResolver) Resolve(_ context.Context, s coretenant.Scope) (SelfServeConfig, error) {
+	cfg, ok := m[s.OrganizationID()]
+	if !ok {
+		return SelfServeConfig{}, ErrSelfServeNotConfigured
+	}
+	return cfg, nil
+}
+
+func TestSelfServe_TenantScope_UsesTenantOwnerAndPipeline(t *testing.T) {
+	tenant := validTestScope(t, "tenant-1")
+	svc, w := newSSWithResolver(t, scopedResolver{"tenant-1": {BotUserID: "t-owner", DealOwnerUserID: "t-owner", PipelineID: "t-pipe"}})
+	if _, err := svc.Checkout(context.Background(), tenant, ssReq); err != nil {
+		t.Fatal(err)
+	}
+	if w.lastLead.OwnerUserID != "t-owner" || w.lastLead.CreatedBy != "t-owner" ||
+		w.lastConvert.OwnerUserID != "t-owner" || w.lastConvert.Deal.OwnerUserID != "t-owner" || w.lastConvert.Deal.PipelineID != "t-pipe" {
+		t.Fatalf("lead=%+v convert=%+v", w.lastLead, w.lastConvert)
+	}
+	if w.lastQuote.CreatedBy != "t-owner" {
+		t.Fatalf("quote creator = %q", w.lastQuote.CreatedBy)
+	}
+}
+
+func TestSelfServe_Platform_Unchanged(t *testing.T) {
+	platform := validTestScope(t, "platform")
+	svc, w := newSSWithResolver(t, StaticSelfServeConfig(SelfServeConfig{BotUserID: "bot", DealOwnerUserID: "owner", PipelineID: "pipe"}))
+	if _, err := svc.Checkout(context.Background(), platform, ssReq); err != nil {
+		t.Fatal(err)
+	}
+	if w.lastLead.OwnerUserID != "owner" || w.lastLead.CreatedBy != "bot" || w.lastConvert.Deal.PipelineID != "pipe" {
+		t.Fatalf("lead=%+v convert=%+v", w.lastLead, w.lastConvert)
+	}
+	// konfigurasi tak tersedia -> ErrSelfServeNotConfigured (handler memetakan ke 503), tanpa menyentuh CRM.
+	svc, w = newSSWithResolver(t, scopedResolver{})
+	if _, err := svc.Checkout(context.Background(), platform, ssReq); !errors.Is(err, ErrSelfServeNotConfigured) {
+		t.Fatalf("err = %v, want ErrSelfServeNotConfigured", err)
+	}
+	if len(w.calls) != 0 {
+		t.Fatalf("calls = %v, want none", w.calls)
 	}
 }

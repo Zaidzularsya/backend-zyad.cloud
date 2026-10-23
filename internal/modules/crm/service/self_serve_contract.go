@@ -48,6 +48,12 @@ type Locker interface {
 
 type SelfServeConfig struct{ BotUserID, DealOwnerUserID, PipelineID string }
 
+// SelfServeConfigResolver menentukan bot, pemilik deal, dan pipeline untuk satu scope CRM.
+// Gagal dengan ErrSelfServeNotConfigured (atau galat lain) bila scope itu belum siap menerima checkout.
+type SelfServeConfigResolver interface {
+	Resolve(ctx context.Context, scope coretenant.Scope) (SelfServeConfig, error)
+}
+
 // Subset service/repository CRM yang dipakai orkestrator (memudahkan fake di test).
 type SelfServeLeads interface {
 	Create(context.Context, coretenant.Scope, repository.CreateLeadParams) (domain.Lead, error)

@@ -175,6 +175,29 @@ func (s *companyService) SetWorkspaceLink(ctx context.Context, scope coretenant.
 	return updated, nil
 }
 
+func (s *companyService) LinkWorkspaceBySystem(ctx context.Context, scope coretenant.Scope, companyID, workspaceOrgID string) error {
+	workspaceOrgID = strings.TrimSpace(workspaceOrgID)
+	if workspaceOrgID == "" {
+		return coreerrors.New("WORKSPACE_NOT_FOUND", "workspace is required", http.StatusUnprocessableEntity)
+	}
+	if workspaceOrgID == scope.OrganizationID() {
+		return coreerrors.New("WORKSPACE_SELF_LINK", "a company cannot be linked to its own organization", http.StatusUnprocessableEntity)
+	}
+	current, err := s.repo.FindByID(ctx, scope, companyID)
+	if err != nil {
+		return crmmodule.MapNotFound(err, "COMPANY_NOT_FOUND", "company not found or already deleted")
+	}
+	if current.TenantOrganizationID != nil && *current.TenantOrganizationID != "" {
+		if *current.TenantOrganizationID == workspaceOrgID {
+			return nil // idempoten
+		}
+		return coreerrors.New("WORKSPACE_ALREADY_LINKED", "company is already linked to another workspace", http.StatusConflict)
+	}
+	// Validasi customer, penanganan konflik unique index, dan hook sinkronisasi memakai jalur yang sama dengan tautan manual.
+	_, err = s.SetWorkspaceLink(ctx, scope, companyID, &workspaceOrgID, "")
+	return err
+}
+
 func nilIfEmpty(v string) *string {
 	if v == "" {
 		return nil

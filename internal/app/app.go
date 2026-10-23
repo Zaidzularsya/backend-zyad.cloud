@@ -597,21 +597,22 @@ func New(ctx context.Context) (*App, error) {
 	// Checkout self-serve (R4-S2): bot/pipeline di-resolve lazily saat request pertama sehingga seeder
 	// boleh dijalankan setelah API hidup.
 	selfServePlatformScopes := newPlatformScopeResolver(organizationrepo.NewOrganizationRepository(db))
-	selfServeSvc := &selfServeResolver{
-		db: db, cfg: selfServeRuntimeConfig{BotEmail: cfg.SelfServe.BotEmail, DealOwnerEmail: cfg.SelfServe.DealOwnerEmail},
-		pipeline: crmPipelineRepo,
-		build: func(sc crmservice.SelfServeConfig) crmservice.SelfServeService {
-			return crmservice.NewSelfServeService(crmservice.SelfServeDeps{
-				Leads: crmLeadSvc, Companies: crmCompanyRepo, Contacts: crmContactRepo,
-				Deals:     selfServeDeals{repo: crmDealRepo, svc: crmDealSvc},
-				Pipelines: crmPipelineRepo, Quotations: crmQuotationSvc, Orders: crmSalesOrderSvc,
-				Invoices: receivableModule.Invoices, Products: catalogProductService,
-				Buyers:        selfServeBuyers{users: userRepo, orgs: organizationrepo.NewOrganizationRepository(db)},
-				Subscriptions: selfServeSubscriptions{orders: crmSalesOrderRepo, contracts: crmReceivableDocs, products: catalogProductService},
-				Locker:        crmrepo.NewAdvisoryLocker(db),
-			}, sc, time.Now)
+	selfServeSvc := crmservice.NewSelfServeService(crmservice.SelfServeDeps{
+		Leads: crmLeadSvc, Companies: crmCompanyRepo, Contacts: crmContactRepo,
+		Deals:     selfServeDeals{repo: crmDealRepo, svc: crmDealSvc},
+		Pipelines: crmPipelineRepo, Quotations: crmQuotationSvc, Orders: crmSalesOrderSvc,
+		Invoices: receivableModule.Invoices, Products: catalogProductService,
+		Buyers:        selfServeBuyers{users: userRepo, orgs: organizationrepo.NewOrganizationRepository(db)},
+		Subscriptions: selfServeSubscriptions{orders: crmSalesOrderRepo, contracts: crmReceivableDocs, products: catalogProductService},
+		Locker:        crmrepo.NewAdvisoryLocker(db),
+	}, crmservice.NewScopedSelfServeResolver(
+		selfServePlatformScopes,
+		&selfServeResolver{
+			db: db, cfg: selfServeRuntimeConfig{BotEmail: cfg.SelfServe.BotEmail, DealOwnerEmail: cfg.SelfServe.DealOwnerEmail},
+			pipeline: crmPipelineRepo,
 		},
-	}
+		crmservice.NewTenantSelfServeResolver(workspaceOwnerRepo{db: db}, crmPipelineRepo),
+	), time.Now)
 	crmSelfServeHandler := crmhandler.NewSelfServeHandler(selfServeSvc, selfServePlatformScopes, permService).
 		WithSubscription(withSubscriptionView(crmTenantAccess, cfg, db, receivableModule.Invoices, receivableModule.Contracts, catalogProductService), cfg.SelfServe.GraceDays)
 

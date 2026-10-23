@@ -26,15 +26,15 @@ const (
 
 type selfServeService struct {
 	deps SelfServeDeps
-	cfg  SelfServeConfig
+	cfgs SelfServeConfigResolver
 	now  func() time.Time
 }
 
-func NewSelfServeService(deps SelfServeDeps, cfg SelfServeConfig, now func() time.Time) SelfServeService {
+func NewSelfServeService(deps SelfServeDeps, cfgs SelfServeConfigResolver, now func() time.Time) SelfServeService {
 	if now == nil {
 		now = time.Now
 	}
-	return &selfServeService{deps: deps, cfg: cfg, now: now}
+	return &selfServeService{deps: deps, cfgs: cfgs, now: now}
 }
 
 func stepErr(step string, err error) error {
@@ -46,7 +46,8 @@ func stepErr(step string, err error) error {
 
 // chain adalah konteks satu pemanggilan Checkout.
 type chain struct {
-	platform coretenant.Scope
+	platform coretenant.Scope // scope CRM tempat rantai berjalan (platform, atau tenant untuk checkout tenant)
+	cfg      SelfServeConfig  // hasil resolver untuk scope ini
 	req      SelfServeCheckoutRequest
 	product  *catalogdomain.Product // nil bila tidak ada di katalog
 	stage0   string                 // "Checkout dimulai"
@@ -54,6 +55,11 @@ type chain struct {
 }
 
 func (s *selfServeService) Checkout(ctx context.Context, platform coretenant.Scope, req SelfServeCheckoutRequest) (SelfServeCheckoutResult, error) {
+	cfg, err := s.cfgs.Resolve(ctx, platform)
+	if err != nil {
+		slog.ErrorContext(ctx, "self-serve is not configured", "organization_id", platform.OrganizationID(), "error", err)
+		return SelfServeCheckoutResult{}, ErrSelfServeNotConfigured
+	}
 	unlock, ok, err := s.deps.Locker.TryLock(ctx, "self_serve:"+req.TenantOrganizationID)
 	if err != nil {
 		return SelfServeCheckoutResult{}, err
@@ -63,7 +69,7 @@ func (s *selfServeService) Checkout(ctx context.Context, platform coretenant.Sco
 	}
 	defer unlock()
 
-	c := &chain{platform: platform, req: req}
+	c := &chain{platform: platform, cfg: cfg, req: req}
 	products, err := s.deps.Products.FindByIDs(ctx, platform, []string{req.ProductID})
 	if err != nil {
 		return SelfServeCheckoutResult{}, err
@@ -102,7 +108,7 @@ func (s *selfServeService) Checkout(ctx context.Context, platform coretenant.Sco
 
 // resolveStages mengambil stage pertama dan kedua pipeline lewat posisi (nama bisa diganti admin).
 func (s *selfServeService) resolveStages(ctx context.Context, c *chain) error {
-	p, err := s.deps.Pipelines.FindByID(ctx, c.platform, s.cfg.PipelineID)
+	p, err := s.deps.Pipelines.FindByID(ctx, c.platform, c.cfg.PipelineID)
 	if err != nil {
 		return err
 	}
@@ -123,7 +129,7 @@ func (s *selfServeService) resolveStages(ctx context.Context, c *chain) error {
 // resumeOrReplaceDeal memeriksa deal open company di pipeline Self-Serve. Mengembalikan deal yang
 // dilanjutkan (dan quote-nya bila ada), atau nil bila rantai baru harus dibuat (pilihan diganti).
 func (s *selfServeService) resumeOrReplaceDeal(ctx context.Context, c *chain, company domain.Company) (*domain.Deal, *domain.Quotation, error) {
-	deals, err := s.deps.Deals.ListOpenByCompanyAndPipeline(ctx, c.platform, company.ID, s.cfg.PipelineID)
+	deals, err := s.deps.Deals.ListOpenByCompanyAndPipeline(ctx, c.platform, company.ID, c.cfg.PipelineID)
 	if err != nil {
 		return nil, nil, stepErr(SelfServeStepDeal, err)
 	}
@@ -165,14 +171,14 @@ func (s *selfServeService) resumeOrReplaceDeal(ctx context.Context, c *chain, co
 		if so.QuotationID != quote.ID {
 			continue
 		}
-		if _, err := s.deps.Orders.CancelUnpaid(ctx, c.platform, so.ID, reason, s.cfg.BotUserID); err != nil {
+		if _, err := s.deps.Orders.CancelUnpaid(ctx, c.platform, so.ID, reason, c.cfg.BotUserID); err != nil {
 			if errors.Is(err, ErrSalesOrderPaid) {
 				return nil, nil, ErrSelfServeAlreadySubscribed
 			}
 			return nil, nil, stepErr(SelfServeStepSalesOrder, err)
 		}
 	}
-	if _, err := s.deps.Deals.CloseLost(ctx, c.platform, deal.ID, reason, s.cfg.BotUserID); err != nil {
+	if _, err := s.deps.Deals.CloseLost(ctx, c.platform, deal.ID, reason, c.cfg.BotUserID); err != nil {
 		return nil, nil, stepErr(SelfServeStepDeal, err)
 	}
 	return nil, nil, nil
@@ -185,7 +191,7 @@ func (s *selfServeService) alignDeal(ctx context.Context, c *chain, deal domain.
 	if deal.Title == title && deal.Value == value {
 		return deal, nil
 	}
-	updated, err := s.deps.Deals.Update(ctx, c.platform, deal.ID, repository.UpdateDealParams{Title: &title, Value: &value, UpdatedBy: s.cfg.BotUserID})
+	updated, err := s.deps.Deals.Update(ctx, c.platform, deal.ID, repository.UpdateDealParams{Title: &title, Value: &value, UpdatedBy: c.cfg.BotUserID})
 	if err != nil {
 		return domain.Deal{}, stepErr(SelfServeStepDeal, err)
 	}
@@ -233,22 +239,22 @@ func (s *selfServeService) startChain(ctx context.Context, c *chain, company dom
 
 	lead, err := s.deps.Leads.Create(ctx, c.platform, repository.CreateLeadParams{
 		ContactName: buyerName, CompanyName: workspace, Email: buyerEmail, Phone: buyerPhone,
-		Source: selfServeLeadSource, OwnerUserID: s.cfg.DealOwnerUserID, CreatedBy: s.cfg.BotUserID, SkipPlaybook: true,
+		Source: selfServeLeadSource, OwnerUserID: c.cfg.DealOwnerUserID, CreatedBy: c.cfg.BotUserID, SkipPlaybook: true,
 	})
 	if err != nil {
 		return nil, stepErr(SelfServeStepLead, err)
 	}
 	result, err := s.deps.Leads.Convert(ctx, c.platform, lead.ID, ConvertLeadParams{
-		Company: companyInput, Contact: contactInput, OwnerUserID: s.cfg.DealOwnerUserID, ConvertedBy: s.cfg.BotUserID,
+		Company: companyInput, Contact: contactInput, OwnerUserID: c.cfg.DealOwnerUserID, ConvertedBy: c.cfg.BotUserID,
 		Deal: &ConvertDealInput{
-			PipelineID: s.cfg.PipelineID, StageID: c.stage0, Title: dealTitle(workspace, *c.product),
+			PipelineID: c.cfg.PipelineID, StageID: c.stage0, Title: dealTitle(workspace, *c.product),
 			Value: c.product.BasePrice, ExpectedCloseDate: businesstime.DayOf(s.now()).Format("2006-01-02"),
-			OwnerUserID: s.cfg.DealOwnerUserID,
+			OwnerUserID: c.cfg.DealOwnerUserID,
 		},
 	})
 	if err != nil {
 		// Lead yatim tidak boleh menumpuk di CRM; best effort.
-		if delErr := s.deps.Leads.Delete(ctx, c.platform, lead.ID, s.cfg.BotUserID); delErr != nil {
+		if delErr := s.deps.Leads.Delete(ctx, c.platform, lead.ID, c.cfg.BotUserID); delErr != nil {
 			slog.WarnContext(ctx, "self-serve: cleanup lead failed", "lead_id", lead.ID, "error", delErr)
 		}
 		return nil, stepErr(SelfServeStepDeal, err)
@@ -278,7 +284,7 @@ func (s *selfServeService) findCompanyContact(ctx context.Context, scope coreten
 
 // finish menyelesaikan quote → SO → invoice dan mengembalikan link pembayaran.
 func (s *selfServeService) finish(ctx context.Context, c *chain, deal domain.Deal, quote *domain.Quotation) (SelfServeCheckoutResult, error) {
-	bot := s.cfg.BotUserID
+	bot := c.cfg.BotUserID
 	if quote == nil {
 		found, err := s.deps.Quotations.FindSelfServeByDeal(ctx, c.platform, deal.ID)
 		switch {
@@ -342,7 +348,7 @@ func (s *selfServeService) createQuote(ctx context.Context, c *chain, deal domai
 	return s.deps.Quotations.Create(ctx, c.platform, CreateQuotationInput{
 		DealID: deal.ID, ValidUntil: &validUntil, Notes: selfServeQuoteNote, Channel: domain.QuotationChannelSelfServe,
 		Items:     []QuotationLineInput{{ProductID: c.req.ProductID, Quantity: "1"}},
-		CreatedBy: s.cfg.BotUserID,
+		CreatedBy: c.cfg.BotUserID,
 	})
 }
 
@@ -361,7 +367,7 @@ func (s *selfServeService) findOrder(ctx context.Context, c *chain, dealID strin
 
 // confirmOrder membawa SO ke confirmed + invoice awal terbit, sesuai status SO saat ini.
 func (s *selfServeService) confirmOrder(ctx context.Context, c *chain, so domain.SalesOrder) (domain.SalesOrder, error) {
-	bot := s.cfg.BotUserID
+	bot := c.cfg.BotUserID
 	switch so.Status {
 	case domain.SalesOrderDraft:
 		name, email, phone, err := s.deps.Buyers.Buyer(ctx, c.req.BuyerUserID)
