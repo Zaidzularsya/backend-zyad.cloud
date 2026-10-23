@@ -500,3 +500,21 @@ func TestProductReadsNeverWrite(t *testing.T) {
 		t.Fatalf("jalur baca menulis: created=%d updated=%d", len(repo.created), len(repo.updated))
 	}
 }
+
+func TestProductsNeedingUpdate_IgnoresCtx(t *testing.T) {
+	reg := &countingRegistry{fakeRegistry: newFakeRegistry()}
+	over := domain.Product{ID: "over", Features: []domain.ProductFeature{{FeatureKey: "tusr", Value: json.RawMessage(`50`)}}}
+	ok := domain.Product{ID: "ok", Features: []domain.ProductFeature{{FeatureKey: "tusr", Value: json.RawMessage(`5`)}}}
+	svc := NewProductService(&fakeProducts{}, reg)
+	// ctx polos tanpa tenant context: Get/List fail-open, helper tidak.
+	got, err := svc.ProductsNeedingUpdate(context.Background(), []domain.Product{over, ok})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got["over"] || got["ok"] || len(got) != 1 {
+		t.Fatalf("got %v", got)
+	}
+	if reg.calls != 1 {
+		t.Errorf("FindByKeys calls = %d, want 1", reg.calls)
+	}
+}

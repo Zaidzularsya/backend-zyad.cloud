@@ -57,6 +57,9 @@ type ProductService interface {
 	// FindByIDs memenuhi interface katalog CRM; label fitur terisi.
 	FindByIDs(ctx context.Context, scope coretenant.Scope, ids []string) (map[string]domain.Product, error)
 	ListFeatures(ctx context.Context) ([]domain.FeatureDef, error)
+	// ProductsNeedingUpdate: gate listing/checkout; unconditional (ctx-independent), caller
+	// guarantees non-platform products. Jangan andalkan Product.NeedsUpdate dari Get/List.
+	ProductsNeedingUpdate(ctx context.Context, products []domain.Product) (map[string]bool, error)
 }
 
 type CategoryService interface {

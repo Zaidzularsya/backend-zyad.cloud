@@ -91,7 +91,9 @@ func (s *productService) Create(ctx context.Context, scope coretenant.Scope, in 
 }
 
 // isTenantOrg: true bila ctx membawa org non-platform. Tanpa tenant context (mis.
-// pemanggil internal) produk tidak ditandai, supaya tidak ada false alarm.
+// pemanggil internal) produk tidak ditandai (fail-open), sehingga Product.NeedsUpdate
+// hanya andal di jalur handler. Gate listing/checkout WAJIB memakai
+// ProductsNeedingUpdate / ExcludeNeedsUpdate, bukan field itu.
 func isTenantOrg(ctx context.Context) bool {
 	tc, err := coretenant.RequireContext(ctx)
 	return err == nil && tc.OrganizationType() != coretenant.OrganizationTypePlatform
@@ -145,6 +147,23 @@ func (s *productService) FindByIDs(ctx context.Context, scope coretenant.Scope, 
 		m[p.ID] = p
 	}
 	return m, nil
+}
+
+// ProductsNeedingUpdate mengevaluasi domain.NeedsUpdate tanpa syarat (tidak bergantung
+// ctx) dengan satu FindByKeys. Pemanggil menjamin produk-produk ini non-platform.
+// Hasil: id produk -> true bila perlu diperbarui.
+func (s *productService) ProductsNeedingUpdate(ctx context.Context, products []domain.Product) (map[string]bool, error) {
+	cp := append([]domain.Product(nil), products...)
+	if err := fillFeatureInfo(ctx, s.features, cp, true); err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(cp))
+	for _, p := range cp {
+		if p.NeedsUpdate {
+			out[p.ID] = true
+		}
+	}
+	return out, nil
 }
 
 func (s *productService) ListFeatures(ctx context.Context) ([]domain.FeatureDef, error) {

@@ -94,6 +94,10 @@ func (f *fakeProductService) Update(_ context.Context, _ coretenant.Scope, id st
 	return domain.Product{ID: id}, f.err
 }
 
+func (f *fakeProductService) ProductsNeedingUpdate(context.Context, []domain.Product) (map[string]bool, error) {
+	return nil, nil
+}
+
 func (f *fakeProductService) ListFeatures(context.Context) ([]domain.FeatureDef, error) {
 	return f.features, nil
 }
