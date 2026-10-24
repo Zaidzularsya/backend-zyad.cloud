@@ -335,3 +335,29 @@ type LandingDocumentResponse struct {
 	CSS           string         `json:"css"`
 	UpdatedAt     time.Time      `json:"updated_at"`
 }
+
+// ActivationResponse is one page activation. The preview token hash is never
+// exposed.
+type ActivationResponse struct {
+	ID            string     `json:"id"`
+	PageID        string     `json:"page_id"`
+	InvoiceID     *string    `json:"invoice_id"`
+	BuyerName     string     `json:"buyer_name"`
+	BuyerContact  string     `json:"buyer_contact"`
+	BuyerEmail    *string    `json:"buyer_email"`
+	Price         string     `json:"price"`
+	DurationValue int        `json:"duration_value"`
+	DurationUnit  string     `json:"duration_unit"`
+	InvoiceDueAt  time.Time  `json:"invoice_due_at"`
+	Status        string     `json:"status"`
+	PaidAt        *time.Time `json:"paid_at"`
+	CreatedAt     time.Time  `json:"created_at"`
+}
+
+// ActivationInvoiceResponse: preview_url carries the raw token and is only
+// returned by this response.
+type ActivationInvoiceResponse struct {
+	Activation ActivationResponse `json:"activation"`
+	PreviewURL string             `json:"preview_url"`
+	PaymentURL string             `json:"payment_url"`
+}

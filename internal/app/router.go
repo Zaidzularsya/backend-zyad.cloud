@@ -185,6 +185,11 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.LandingAdminPageHandler != nil {
 		deps.LandingAdminPageHandler.RegisterRoutes(protected, deps.PermissionChecker)
 	}
+	// POST /app/landing/pages/:id/activation-invoice (reseller). Entitlements
+	// landing.enabled + landing.page_activation are enforced by the service.
+	if deps.LandingActivationHandler != nil {
+		deps.LandingActivationHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
 	if deps.LandingAdminSectionHandler != nil {
 		deps.LandingAdminSectionHandler.RegisterRoutes(protected, deps.PermissionChecker)
 	}

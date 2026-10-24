@@ -47,6 +47,7 @@ type Dependencies struct {
 	UserAuthHandler                  *userhandler.AuthHandler
 	UserHandler                      *userhandler.UserHandler
 	LandingAdminPageHandler          *landinghandler.AdminPageHandler
+	LandingActivationHandler         *landinghandler.ActivationHandler
 	LandingAdminSectionHandler       *landinghandler.AdminSectionHandler
 	LandingAdminDocumentHandler      *landinghandler.AdminDocumentHandler
 	LandingAdminPageTemplateHandler  *landinghandler.AdminPageTemplateHandler

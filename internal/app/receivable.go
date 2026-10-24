@@ -174,6 +174,9 @@ type receivableBuild struct {
 	// sales-order invoices. Nil in the worker: its only invoice source, the contract
 	// billing run, is deliberately never blocked (see invoiceService.CreateAndIssue).
 	InvoiceQuota receivableservice.QuotaRoomRequirer
+	// ActivationInvoices: landing activation invoices are payable online with landing.page_activation
+	// (no receivable.online_payment needed). Nil = existing rule only.
+	ActivationInvoices receivableservice.ActivationInvoiceChecker
 }
 
 // receivableModule menampung handler untuk router dan service yang dibagikan ke modul lain
@@ -214,11 +217,12 @@ func buildReceivable(b receivableBuild) receivableModule {
 	sendSvc := receivableservice.NewSendService(receivableservice.SendDeps{
 		Invoices: invoiceRepo, Sends: sendRepo, Settings: settingsRepo, Docs: lazyInvoiceDocs{svc: &invoiceSvc}, Issuers: issuer,
 		// Kanal kirim: adapter di modul mailbox & whatsapp (receivable tidak mengimpor mereka).
-		Email:        mailboxservice.NewInvoiceMailer(b.Mailboxes, b.Messages),
-		WhatsApp:     whatsappservice.NewInvoiceSender(b.WhatsApp, b.Entitlements),
-		Notifier:     receivableNotifier{publisher: b.Publisher, appName: b.AppName, frontendURL: b.FrontendURL, locale: b.NotificationLocale},
-		Members:      members,
-		Entitlements: b.Entitlements,
+		Email:              mailboxservice.NewInvoiceMailer(b.Mailboxes, b.Messages),
+		WhatsApp:           whatsappservice.NewInvoiceSender(b.WhatsApp, b.Entitlements),
+		Notifier:           receivableNotifier{publisher: b.Publisher, appName: b.AppName, frontendURL: b.FrontendURL, locale: b.NotificationLocale},
+		Members:            members,
+		Entitlements:       b.Entitlements,
+		ActivationInvoices: b.ActivationInvoices,
 	})
 	invoiceSvc = receivableservice.NewInvoiceService(receivableservice.InvoiceDeps{
 		Accounts: accountRepo, Invoices: invoiceRepo, Counters: counterRepo, Settings: settingsRepo, Issuers: issuer,
@@ -240,13 +244,13 @@ func buildReceivable(b receivableBuild) receivableModule {
 		b.Links,
 		organizationservice.NewWorkerResolver(organizationrepo.NewOrganizationRepository(db), receivableservice.PublicLinkIdentity),
 		invoiceSvc, issuer, b.Entitlements, nil,
-	)
+	).WithActivationInvoices(b.ActivationInvoices)
 
 	workerResolver := organizationservice.NewWorkerResolver(organizationrepo.NewOrganizationRepository(db), receivableservice.PublicLinkIdentity)
 	onlinePayment := receivableservice.NewOnlinePayment(
 		receivableservice.OnlinePaymentConfig{FrontendURL: b.FrontendURL, NotificationURL: b.DokuNotificationURL},
 		b.Doku, receivablerepo.NewCheckoutRepository(db), invoiceSvc, paymentSvc, b.Links, workerResolver, b.Entitlements, nil,
-	)
+	).WithActivationInvoices(b.ActivationInvoices)
 
 	return receivableModule{
 		AccountHandler:  receivablehandler.NewAccountHandler(accountSvc),

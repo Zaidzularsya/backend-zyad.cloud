@@ -520,8 +520,15 @@ func New(ctx context.Context) (*App, error) {
 		Members:   crmMemberRepo, Issuers: crmrepo.NewQuotationIssuerRepository(db),
 		AppName: cfg.App.Name, FrontendURL: cfg.App.FrontendURL, NotificationLocale: cfg.Notification.DefaultLocale,
 		RateCounter: redisClient, Doku: dokuClient, DokuNotificationURL: dokuNotificationURL,
-		InvoiceQuota: crmQuotaEnforcer,
+		InvoiceQuota:       crmQuotaEnforcer,
+		ActivationInvoices: activationInvoiceChecker{activations: landingActivationRepo},
 	})
+	// Aktivasi halaman (2C): reseller menagih klien lewat invoice receivable di organisasinya sendiri.
+	landingActivationHandler := landinghandler.NewActivationHandler(landingservice.NewActivationService(landingservice.ActivationServiceDeps{
+		Activations: landingActivationRepo, Pages: landingPageRepo, Features: crmEntitlementChecker,
+		Billing: receivableActivationBilling{accounts: receivableModule.Accounts, invoices: receivableModule.Invoices},
+		Links:   activationPreviewLinks{domains: organizationrepo.NewDomainRepository(db)},
+	}))
 	// Webhook DOKU (URL tetap /webhooks/doku) hanya melayani invoice receivable (RCV-).
 	dokuWebhookHandler := receivablehandler.NewDokuWebhookHandler(
 		receivableModule.OnlinePayment, cfg.Doku.ClientID, cfg.Doku.SecretKey, log,
@@ -657,6 +664,7 @@ func New(ctx context.Context) (*App, error) {
 		UserAuthHandler:                  authHandler,
 		UserHandler:                      userHandler,
 		LandingAdminPageHandler:          landingAdminPageHandler,
+		LandingActivationHandler:         landingActivationHandler,
 		LandingAdminSectionHandler:       landingAdminSectionHandler,
 		LandingAdminDocumentHandler:      landingAdminDocumentHandler,
 		LandingAdminPageTemplateHandler:  landingAdminPageTemplateHandler,
