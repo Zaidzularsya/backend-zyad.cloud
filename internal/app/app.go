@@ -534,7 +534,7 @@ func New(ctx context.Context) (*App, error) {
 	receivableModule.Listeners.Add(landingActivationReceivableListener{paid: landingservice.NewActivationPaidListener(
 		landingActivationRepo,
 		activationPaidNotifier{publisher: notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts), appName: cfg.App.Name, locale: cfg.Notification.DefaultLocale},
-		activationPublicLinks{domains: organizationrepo.NewDomainRepository(db)}, nil)})
+		activationPublicLinks{domains: organizationrepo.NewDomainRepository(db)}, nil).WithSnapshotter(landingPublishSvc.(landingservice.ActivationSnapshotter))})
 	// Webhook DOKU (URL tetap /webhooks/doku) hanya melayani invoice receivable (RCV-).
 	dokuWebhookHandler := receivablehandler.NewDokuWebhookHandler(
 		receivableModule.OnlinePayment, cfg.Doku.ClientID, cfg.Doku.SecretKey, log,

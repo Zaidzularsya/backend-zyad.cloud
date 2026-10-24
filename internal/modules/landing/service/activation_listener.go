@@ -7,6 +7,7 @@ import (
 	"time"
 
 	coretenant "zyad.cloud/internal/core/tenant"
+	"zyad.cloud/internal/modules/landing/domain"
 	"zyad.cloud/internal/modules/landing/repository"
 )
 
@@ -32,6 +33,12 @@ type ActivationPublicLinks interface {
 	PublicURL(ctx context.Context, scope coretenant.Scope, slug string, isHomepage bool) (string, error)
 }
 
+// ActivationSnapshotter stores a fresh published snapshot of the page's
+// current content (publishService.SnapshotCurrent).
+type ActivationSnapshotter interface {
+	SnapshotCurrent(ctx context.Context, scope coretenant.Scope, pageID string, changeNote string) (domain.LandingPageVersion, error)
+}
+
 // ActivationPaidListener publishes an activated page once its invoice is paid.
 // internal/app adapts it to the receivable listener registry, so landing does
 // not import receivable.
@@ -39,7 +46,15 @@ type ActivationPaidListener struct {
 	settler  repository.ActivationSettler
 	notifier ActivationPaidNotifier
 	links    ActivationPublicLinks
+	snaps    ActivationSnapshotter
 	now      func() time.Time
+}
+
+// WithSnapshotter makes every (re)publish by a payment take a fresh snapshot,
+// so the live page is what the buyer previewed and not an older version.
+func (l *ActivationPaidListener) WithSnapshotter(s ActivationSnapshotter) *ActivationPaidListener {
+	l.snaps = s
+	return l
 }
 
 func NewActivationPaidListener(settler repository.ActivationSettler, notifier ActivationPaidNotifier, links ActivationPublicLinks, now func() time.Time) *ActivationPaidListener {
@@ -71,7 +86,19 @@ func (l *ActivationPaidListener) InvoicePaid(ctx context.Context, scope coretena
 			"activation_id", res.Activation.ID, "page_id", res.Activation.PageID, "page_found", res.PageFound)
 		return
 	}
+	l.snapshot(ctx, scope, res)
 	l.notify(ctx, scope, res)
+}
+
+// snapshot is best effort: the payment and publish are already committed.
+func (l *ActivationPaidListener) snapshot(ctx context.Context, scope coretenant.Scope, res repository.ActivationSettlement) {
+	if l.snaps == nil {
+		return
+	}
+	if _, err := l.snaps.SnapshotCurrent(ctx, scope, res.Activation.PageID, "Terbit otomatis setelah pembayaran"); err != nil {
+		slog.WarnContext(ctx, "activation payment: snapshot failed, page may serve an older version",
+			"activation_id", res.Activation.ID, "page_id", res.Activation.PageID, "error", err)
+	}
 }
 
 func (l *ActivationPaidListener) notify(ctx context.Context, scope coretenant.Scope, res repository.ActivationSettlement) {

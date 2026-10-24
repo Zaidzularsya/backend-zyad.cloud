@@ -10,10 +10,10 @@ INSERT INTO notification_templates (
 		{"key":"app_name","description":"Application name","required":true,"example":"Zyad Cloud"},
 		{"key":"buyer_name","description":"Buyer name","required":true,"example":"Budi"},
 		{"key":"page_title","description":"Activated page title","required":true,"example":"Toko Budi"},
-		{"key":"active_until","description":"End of the paid period","required":true,"example":"17 Okt 2026"},
+		{"key":"active_until","description":"End of the paid period","required":true,"example":"17-10-2026"},
 		{"key":"page_link_line","description":"Sentence with the public page link (empty when no host is available)","required":false,"example":"Halaman Anda dapat dibuka di https://klien.example.test/toko-budi."}
 	]'::jsonb,
-	'{"app_name":"Zyad Cloud","buyer_name":"Budi","page_title":"Toko Budi","active_until":"17 Okt 2026","page_link_line":"Halaman Anda dapat dibuka di https://klien.example.test/toko-budi."}'::jsonb,
+	'{"app_name":"Zyad Cloud","buyer_name":"Budi","page_title":"Toko Budi","active_until":"17-10-2026","page_link_line":"Halaman Anda dapat dibuka di https://klien.example.test/toko-budi."}'::jsonb,
 	'active', true, true, 1, now(), now()
 )
 ON CONFLICT (code, channel, locale, version)

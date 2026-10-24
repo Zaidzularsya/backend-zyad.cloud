@@ -71,7 +71,18 @@ func (l publicLinkFake) PublicURL(_ context.Context, _ coretenant.Scope, slug st
 	return l.url + "/" + slug, nil
 }
 
+type snapFake struct {
+	pages []string
+	err   error
+}
+
+func (f *snapFake) SnapshotCurrent(_ context.Context, _ coretenant.Scope, pageID, _ string) (domain.LandingPageVersion, error) {
+	f.pages = append(f.pages, pageID)
+	return domain.LandingPageVersion{}, f.err
+}
+
 type listenerHarness struct {
+	snaps    *snapFake
 	settler  *settlerFake
 	notifier *noticeFake
 	l        *ActivationPaidListener
@@ -92,7 +103,8 @@ func newListenerHarness() *listenerHarness {
 		},
 		notifier: &noticeFake{},
 	}
-	h.l = NewActivationPaidListener(h.settler, h.notifier, publicLinkFake{url: "https://klien.test"}, func() time.Time { return listenerNow })
+	h.snaps = &snapFake{}
+	h.l = NewActivationPaidListener(h.settler, h.notifier, publicLinkFake{url: "https://klien.test"}, func() time.Time { return listenerNow }).WithSnapshotter(h.snaps)
 	return h
 }
 
@@ -292,5 +304,42 @@ func TestInvoicePaid_NoticeCarriesNoInternalData(t *testing.T) {
 		if strings.Contains(s, "act-1") || strings.Contains(s, "page-a") || strings.Contains(s, "inv-1") {
 			t.Fatalf("internal id leaked into %q", s)
 		}
+	}
+}
+
+func TestInvoicePaid_SnapshotOncePerPublish(t *testing.T) {
+	h := newListenerHarness()
+	h.pay(t, "inv-1")
+	if len(h.snaps.pages) != 1 || h.snaps.pages[0] != "page-a" {
+		t.Fatalf("snapshots = %v, want exactly one for page-a", h.snaps.pages)
+	}
+	h.pay(t, "inv-1") // idempotent no-op
+	if len(h.snaps.pages) != 1 {
+		t.Fatalf("snapshots after repeat = %d, want still 1", len(h.snaps.pages))
+	}
+}
+
+func TestInvoicePaid_SnapshotFailureDoesNotFailSettle(t *testing.T) {
+	h := newListenerHarness()
+	h.snaps.err = errors.New("db down")
+	h.pay(t, "inv-1")
+	if h.settler.pages["page-a"].Status != domain.PageStatusPublished || h.settler.acts["inv-1"].Status != domain.ActivationStatusPaid {
+		t.Fatal("snapshot failure must not undo settle")
+	}
+	if len(h.notifier.notices) != 1 {
+		t.Fatalf("notices = %d, want 1", len(h.notifier.notices))
+	}
+}
+
+func TestInvoicePaid_NoSnapshotWhenNotPublished(t *testing.T) {
+	h := newListenerHarness()
+	h.settler.pages["page-a"].Status = domain.PageStatusArchived
+	h.pay(t, "inv-1")
+	delete(h.settler.pages, "page-a")
+	h.settler.acts["inv-2"] = &domain.LandingPageActivation{ID: "act-2", OrganizationID: landingServiceOrganizationID, PageID: "page-a",
+		Status: domain.ActivationStatusOpen, DurationValue: 1, DurationUnit: domain.ActivationDurationDay}
+	h.pay(t, "inv-2")
+	if len(h.snaps.pages) != 0 {
+		t.Fatalf("snapshots = %v, want none for archived/missing page", h.snaps.pages)
 	}
 }

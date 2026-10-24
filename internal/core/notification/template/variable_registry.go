@@ -125,7 +125,7 @@ func defaultVariables() map[string][]domain.NotificationVariable {
 			{Key: "app_name", Description: "Application name", Required: true, Example: "Zyad Cloud"},
 			{Key: "buyer_name", Description: "Buyer name", Required: true, Example: "Budi"},
 			{Key: "page_title", Description: "Activated page title", Required: true, Example: "Toko Budi"},
-			{Key: "active_until", Description: "End of the paid period", Required: true, Example: "17 Okt 2026"},
+			{Key: "active_until", Description: "End of the paid period", Required: true, Example: "17-10-2026"},
 			{Key: "page_link_line", Description: "Sentence with the public page link (empty when no host is available)", Required: false, Example: "Halaman Anda dapat dibuka di https://klien.example.test/toko-budi."},
 		},
 		"self_serve.workspace_suspended": {
