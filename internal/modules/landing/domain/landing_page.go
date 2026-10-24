@@ -128,9 +128,12 @@ type LandingPage struct {
 	PublishAt        *time.Time
 	UnpublishAt      *time.Time
 	PublishedAt      *time.Time
-	CreatedBy        string
-	UpdatedBy        string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	DeletedAt        *time.Time
+	// ActiveUntil ends the paid publish period of an activated page (UTC).
+	// NULL for pages that were never sold through an activation.
+	ActiveUntil *time.Time
+	CreatedBy   string
+	UpdatedBy   string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	DeletedAt   *time.Time
 }
