@@ -58,7 +58,9 @@ type OnlinePayment struct {
 	links     LinkResolver
 	scopes    PublicScopeResolver
 	gate      FeatureGate
-	now       func() time.Time
+	// activations: optional; landing activation invoices may be paid online via landing.page_activation.
+	activations ActivationInvoiceChecker
+	now         func() time.Time
 
 	mu       sync.Mutex
 	lastSync map[string]time.Time
@@ -109,7 +111,7 @@ func (p *OnlinePayment) Checkout(ctx context.Context, token string) (string, tim
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	if p.gate == nil || p.gate.RequireFeature(ctx, d.scope.OrganizationID(), onlinePaymentFeature) != nil {
+	if !onlinePaymentAllowed(ctx, p.gate, p.activations, d.scope, d.inv.ID) {
 		return "", time.Time{}, ErrOnlinePaymentUnavailable
 	}
 	if !payable(d.inv) {

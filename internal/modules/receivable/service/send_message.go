@@ -35,7 +35,7 @@ func (s *sendService) compose(ctx context.Context, scope coretenant.Scope, inv d
 			tenantName = party.Name
 		}
 	}
-	canPay := s.Entitlements != nil && s.Entitlements.RequireFeature(ctx, scope.OrganizationID(), "receivable.online_payment") == nil
+	canPay := onlinePaymentAllowed(ctx, s.Entitlements, s.ActivationInvoices, scope, inv.ID)
 	subject, text, body := buildInvoiceMessage(inv, tenantName, link, strings.TrimSpace(opening), canPay)
 	return composed{
 		subject: subject, text: text, html: body,

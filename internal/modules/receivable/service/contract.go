@@ -67,7 +67,10 @@ type InvoiceInput struct {
 	SourceID, ContractID, IdempotencyKey, Currency, Notes, PICUserID string
 	Channels                                                         []string // kosong → settings.DefaultChannels
 	PeriodStart, PeriodEnd                                           *time.Time
-	Lines                                                            []LineInput
+	// DueDate (opsional, hanya CreateAndIssue): jatuh tempo eksplisit; tanggal kalender WIB dari
+	// instan ini, tidak sebelum tanggal terbit. Nil → tanggal terbit + PaymentTermsDays.
+	DueDate *time.Time
+	Lines   []LineInput
 }
 
 type InvoicePDF struct {
@@ -78,7 +81,8 @@ type InvoicePDF struct {
 type InvoiceService interface {
 	CreateDraft(ctx context.Context, scope coretenant.Scope, in InvoiceInput, userID string) (domain.Invoice, error)
 	UpdateDraft(ctx context.Context, scope coretenant.Scope, id string, in InvoiceInput, userID string) (domain.Invoice, error)
-	// CreateAndIssue: idempoten by (SourceType, SourceID, IdempotencyKey) — duplikat → kembalikan invoice lama
+	// CreateAndIssue: idempoten by (SourceType, SourceID, IdempotencyKey) bila SourceID dan IdempotencyKey
+	// terisi (termasuk SourceManual, dipakai invoice aktivasi landing) — duplikat → kembalikan invoice lama
 	// tanpa kirim ulang. Mengirim otomatis (trigger "auto") setelah terbit. Dipakai S4/S5.
 	CreateAndIssue(ctx context.Context, scope coretenant.Scope, in InvoiceInput, actorUserID string) (domain.Invoice, error)
 	// Issue: terbit + kirim otomatis; idempoten (sudah issued → kembalikan apa adanya, tanpa kirim).
