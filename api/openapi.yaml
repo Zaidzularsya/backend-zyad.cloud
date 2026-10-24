@@ -2028,6 +2028,79 @@ paths:
       responses:
         "200":
           description: Landing page access updated successfully
+  /api/v1/app/landing/pages/{id}/activation-invoice:
+    post:
+      summary: Create the activation invoice of a landing page (reseller)
+      operationId: createLandingActivationInvoice
+      tags:
+        - Landing Pages
+      security:
+        - BearerAuth: []
+      description: >-
+        Requires permission `landing.page.update` and entitlements `landing.enabled` and
+        `landing.page_activation` (403 `FEATURE_NOT_ENABLED`). The page must belong to the active
+        organization (404 `PAGE_NOT_FOUND` otherwise, also for templates) and be a non-archived
+        GrapesJS page (422 `ACTIVATION_PAGE_NOT_ELIGIBLE`). At most one open activation per page:
+        an open activation whose invoice is not yet due gives 409 `ACTIVATION_OPEN`; an open one
+        that is already due is voided in the same transaction and replaced (its invoice is not
+        touched; a late payment stays acceptable). Creates a receivable account for the buyer and
+        issues a manual invoice in the reseller organization (one line `Halaman undangan <slug>`,
+        due on the calendar day of `invoice_due_at`, default send channels of the organization).
+        If invoicing fails, the activation (and any invoice already created) is voided and the
+        request can be retried. `preview_url` carries the raw preview token and is returned only
+        in this response; it uses the organization's active primary host, or a relative path when
+        the organization has no active host.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LandingActivationInvoiceRequest"
+      responses:
+        "201":
+          description: Activation and invoice created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, message, data]
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  data:
+                    $ref: "#/components/schemas/LandingActivationInvoiceResult"
+        "403":
+          description: Missing permission or entitlement (FEATURE_NOT_ENABLED)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Page not found in the active organization (PAGE_NOT_FOUND)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "409":
+          description: Open, not yet due activation exists (ACTIVATION_OPEN), or invoice quota exceeded (QUOTA_EXCEEDED)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "422":
+          description: Invalid input (VALIDATION_ERROR) or page not eligible (ACTIVATION_PAGE_NOT_ELIGIBLE)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "502":
+          description: Invoice could not be created (ACTIVATION_INVOICE_FAILED); retry is safe
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
   /api/v1/admin/landing-pages/{id}/duplicate:
     post:
       summary: Duplicate landing page
@@ -8947,7 +9020,7 @@ paths:
       operationId: getPublicInvoice
       tags:
       - Receivable
-      description: "Public endpoint (no bearer token, no tenant host): the tenant is derived from the link row. Rate limited to 30 requests/minute per IP. Unknown, expired or non-invoice tokens all return the same `404 LINK_INVALID`. `state`: `open` (issued/overdue), `paid`, `void` (a voided invoice stays viewable as cancelled even though its link is revoked). `can_pay` is true only for `open` invoices of organizations with `receivable.online_payment` (platform organization); see `POST .../checkout`."
+      description: "Public endpoint (no bearer token, no tenant host): the tenant is derived from the link row. Rate limited to 30 requests/minute per IP. Unknown, expired or non-invoice tokens all return the same `404 LINK_INVALID`. `state`: `open` (issued/overdue), `paid`, `void` (a voided invoice stays viewable as cancelled even though its link is revoked). `can_pay` is true only for `open` invoices of organizations with `receivable.online_payment`, or for landing page activation invoices of organizations with `landing.page_activation` (resellers; no `receivable.online_payment` needed); see `POST .../checkout`."
       parameters:
       - name: token
         in: path
@@ -9003,7 +9076,7 @@ paths:
       operationId: createPublicInvoiceCheckout
       tags:
       - Receivable
-      description: "Public endpoint (rate limited like the invoice view). Only organizations with `receivable.online_payment` (the platform organization) may pay online; others get `403 ONLINE_PAYMENT_UNAVAILABLE` and no DOKU session is created. The amount is the remaining balance rounded up to whole rupiah. Clicking again while the session is pending and unexpired returns the same `payment_url`. DOKU notifications settle the invoice via the shared `POST /api/v1/webhooks/doku` webhook (invoice numbers prefixed `RCV-`)."
+      description: "Public endpoint (rate limited like the invoice view). Only organizations with `receivable.online_payment` may pay online, plus landing page activation invoices (an invoice linked from `landing_page_activations`) of organizations with `landing.page_activation`; others get `403 ONLINE_PAYMENT_UNAVAILABLE` and no DOKU session is created. The amount is the remaining balance rounded up to whole rupiah. Clicking again while the session is pending and unexpired returns the same `payment_url`. DOKU notifications settle the invoice via the shared `POST /api/v1/webhooks/doku` webhook (invoice numbers prefixed `RCV-`)."
       parameters:
       - name: token
         in: path
@@ -9776,6 +9849,55 @@ components:
           nullable: true
           allOf:
             - $ref: "#/components/schemas/LandingPageOpenActivation"
+    LandingActivationInvoiceRequest:
+      type: object
+      required: [buyer_name, buyer_contact, price, duration_value, duration_unit]
+      description: Set at most one of invoice_due_hours / invoice_due_days; neither means 1 hour.
+      properties:
+        buyer_name: {type: string, minLength: 1, maxLength: 200}
+        buyer_contact: {type: string, minLength: 1, maxLength: 50, description: Phone/WhatsApp, also the receivable account phone.}
+        buyer_email: {type: string, format: email, maxLength: 255, description: Optional; empty is stored as null.}
+        price:
+          type: string
+          pattern: '^[0-9]{1,16}(\.[0-9]{1,2})?$'
+          description: Decimal string, must be > 0 (a JSON number is rejected).
+          example: "150000"
+        duration_value:
+          type: integer
+          minimum: 1
+          description: "Maximum two years: day <= 730, week <= 104, month <= 24."
+        duration_unit: {type: string, enum: [day, week, month]}
+        invoice_due_hours: {type: integer, minimum: 1, maximum: 720}
+        invoice_due_days: {type: integer, minimum: 1, maximum: 30}
+    LandingActivation:
+      type: object
+      description: The preview token hash is never exposed.
+      properties:
+        id: {type: string, format: uuid}
+        page_id: {type: string, format: uuid}
+        invoice_id: {type: string, format: uuid, nullable: true}
+        buyer_name: {type: string}
+        buyer_contact: {type: string}
+        buyer_email: {type: string, nullable: true}
+        price: {type: string, example: "150000.00"}
+        duration_value: {type: integer}
+        duration_unit: {type: string, enum: [day, week, month]}
+        invoice_due_at: {type: string, format: date-time}
+        status: {type: string, enum: [open, paid, void]}
+        paid_at: {type: string, format: date-time, nullable: true}
+        created_at: {type: string, format: date-time}
+    LandingActivationInvoiceResult:
+      type: object
+      required: [activation, preview_url, payment_url]
+      properties:
+        activation: {$ref: "#/components/schemas/LandingActivation"}
+        preview_url:
+          type: string
+          description: Contains the raw preview token; shown only once.
+          example: https://reseller.zyad.cloud/api/v1/public/landing/preview/AbC...
+        payment_url:
+          type: string
+          description: Public invoice link (`<FRONTEND_URL>/i/<token>`).
     LandingPageOpenActivation:
       type: object
       description: Token preview mentah tidak pernah dikembalikan di sini (hanya sekali saat dibuat).
