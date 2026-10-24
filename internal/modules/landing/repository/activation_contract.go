@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	coretenant "zyad.cloud/internal/core/tenant"
@@ -24,6 +25,10 @@ type CreateActivationParams struct {
 	CreatedBy        string
 }
 
+// ErrActivationOpen: the page already has an open activation that is not
+// overdue (the one-open-per-page partial unique index refused the insert).
+var ErrActivationOpen = errors.New("page already has an open activation")
+
 // ActivationRepository stores landing_page_activations. Every query filters
 // organization_id from the verified scope (RLS is the second guard).
 type ActivationRepository interface {
@@ -39,4 +44,16 @@ type ActivationRepository interface {
 	MarkPaid(ctx context.Context, scope coretenant.Scope, id string, paidAt time.Time) (domain.LandingPageActivation, error)
 	// Void moves an open activation to void; pgx.ErrNoRows when it is not open.
 	Void(ctx context.Context, scope coretenant.Scope, id string) (domain.LandingPageActivation, error)
+	// CreateReplacingOverdue voids the page's open activation whose invoice is
+	// due (invoice_due_at <= now) and inserts the new one in ONE transaction.
+	// It returns ErrActivationOpen when an open, not-yet-due activation exists
+	// and pgx.ErrNoRows when the page is not in the scope. voided is nil when
+	// nothing was replaced.
+	CreateReplacingOverdue(ctx context.Context, scope coretenant.Scope, params CreateActivationParams, now time.Time) (created domain.LandingPageActivation, voided *domain.LandingPageActivation, err error)
+	// SetInvoice links the receivable invoice to an open activation that has
+	// none yet; pgx.ErrNoRows otherwise.
+	SetInvoice(ctx context.Context, scope coretenant.Scope, id, invoiceID string) (domain.LandingPageActivation, error)
+	// ExistsForInvoice reports whether any activation (any status) of the
+	// scope references the invoice.
+	ExistsForInvoice(ctx context.Context, scope coretenant.Scope, invoiceID string) (bool, error)
 }

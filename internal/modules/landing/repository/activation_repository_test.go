@@ -121,3 +121,97 @@ func TestActivationRepositoryLifecycleAndIsolationIntegration(t *testing.T) {
 		t.Fatalf("Void = %+v, %v", v, err)
 	}
 }
+
+// Written for Task 13 (activation invoice); not executed in that task (no test DB).
+func TestActivationRepositoryReplaceOverdueAndInvoiceLinkIntegration(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+	pages := repository.NewPageRepository(db)
+	acts := repository.NewActivationRepository(db)
+
+	if _, err := db.Exec(ctx, `
+		INSERT INTO organizations (id, type, slug, name, status)
+		VALUES ($1, 'customer', $3, 'Organization A', 'active'),
+		       ($2, 'customer', $4, 'Organization B', 'active')
+		ON CONFLICT DO NOTHING
+	`, tenants.A.OrganizationID, tenants.B.OrganizationID, testutil.UniqueCode("rep-a"), testutil.UniqueCode("rep-b")); err != nil {
+		t.Fatalf("insert organizations: %v", err)
+	}
+	slug := strings.ReplaceAll("rep-"+testutil.UniqueCode("p"), ".", "-")
+	page, err := pages.Create(ctx, tenants.A.Scope, repository.CreatePageParams{
+		Name: "Undangan", Title: "Undangan", Slug: slug, Type: domain.PageTypeCampaign,
+		Builder: domain.PageBuilderGrapesJS, Status: domain.PageStatusDraft,
+		Visibility: domain.PageVisibilityPublic, Locale: "id-ID", Timezone: "Asia/Jakarta",
+	})
+	if err != nil {
+		t.Fatalf("create page: %v", err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec(context.Background(), "DELETE FROM landing_pages WHERE id = $1", page.ID) })
+
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	params := func(due time.Time) repository.CreateActivationParams {
+		_, hash, err := domain.NewActivationPreviewToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return repository.CreateActivationParams{
+			PageID: page.ID, BuyerName: "Budi", BuyerContact: "6281234567890", Price: "150000.00",
+			DurationValue: 1, DurationUnit: domain.ActivationDurationMonth, PreviewTokenHash: hash, InvoiceDueAt: due,
+		}
+	}
+
+	first, voided, err := acts.CreateReplacingOverdue(ctx, tenants.A.Scope, params(now.Add(time.Hour)), now)
+	if err != nil || voided != nil || first.Status != domain.ActivationStatusOpen {
+		t.Fatalf("first = %+v voided=%v err=%v", first, voided, err)
+	}
+	// Not overdue: refused, nothing changes.
+	if _, _, err := acts.CreateReplacingOverdue(ctx, tenants.A.Scope, params(now.Add(time.Hour)), now); !errors.Is(err, repository.ErrActivationOpen) {
+		t.Fatalf("second while open: err = %v, want ErrActivationOpen", err)
+	}
+	// Other tenant cannot create on this page.
+	if _, _, err := acts.CreateReplacingOverdue(ctx, tenants.B.Scope, params(now.Add(time.Hour)), now); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("cross-tenant create: err = %v, want ErrNoRows", err)
+	}
+	// Once overdue, replaced in one step.
+	later := now.Add(2 * time.Hour)
+	second, voided, err := acts.CreateReplacingOverdue(ctx, tenants.A.Scope, params(later.Add(time.Hour)), later)
+	if err != nil || voided == nil || voided.ID != first.ID || voided.Status != domain.ActivationStatusVoid {
+		t.Fatalf("replace: second=%+v voided=%+v err=%v", second, voided, err)
+	}
+	if open, err := acts.FindOpenByPage(ctx, tenants.A.Scope, page.ID); err != nil || open.ID != second.ID {
+		t.Fatalf("open after replace = %+v err=%v", open, err)
+	}
+
+	// SetInvoice requires an invoice row of the same org (composite FK).
+	var accountID, invoiceID string
+	if err := db.QueryRow(ctx, `INSERT INTO receivable_accounts (organization_id, name) VALUES ($1, 'Budi') RETURNING id`,
+		tenants.A.OrganizationID).Scan(&accountID); err != nil {
+		t.Fatalf("insert account: %v", err)
+	}
+	if err := db.QueryRow(ctx, `INSERT INTO receivable_invoices (organization_id, account_id) VALUES ($1, $2) RETURNING id`,
+		tenants.A.OrganizationID, accountID).Scan(&invoiceID); err != nil {
+		t.Fatalf("insert invoice: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Exec(context.Background(), "DELETE FROM landing_page_activations WHERE page_id = $1", page.ID)
+		_, _ = db.Exec(context.Background(), "DELETE FROM receivable_invoices WHERE id = $1", invoiceID)
+		_, _ = db.Exec(context.Background(), "DELETE FROM receivable_accounts WHERE id = $1", accountID)
+	})
+	if _, err := acts.SetInvoice(ctx, tenants.B.Scope, second.ID, invoiceID); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("cross-tenant SetInvoice: err = %v", err)
+	}
+	linked, err := acts.SetInvoice(ctx, tenants.A.Scope, second.ID, invoiceID)
+	if err != nil || linked.InvoiceID == nil || *linked.InvoiceID != invoiceID {
+		t.Fatalf("SetInvoice = %+v err=%v", linked, err)
+	}
+	if _, err := acts.SetInvoice(ctx, tenants.A.Scope, second.ID, invoiceID); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("SetInvoice twice: err = %v, want ErrNoRows", err)
+	}
+	if ok, err := acts.ExistsForInvoice(ctx, tenants.A.Scope, invoiceID); err != nil || !ok {
+		t.Fatalf("ExistsForInvoice(A) = %v, %v", ok, err)
+	}
+	if ok, err := acts.ExistsForInvoice(ctx, tenants.B.Scope, invoiceID); err != nil || ok {
+		t.Fatalf("ExistsForInvoice(B) = %v, %v; want false", ok, err)
+	}
+}
