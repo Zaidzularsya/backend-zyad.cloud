@@ -1900,6 +1900,9 @@ paths:
           schema:
             type: boolean
           description: Filter landing pages that are reusable templates.
+      description: >-
+        Setiap item memuat field aktivasi halaman (`activation_state`, `active_until`,
+        `open_activation`), lihat `LandingPageActivationFields`.
       responses:
         "200":
           description: Landing pages retrieved successfully
@@ -1907,6 +1910,14 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/LandingPageActivationFields"
     post:
       summary: Create landing page
       operationId: createLandingPage
@@ -1953,6 +1964,9 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/LandingPageActivationFields"
     patch:
       summary: Update landing page
       operationId: updateLandingPage
@@ -3583,7 +3597,9 @@ paths:
         "200":
           description: Public landing page resolved successfully
         "404":
-          description: PUBLIC_PAGE_NOT_FOUND (tidak ada, belum published, atau host tidak terdaftar)
+          description: >-
+            PUBLIC_PAGE_NOT_FOUND (tidak ada, belum published, masa aktif `active_until` sudah lewat,
+            atau host tidak terdaftar)
   /api/v1/public/landing/render:
     get:
       summary: Server-render a published GrapesJS landing page as HTML (SEO)
@@ -3609,7 +3625,7 @@ paths:
               schema:
                 type: string
         "404":
-          description: Page not found or not a GrapesJS page
+          description: Page not found, not published, its `active_until` has passed, or not a GrapesJS page
   /api/v1/public/landing/render/{slug}:
     get:
       summary: Server-render a published GrapesJS landing page as HTML (SEO)
@@ -3630,10 +3646,20 @@ paths:
               schema:
                 type: string
         "404":
-          description: Page not found or not a GrapesJS page
+          description: Page not found, not published, its `active_until` has passed, or not a GrapesJS page
   /api/v1/public/landing/preview/{token}:
     get:
       summary: Preview public landing page
+      description: >-
+        Organisasi tetap diturunkan dari host (middleware publik yang sama dengan /public/landing/*).
+        (1) Token aktivasi halaman (reseller): halaman dipilih dari token saja (dicari lewat sha256,
+        hanya di organisasi host), ditayangkan (working copy, `IsDraft=true`) selama aktivasi `open`
+        dan `invoice_due_at` belum lewat. Token yang jatuh tempo, `paid`, `void`, tidak dikenal, atau
+        milik tenant lain menghasilkan 404. Bila `slug` diisi dan bukan slug halaman token, 404.
+        (2) Selain itu, token draft-preview bertanda tangan lama hanya berlaku bersama `slug`;
+        tanpa `slug` token yang tidak dikenal menghasilkan 404 (tidak jatuh ke halaman host).
+        Respons selalu `X-Robots-Tag: noindex, nofollow` dan `Cache-Control: no-store`.
+        Tidak ada rate limit khusus (sama dengan /resolve).
       operationId: previewPublicLandingPage
       tags:
         - Public Landing
@@ -3645,11 +3671,19 @@ paths:
             type: string
         - name: slug
           in: query
+          description: Wajib untuk token draft-preview lama; opsional untuk token aktivasi.
           schema:
             type: string
       responses:
         "200":
           description: Public landing preview resolved successfully
+          headers:
+            X-Robots-Tag:
+              schema:
+                type: string
+                example: noindex, nofollow
+        "404":
+          description: PUBLIC_PAGE_NOT_FOUND (token tidak dikenal, kedaluwarsa, sudah lunas/void, atau tenant lain)
   /api/v1/public/landing/access/{publicPageId}:
     post:
       summary: Request public landing page access
@@ -9717,6 +9751,50 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    LandingPageActivationFields:
+      type: object
+      description: >-
+        Field aktivasi halaman yang ditambahkan ke respons halaman admin (field halaman lain tetap).
+        `activation_state`: `publish` bila status published dan `active_until` di masa depan; selain itu
+        `preview` bila ada aktivasi `open` yang `invoice_due_at`-nya belum lewat; selain itu `expired`
+        bila `active_until` terisi dan sudah lewat; selain itu `none` (termasuk halaman biasa tanpa aktivasi).
+        `open_activation` hanya diisi di list/detail. Respons create/update/duplicate tidak memuat
+        aktivasi sehingga tidak pernah `preview`.
+      properties:
+        id:
+          type: string
+          format: uuid
+        activation_state:
+          type: string
+          enum: [none, preview, publish, expired]
+        active_until:
+          type: string
+          format: date-time
+          nullable: true
+          description: Akhir masa tayang berbayar (UTC). Null untuk halaman yang tidak pernah diaktivasi.
+        open_activation:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/LandingPageOpenActivation"
+    LandingPageOpenActivation:
+      type: object
+      description: Token preview mentah tidak pernah dikembalikan di sini (hanya sekali saat dibuat).
+      properties:
+        id:
+          type: string
+          format: uuid
+        buyer_name:
+          type: string
+        price:
+          type: string
+          description: Desimal sebagai string, mis. "150000.00".
+          example: "150000.00"
+        invoice_due_at:
+          type: string
+          format: date-time
+        preview_url_template:
+          type: string
+          example: /api/v1/public/landing/preview/{token}
     CrmSalesOrder:
       type: object
       properties:
