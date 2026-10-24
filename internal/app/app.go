@@ -357,7 +357,8 @@ func New(ctx context.Context) (*App, error) {
 	platformFinanceFixedAssetHandler := financehandler.NewPlatformFixedAssetHandler(financeFixedAssetSvc, permService)
 	platformFinanceTaxHandler := financehandler.NewPlatformTaxHandler(financeTaxSvc, permService)
 
-	landingAdminPageHandler := landinghandler.NewAdminPageHandler(landingPageSvc, landingVisibilitySvc, landingRevisionSvc, landingPublishSvc)
+	landingAdminPageHandler := landinghandler.NewAdminPageHandler(landingPageSvc, landingVisibilitySvc, landingRevisionSvc, landingPublishSvc).
+		WithActivations(landingservice.NewActivationReader(landingActivationRepo))
 	landingAdminSectionHandler := landinghandler.NewAdminSectionHandler(landingSectionSvc, landingRevisionSvc)
 	landingAdminDocumentHandler := landinghandler.NewAdminDocumentHandler(landingDocumentSvc)
 	landingAdminPageTemplateHandler := landinghandler.NewAdminPageTemplateHandler(landingPageTemplateSvc)

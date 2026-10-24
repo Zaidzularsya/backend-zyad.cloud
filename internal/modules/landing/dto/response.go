@@ -45,6 +45,22 @@ type PageResponse struct {
 	CreatedAt        time.Time            `json:"created_at"`
 	UpdatedAt        time.Time            `json:"updated_at"`
 	DeletedAt        *time.Time           `json:"deleted_at,omitempty"`
+
+	// Page activation (reseller sells the page): none | preview | publish | expired.
+	ActivationState string                  `json:"activation_state"`
+	ActiveUntil     *time.Time              `json:"active_until"`
+	OpenActivation  *OpenActivationResponse `json:"open_activation"`
+}
+
+// OpenActivationResponse is the page's open activation invoice. It never
+// carries the preview token or its hash; the raw token is returned once, at
+// creation, and plugged into PreviewURLTemplate.
+type OpenActivationResponse struct {
+	ID                 string    `json:"id"`
+	BuyerName          string    `json:"buyer_name"`
+	Price              string    `json:"price"`
+	InvoiceDueAt       time.Time `json:"invoice_due_at"`
+	PreviewURLTemplate string    `json:"preview_url_template"`
 }
 
 // PageListResponse wraps pages and metadata.
