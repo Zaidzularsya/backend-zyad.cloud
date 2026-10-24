@@ -125,3 +125,47 @@ func HashActivationPreviewToken(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
 }
+
+// ActivationPeriodEnd is paidAt plus the purchased duration. Months are
+// calendar months (time.AddDate), weeks are 7 days.
+func ActivationPeriodEnd(paidAt time.Time, value int, unit ActivationDurationUnit) time.Time {
+	paidAt = paidAt.UTC()
+	switch unit {
+	case ActivationDurationMonth:
+		return paidAt.AddDate(0, value, 0)
+	case ActivationDurationWeek:
+		return paidAt.AddDate(0, 0, 7*value)
+	default:
+		return paidAt.AddDate(0, 0, value)
+	}
+}
+
+// PageSettlement is the page-side effect of a paid activation.
+type PageSettlement struct {
+	// Publish is false for a deleted or archived page: the money is still
+	// recorded on the activation, but the page is left untouched.
+	Publish     bool
+	PublishedAt time.Time
+	ActiveUntil time.Time
+}
+
+// SettleActivationPayment decides how a payment changes the page. active_until
+// = GREATEST(current active_until when still in the future, paidAt + duration),
+// so a second payment can extend but never shorten the paid period; an expired
+// page restarts from the payment time. published_at is only set when the page
+// was not already published.
+func SettleActivationPayment(p LandingPage, a LandingPageActivation, paidAt time.Time) PageSettlement {
+	if p.DeletedAt != nil || p.Status == PageStatusArchived {
+		return PageSettlement{}
+	}
+	paidAt = paidAt.UTC()
+	until := ActivationPeriodEnd(paidAt, a.DurationValue, a.DurationUnit)
+	if p.ActiveUntil != nil && p.ActiveUntil.After(paidAt) && p.ActiveUntil.After(until) {
+		until = p.ActiveUntil.UTC()
+	}
+	publishedAt := paidAt
+	if p.Status == PageStatusPublished && p.PublishedAt != nil {
+		publishedAt = p.PublishedAt.UTC()
+	}
+	return PageSettlement{Publish: true, PublishedAt: publishedAt, ActiveUntil: until}
+}

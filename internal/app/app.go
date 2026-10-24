@@ -529,6 +529,12 @@ func New(ctx context.Context) (*App, error) {
 		Billing: receivableActivationBilling{accounts: receivableModule.Accounts, invoices: receivableModule.Invoices},
 		Links:   activationPreviewLinks{domains: organizationrepo.NewDomainRepository(db)},
 	}))
+	// Lunas -> halaman terbit otomatis. Didaftarkan di proses API saja: InvoicePaid hanya dipicu oleh
+	// webhook DOKU / pencatatan pembayaran manual (payment_service); worker billing run tidak memicunya.
+	receivableModule.Listeners.Add(landingActivationReceivableListener{paid: landingservice.NewActivationPaidListener(
+		landingActivationRepo,
+		activationPaidNotifier{publisher: notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts), appName: cfg.App.Name, locale: cfg.Notification.DefaultLocale},
+		activationPublicLinks{domains: organizationrepo.NewDomainRepository(db)}, nil)})
 	// Webhook DOKU (URL tetap /webhooks/doku) hanya melayani invoice receivable (RCV-).
 	dokuWebhookHandler := receivablehandler.NewDokuWebhookHandler(
 		receivableModule.OnlinePayment, cfg.Doku.ClientID, cfg.Doku.SecretKey, log,

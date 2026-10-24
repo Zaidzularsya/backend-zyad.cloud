@@ -140,3 +140,19 @@ func TestActivationEnumsValid(t *testing.T) {
 		t.Fatal("expired is not a stored activation status")
 	}
 }
+
+func TestSettleActivationPayment(t *testing.T) {
+	now := time.Date(2026, 10, 10, 8, 0, 0, 0, time.UTC)
+	act := LandingPageActivation{DurationValue: 7, DurationUnit: ActivationDurationDay}
+	later := now.Add(60 * 24 * time.Hour)
+	del := now
+	if s := SettleActivationPayment(LandingPage{Status: PageStatusArchived}, act, now); s.Publish {
+		t.Fatal("archived page must not be published")
+	}
+	if s := SettleActivationPayment(LandingPage{Status: PageStatusDraft, DeletedAt: &del}, act, now); s.Publish {
+		t.Fatal("deleted page must not be published")
+	}
+	if s := SettleActivationPayment(LandingPage{Status: PageStatusPublished, ActiveUntil: &later}, act, now); !s.ActiveUntil.Equal(later) {
+		t.Fatalf("active_until = %v, want kept %v", s.ActiveUntil, later)
+	}
+}

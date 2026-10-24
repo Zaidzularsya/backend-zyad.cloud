@@ -253,3 +253,79 @@ func (r *activationRepository) Void(ctx context.Context, scope coretenant.Scope,
 	})
 	return a, err
 }
+
+func (r *activationRepository) SettleByInvoice(ctx context.Context, scope coretenant.Scope, invoiceID string, paidAt time.Time) (ActivationSettlement, error) {
+	lockActivation := `SELECT ` + activationColumns + `
+		FROM landing_page_activations
+		WHERE organization_id = $1 AND invoice_id = $2
+		FOR UPDATE`
+	// Lock order is always activation then page; the page lock serializes two
+	// activations of the same page so active_until is computed from fresh state.
+	lockPage := `SELECT id, organization_id, status, slug, title, is_homepage, published_at, active_until, deleted_at
+		FROM landing_pages
+		WHERE organization_id = $1 AND id = $2
+		FOR UPDATE`
+	markPaid := `UPDATE landing_page_activations
+		SET status = 'paid', paid_at = $3
+		WHERE organization_id = $1 AND id = $2 AND status IN ('open', 'void')`
+	publish := `UPDATE landing_pages
+		SET status = 'published', published_at = $3, active_until = $4, updated_at = now()
+		WHERE organization_id = $1 AND id = $2 AND deleted_at IS NULL AND status <> 'archived'`
+
+	var out ActivationSettlement
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		act, err := scanActivation(tx.QueryRow(ctx, lockActivation, scope.OrganizationID(), invoiceID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		out.Found = true
+		out.Activation = act
+		if act.Status == domain.ActivationStatusPaid {
+			return nil
+		}
+
+		var page domain.LandingPage
+		err = tx.QueryRow(ctx, lockPage, scope.OrganizationID(), act.PageID).Scan(
+			&page.ID, &page.OrganizationID, &page.Status, &page.Slug, &page.Title, &page.IsHomepage,
+			&page.PublishedAt, &page.ActiveUntil, &page.DeletedAt)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+		case err != nil:
+			return err
+		default:
+			out.PageFound = page.DeletedAt == nil
+			out.PageSlug, out.PageTitle, out.IsHomepage = page.Slug, page.Title, page.IsHomepage
+		}
+
+		paidAt = paidAt.UTC()
+		if _, err := tx.Exec(ctx, markPaid, scope.OrganizationID(), act.ID, paidAt); err != nil {
+			return err
+		}
+		out.Applied = true
+		act.Status, act.PaidAt = domain.ActivationStatusPaid, &paidAt
+		out.Activation = act
+
+		if !out.PageFound {
+			return nil
+		}
+		s := domain.SettleActivationPayment(page, act, paidAt)
+		if !s.Publish {
+			return nil
+		}
+		if _, err := tx.Exec(ctx, publish, scope.OrganizationID(), act.PageID, s.PublishedAt, s.ActiveUntil); err != nil {
+			return err
+		}
+		out.Published = true
+		out.ActiveUntil = &s.ActiveUntil
+		return nil
+	})
+	if err != nil {
+		return ActivationSettlement{}, err
+	}
+	return out, nil
+}
+
+var _ ActivationSettler = (*activationRepository)(nil)

@@ -32,6 +32,7 @@ var ErrActivationOpen = errors.New("page already has an open activation")
 // ActivationRepository stores landing_page_activations. Every query filters
 // organization_id from the verified scope (RLS is the second guard).
 type ActivationRepository interface {
+	ActivationSettler
 	Create(ctx context.Context, scope coretenant.Scope, params CreateActivationParams) (domain.LandingPageActivation, error)
 	// FindOpenByPage returns pgx.ErrNoRows when the page has no open activation.
 	FindOpenByPage(ctx context.Context, scope coretenant.Scope, pageID string) (domain.LandingPageActivation, error)
@@ -56,4 +57,29 @@ type ActivationRepository interface {
 	// ExistsForInvoice reports whether any activation (any status) of the
 	// scope references the invoice.
 	ExistsForInvoice(ctx context.Context, scope coretenant.Scope, invoiceID string) (bool, error)
+}
+
+// ActivationSettlement is the outcome of recording a paid activation invoice.
+type ActivationSettlement struct {
+	// Found: an activation of the scope references the invoice.
+	Found bool
+	// Applied: this call moved the activation to paid (false for a repeat).
+	Applied    bool
+	Activation domain.LandingPageActivation
+	// PageFound is false when the page is missing or soft-deleted.
+	PageFound   bool
+	Published   bool // the page was published/extended by this call
+	PageSlug    string
+	PageTitle   string
+	IsHomepage  bool
+	ActiveUntil *time.Time
+}
+
+// ActivationSettler applies a payment to the activation and its page.
+type ActivationSettler interface {
+	// SettleByInvoice runs in ONE transaction: lock the activation by
+	// (organization_id, invoice_id), and when it is open or void mark it paid
+	// and publish the page (page row locked FOR UPDATE). A paid activation or
+	// unknown invoice yields Applied=false and changes nothing.
+	SettleByInvoice(ctx context.Context, scope coretenant.Scope, invoiceID string, paidAt time.Time) (ActivationSettlement, error)
 }

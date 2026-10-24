@@ -6,7 +6,10 @@ import (
 	"net/http"
 	"strings"
 
+	"zyad.cloud/internal/core/businesstime"
 	coreerrors "zyad.cloud/internal/core/errors"
+	notificationdomain "zyad.cloud/internal/core/notification/domain"
+	notificationpublisher "zyad.cloud/internal/core/notification/publisher"
 	coretenant "zyad.cloud/internal/core/tenant"
 	landingrepo "zyad.cloud/internal/modules/landing/repository"
 	landingservice "zyad.cloud/internal/modules/landing/service"
@@ -121,3 +124,78 @@ func (l activationPreviewLinks) PreviewURL(ctx context.Context, scope coretenant
 }
 
 var _ landingservice.ActivationLinks = activationPreviewLinks{}
+
+// activationPublicLinks builds a page's public URL on the organization's
+// active host (primary first); empty when the organization has none.
+type activationPublicLinks struct {
+	domains activeDomainLister
+}
+
+func (l activationPublicLinks) PublicURL(ctx context.Context, scope coretenant.Scope, slug string, isHomepage bool) (string, error) {
+	domains, _, err := l.domains.ListByOrganization(ctx, scope.OrganizationID(), organizationrepo.DomainListFilter{
+		Status: organizationmodel.DomainStatusActive, Limit: 20,
+	})
+	if err != nil {
+		return "", err
+	}
+	for _, d := range domains {
+		if host := strings.TrimSpace(d.CanonicalHost); host != "" && d.OrganizationID == scope.OrganizationID() {
+			if isHomepage || slug == "" {
+				return "https://" + host + "/", nil
+			}
+			return "https://" + host + "/" + slug, nil
+		}
+	}
+	return "", nil
+}
+
+var _ landingservice.ActivationPublicLinks = activationPublicLinks{}
+
+// EventLandingActivationPaid is the notification event for the buyer.
+const EventLandingActivationPaid = "landing.activation_paid"
+
+type activationNoticePublisher interface {
+	Publish(ctx context.Context, event notificationpublisher.Event) (notificationdomain.OutboxEvent, error)
+}
+
+// activationPaidNotifier enqueues the buyer email through the notification outbox.
+type activationPaidNotifier struct {
+	publisher activationNoticePublisher
+	appName   string
+	locale    string
+}
+
+func (n activationPaidNotifier) PaymentReceived(ctx context.Context, scope coretenant.Scope, in landingservice.ActivationPaymentNotice) error {
+	line := ""
+	if in.PageURL != "" {
+		line = "Halaman Anda dapat dibuka di " + in.PageURL + "."
+	}
+	_, err := n.publisher.Publish(ctx, notificationpublisher.Event{
+		Type: EventLandingActivationPaid, OrganizationID: scope.OrganizationID(),
+		Recipient: notificationdomain.NotificationRecipient{Type: "external", Name: in.BuyerName, Email: in.BuyerEmail},
+		Payload: map[string]any{
+			"app_name": n.appName, "buyer_name": in.BuyerName, "page_title": in.PageTitle,
+			"active_until": businesstime.DayOf(in.ActiveUntil).Format("02-01-2006"), "page_link_line": line,
+		},
+		Locale: n.locale,
+	})
+	return err
+}
+
+var _ landingservice.ActivationPaidNotifier = activationPaidNotifier{}
+
+// landingActivationReceivableListener adapts the landing listener to the
+// receivable registry; contract events are of no interest to landing.
+type landingActivationReceivableListener struct {
+	paid *landingservice.ActivationPaidListener
+}
+
+func (l landingActivationReceivableListener) InvoicePaid(ctx context.Context, scope coretenant.Scope, inv receivableservice.InvoiceRef) {
+	l.paid.InvoicePaid(ctx, scope, inv.ID)
+}
+func (landingActivationReceivableListener) ContractCreated(context.Context, coretenant.Scope, receivableservice.ContractRef) {
+}
+func (landingActivationReceivableListener) ContractEnded(context.Context, coretenant.Scope, receivableservice.ContractRef) {
+}
+
+var _ receivableservice.Listener = landingActivationReceivableListener{}
