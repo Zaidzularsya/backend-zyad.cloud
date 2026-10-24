@@ -43,6 +43,7 @@ func TestVariableRegistryCodes(t *testing.T) {
 		"auth.password_reset",
 		"crm.quotation_approved",
 		"crm.quotation_revision_requested",
+		"landing.activation_paid",
 		"lead.created",
 		"payment.paid",
 		"permission.updated",
