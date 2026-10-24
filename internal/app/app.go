@@ -251,6 +251,7 @@ func New(ctx context.Context) (*App, error) {
 	)
 
 	landingPageRepo := landingrepo.NewPageRepository(db)
+	landingActivationRepo := landingrepo.NewActivationRepository(db)
 	landingSectionRepo := landingrepo.NewSectionRepository(db)
 	landingRevisionRepo := landingrepo.NewRevisionRepository(db)
 	landingFormRepo := landingrepo.NewFormRepository(db)
@@ -373,7 +374,8 @@ func New(ctx context.Context) (*App, error) {
 	landingAdminIntegrationHandler := landinghandler.NewAdminIntegrationHandler(landingDeliverySvc)
 
 	landingResolverRepo := landingrepo.NewResolverRepository(db)
-	landingResolverSvc := landingservice.NewResolverService(db, landingResolverRepo, landingVersionRepo, landingPageRepo, landingSectionRepo, landingFormRepo, landingBrandingRepo, landingReusableRepo, landingDocumentRepo, landingPublishSvc)
+	landingResolverSvc := landingservice.NewResolverService(db, landingResolverRepo, landingVersionRepo, landingPageRepo, landingSectionRepo, landingFormRepo, landingBrandingRepo, landingReusableRepo, landingDocumentRepo, landingPublishSvc,
+		landingservice.WithResolverActivations(landingActivationRepo))
 	landingAnalyticsRepo := landingrepo.NewAnalyticsRepository(db)
 	landingAnalyticsSvc := landingservice.NewAnalyticsService(landingAnalyticsRepo, landingPageRepo, db)
 

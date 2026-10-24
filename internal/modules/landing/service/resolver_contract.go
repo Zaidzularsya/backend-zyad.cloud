@@ -87,6 +87,12 @@ type ResolverService interface {
 	// Never serves drafts: no preview token is accepted.
 	ResolveHomepage(ctx context.Context, scope tenant.Scope) (ResolvedPage, error)
 
+	// ResolveActivationPreview serves the one page an activation preview token
+	// belongs to while the activation is open and its invoice not yet due.
+	// ErrActivationTokenNotFound when the host organization has no such token;
+	// ErrPageNotFound when the activation is due, paid or void.
+	ResolveActivationPreview(ctx context.Context, scope tenant.Scope, token string) (ResolvedPage, error)
+
 	// ResolveByDomain finds a published page by a custom domain
 	ResolveByDomain(ctx context.Context, scope tenant.Scope, customDomain string, previewToken string) (ResolvedPage, error)
 }
