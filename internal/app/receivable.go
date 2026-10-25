@@ -182,14 +182,15 @@ type receivableBuild struct {
 // receivableModule menampung handler untuk router dan service yang dibagikan ke modul lain
 // (S4: SalesOrder membuat invoice lewat Invoices/Accounts dan mendaftar Listeners).
 type receivableModule struct {
-	AccountHandler  *receivablehandler.AccountHandler
-	InvoiceHandler  *receivablehandler.InvoiceHandler
-	PaymentHandler  *receivablehandler.PaymentHandler
-	SettingsHandler *receivablehandler.SettingsHandler
-	PublicHandler   *receivablehandler.PublicInvoiceHandler
-	OnlinePayment   *receivableservice.OnlinePayment
-	ContractHandler *receivablehandler.ContractHandler
-	OverviewHandler *receivablehandler.OverviewHandler
+	AccountHandler    *receivablehandler.AccountHandler
+	InvoiceHandler    *receivablehandler.InvoiceHandler
+	PaymentHandler    *receivablehandler.PaymentHandler
+	SettingsHandler   *receivablehandler.SettingsHandler
+	PublicHandler     *receivablehandler.PublicInvoiceHandler
+	OnlinePayment     *receivableservice.OnlinePayment
+	ContractHandler   *receivablehandler.ContractHandler
+	OverviewHandler   *receivablehandler.OverviewHandler
+	SettlementHandler *receivablehandler.SettlementHandler
 
 	Invoices  receivableservice.InvoiceService
 	Contracts receivableservice.ContractService
@@ -255,15 +256,16 @@ func buildReceivable(b receivableBuild) receivableModule {
 		WithSettlementRecorder(receivableservice.NewSettlementRecorder(receivablerepo.NewSettlementRepository(db)))
 
 	return receivableModule{
-		AccountHandler:  receivablehandler.NewAccountHandler(accountSvc),
-		InvoiceHandler:  receivablehandler.NewInvoiceHandler(invoiceSvc, sendSvc),
-		PaymentHandler:  receivablehandler.NewPaymentHandler(paymentSvc),
-		SettingsHandler: receivablehandler.NewSettingsHandler(settingsSvc),
-		PublicHandler:   receivablehandler.NewPublicInvoiceHandler(publicSvc, b.RateCounter).WithPayments(onlinePayment),
-		OnlinePayment:   onlinePayment,
-		ContractHandler: receivablehandler.NewContractHandler(contractSvc).WithUpcoming(overviewSvc),
-		OverviewHandler: receivablehandler.NewOverviewHandler(overviewSvc),
-		Invoices:        invoiceSvc, Accounts: accountSvc, Payments: paymentSvc, Listeners: listeners,
+		AccountHandler:    receivablehandler.NewAccountHandler(accountSvc),
+		InvoiceHandler:    receivablehandler.NewInvoiceHandler(invoiceSvc, sendSvc),
+		PaymentHandler:    receivablehandler.NewPaymentHandler(paymentSvc),
+		SettingsHandler:   receivablehandler.NewSettingsHandler(settingsSvc),
+		PublicHandler:     receivablehandler.NewPublicInvoiceHandler(publicSvc, b.RateCounter).WithPayments(onlinePayment),
+		OnlinePayment:     onlinePayment,
+		ContractHandler:   receivablehandler.NewContractHandler(contractSvc).WithUpcoming(overviewSvc),
+		OverviewHandler:   receivablehandler.NewOverviewHandler(overviewSvc),
+		SettlementHandler: receivablehandler.NewSettlementHandler(receivableservice.NewSettlementService(receivablerepo.NewSettlementLedgerRepository(db))),
+		Invoices:          invoiceSvc, Accounts: accountSvc, Payments: paymentSvc, Listeners: listeners,
 		Contracts: contractSvc, Billing: orderBilling,
 	}
 }

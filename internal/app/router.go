@@ -235,6 +235,12 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.AdminAssetHandler != nil {
 		deps.AdminAssetHandler.RegisterRoutes(protected, deps.PermissionChecker)
 	}
+	// Ledger penyelesaian: permukaan platform (settlement.manage) dan baca-saja org sendiri
+	// (settlement.read); middleware tenant/izin dipasang di dalam RegisterXRoutes.
+	if deps.ReceivableSettlementHandler != nil {
+		deps.ReceivableSettlementHandler.RegisterPlatformRoutes(protected, deps.PermissionChecker)
+		deps.ReceivableSettlementHandler.RegisterOwnRoutes(protected, deps.PermissionChecker)
+	}
 	if deps.PlatformAssetHandler != nil {
 		deps.PlatformAssetHandler.RegisterRoutes(protected, deps.PermissionChecker)
 	}

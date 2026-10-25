@@ -710,6 +710,7 @@ func New(ctx context.Context) (*App, error) {
 		CRMDealOrdersHandler:             crmDealOrdersHandler,
 		ReceivableContractHandler:        receivableModule.ContractHandler,
 		ReceivableOverviewHandler:        receivableModule.OverviewHandler,
+		ReceivableSettlementHandler:      receivableModule.SettlementHandler,
 		CRMPublicQuotationHandler:        crmPublicQuotationHandler,
 		CRMSelfServeHandler:              crmSelfServeHandler,
 		CRMTenantCheckoutHandler:         crmTenantCheckoutHandler,

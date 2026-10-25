@@ -9582,6 +9582,171 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/platform/settlements:
+    get:
+      summary: Settlement balances per organization
+      operationId: listPlatformSettlements
+      tags: [Settlement]
+      security:
+      - BearerAuth: []
+      description: 'Organizations with at least one ledger entry, ordered by name. balance = paid_in - settled + adjusted. Platform organization context and permission `settlement.manage` required.'
+      parameters:
+      - {name: search, in: query, schema: {type: string}, description: Organization name}
+      - {name: page, in: query, schema: {type: integer}}
+      - {name: per_page, in: query, schema: {type: integer, maximum: 100}}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  data: {type: array, items: {$ref: '#/components/schemas/SettlementOrgBalance'}}
+                  meta: {type: object}
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Not platform org or missing permission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/platform/settlements/{orgId}/entries:
+    get:
+      summary: Ledger entries of an organization
+      operationId: listPlatformSettlementEntries
+      tags: [Settlement]
+      security:
+      - BearerAuth: []
+      description: 'Most recent first. Platform organization context and permission `settlement.manage` required.'
+      parameters:
+      - {name: orgId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: page, in: query, schema: {type: integer}}
+      - {name: per_page, in: query, schema: {type: integer, maximum: 100}}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  data: {type: array, items: {$ref: '#/components/schemas/SettlementEntry'}}
+                  meta: {type: object}
+        '403':
+          description: Not platform org or missing permission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Record a manual settlement or adjustment
+      operationId: createPlatformSettlementEntry
+      tags: [Settlement]
+      security:
+      - BearerAuth: []
+      description: 'kind=settlement: amount > 0 and must not exceed the current balance (422 SETTLEMENT_EXCEEDS_BALANCE). kind=adjustment: non-zero amount (negative allowed), note required, must not drive the balance below zero (422 ADJUSTMENT_BELOW_ZERO). The balance check and insert run under a per-organization advisory lock in one transaction. The beneficiary must be an existing customer organization (404 / 422 BENEFICIARY_NOT_CUSTOMER). Amounts are decimal strings with at most 2 digits. Platform organization context and permission `settlement.manage` required.'
+      parameters:
+      - {name: orgId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettlementEntryRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  data: {$ref: '#/components/schemas/SettlementEntry'}
+        '403':
+          description: Not platform org or missing permission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation / business rule error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/settlement/balance:
+    get:
+      summary: Own organization settlement balance
+      operationId: getOwnSettlementBalance
+      tags: [Settlement]
+      security:
+      - BearerAuth: []
+      description: 'Read-only. organization_id comes only from the tenant context (never a parameter). Customer organizations only; permission `settlement.read` (organization owner).'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  data: {$ref: '#/components/schemas/SettlementBalance'}
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/settlement/entries:
+    get:
+      summary: Own organization ledger entries
+      operationId: listOwnSettlementEntries
+      tags: [Settlement]
+      security:
+      - BearerAuth: []
+      description: 'Read-only, most recent first. organization_id comes only from the tenant context. Customer organizations only; permission `settlement.read`.'
+      parameters:
+      - {name: page, in: query, schema: {type: integer}}
+      - {name: per_page, in: query, schema: {type: integer, maximum: 100}}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  data: {type: array, items: {$ref: '#/components/schemas/SettlementEntry'}}
+                  meta: {type: object}
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/app/receivable/contracts:
     get:
       summary: List contracts
@@ -9976,6 +10141,40 @@ components:
               kind: {type: string, enum: [prepaid_one_time, prepaid_recurring, postpaid_recurring, postpaid_one_time]}
               met: {type: boolean}
               label: {type: string}
+    SettlementBalance:
+      type: object
+      properties:
+        paid_in: {type: string, example: '150000.75'}
+        settled: {type: string, example: '50000.00'}
+        adjusted: {type: string, example: '0.00'}
+        balance: {type: string, example: '100000.75', description: paid_in - settled + adjusted}
+    SettlementOrgBalance:
+      allOf:
+      - $ref: '#/components/schemas/SettlementBalance'
+      - type: object
+        properties:
+          organization_id: {type: string, format: uuid}
+          organization_name: {type: string}
+    SettlementEntry:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        organization_id: {type: string, format: uuid}
+        kind: {type: string, enum: [payment, settlement, adjustment]}
+        amount: {type: string, description: Decimal string; negative only for adjustment}
+        invoice_id: {type: string, format: uuid}
+        provider_reference: {type: string}
+        note: {type: string}
+        occurred_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+    SettlementEntryRequest:
+      type: object
+      required: [kind, amount]
+      properties:
+        kind: {type: string, enum: [settlement, adjustment]}
+        amount: {type: string, example: '-0.25'}
+        note: {type: string, maxLength: 500, description: Required for adjustment}
+        occurred_at: {type: string, format: date-time, description: Defaults to now (UTC)}
     ReceivableContract:
       type: object
       properties:
