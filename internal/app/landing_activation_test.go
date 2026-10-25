@@ -165,7 +165,7 @@ func TestActivationPreviewLinks(t *testing.T) {
 		{OrganizationID: activationOrgID, CanonicalHost: "other.example.test"},
 	}}
 	url, err := activationPreviewLinks{domains: lister}.PreviewURL(context.Background(), activationScope(t), "TOKEN")
-	if err != nil || url != "https://reseller.zyad.cloud/api/v1/public/landing/preview/TOKEN" {
+	if err != nil || url != "https://reseller.zyad.cloud/preview/TOKEN" {
 		t.Fatalf("url=%q err=%v", url, err)
 	}
 	if lister.org != activationOrgID || lister.filter.Status != organizationmodel.DomainStatusActive {
@@ -173,7 +173,7 @@ func TestActivationPreviewLinks(t *testing.T) {
 	}
 
 	empty := &fakeDomainLister{}
-	if url, _ := (activationPreviewLinks{domains: empty}).PreviewURL(context.Background(), activationScope(t), "TOKEN"); url != "/api/v1/public/landing/preview/TOKEN" {
+	if url, _ := (activationPreviewLinks{domains: empty}).PreviewURL(context.Background(), activationScope(t), "TOKEN"); url != "/preview/TOKEN" {
 		t.Fatalf("fallback url=%q", url)
 	}
 	if _, err := (activationPreviewLinks{domains: &fakeDomainLister{err: errors.New("db")}}).PreviewURL(context.Background(), activationScope(t), "T"); err == nil {

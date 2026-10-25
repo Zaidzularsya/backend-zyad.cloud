@@ -670,6 +670,10 @@ Field tambahan halaman GrapesJS (R5-S3): `OrganizationType` (`"platform"` | `"cu
 
 ### GET /public/landing/preview/:token
 
+Token aktivasi (halaman undangan berbayar) dibagikan ke pembeli sebagai halaman frontend
+`https://<host-tenant>/preview/:token` (`preview_url` saat invoice aktivasi dibuat); halaman itu memanggil
+endpoint ini dan merender `ResolvedPage` dengan renderer publik yang sama. 404 = token tidak dikenal/kedaluwarsa.
+
 Wajib mengirim:
 
 ```http

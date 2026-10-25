@@ -140,7 +140,7 @@ func (f *activationBillingFake) VoidInvoice(_ context.Context, _ coretenant.Scop
 type activationLinksFake struct{}
 
 func (activationLinksFake) PreviewURL(_ context.Context, _ coretenant.Scope, token string) (string, error) {
-	return "https://reseller.example.test/api/v1/public/landing/preview/" + token, nil
+	return "https://reseller.example.test/preview/" + token, nil
 }
 
 type activationHarness struct {
@@ -213,7 +213,7 @@ func TestActivationCreateInvoice_Success(t *testing.T) {
 		t.Fatalf("invoice_due_at = %s, want now+1h default", a.InvoiceDueAt)
 	}
 	// Preview URL carries the raw token whose hash is the stored one.
-	const prefix = "https://reseller.example.test/api/v1/public/landing/preview/"
+	const prefix = "https://reseller.example.test/preview/"
 	if !strings.HasPrefix(res.PreviewURL, prefix) {
 		t.Fatalf("PreviewURL = %q", res.PreviewURL)
 	}
@@ -457,7 +457,7 @@ func TestActivationCreateInvoice_DefaultPreviewURLIsRelativePath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(res.PreviewURL, "/api/v1/public/landing/preview/") || strings.Contains(res.PreviewURL, "{token}") {
+	if !strings.HasPrefix(res.PreviewURL, "/preview/") || strings.Contains(res.PreviewURL, "{token}") {
 		t.Fatalf("PreviewURL = %q", res.PreviewURL)
 	}
 }

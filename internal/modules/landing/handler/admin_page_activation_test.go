@@ -92,7 +92,7 @@ func TestAdminPageListIncludesActivationFields(t *testing.T) {
 			if oa == nil || oa.ID != "act-1" || oa.BuyerName != "Budi" || oa.Price != "150000.00" || !oa.InvoiceDueAt.Equal(due) {
 				t.Fatalf("open_activation = %+v", oa)
 			}
-			if oa.PreviewURLTemplate != "/api/v1/public/landing/preview/{token}" {
+			if oa.PreviewURLTemplate != "/preview/{token}" {
 				t.Fatalf("preview_url_template = %q", oa.PreviewURLTemplate)
 			}
 		} else if it.OpenActivation != nil {

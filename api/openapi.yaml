@@ -10058,8 +10058,8 @@ components:
         activation: {$ref: "#/components/schemas/LandingActivation"}
         preview_url:
           type: string
-          description: Contains the raw preview token; shown only once.
-          example: https://reseller.zyad.cloud/api/v1/public/landing/preview/AbC...
+          description: Buyer-facing preview page (frontend route `/preview/<token>` on the tenant host, which loads `GET /api/v1/public/landing/preview/{token}`). Contains the raw preview token; shown only once.
+          example: https://reseller.zyad.cloud/preview/AbC...
         payment_url:
           type: string
           description: Public invoice link (`<FRONTEND_URL>/i/<token>`).
@@ -10081,7 +10081,8 @@ components:
           format: date-time
         preview_url_template:
           type: string
-          example: /api/v1/public/landing/preview/{token}
+          description: Frontend preview page path; the page fetches `GET /api/v1/public/landing/preview/{token}`.
+          example: /preview/{token}
     CrmSalesOrder:
       type: object
       properties:

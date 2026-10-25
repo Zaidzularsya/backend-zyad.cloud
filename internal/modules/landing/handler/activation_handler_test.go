@@ -40,7 +40,7 @@ func (f *fakeActivationService) CreateInvoice(_ context.Context, scope coretenan
 			PreviewTokenHash: "SECRET-HASH", InvoiceDueAt: time.Date(2026, 10, 23, 11, 0, 0, 0, time.UTC),
 			Status: domain.ActivationStatusOpen,
 		},
-		PreviewURL: "https://r.example.test/api/v1/public/landing/preview/RAWTOKEN",
+		PreviewURL: "https://r.example.test/preview/RAWTOKEN",
 		PaymentURL: "https://app.example.test/i/link",
 	}, nil
 }

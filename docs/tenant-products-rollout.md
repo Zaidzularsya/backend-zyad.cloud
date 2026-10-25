@@ -85,9 +85,9 @@ Karena aditif/registry-only, migration boleh dirilis **sebelum** kode. `deploy/d
   kunci IP (atau IP proxy) dan terblokir bersama.
 - **`APP_FRONTEND_URL`**: link invoice publik (`/i/:token`) dibangun dari nilai ini, bukan dari host tenant.
   Frontend checkout memang menerima redirect lintas-origin ke host ini; pastikan nilainya benar.
-- **nginx**: bila `preview_url` dipakai, host tenant harus meneruskan `/api/v1/public/*` ke backend.
-  `preview_url` yang dikembalikan saat ini adalah **path API** (`https://<host>/api/v1/public/landing/preview/<token>`),
-  belum ada rute SPA untuk pembeli.
+- **nginx**: `preview_url` kini halaman SPA `https://<host>/preview/<token>`; host tenant harus menyajikan
+  SPA untuk path itu (fallback `index.html`) dan meneruskan `/api/v1/public/*` ke backend (halaman memanggil
+  `GET /api/v1/public/landing/preview/<token>`).
 - **Cloudflare/cache**: `GET /public/tenant-catalog` mengirim `Cache-Control: public, max-age=60` dengan
   `Vary: Host, X-Forwarded-Host`. Pastikan cache edge menghormati `Vary: Host`; kalau tidak, katalog satu
   tenant bisa disajikan ke tenant lain. Jika ragu, jangan cache path ini di edge.
@@ -186,7 +186,7 @@ Koreksi kesalahan input dilakukan dengan entri `adjustment` lawan, bukan edit/ha
   dipenuhi).
 - Tidak ada undangan staf lewat email (Task 11b ditunda). Staf tetap dibuat lewat CRM lalu ditautkan.
 - Tidak ada override katalog per-tenant; flag `tenant_offerable/tenant_max` berlaku global.
-- `preview_url` berupa path API; belum ada rute SPA untuk pembeli. Link preview hanya muncul sekali.
+- Link preview (`/preview/<token>`) hanya muncul sekali, saat invoice aktivasi dibuat.
 - Endpoint publik (`/public/tenant-catalog`, preview, dll.) tidak punya rate limit khusus; hanya
   `POST /public/tenant-checkout` yang dibatasi (per IP dan per tenant, Redis). Bila Redis tidak tersedia,
   limiter **fail-open**.

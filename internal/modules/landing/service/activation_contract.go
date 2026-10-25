@@ -9,9 +9,10 @@ import (
 	"zyad.cloud/internal/modules/landing/repository"
 )
 
-// ActivationPreviewURLTemplate is the public preview path; {token} is the raw
-// token, which is only returned once when the activation is created.
-const ActivationPreviewURLTemplate = "/api/v1/public/landing/preview/{token}"
+// ActivationPreviewURLTemplate is the buyer-facing preview PAGE (frontend SPA
+// route, which fetches GET /api/v1/public/landing/preview/:token); {token} is
+// the raw token, which is only returned once when the activation is created.
+const ActivationPreviewURLTemplate = "/preview/{token}"
 
 // ActivationReader exposes page activation state to the admin page API.
 type ActivationReader interface {
