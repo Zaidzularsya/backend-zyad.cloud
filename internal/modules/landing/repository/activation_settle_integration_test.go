@@ -8,8 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"zyad.cloud/internal/modules/landing/domain"
 	"zyad.cloud/internal/modules/landing/repository"
+	"zyad.cloud/internal/platform/database"
 	"zyad.cloud/internal/platform/database/testutil"
 )
 
@@ -26,7 +29,7 @@ func TestActivationSettleByInvoiceIntegration(t *testing.T) {
 		VALUES ($1, 'customer', $3, 'Organization A', 'active'),
 		       ($2, 'customer', $4, 'Organization B', 'active')
 		ON CONFLICT DO NOTHING
-	`, tenants.A.OrganizationID, tenants.B.OrganizationID, testutil.UniqueCode("set-a"), testutil.UniqueCode("set-b")); err != nil {
+	`, tenants.A.OrganizationID, tenants.B.OrganizationID, orgSlug("set-a"), orgSlug("set-b")); err != nil {
 		t.Fatalf("insert organizations: %v", err)
 	}
 	page, err := pages.Create(ctx, tenants.A.Scope, repository.CreatePageParams{
@@ -48,20 +51,7 @@ func TestActivationSettleByInvoiceIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create activation: %v", err)
 	}
-	var accountID, invoiceID string
-	if err := db.QueryRow(ctx, `INSERT INTO receivable_accounts (organization_id, name) VALUES ($1, 'Budi') RETURNING id`,
-		tenants.A.OrganizationID).Scan(&accountID); err != nil {
-		t.Fatalf("insert account: %v", err)
-	}
-	if err := db.QueryRow(ctx, `INSERT INTO receivable_invoices (organization_id, account_id) VALUES ($1, $2) RETURNING id`,
-		tenants.A.OrganizationID, accountID).Scan(&invoiceID); err != nil {
-		t.Fatalf("insert invoice: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = db.Exec(context.Background(), "DELETE FROM landing_page_activations WHERE page_id = $1", page.ID)
-		_, _ = db.Exec(context.Background(), "DELETE FROM receivable_invoices WHERE id = $1", invoiceID)
-		_, _ = db.Exec(context.Background(), "DELETE FROM receivable_accounts WHERE id = $1", accountID)
-	})
+	invoiceID := insertActivationInvoice(t, db, tenants.A.OrganizationID, page.ID)
 	if _, err := acts.SetInvoice(ctx, tenants.A.Scope, act.ID, invoiceID); err != nil {
 		t.Fatalf("set invoice: %v", err)
 	}
@@ -86,4 +76,61 @@ func TestActivationSettleByInvoiceIntegration(t *testing.T) {
 	if again, err := acts.SettleByInvoice(ctx, tenants.A.Scope, invoiceID, paidAt.Add(time.Hour)); err != nil || again.Applied {
 		t.Fatalf("repeat: applied=%v err=%v", again.Applied, err)
 	}
+}
+
+// orgSlug: testutil.UniqueCode memakai titik, sedangkan organizations_slug_format_check hanya
+// mengizinkan a-z, 0-9, dan tanda hubung.
+func orgSlug(prefix string) string {
+	return strings.ReplaceAll(testutil.UniqueCode(prefix), ".", "-")
+}
+
+// inOrg menjalankan SQL fixture dalam transaksi ber-konteks RLS org itu: tabel landing_* dan
+// receivable_* memakai FORCE RLS, jadi SQL tanpa konteks ditolak (insert) atau tidak melihat apa pun.
+func inOrg(t *testing.T, db *database.Pool, orgID string, fn func(pgx.Tx) error) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", orgID); err != nil {
+		t.Fatal(err)
+	}
+	if err := fn(tx); err != nil {
+		t.Fatalf("fixture in org %s: %v", orgID, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// insertActivationInvoice membuat receivable account + invoice org itu (target composite FK SetInvoice)
+// dan mendaftarkan cleanup yang juga berjalan dalam konteks org.
+func insertActivationInvoice(t *testing.T, db *database.Pool, orgID, pageID string) string {
+	t.Helper()
+	var accountID, invoiceID string
+	inOrg(t, db, orgID, func(tx pgx.Tx) error {
+		ctx := context.Background()
+		if err := tx.QueryRow(ctx, `INSERT INTO receivable_accounts (organization_id, name) VALUES ($1, 'Budi') RETURNING id`,
+			orgID).Scan(&accountID); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `INSERT INTO receivable_invoices (organization_id, account_id) VALUES ($1, $2) RETURNING id`,
+			orgID, accountID).Scan(&invoiceID)
+	})
+	t.Cleanup(func() {
+		inOrg(t, db, orgID, func(tx pgx.Tx) error {
+			ctx := context.Background()
+			if _, err := tx.Exec(ctx, "DELETE FROM landing_page_activations WHERE page_id = $1", pageID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, "DELETE FROM receivable_invoices WHERE id = $1", invoiceID); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, "DELETE FROM receivable_accounts WHERE id = $1", accountID)
+			return err
+		})
+	})
+	return invoiceID
 }

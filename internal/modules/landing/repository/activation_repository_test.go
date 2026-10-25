@@ -29,7 +29,7 @@ func TestActivationRepositoryLifecycleAndIsolationIntegration(t *testing.T) {
 		VALUES ($1, 'customer', $3, 'Organization A', 'active'),
 		       ($2, 'customer', $4, 'Organization B', 'active')
 		ON CONFLICT DO NOTHING
-	`, tenants.A.OrganizationID, tenants.B.OrganizationID, testutil.UniqueCode("act-a"), testutil.UniqueCode("act-b")); err != nil {
+	`, tenants.A.OrganizationID, tenants.B.OrganizationID, orgSlug("act-a"), orgSlug("act-b")); err != nil {
 		t.Fatalf("insert organizations: %v", err)
 	}
 
@@ -66,9 +66,9 @@ func TestActivationRepositoryLifecycleAndIsolationIntegration(t *testing.T) {
 	}
 
 	var stored string
-	if err := db.QueryRow(ctx, "SELECT preview_token_hash FROM landing_page_activations WHERE id = $1", act.ID).Scan(&stored); err != nil {
-		t.Fatal(err)
-	}
+	inOrg(t, db, tenants.A.OrganizationID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, "SELECT preview_token_hash FROM landing_page_activations WHERE id = $1", act.ID).Scan(&stored)
+	})
 	if stored == raw || stored != hash {
 		t.Fatal("only the token hash may be stored")
 	}
@@ -76,8 +76,8 @@ func TestActivationRepositoryLifecycleAndIsolationIntegration(t *testing.T) {
 	// One open activation per page.
 	params2 := params
 	_, params2.PreviewTokenHash, _ = domain.NewActivationPreviewToken()
-	if _, err := acts.Create(ctx, tenants.A.Scope, params2); err == nil {
-		t.Fatal("a second open activation for the same page must be rejected")
+	if _, err := acts.Create(ctx, tenants.A.Scope, params2); !errors.Is(err, repository.ErrActivationOpen) {
+		t.Fatalf("a second open activation for the same page: err = %v, want ErrActivationOpen (23505 on %s)", err, "idx_landing_page_activations_one_open_per_page")
 	}
 
 	// Another tenant cannot create on, find, or change this page's activation.
@@ -135,7 +135,7 @@ func TestActivationRepositoryReplaceOverdueAndInvoiceLinkIntegration(t *testing.
 		VALUES ($1, 'customer', $3, 'Organization A', 'active'),
 		       ($2, 'customer', $4, 'Organization B', 'active')
 		ON CONFLICT DO NOTHING
-	`, tenants.A.OrganizationID, tenants.B.OrganizationID, testutil.UniqueCode("rep-a"), testutil.UniqueCode("rep-b")); err != nil {
+	`, tenants.A.OrganizationID, tenants.B.OrganizationID, orgSlug("rep-a"), orgSlug("rep-b")); err != nil {
 		t.Fatalf("insert organizations: %v", err)
 	}
 	slug := strings.ReplaceAll("rep-"+testutil.UniqueCode("p"), ".", "-")
@@ -184,20 +184,7 @@ func TestActivationRepositoryReplaceOverdueAndInvoiceLinkIntegration(t *testing.
 	}
 
 	// SetInvoice requires an invoice row of the same org (composite FK).
-	var accountID, invoiceID string
-	if err := db.QueryRow(ctx, `INSERT INTO receivable_accounts (organization_id, name) VALUES ($1, 'Budi') RETURNING id`,
-		tenants.A.OrganizationID).Scan(&accountID); err != nil {
-		t.Fatalf("insert account: %v", err)
-	}
-	if err := db.QueryRow(ctx, `INSERT INTO receivable_invoices (organization_id, account_id) VALUES ($1, $2) RETURNING id`,
-		tenants.A.OrganizationID, accountID).Scan(&invoiceID); err != nil {
-		t.Fatalf("insert invoice: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = db.Exec(context.Background(), "DELETE FROM landing_page_activations WHERE page_id = $1", page.ID)
-		_, _ = db.Exec(context.Background(), "DELETE FROM receivable_invoices WHERE id = $1", invoiceID)
-		_, _ = db.Exec(context.Background(), "DELETE FROM receivable_accounts WHERE id = $1", accountID)
-	})
+	invoiceID := insertActivationInvoice(t, db, tenants.A.OrganizationID, page.ID)
 	if _, err := acts.SetInvoice(ctx, tenants.B.Scope, second.ID, invoiceID); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("cross-tenant SetInvoice: err = %v", err)
 	}
