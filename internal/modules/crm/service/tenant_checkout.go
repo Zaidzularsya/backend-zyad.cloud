@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	coreerrors "zyad.cloud/internal/core/errors"
@@ -62,6 +64,11 @@ type WorkspaceSystemLinker interface {
 	LinkWorkspaceBySystem(ctx context.Context, scope coretenant.Scope, companyID, workspaceOrgID string) error
 }
 
+// WorkspaceLinkFinder: companyRepository.FindWorkspaceLinkAnyOrg (lintas org CRM).
+type WorkspaceLinkFinder interface {
+	FindWorkspaceLinkAnyOrg(ctx context.Context, workspaceOrgID string) (companyID string, found bool, err error)
+}
+
 type TenantCheckoutDeps struct {
 	Buyers       GoogleBuyerVerifier
 	Workspaces   TenantBuyerWorkspaces
@@ -72,7 +79,9 @@ type TenantCheckoutDeps struct {
 	Chain        SelfServeService
 	Companies    SelfServeCompanies
 	Links        WorkspaceSystemLinker
-	Locker       Locker
+	// WorkspaceLinks menjaga satu workspace hanya tertaut di satu org CRM (guard Task 7).
+	WorkspaceLinks WorkspaceLinkFinder
+	Locker         Locker
 }
 
 // Fitur tenant yang wajib ada agar checkout publik boleh berjalan (sama dengan gerbang listing Task 8).
@@ -132,6 +141,11 @@ func (s *tenantCheckoutService) Checkout(ctx context.Context, tenant coretenant.
 		return SelfServeCheckoutResult{}, err
 	}
 
+	// Rantai menautkan company↔workspace di dalam Convert, sebelum LinkWorkspaceBySystem
+	// (yang lalu idempoten), jadi guard lintas-org harus dijalankan di sini.
+	if err := s.rejectForeignLink(ctx, tenant, workspaceID); err != nil {
+		return SelfServeCheckoutResult{}, err
+	}
 	result, err := s.deps.Chain.Checkout(ctx, tenant, SelfServeCheckoutRequest{
 		TenantOrganizationID: workspaceID, BuyerUserID: buyer.UserID, ProductID: productID,
 	})
@@ -142,6 +156,28 @@ func (s *tenantCheckoutService) Checkout(ctx context.Context, tenant coretenant.
 		return SelfServeCheckoutResult{}, err
 	}
 	return result, nil
+}
+
+// rejectForeignLink: workspace yang sudah tertaut ke company org CRM lain ditolak (409);
+// tautan ke company tenant ini sendiri = pembeli lama, lanjut.
+func (s *tenantCheckoutService) rejectForeignLink(ctx context.Context, tenant coretenant.Scope, workspaceID string) error {
+	linkedID, found, err := s.deps.WorkspaceLinks.FindWorkspaceLinkAnyOrg(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("find workspace link: %w", err)
+	}
+	if !found {
+		return nil
+	}
+	own, err := s.deps.Companies.FindByTenantOrganization(ctx, tenant, workspaceID)
+	switch {
+	case err == nil && own.ID == linkedID:
+		return nil
+	case err != nil && !errors.Is(err, pgx.ErrNoRows):
+		return fmt.Errorf("find tenant company for workspace: %w", err)
+	}
+	slog.WarnContext(ctx, "tenant checkout: buyer workspace already linked in another organization",
+		"organization_id", tenant.OrganizationID(), "workspace_id", workspaceID)
+	return coreerrors.New("WORKSPACE_ALREADY_LINKED", "workspace is already linked to another company", http.StatusConflict)
 }
 
 func (s *tenantCheckoutService) rejectPlatform(ctx context.Context, tenant coretenant.Scope) error {

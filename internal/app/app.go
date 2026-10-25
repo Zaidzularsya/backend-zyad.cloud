@@ -635,16 +635,17 @@ func New(ctx context.Context) (*App, error) {
 	// Checkout publik pelanggan tenant (Bagian 2B): tenant dari host, pembeli dari Google, workspace
 	// per tenant-pembeli, rantai self-serve di scope tenant.
 	crmTenantCheckoutHandler := crmhandler.NewTenantCheckoutHandler(crmservice.NewTenantCheckoutService(crmservice.TenantCheckoutDeps{
-		Buyers:       googleBuyerAdapter{auth: authService},
-		Workspaces:   tenantBuyerWorkspaces{db: db, onboarding: organizationOnboardingService},
-		Products:     catalogProductService,
-		ProductGate:  catalogProductService,
-		Entitlements: crmEntitlementChecker,
-		Platforms:    selfServePlatformScopes,
-		Chain:        selfServeSvc,
-		Companies:    crmCompanyRepo,
-		Links:        crmCompanySvc,
-		Locker:       crmrepo.NewAdvisoryLocker(db),
+		Buyers:         googleBuyerAdapter{auth: authService},
+		Workspaces:     tenantBuyerWorkspaces{db: db, onboarding: organizationOnboardingService},
+		Products:       catalogProductService,
+		ProductGate:    catalogProductService,
+		Entitlements:   crmEntitlementChecker,
+		Platforms:      selfServePlatformScopes,
+		Chain:          selfServeSvc,
+		Companies:      crmCompanyRepo,
+		Links:          crmCompanySvc,
+		WorkspaceLinks: crmCompanyRepo,
+		Locker:         crmrepo.NewAdvisoryLocker(db),
 	}), redisClient)
 
 	router, err := newRouter(Dependencies{

@@ -178,6 +178,18 @@ func (w *tcWorld) LinkWorkspaceBySystem(_ context.Context, scope coretenant.Scop
 	return nil
 }
 
+// FindWorkspaceLinkAnyOrg: company mana pun (semua org) yang tertaut ke workspace.
+func (w *tcWorld) FindWorkspaceLinkAnyOrg(_ context.Context, workspaceOrgID string) (string, bool, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, byWS := range w.companies {
+		if c, ok := byWS[workspaceOrgID]; ok {
+			return c.ID, true, nil
+		}
+	}
+	return "", false, nil
+}
+
 // ---- Locker: lock in-memory yang benar-benar eksklusif.
 func (w *tcWorld) TryLock(_ context.Context, key string) (func(), bool, error) {
 	w.mu.Lock()
@@ -217,7 +229,7 @@ func tcScope(orgID string) coretenant.Scope {
 func newTC(w *tcWorld) TenantCheckoutService {
 	return NewTenantCheckoutService(TenantCheckoutDeps{
 		Buyers: w, Workspaces: w, Products: w, ProductGate: w, Entitlements: w, Platforms: w,
-		Chain: w, Companies: w, Links: w, Locker: w,
+		Chain: w, Companies: w, Links: w, WorkspaceLinks: w, Locker: w,
 	})
 }
 
@@ -432,7 +444,7 @@ func TestTenantCheckout_ChainErrorPropagates(t *testing.T) {
 	w := newTCWorld()
 	svc := NewTenantCheckoutService(TenantCheckoutDeps{
 		Buyers: w, Workspaces: w, Products: w, ProductGate: w, Entitlements: w, Platforms: w,
-		Chain: failingChain{err: ErrSelfServeAlreadySubscribed}, Companies: w, Links: w, Locker: w,
+		Chain: failingChain{err: ErrSelfServeAlreadySubscribed}, Companies: w, Links: w, WorkspaceLinks: w, Locker: w,
 	})
 	_, err := svc.Checkout(context.Background(), tcScope(tcTenantA), TenantCheckoutInput{GoogleCredential: "cred-rina", ProductID: tcProdA1})
 	if !errors.Is(err, ErrSelfServeAlreadySubscribed) {
@@ -472,5 +484,42 @@ func TestTenantCheckout_PostpaidProductRejected(t *testing.T) {
 	_, err := newTC(w).Checkout(context.Background(), tcScope(tcTenantA), TenantCheckoutInput{GoogleCredential: "cred-rina", ProductID: tcProdA1})
 	if code, status := tcAppErr(t, err); code != "TENANT_PRODUCT_UNAVAILABLE" || status != http.StatusUnprocessableEntity {
 		t.Fatalf("code=%s status=%d", code, status)
+	}
+}
+
+// Workspace pembeli yang sudah tertaut ke company org LAIN ditolak SEBELUM rantai berjalan
+// (rantai menautkan di dalam Convert, sehingga guard di LinkWorkspaceBySystem tidak pernah
+// sempat berjalan pada jalur checkout).
+func TestTenantCheckout_WorkspaceLinkedInOtherOrgIsRejected(t *testing.T) {
+	w := newTCWorld()
+	w.workspaces[tcTenantA+"|user-rina"] = "ws-x"
+	ws := "ws-x"
+	w.companies[tcTenantB] = map[string]domain.Company{"ws-x": {ID: "co-b", TenantOrganizationID: &ws}}
+
+	_, err := newTC(w).Checkout(context.Background(), tcScope(tcTenantA), TenantCheckoutInput{GoogleCredential: "cred-rina", ProductID: tcProdA1})
+	if code, status := tcAppErr(t, err); code != "WORKSPACE_ALREADY_LINKED" || status != http.StatusConflict {
+		t.Fatalf("got %s %d", code, status)
+	}
+	if len(w.checkouts) != 0 || len(w.links) != 0 {
+		t.Fatalf("chain must not run: checkouts=%v links=%v", w.checkouts, w.links)
+	}
+	if len(w.held) != 0 {
+		t.Fatalf("locks must be released, held=%v", w.held)
+	}
+}
+
+// Tautan ke company tenant ini sendiri = pembeli lama; checkout dilanjutkan.
+func TestTenantCheckout_WorkspaceLinkedInSameTenantProceeds(t *testing.T) {
+	w := newTCWorld()
+	svc := newTC(w)
+	in := TenantCheckoutInput{GoogleCredential: "cred-rina", ProductID: tcProdA1}
+	if _, err := svc.Checkout(context.Background(), tcScope(tcTenantA), in); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Checkout(context.Background(), tcScope(tcTenantA), in); err != nil {
+		t.Fatalf("same-tenant link must be reused: %v", err)
+	}
+	if len(w.checkouts) != 2 || w.workspaceCreate != 1 {
+		t.Fatalf("checkouts=%d workspaces=%d", len(w.checkouts), w.workspaceCreate)
 	}
 }

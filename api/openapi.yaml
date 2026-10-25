@@ -4071,7 +4071,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: SELF_SERVE_IN_PROGRESS (another checkout for this buyer is running), SELF_SERVE_ALREADY_SUBSCRIBED (the buyer already has an active contract for this same product), AUTH_GOOGLE_EMAIL_CONFLICT, or a workspace link conflict
+          description: SELF_SERVE_IN_PROGRESS (another checkout for this buyer is running), SELF_SERVE_ALREADY_SUBSCRIBED (the buyer already has an active contract for this same product), AUTH_GOOGLE_EMAIL_CONFLICT, or WORKSPACE_ALREADY_LINKED (the buyer workspace is already linked to a company of another CRM organization; checked before the CRM chain runs)
           content:
             application/json:
               schema:
