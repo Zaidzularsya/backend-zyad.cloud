@@ -149,7 +149,21 @@ func mapListingErr(err error) error {
 	if isUniqueViolation(err, "idx_catalog_products_listing_unique") {
 		return ErrListingExists
 	}
+	// FK komposit (organization_id, category_id): kategori org lain ditolak database.
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.ConstraintName == "fk_catalog_products_category" {
+		return ErrCategoryNotFound
+	}
 	return err
+}
+
+func (r *productRepository) CategoryInScope(ctx context.Context, scope coretenant.Scope, categoryID string) (bool, error) {
+	var ok bool
+	err := withTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM catalog_product_categories
+			WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL)`, categoryID, scope.OrganizationID()).Scan(&ok)
+	})
+	return ok, err
 }
 
 func (r *productRepository) Create(ctx context.Context, scope coretenant.Scope, in CreateProductParams) (domain.Product, error) {

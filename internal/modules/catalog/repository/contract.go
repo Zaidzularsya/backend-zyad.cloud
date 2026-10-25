@@ -14,6 +14,7 @@ var (
 	ErrSKUExists          = errors.New("sku already used by another product")
 	ErrCategoryNameExists = errors.New("category name already exists")
 	ErrListingExists      = errors.New("listing_code already has a public product with this billing frequency")
+	ErrCategoryNotFound   = errors.New("category not found in this organization's catalog")
 )
 
 // ListingParams adalah blok publikasi produk; dikirim utuh.
@@ -74,6 +75,8 @@ type UpdateProductParams struct {
 type ProductRepository interface {
 	Create(ctx context.Context, scope coretenant.Scope, p CreateProductParams) (domain.Product, error)
 	FindByID(ctx context.Context, scope coretenant.Scope, id string) (domain.Product, error)
+	// CategoryInScope: kategori aktif (belum dihapus) milik org scope.
+	CategoryInScope(ctx context.Context, scope coretenant.Scope, categoryID string) (bool, error)
 	// FindBySKU mengembalikan produk aktif dengan SKU persis itu (pgx.ErrNoRows bila tidak ada), lengkap dengan fitur.
 	FindBySKU(ctx context.Context, scope coretenant.Scope, sku string) (domain.Product, error)
 	// FindByIDs mengembalikan produk aktif maupun nonaktif, tetapi tidak yang terhapus.

@@ -22,6 +22,8 @@ func failCatalog(c *gin.Context, err error) {
 		corehttp.Fail(c, coreerrors.New("PRODUCT_SKU_EXISTS", "SKU sudah dipakai produk lain", http.StatusConflict))
 	case errors.Is(err, repository.ErrListingExists):
 		corehttp.Fail(c, coreerrors.New("PRODUCT_LISTING_EXISTS", "Kode listing sudah punya produk publik dengan frekuensi ini", http.StatusConflict))
+	case errors.Is(err, repository.ErrCategoryNotFound):
+		corehttp.Fail(c, coreerrors.New("CATEGORY_NOT_FOUND", "Kategori tidak ditemukan di katalog organisasi ini", http.StatusUnprocessableEntity))
 	case errors.Is(err, repository.ErrCategoryNameExists):
 		corehttp.Fail(c, coreerrors.New("CATEGORY_NAME_EXISTS", "Nama kategori sudah ada", http.StatusConflict))
 	default:

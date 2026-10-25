@@ -13196,11 +13196,11 @@ components:
           default: true
         is_public:
           type: boolean
-          description: Platform catalog only; other organizations get 422 VALIDATION_ERROR.
+          description: Any organization may publish its own products (platform -> `/public/catalog`, tenant -> `/public/tenant-catalog` on the tenant host). Non-platform organizations must use an active category of their own catalog (422 CATEGORY_NOT_FOUND otherwise). No extra permission is needed; `features` keep their own permission rule.
         listing_code:
           type: string
           pattern: '^[a-z0-9][a-z0-9-]{0,49}$'
-          description: Required when `is_public`; unique per (listing_code, billing_frequency) among public products (409 PRODUCT_LISTING_EXISTS). Public products also require a category.
+          description: Required when `is_public`; unique per (organization, listing_code, billing_frequency) among public products (409 PRODUCT_LISTING_EXISTS). Public products also require a category.
         listing_order:
           type: integer
         features:
@@ -13244,7 +13244,7 @@ components:
           type: boolean
         is_public:
           type: boolean
-          description: Listing block (`is_public`, `listing_code`, `listing_order`) is sent whole or not at all; a partial block is 422. Platform catalog only.
+          description: Listing block (`is_public`, `listing_code`, `listing_order`) is sent whole or not at all; a partial block is 422. Allowed for every organization; when the effective product is public, a non-platform organization's effective category must be an active category of its own catalog (422 CATEGORY_NOT_FOUND).
         listing_code:
           type: string
         listing_order:

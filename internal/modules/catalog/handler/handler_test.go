@@ -143,6 +143,18 @@ func TestCreateProductCustomerGetsPlatformFalseAnd422(t *testing.T) {
 	}
 }
 
+func TestCreateProductForeignCategoryIs422(t *testing.T) {
+	svc := &fakeProductService{err: repository.ErrCategoryNotFound}
+	r := productRouter(t, coretenant.OrganizationTypeCustomer, svc)
+	code, body := doBody(r, http.MethodPost, "/products", `{"name":"A","category_id":"c-other","is_public":true,"listing_code":"a"}`)
+	if code != http.StatusUnprocessableEntity || !strings.Contains(body, "CATEGORY_NOT_FOUND") {
+		t.Fatalf("code=%d body=%s", code, body)
+	}
+	if in := svc.created[0]; in.Platform || !in.Listing.IsPublic || in.Listing.ListingCode != "a" {
+		t.Fatalf("listing tenant harus diteruskan: %+v", in)
+	}
+}
+
 func TestCreateProductPlatformForwardsFeaturesVerbatim(t *testing.T) {
 	svc := &fakeProductService{}
 	r := productRouter(t, coretenant.OrganizationTypePlatform, svc)

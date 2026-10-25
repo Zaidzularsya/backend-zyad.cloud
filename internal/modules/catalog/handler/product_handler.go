@@ -84,7 +84,8 @@ func (h *ProductHandler) List(c *gin.Context) {
 	response.JSON(c, http.StatusOK, "success", items, dto.BuildMeta(page, perPage, total))
 }
 
-// isPlatformOrg: fitur & listing hanya untuk katalog org platform.
+// isPlatformOrg: org platform bebas memakai semua fitur registry; org lain dibatasi
+// tenant_offerable/tenant_max dan kategori listing miliknya sendiri.
 func isPlatformOrg(c *gin.Context) bool {
 	tc, err := coretenant.RequireContext(c.Request.Context())
 	return err == nil && tc.OrganizationType() == coretenant.OrganizationTypePlatform

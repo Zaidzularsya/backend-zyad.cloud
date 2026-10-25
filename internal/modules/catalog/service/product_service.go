@@ -63,13 +63,15 @@ func (s *productService) Create(ctx context.Context, scope coretenant.Scope, in 
 		!ValidMoney(in.BasePrice) || !ValidPercent(in.TaxPercent) {
 		return domain.Product{}, ErrInvalidProduct
 	}
-	if !in.Platform && in.Listing != (repository.ListingParams{}) {
-		return domain.Product{}, ErrPlatformOnly
+	if err := validateListing(in.Listing, in.CategoryID); err != nil {
+		return domain.Product{}, err
 	}
-	if in.Platform {
-		if err := validateListing(in.Listing, in.CategoryID); err != nil {
+	if !in.Platform && in.Listing.IsPublic {
+		if err := s.requireOwnCategory(ctx, scope, in.CategoryID); err != nil {
 			return domain.Product{}, err
 		}
+	}
+	if in.Platform {
 		if err := s.validateFeatures(ctx, in.Features); err != nil {
 			return domain.Product{}, err
 		}
@@ -170,14 +172,23 @@ func (s *productService) ListFeatures(ctx context.Context) ([]domain.FeatureDef,
 	return s.features.ListActive(ctx)
 }
 
-// validatePlatformUpdate memeriksa blok listing/fitur pada update. Kategori efektif
-// (yang tersimpan, atau yang baru dikirim) menentukan sah-tidaknya produk publik.
-func (s *productService) validatePlatformUpdate(ctx context.Context, scope coretenant.Scope, id string, in repository.UpdateProductParams) error {
-	if in.Features != nil {
-		if err := s.validateFeatures(ctx, *in.Features); err != nil {
-			return err
-		}
+// requireOwnCategory: produk publik org non-platform wajib memakai kategori aktif milik
+// org itu sendiri (FK komposit sudah menolak kategori org lain, tapi bukan yang terhapus).
+func (s *productService) requireOwnCategory(ctx context.Context, scope coretenant.Scope, categoryID string) error {
+	ok, err := s.repo.CategoryInScope(ctx, scope, strings.TrimSpace(categoryID))
+	if err != nil {
+		return err
 	}
+	if !ok {
+		return repository.ErrCategoryNotFound
+	}
+	return nil
+}
+
+// validateListingUpdate memeriksa blok listing pada update. Kategori efektif (yang
+// tersimpan, atau yang baru dikirim) menentukan sah-tidaknya produk publik; org
+// non-platform juga wajib memakai kategori miliknya sendiri.
+func (s *productService) validateListingUpdate(ctx context.Context, scope coretenant.Scope, id string, in repository.UpdateProductParams, platform bool) error {
 	if in.Listing == nil && in.CategoryID == nil {
 		return nil
 	}
@@ -196,13 +207,16 @@ func (s *productService) validatePlatformUpdate(ctx context.Context, scope coret
 	if in.CategoryID != nil {
 		category = *in.CategoryID
 	}
-	return validateListing(listing, category)
+	if err := validateListing(listing, category); err != nil {
+		return err
+	}
+	if !platform && listing.IsPublic {
+		return s.requireOwnCategory(ctx, scope, category)
+	}
+	return nil
 }
 
 func (s *productService) Update(ctx context.Context, scope coretenant.Scope, id string, in repository.UpdateProductParams, platform, canManageEntitlements bool) (domain.Product, error) {
-	if !platform && in.Listing != nil {
-		return domain.Product{}, ErrPlatformOnly
-	}
 	// Mengirim features (termasuk [] = hapus semua) mengubah entitlement, jadi butuh
 	// permission; update yang tidak menyentuh features tidak.
 	if !platform && in.Features != nil && !canManageEntitlements {
@@ -225,10 +239,13 @@ func (s *productService) Update(ctx context.Context, scope coretenant.Scope, id 
 			return domain.Product{}, err
 		}
 	}
-	if platform {
-		if err := s.validatePlatformUpdate(ctx, scope, id, in); err != nil {
+	if platform && in.Features != nil {
+		if err := s.validateFeatures(ctx, *in.Features); err != nil {
 			return domain.Product{}, err
 		}
+	}
+	if err := s.validateListingUpdate(ctx, scope, id, in, platform); err != nil {
+		return domain.Product{}, err
 	}
 	if in.Listing != nil {
 		l := *in.Listing
