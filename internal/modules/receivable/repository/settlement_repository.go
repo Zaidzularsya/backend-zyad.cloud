@@ -19,6 +19,8 @@ type SettlementPaymentParams struct {
 type SettlementRepository interface {
 	// InsertPayment idempoten per provider_reference; created=false bila sudah ada.
 	InsertPayment(ctx context.Context, p SettlementPaymentParams) (bool, error)
+	// FindPaymentByReference: entri payment untuk referensi itu; pgx.ErrNoRows bila tidak ada.
+	FindPaymentByReference(ctx context.Context, providerReference string) (SettlementPaymentParams, error)
 }
 
 type settlementRepository struct{ db *database.Pool }
@@ -37,4 +39,14 @@ func (r *settlementRepository) InsertPayment(ctx context.Context, p SettlementPa
 		return false, err
 	}
 	return tag.RowsAffected() == 1, nil
+}
+
+func (r *settlementRepository) FindPaymentByReference(ctx context.Context, providerReference string) (SettlementPaymentParams, error) {
+	var p SettlementPaymentParams
+	err := r.db.QueryRow(ctx, `
+		SELECT beneficiary_organization_id::text, invoice_id::text, provider_reference, amount::text, occurred_at
+		FROM settlement_entries
+		WHERE kind = 'payment' AND provider_reference = $1`, providerReference).
+		Scan(&p.BeneficiaryOrganizationID, &p.InvoiceID, &p.ProviderReference, &p.Amount, &p.OccurredAt)
+	return p, err
 }

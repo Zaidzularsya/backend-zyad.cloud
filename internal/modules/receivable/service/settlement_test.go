@@ -1,10 +1,15 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"zyad.cloud/internal/modules/receivable/repository"
 )
@@ -25,6 +30,15 @@ func (f *fakeSettlementRepo) InsertPayment(_ context.Context, p repository.Settl
 	}
 	f.rows = append(f.rows, p)
 	return true, nil
+}
+
+func (f *fakeSettlementRepo) FindPaymentByReference(_ context.Context, ref string) (repository.SettlementPaymentParams, error) {
+	for _, r := range f.rows {
+		if r.ProviderReference == ref {
+			return r, nil
+		}
+	}
+	return repository.SettlementPaymentParams{}, pgx.ErrNoRows
 }
 
 const ledgerOrg = "11111111-1111-1111-1111-111111111111"
@@ -96,4 +110,45 @@ func TestSettlementPaymentReference(t *testing.T) {
 	if got := settlementPaymentReference(DokuNotification{InvoiceNumber: "RCV-inv-1"}, "pay-1"); got != "RCV-inv-1:pay-1" {
 		t.Fatalf("fallback got %q", got)
 	}
+}
+
+func TestSettlementRecorderLogsReferenceCollision(t *testing.T) {
+	logs := &bytes.Buffer{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	repo := &fakeSettlementRepo{}
+	rec := NewSettlementRecorder(repo)
+	if err := rec.RecordPayment(context.Background(), ledgerOrg, "inv-1", "req-1", "833000.00", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	// Notifikasi ulang yang sama (amount beda format) bukan tabrakan.
+	if err := rec.RecordPayment(context.Background(), ledgerOrg, "inv-1", "req-1", "833000", time.Now()); err != nil || logs.Len() != 0 {
+		t.Fatalf("same payment: err=%v logs=%s", err, logs.String())
+	}
+	other := "22222222-2222-2222-2222-222222222222"
+	if err := rec.RecordPayment(context.Background(), other, "inv-9", "req-1", "5000.00", time.Now()); err != nil {
+		t.Fatalf("collision must not fail: %v", err)
+	}
+	out := logs.String()
+	if len(repo.rows) != 1 || !strings.Contains(out, "level=ERROR") || !strings.Contains(out, "collision") ||
+		!strings.Contains(out, "existing_organization_id="+ledgerOrg) || !strings.Contains(out, "organization_id="+other) ||
+		!strings.Contains(out, "existing_invoice_id=inv-1") || !strings.Contains(out, "invoice_id=inv-9") {
+		t.Fatalf("rows=%d logs=%s", len(repo.rows), out)
+	}
+
+	lookupFail := &failingLookupRepo{}
+	if err := NewSettlementRecorder(lookupFail).RecordPayment(context.Background(), ledgerOrg, "inv-1", "req-1", "1", time.Now()); err == nil {
+		t.Fatal("lookup error on duplicate must be returned")
+	}
+}
+
+type failingLookupRepo struct{}
+
+func (failingLookupRepo) InsertPayment(context.Context, repository.SettlementPaymentParams) (bool, error) {
+	return false, nil
+}
+func (failingLookupRepo) FindPaymentByReference(context.Context, string) (repository.SettlementPaymentParams, error) {
+	return repository.SettlementPaymentParams{}, errors.New("db down")
 }

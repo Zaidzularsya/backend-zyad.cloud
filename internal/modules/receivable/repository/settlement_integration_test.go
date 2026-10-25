@@ -3,8 +3,11 @@
 package repository_test
 
 import (
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"zyad.cloud/internal/modules/receivable/repository"
 )
@@ -41,6 +44,14 @@ func TestSettlementInsertPaymentIdempotent(t *testing.T) {
 	}
 	if count != 1 || amount != "0.50" || kind != "payment" {
 		t.Fatalf("count=%d amount=%s kind=%s", count, amount, kind)
+	}
+
+	found, err := repo.FindPaymentByReference(e.ctx, ref)
+	if err != nil || found.BeneficiaryOrganizationID != orgID || found.InvoiceID != inv.ID || found.Amount != "0.50" {
+		t.Fatalf("find = %+v err=%v", found, err)
+	}
+	if _, err := repo.FindPaymentByReference(e.ctx, ref+"-missing"); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("missing reference: %v", err)
 	}
 
 	// CHECK: payment wajib positif dan punya invoice_id.

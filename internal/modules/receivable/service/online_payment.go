@@ -230,7 +230,7 @@ func (p *OnlinePayment) HandleNotification(ctx context.Context, n DokuNotificati
 	if err := p.checkouts.SetStatus(ctx, checkout.ID, checkoutStatusPaid); err != nil {
 		slog.WarnContext(ctx, "receivable: set checkout status failed", "checkout_id", checkout.ID, "error", err)
 	}
-	p.creditSettlement(ctx, tenantCtx, n, payment)
+	p.creditSettlement(ctx, tenantCtx, n, inv.Currency, payment)
 	return true, nil
 }
 
@@ -244,11 +244,19 @@ func (p *OnlinePayment) WithSettlementRecorder(r SettlementRecorder) *OnlinePaym
 // Hanya org customer (tenant/reseller); org platform tidak berhak atas ledger. Galat hanya
 // di-log: payment sudah sah, dan menggagalkan webhook membuat DOKU mengirim ulang. Pemulihan:
 // kirim ulang notifikasi — RecordProvider idempoten dan entri ledger unik per referensi.
-func (p *OnlinePayment) creditSettlement(ctx context.Context, tenantCtx coretenant.Context, n DokuNotification, payment domain.Payment) {
+func (p *OnlinePayment) creditSettlement(ctx context.Context, tenantCtx coretenant.Context, n DokuNotification, currency string, payment domain.Payment) {
 	if p.settlements == nil || tenantCtx.OrganizationType() != coretenant.OrganizationTypeCustomer {
 		return
 	}
 	reference := settlementPaymentReference(n, payment.ID)
+	// Ledger tidak punya kolom mata uang (IDR). Invoice non-IDR (bisa dibuat lewat API) tidak
+	// dikreditkan agar nominal asing tidak tercampur; perlu penanganan manual.
+	if c := strings.TrimSpace(currency); c != "" && !strings.EqualFold(c, "IDR") {
+		slog.ErrorContext(ctx, "receivable: settlement ledger skipped for non-IDR invoice",
+			"organization_id", tenantCtx.OrganizationID(), "invoice_id", payment.InvoiceID, "payment_id", payment.ID,
+			"currency", c, "provider_reference", reference, "amount", payment.Amount)
+		return
+	}
 	if err := p.settlements.RecordPayment(ctx, tenantCtx.OrganizationID(), payment.InvoiceID, reference, payment.Amount, payment.PaidAt); err != nil {
 		slog.ErrorContext(ctx, "receivable: settlement ledger entry failed",
 			"organization_id", tenantCtx.OrganizationID(), "invoice_id", payment.InvoiceID, "payment_id", payment.ID,

@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"math/big"
 	"strings"
 	"time"
 
@@ -33,11 +35,40 @@ func (s *settlementRecorder) RecordPayment(ctx context.Context, orgID, invoiceID
 	if orgID == "" || invoiceID == "" || providerReference == "" || paidAt.IsZero() || !validAmount(amount) {
 		return ErrInvalidSettlementEntry
 	}
-	_, err := s.repo.InsertPayment(ctx, repository.SettlementPaymentParams{
+	entry := repository.SettlementPaymentParams{
 		BeneficiaryOrganizationID: orgID, InvoiceID: invoiceID, ProviderReference: providerReference,
 		Amount: amount, OccurredAt: paidAt.UTC(),
-	})
-	return err
+	}
+	created, err := s.repo.InsertPayment(ctx, entry)
+	if err != nil || created {
+		return err
+	}
+	return s.checkDuplicate(ctx, entry)
+}
+
+// checkDuplicate: referensi sudah tercatat. Normalnya notifikasi ulang untuk payment yang sama;
+// bila org/invoice/amount berbeda, referensi bertabrakan (kunci unik global, payment per org) —
+// entri kedua tidak dicatat dan perlu ditangani manual, jadi di-log ERROR.
+func (s *settlementRecorder) checkDuplicate(ctx context.Context, entry repository.SettlementPaymentParams) error {
+	existing, err := s.repo.FindPaymentByReference(ctx, entry.ProviderReference)
+	if err != nil {
+		return err
+	}
+	if existing.BeneficiaryOrganizationID == entry.BeneficiaryOrganizationID && existing.InvoiceID == entry.InvoiceID &&
+		sameAmount(existing.Amount, entry.Amount) {
+		return nil
+	}
+	slog.ErrorContext(ctx, "receivable: settlement provider reference collision, entry not recorded",
+		"provider_reference", entry.ProviderReference,
+		"existing_organization_id", existing.BeneficiaryOrganizationID, "existing_invoice_id", existing.InvoiceID, "existing_amount", existing.Amount,
+		"organization_id", entry.BeneficiaryOrganizationID, "invoice_id", entry.InvoiceID, "amount", entry.Amount)
+	return nil
+}
+
+func sameAmount(a, b string) bool {
+	x, ok1 := new(big.Rat).SetString(a)
+	y, ok2 := new(big.Rat).SetString(b)
+	return ok1 && ok2 && x.Cmp(y) == 0
 }
 
 // settlementPaymentReference: kunci idempotensi entri ledger. Referensi DOKU bila ada; bila
