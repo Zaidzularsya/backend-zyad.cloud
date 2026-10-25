@@ -414,11 +414,23 @@ func (r *companyRepository) SetTenantOrganization(ctx context.Context, scope cor
 }
 
 func (r *companyRepository) FindWorkspaceLinkAnyOrg(ctx context.Context, workspaceOrgID string) (string, bool, error) {
-	// Query lintas-org yang disengaja; filter tenant_organization_id dan deleted_at eksplisit, tanpa bergantung pada RLS.
+	// Query lintas-org yang disengaja. crm_companies memakai FORCE RLS, jadi tanpa konteks query ini
+	// selalu kosong. Konteks sempit app.crm_workspace_link_lookup (migration 000167) hanya membuka
+	// baris SELECT yang tertaut ke workspace ini dan belum soft-deleted; app.organization_id dibiarkan
+	// kosong sehingga baris org mana pun selain itu tetap tertutup.
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	defer tx.Rollback(context.Background())
+
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.crm_workspace_link_lookup', $1, true)", workspaceOrgID); err != nil {
+		return "", false, err
+	}
 	var id string
-	err := r.db.QueryRow(ctx, `SELECT id FROM crm_companies
+	err = tx.QueryRow(ctx, `SELECT id FROM crm_companies
 		WHERE tenant_organization_id = $1::uuid AND deleted_at IS NULL
-		ORDER BY created_at LIMIT 1`, workspaceOrgID).Scan(&id)
+		ORDER BY created_at, id LIMIT 1`, workspaceOrgID).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, nil
 	}

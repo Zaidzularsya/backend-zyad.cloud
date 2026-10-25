@@ -20,9 +20,11 @@ Sebelum ini hanya katalog platform yang bisa memberi entitlement. Setelah fitur 
 
 - Yang sudah dijalankan agen: unit test Go, `go vet`, `go build`, unit test + typecheck + build frontend, dan
   e2e Playwright dengan API di-stub (`frontend/tests/e2e/tenant-products.spec.ts`).
-- **Belum pernah dijalankan oleh siapa pun**: migration `000161`–`000166` (up maupun down), semua test
-  `-tags integration` (Task 7, 10, 13, 14, 15, 16: lock advisory, FK komposit, `ListBalances`, settle), dan
-  alur nyata dengan DOKU sandbox/Google. Semua klaim perilaku SQL di bawah berasal dari membaca kode.
+- **25 Okt 2026, database scratch lokal (bukan dev/produksi):** migration `000161`–`000167` up → down → up
+  dan `go test -tags integration -p 1 ./...` dijalankan. Test integrasi Bagian 2 lulus; sisa kegagalan adalah
+  6 test lama yang juga gagal di ujung Bagian 1. Run ini menemukan bug RLS nyata (lookup lintas org pada
+  `crm_companies` tanpa konteks selalu kosong) yang diperbaiki dengan migration `000167`.
+- **Belum pernah dijalankan:** migration di DB dev/produksi dan alur nyata dengan DOKU sandbox/Google.
 - Task 11b (undangan staf lewat email) **tidak dibangun** (ditunda); lihat "Keterbatasan".
 
 ## Prasyarat
@@ -35,7 +37,7 @@ Sebelum ini hanya katalog platform yang bisa memberi entitlement. Setelah fitur 
    go test -tags integration ./internal/app/ ./internal/modules/...
    ```
 
-   lalu uji `migrate` up → down → up untuk `000161`–`000166` di database scratch yang sama.
+   lalu uji `migrate` up → down → up untuk `000161`–`000167` di database scratch yang sama.
 2. Produk `FREE` ada di katalog platform (sudah syarat `free-plan-rollout.md`).
 3. Organisasi platform dapat di-resolve (checkout tenant memakai scope platform untuk produk Free/tautan
    workspace).
@@ -52,6 +54,7 @@ Nama file nyata di `backend/migrations`:
 | 000164 | `landing_activation_paid_template` | Template notifikasi email `landing.activation_paid` (sistem, upsert). |
 | 000165 | `settlement_ledger` | Tabel `settlement_entries` (`payment`/`settlement`/`adjustment`), unik per `provider_reference` untuk `payment`. Sengaja **tanpa RLS** (pembukuan platform lintas tenant), akses dibatasi di service. FK organisasi tanpa `ON DELETE CASCADE`. |
 | 000166 | `settlement_permissions` | `settlement.manage` (super admin) dan `settlement.read` (owner org, saldo miliknya sendiri). |
+| 000167 | `crm_companies_workspace_link_lookup` | Policy RLS `crm_companies`: pengecualian **SELECT saja** saat transaksi men-set `app.crm_workspace_link_lookup = '<workspace uuid>'` (hanya baris yang tertaut ke workspace itu dan belum soft-deleted); `WITH CHECK` dan policy tulis tetap ketat per org. Plus index parsial `tenant_organization_id`. Dibutuhkan guard tautan workspace lintas org (checkout tenant dan tautan sistem); tanpa ini lookup selalu kosong di bawah FORCE RLS. Nama policy lama dipertahankan (`remove_organization_rls` tetap jalan). |
 
 Karena aditif/registry-only, migration boleh dirilis **sebelum** kode. `deploy/deploy.sh` menjalankan
 `./migrate -direction up` sebelum `pm2 startOrReload`, jadi pada deploy normal ini otomatis.
@@ -60,7 +63,7 @@ Karena aditif/registry-only, migration boleh dirilis **sebelum** kode. `deploy/d
 
 1. Backup database (penting: ini pertama kali `settlement_entries` ada; tidak ada data lama, tetapi
    backup tetap prosedur standar).
-2. Terapkan migration `000161`–`000166` (sendiri atau lewat `deploy.sh`).
+2. Terapkan migration `000161`–`000167` (sendiri atau lewat `deploy.sh`).
 3. Deploy kode backend, lalu frontend (symlink release + `pm2 startOrReload`; lihat `vps-deploy` /
    skill `zyad-dev-deploy` untuk dev).
 4. **Set flag katalog sebelum tenant dapat menjual fitur apa pun.** Di Fitur Platform (super admin), untuk
@@ -101,6 +104,8 @@ Karena aditif/registry-only, migration boleh dirilis **sebelum** kode. `deploy/d
   menghapus pembukuan uang yang tidak bisa direkonstruksi dari tempat lain selain laporan DOKU.
 - Down `000161` menghapus baris `landing.page_activation`; periksa dulu bahwa tidak ada entitlement yang
   merujuknya.
+- Down `000167` tidak menghapus data, tetapi membuat guard tautan workspace lintas org kembali tidak efektif
+  (lookup selalu kosong); jangan dijalankan selama kode ini live.
 - `free-plan --apply` tidak punya rollback otomatis; pulihkan nilai sebelumnya lewat kode seperti dijelaskan
   di `free-plan-rollout.md`.
 
