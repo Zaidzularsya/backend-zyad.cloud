@@ -48,10 +48,21 @@ type tenantBuyerWorkspaces struct {
 
 // FindForTenant mencari workspace customer yang DIMILIKI user (is_owner, membership aktif) dan
 // (a) sudah tertaut ke company milik tenant ini, atau (b) dibuat oleh checkout tenant ini.
-// Query lintas-org yang disengaja: kedua cabang memfilter organization_id tenant secara eksplisit.
+// organizations/organization_memberships tidak memakai RLS, tetapi crm_companies memakai FORCE RLS:
+// cabang (a) hanya terlihat dalam transaksi yang app.organization_id-nya = tenant. Tanpa itu cabang (a)
+// selalu kosong dan checkout ulang pembeli lama membuat workspace duplikat.
 func (w tenantBuyerWorkspaces) FindForTenant(ctx context.Context, tenantOrganizationID, userID string) (string, bool, error) {
+	tx, err := w.db.Begin(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	defer tx.Rollback(context.Background())
+
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", tenantOrganizationID); err != nil {
+		return "", false, err
+	}
 	var id string
-	err := w.db.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		SELECT o.id::text
 		FROM organizations o
 		JOIN organization_memberships m ON m.organization_id = o.id

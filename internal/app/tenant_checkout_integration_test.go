@@ -17,6 +17,7 @@ import (
 	organizationservice "zyad.cloud/internal/modules/organization/service"
 	productrepo "zyad.cloud/internal/modules/product/repository"
 	receivabledomain "zyad.cloud/internal/modules/receivable/domain"
+	"zyad.cloud/internal/platform/database"
 	"zyad.cloud/internal/platform/database/testutil"
 )
 
@@ -43,7 +44,6 @@ func TestTenantBuyerWorkspacesFindForTenantIntegration(t *testing.T) {
 			t.Fatalf("insert org %s: %v", slug, err)
 		}
 		t.Cleanup(func() {
-			db.Exec(context.Background(), `DELETE FROM crm_companies WHERE organization_id = $1::uuid OR tenant_organization_id = $1::uuid`, id)
 			db.Exec(context.Background(), `DELETE FROM organization_memberships WHERE organization_id = $1::uuid`, id)
 			db.Exec(context.Background(), `DELETE FROM organizations WHERE id = $1::uuid`, id)
 		})
@@ -80,13 +80,51 @@ func TestTenantBuyerWorkspacesFindForTenantIntegration(t *testing.T) {
 	// (a) tertaut ke company milik tenant B.
 	linked := newOrg("tc-linked", `{}`)
 	own(linked)
-	if _, err := db.Exec(ctx, `INSERT INTO crm_companies (organization_id, name, tenant_organization_id) VALUES ($1::uuid, 'Buyer', $2::uuid)`,
+	// crm_companies memakai FORCE RLS: insert harus dalam transaksi ber-konteks tenant B.
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", tenantB); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO crm_companies (organization_id, name, tenant_organization_id) VALUES ($1::uuid, 'Buyer', $2::uuid)`,
 		tenantB, linked); err != nil {
 		t.Fatalf("company: %v", err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { deleteCompaniesInOrg(db, tenantB) })
+
+	// Pembeli lama tenant B (workspace "linked" tanpa metadata checkout) harus ditemukan lewat cabang
+	// crm_companies; kalau tidak, checkout ulang membuat workspace duplikat.
 	if id, found, err := w.FindForTenant(ctx, tenantB, userID); err != nil || !found || id != linked {
 		t.Fatalf("linked: id=%s found=%v err=%v", id, found, err)
 	}
+	// Tautan di CRM tenant B tidak membuat workspace itu terpakai ulang oleh tenant A (tetap "pending").
+	if id, found, err := w.FindForTenant(ctx, tenantA, userID); err != nil || !found || id != pending {
+		t.Fatalf("tenant A after B link: id=%s found=%v err=%v", id, found, err)
+	}
+}
+
+// deleteCompaniesInOrg membersihkan crm_companies org itu dalam konteks RLS-nya (cleanup tanpa
+// konteks tidak menghapus apa pun di bawah FORCE RLS).
+func deleteCompaniesInOrg(db *database.Pool, orgID string) {
+	ctx := context.Background()
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		return
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", orgID); err != nil {
+		return
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM crm_companies WHERE organization_id = $1::uuid`, orgID); err != nil {
+		return
+	}
+	_ = tx.Commit(ctx)
 }
 
 // Fakes sempit untuk TenantAccess: hanya contract/SO/company yang di-stub; writer entitlement + DB nyata.
@@ -128,7 +166,7 @@ func (tcInvoices) InvoiceStatus(context.Context, coretenant.Scope, string) (stri
 
 // Urutan end-to-end: checkout tenant → invoice belum lunas → workspace pembeli BELUM punya
 // organization_entitlements → invoice lunas → baris source='contract' untuk fitur snapshot produk.
-// Skeleton: butuh DB integrasi dengan fitur `user.max` ada di registry; tidak dijalankan di CI default.
+// Butuh registry fitur hasil migration (`users.max_users`, integer); tidak dijalankan di CI default.
 func TestTenantCheckoutPrepaidEntitlementAfterPaidIntegration(t *testing.T) {
 	db := testutil.OpenTestDatabase(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -156,7 +194,7 @@ func TestTenantCheckoutPrepaidEntitlementAfterPaidIntegration(t *testing.T) {
 		ID: "00000000-0000-0000-0000-0000000000c1", Number: "CTR-TC-1", Status: "active",
 		SourceType: string(receivabledomain.SourceSalesOrder), SourceID: "so-1",
 		Items: []crmservice.ContractAccessItem{{Prepaid: true, Features: []crmdomain.FeatureSnapshot{
-			{FeatureKey: "user.max", Value: json.RawMessage(`5`)},
+			{FeatureKey: "users.max_users", Value: json.RawMessage(`5`)},
 		}}},
 	}}
 	access := crmservice.NewTenantAccess(
@@ -191,5 +229,10 @@ func TestTenantCheckoutPrepaidEntitlementAfterPaidIntegration(t *testing.T) {
 	}
 	if n := count(); n == 0 {
 		t.Fatal("expected source='contract' entitlement rows after invoice paid")
+	}
+	var feature string
+	if err := db.QueryRow(ctx, `SELECT feature_key FROM organization_entitlements
+		WHERE organization_id = $1::uuid AND source = 'contract' AND feature_key = 'users.max_users'`, buyerOrg).Scan(&feature); err != nil {
+		t.Fatalf("users.max_users contract entitlement: %v", err)
 	}
 }
