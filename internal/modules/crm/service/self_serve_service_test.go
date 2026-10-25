@@ -694,3 +694,53 @@ func TestCheckoutPlatformScopeUsesFeatureSubscriptionCheck(t *testing.T) {
 		t.Fatalf("platform scope must not use the per-product check: %v", w.calls)
 	}
 }
+
+// Scope tenant: deal open buatan staf (tanpa quote self-serve) di company yang sama
+// tidak boleh diambil alih; rantai baru dibuat di sampingnya.
+func TestCheckoutTenantScopeDoesNotTakeOverStaffDeal(t *testing.T) {
+	svc, w := newTenantSS(t)
+	w.company = &domain.Company{ID: "co1", Name: "Studio Rina"}
+	staff := domain.Deal{ID: "staff1", Title: "Instalasi kantor cabang", Value: "7500000", StageID: "st1", Status: domain.DealStatusOpen}
+	w.deals = []domain.Deal{staff}
+
+	res, err := svc.Checkout(context.Background(), ssScope(), ssReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.DealID == "staff1" || w.count("deal.update") != 0 || w.count("lead.create") != 1 || w.count("convert") != 1 {
+		t.Fatalf("res=%+v calls=%v", res, w.calls)
+	}
+	if w.deals[0] != staff {
+		t.Fatalf("staff deal modified: %+v", w.deals[0])
+	}
+	if w.quote == nil || *w.quote.DealID != res.DealID {
+		t.Fatalf("quote must attach to the new deal: %+v", w.quote)
+	}
+
+	// Checkout ulang produk yang sama melanjutkan deal self-serve, bukan deal staf.
+	w.calls = nil
+	again, err := svc.Checkout(context.Background(), ssScope(), ssReq)
+	if err != nil || again.DealID != res.DealID {
+		t.Fatalf("again=%+v err=%v", again, err)
+	}
+	if got := strings.Join(w.calls, ","); got != "link,unlock" {
+		t.Fatalf("calls = %s, want only link", got)
+	}
+	if w.deals[0] != staff {
+		t.Fatalf("staff deal modified on resume: %+v", w.deals[0])
+	}
+}
+
+// Regresi platform: deal open tanpa quote di pipeline Self-Serve tetap dilanjutkan (alignDeal).
+func TestCheckoutPlatformScopeResumesDealWithoutQuote(t *testing.T) {
+	svc, w := newSS(t)
+	w.company = &domain.Company{ID: "co1", Name: "Studio Rina"}
+	w.deals = []domain.Deal{{ID: "d-old", Title: "lama", Value: "1", StageID: "st0", Status: domain.DealStatusOpen}}
+	res, err := svc.Checkout(context.Background(), ssScope(), ssReq)
+	if err != nil || res.DealID != "d-old" {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if w.count("deal.update") != 1 || w.count("lead.create") != 0 {
+		t.Fatalf("calls = %v", w.calls)
+	}
+}

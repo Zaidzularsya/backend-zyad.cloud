@@ -136,13 +136,30 @@ func (s *selfServeService) resumeOrReplaceDeal(ctx context.Context, c *chain, co
 	if len(deals) == 0 {
 		return nil, nil, nil
 	}
-	deal := deals[0]
-	quote, err := s.deps.Quotations.FindSelfServeByDeal(ctx, c.platform, deal.ID)
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		quote = domain.Quotation{}
-	case err != nil:
-		return nil, nil, stepErr(SelfServeStepQuotation, err)
+	var deal domain.Deal
+	var quote domain.Quotation
+	if c.cfg.TenantScope {
+		// Pipeline tenant juga dipakai staf: hanya deal yang sudah punya quote self-serve
+		// milik rantai ini; deal staf tidak pernah diambil alih (judul/nilai/quote).
+		found := false
+		for _, d := range deals {
+			q, err := s.findSelfServeQuote(ctx, c, d.ID)
+			if err != nil {
+				return nil, nil, err
+			}
+			if q.ID != "" {
+				deal, quote, found = d, q, true
+				break
+			}
+		}
+		if !found {
+			return nil, nil, nil
+		}
+	} else {
+		deal = deals[0]
+		if quote, err = s.findSelfServeQuote(ctx, c, deal.ID); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	if quote.ID != "" && quoteProductID(quote) == c.req.ProductID {
@@ -182,6 +199,18 @@ func (s *selfServeService) resumeOrReplaceDeal(ctx context.Context, c *chain, co
 		return nil, nil, stepErr(SelfServeStepDeal, err)
 	}
 	return nil, nil, nil
+}
+
+// findSelfServeQuote: quote self-serve deal itu, atau Quotation kosong bila belum ada.
+func (s *selfServeService) findSelfServeQuote(ctx context.Context, c *chain, dealID string) (domain.Quotation, error) {
+	quote, err := s.deps.Quotations.FindSelfServeByDeal(ctx, c.platform, dealID)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return domain.Quotation{}, nil
+	case err != nil:
+		return domain.Quotation{}, stepErr(SelfServeStepQuotation, err)
+	}
+	return quote, nil
 }
 
 // alignDeal menyelaraskan judul/nilai deal yang belum punya quote dengan produk yang diminta.
