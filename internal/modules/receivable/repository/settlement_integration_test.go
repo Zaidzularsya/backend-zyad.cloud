@@ -4,6 +4,7 @@ package repository_test
 
 import (
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -66,5 +67,88 @@ func TestSettlementInsertPaymentIdempotent(t *testing.T) {
 	if _, err := e.db.Exec(e.ctx, `INSERT INTO settlement_entries (beneficiary_organization_id, kind, amount, occurred_at)
 		VALUES ($1, 'adjustment', 0, now())`, orgID); err == nil {
 		t.Fatal("zero adjustment must violate CHECK")
+	}
+}
+
+func TestSettlementLedgerTotalsAndLockedInsert(t *testing.T) {
+	e := setup(t)
+	orgA, orgB := e.tenants.A.OrganizationID, e.tenants.B.OrganizationID
+	inv := e.issued(t, e.tenants.A.Scope, e.account(t, e.tenants.A.Scope, "Budi").ID, "INV-2026-0961")
+	repo := repository.NewSettlementRepository(e.db)
+	ledger := repository.NewSettlementLedgerRepository(e.db)
+	ref := "it-ledger-" + inv.ID
+	t.Cleanup(func() {
+		_, _ = e.db.Exec(e.ctx, `DELETE FROM settlement_entries WHERE beneficiary_organization_id IN ($1, $2)`, orgA, orgB)
+	})
+	if _, err := repo.InsertPayment(e.ctx, repository.SettlementPaymentParams{BeneficiaryOrganizationID: orgA, InvoiceID: inv.ID, ProviderReference: ref, Amount: "150000.50", OccurredAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	okCheck := func(repository.SettlementTotals) error { return nil }
+	in := func(kind, amount, note string) repository.SettlementManualEntry {
+		return repository.SettlementManualEntry{OrganizationID: orgA, Kind: kind, Amount: amount, Note: note, OccurredAt: time.Now().UTC()}
+	}
+	if _, err := ledger.InsertManualLocked(e.ctx, in("settlement", "50000.25", ""), okCheck); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ledger.InsertManualLocked(e.ctx, in("adjustment", "-0.25", "koreksi"), okCheck); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ledger.Totals(e.ctx, orgA)
+	if err != nil || got != (repository.SettlementTotals{PaidIn: "150000.50", Settled: "50000.25", Adjusted: "-0.25"}) {
+		t.Fatalf("totals = %+v err=%v", got, err)
+	}
+	if other, _ := ledger.Totals(e.ctx, orgB); other != (repository.SettlementTotals{PaidIn: "0.00", Settled: "0.00", Adjusted: "0.00"}) {
+		t.Fatalf("org B totals = %+v", other)
+	}
+	// check yang gagal tidak menulis apa pun
+	boom := errors.New("boom")
+	if _, err := ledger.InsertManualLocked(e.ctx, in("settlement", "1.00", ""), func(repository.SettlementTotals) error { return boom }); !errors.Is(err, boom) {
+		t.Fatalf("err = %v", err)
+	}
+	if _, total, _ := ledger.ListEntries(e.ctx, orgA, 50, 0); total != 3 {
+		t.Fatalf("entries = %d", total)
+	}
+	entries, _, _ := ledger.ListEntries(e.ctx, orgA, 50, 0)
+	if entries[0].OccurredAt.Before(entries[len(entries)-1].OccurredAt) {
+		t.Fatal("entri harus terbaru lebih dulu")
+	}
+	bals, total, err := ledger.ListBalances(e.ctx, repository.SettlementBalanceFilter{Limit: 200})
+	if err != nil || total < 1 || len(bals) < 1 {
+		t.Fatalf("balances = %+v total=%d err=%v", bals, total, err)
+	}
+
+	// Dua setoran paralel 100% saldo: dengan advisory lock tepat satu yang lolos cek.
+	remaining := "100000.00" // 150000.50 - 50000.25 + (-0.25)
+	var wg sync.WaitGroup
+	results := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := ledger.InsertManualLocked(e.ctx, in("settlement", remaining, ""), func(tt repository.SettlementTotals) error {
+				if tt.Settled != "50000.25" {
+					return errors.New("exceeds")
+				}
+				return nil
+			})
+			results <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+	okCount := 0
+	for err := range results {
+		if err == nil {
+			okCount++
+		}
+	}
+	if okCount != 1 {
+		t.Fatalf("setoran paralel lolos %d kali, want 1", okCount)
+	}
+	if typ, err := ledger.BeneficiaryType(e.ctx, orgA); err != nil || typ != "customer" {
+		t.Fatalf("type = %q err=%v", typ, err)
+	}
+	if _, err := ledger.BeneficiaryType(e.ctx, "00000000-0000-0000-0000-000000000000"); !errors.Is(err, repository.ErrOrganizationNotFound) {
+		t.Fatalf("err = %v", err)
 	}
 }
