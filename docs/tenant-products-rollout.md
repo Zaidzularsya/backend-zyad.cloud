@@ -192,5 +192,17 @@ Koreksi kesalahan input dilakukan dengan entri `adjustment` lawan, bukan edit/ha
   limiter **fail-open**.
 - Tenant yang tidak punya pipeline tidak dapat menerima self-checkout (`ErrSelfServeNotConfigured`).
 - Kegagalan snapshot/notifikasi setelah aktivasi hanya WARN; halaman tetap terbit.
+- **Perpanjangan dini halaman aktif** (aturan disetujui pemilik, spec §6b.14: durasi dihitung dari waktu
+  bayar): `active_until = max(active_until saat ini, paid_at + durasi)`. Pembeli yang memperpanjang saat
+  masih punya sisa hari **tidak** mendapat sisa itu ditambahkan (mis. sisa 3 hari + bayar 7 hari = aktif
+  7 hari dari waktu bayar). Ini keputusan pemilik, bukan bug; komunikasikan ke reseller.
+- **Snapshot setelah terbit**: snapshot versi published diambil tepat setelah commit publish (langkah
+  terpisah). Ada jendela singkat ketika halaman sudah `published` tetapi masih menyajikan snapshot
+  sebelumnya; bila pengambilan snapshot gagal (WARN `snapshot failed`), versi lama tetap tersaji sampai
+  snapshot berikutnya.
+- **Google Identity Services per origin**: GIS mewajibkan setiap origin tenant (tiap subdomain tenant dan
+  tiap domain kustom) terdaftar di *Authorized JavaScript origins* OAuth client; **wildcard tidak
+  didukung**. Checkout tenant hanya berjalan di origin yang sudah terdaftar. Pemilik harus memutuskan
+  **sebelum produksi**: proses pendaftaran origin per tenant, atau satu origin checkout terpusat.
 - Defek lama terpisah (bukan bagian rilis ini): respons publik landing dapat memuat `PasswordHash` halaman;
   ditangani lewat task follow-up terpisah.
