@@ -122,8 +122,9 @@ type ManualPaymentInput struct {
 
 type PaymentService interface {
 	RecordManual(ctx context.Context, scope coretenant.Scope, invoiceID string, in ManualPaymentInput, userID string) (domain.Invoice, domain.Payment, error)
-	// RecordProvider: dipakai S6 (DOKU). Idempoten by reference.
-	RecordProvider(ctx context.Context, scope coretenant.Scope, invoiceID string, p repository.PaymentParams) (domain.Invoice, error)
+	// RecordProvider: dipakai S6 (DOKU). Idempoten by reference: notifikasi ulang
+	// mengembalikan baris payment yang sudah ada (dipakai ledger penyelesaian).
+	RecordProvider(ctx context.Context, scope coretenant.Scope, invoiceID string, p repository.PaymentParams) (domain.Invoice, domain.Payment, error)
 	List(ctx context.Context, scope coretenant.Scope, invoiceID string) ([]domain.Payment, error)
 	ListAll(ctx context.Context, scope coretenant.Scope, limit, offset int) ([]domain.Payment, int64, error)
 }

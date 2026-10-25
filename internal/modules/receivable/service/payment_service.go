@@ -86,12 +86,11 @@ func (s *paymentService) RecordManual(ctx context.Context, scope coretenant.Scop
 	})
 }
 
-func (s *paymentService) RecordProvider(ctx context.Context, scope coretenant.Scope, invoiceID string, p repository.PaymentParams) (domain.Invoice, error) {
+func (s *paymentService) RecordProvider(ctx context.Context, scope coretenant.Scope, invoiceID string, p repository.PaymentParams) (domain.Invoice, domain.Payment, error) {
 	if p.Method != "doku" || strings.TrimSpace(p.Reference) == "" {
-		return domain.Invoice{}, ErrInvalidPayment
+		return domain.Invoice{}, domain.Payment{}, ErrInvalidPayment
 	}
-	inv, _, err := s.record(ctx, scope, invoiceID, p)
-	return inv, err
+	return s.record(ctx, scope, invoiceID, p)
 }
 
 func (s *paymentService) List(ctx context.Context, scope coretenant.Scope, invoiceID string) ([]domain.Payment, error) {

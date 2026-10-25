@@ -150,7 +150,7 @@ func TestPostCreationOpsNotBlockedWhenInvoiceQuotaFull(t *testing.T) {
 	if _, err := h.svc.UpdateDraft(ctx, scope, editable.ID, manualInput(), "u1"); err != nil {
 		t.Fatalf("UpdateDraft() error = %v", err)
 	}
-	if _, err := h.pay.RecordProvider(ctx, scope, toPay.ID, repository.PaymentParams{Amount: "300000", Method: "doku", Reference: "DOKU-1", PaidAt: nowWIB}); err != nil {
+	if _, _, err := h.pay.RecordProvider(ctx, scope, toPay.ID, repository.PaymentParams{Amount: "300000", Method: "doku", Reference: "DOKU-1", PaidAt: nowWIB}); err != nil {
 		t.Fatalf("RecordProvider() error = %v", err)
 	}
 	if len(room.calls) != 0 {

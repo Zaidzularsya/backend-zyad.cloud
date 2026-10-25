@@ -74,20 +74,20 @@ func TestProviderPaymentIdempotentByReference(t *testing.T) {
 	h := newInvoiceHarness(t)
 	inv := issuedInvoice(t, h, "100000")
 	p := repository.PaymentParams{Amount: "100000", Method: "doku", Reference: "R1", PaidAt: nowWIB}
-	first, err := h.pay.RecordProvider(ctx, scope, inv.ID, p)
+	first, _, err := h.pay.RecordProvider(ctx, scope, inv.ID, p)
 	if err != nil || first.Status != domain.InvoicePaid {
 		t.Fatalf("first = %+v err=%v", first, err)
 	}
-	if _, err := h.pay.RecordProvider(ctx, scope, inv.ID, p); err != nil {
+	if _, _, err := h.pay.RecordProvider(ctx, scope, inv.ID, p); err != nil {
 		t.Fatalf("retry must be a no-op, err = %v", err)
 	}
 	if len(h.listener.paid) != 1 || len(h.store.payments) != 1 {
 		t.Fatalf("listener=%d payments=%d, want 1/1", len(h.listener.paid), len(h.store.payments))
 	}
-	if _, err := h.pay.RecordProvider(ctx, scope, inv.ID, repository.PaymentParams{Amount: "1", Method: "manual", PaidAt: nowWIB}); !errors.Is(err, ErrInvalidPayment) {
+	if _, _, err := h.pay.RecordProvider(ctx, scope, inv.ID, repository.PaymentParams{Amount: "1", Method: "manual", PaidAt: nowWIB}); !errors.Is(err, ErrInvalidPayment) {
 		t.Fatalf("provider path must reject method manual, err = %v", err)
 	}
-	if _, err := h.pay.RecordProvider(ctx, scope, inv.ID, repository.PaymentParams{Amount: "1", Method: "doku", PaidAt: nowWIB}); !errors.Is(err, ErrInvalidPayment) {
+	if _, _, err := h.pay.RecordProvider(ctx, scope, inv.ID, repository.PaymentParams{Amount: "1", Method: "doku", PaidAt: nowWIB}); !errors.Is(err, ErrInvalidPayment) {
 		t.Fatalf("provider path requires a reference, err = %v", err)
 	}
 }

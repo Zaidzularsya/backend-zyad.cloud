@@ -250,7 +250,9 @@ func buildReceivable(b receivableBuild) receivableModule {
 	onlinePayment := receivableservice.NewOnlinePayment(
 		receivableservice.OnlinePaymentConfig{FrontendURL: b.FrontendURL, NotificationURL: b.DokuNotificationURL},
 		b.Doku, receivablerepo.NewCheckoutRepository(db), invoiceSvc, paymentSvc, b.Links, workerResolver, b.Entitlements, nil,
-	).WithActivationInvoices(b.ActivationInvoices)
+	).WithActivationInvoices(b.ActivationInvoices).
+		// Ledger penyelesaian: hanya jalur notifikasi DOKU yang mengkredit (bukan pembayaran manual).
+		WithSettlementRecorder(receivableservice.NewSettlementRecorder(receivablerepo.NewSettlementRepository(db)))
 
 	return receivableModule{
 		AccountHandler:  receivablehandler.NewAccountHandler(accountSvc),
