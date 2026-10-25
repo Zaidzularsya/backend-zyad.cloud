@@ -116,3 +116,67 @@ func (panicListener) ContractEnded(_ context.Context, _ coretenant.Scope, _ Cont
 func (panicListener) ContractCreated(_ context.Context, _ coretenant.Scope, _ ContractRef) {
 	panic("boom")
 }
+
+// replayListener opt-in ke pemanggilan ulang saat notifikasi provider dikirim ulang.
+type replayListener struct {
+	paid, replays []InvoiceRef
+}
+
+func (l *replayListener) InvoicePaid(_ context.Context, _ coretenant.Scope, inv InvoiceRef) {
+	l.paid = append(l.paid, inv)
+}
+func (l *replayListener) InvoicePaidReplay(_ context.Context, _ coretenant.Scope, inv InvoiceRef) {
+	l.replays = append(l.replays, inv)
+}
+func (*replayListener) ContractCreated(context.Context, coretenant.Scope, ContractRef) {}
+func (*replayListener) ContractEnded(context.Context, coretenant.Scope, ContractRef)   {}
+
+// Notifikasi yang dikirim ulang (pembayaran sudah tercatat, created=false) pada invoice
+// lunas hanya memanggil listener yang opt-in; listener biasa tidak dipanggil lagi dan
+// snapshot invoice tidak dirender ulang.
+func TestProviderReplayCallsOnlyReplayableListeners(t *testing.T) {
+	h := newInvoiceHarness(t)
+	replay := &replayListener{}
+	reg := NewRegistry()
+	reg.Add(h.listener)
+	reg.Add(replay)
+	pay := NewPaymentService(PaymentDeps{Payments: fakePayments{h.store}, Invoices: h.svc, Listeners: reg, Now: func() time.Time { return nowWIB }})
+	inv := issuedInvoice(t, h, "100000")
+	p := repository.PaymentParams{Amount: "100000", Method: "doku", Reference: "R1", PaidAt: nowWIB}
+	if _, _, err := pay.RecordProvider(ctx, scope, inv.ID, p); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.listener.paid) != 1 || len(replay.paid) != 1 || len(replay.replays) != 0 {
+		t.Fatalf("first: plain=%d replayable paid=%d replays=%d", len(h.listener.paid), len(replay.paid), len(replay.replays))
+	}
+	renders := len(h.renderer.docs)
+
+	if _, _, err := pay.RecordProvider(ctx, scope, inv.ID, p); err != nil {
+		t.Fatalf("replay err = %v", err)
+	}
+	if len(h.listener.paid) != 1 || len(replay.paid) != 1 || len(replay.replays) != 1 || replay.replays[0].ID != inv.ID {
+		t.Fatalf("replay: plain=%d replayable paid=%d replays=%+v", len(h.listener.paid), len(replay.paid), replay.replays)
+	}
+	if len(h.renderer.docs) != renders || len(h.store.payments) != 1 {
+		t.Fatalf("replay must not re-render or record: renders %d→%d payments=%d", renders, len(h.renderer.docs), len(h.store.payments))
+	}
+}
+
+// Pembayaran sebagian yang dikirim ulang (invoice belum lunas) tidak memicu replay.
+func TestProviderReplayOnUnpaidInvoiceIsSilent(t *testing.T) {
+	h := newInvoiceHarness(t)
+	replay := &replayListener{}
+	reg := NewRegistry()
+	reg.Add(replay)
+	pay := NewPaymentService(PaymentDeps{Payments: fakePayments{h.store}, Invoices: h.svc, Listeners: reg, Now: func() time.Time { return nowWIB }})
+	inv := issuedInvoice(t, h, "100000")
+	p := repository.PaymentParams{Amount: "40000", Method: "doku", Reference: "R1", PaidAt: nowWIB}
+	for i := 0; i < 2; i++ {
+		if _, _, err := pay.RecordProvider(ctx, scope, inv.ID, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(replay.paid) != 0 || len(replay.replays) != 0 {
+		t.Fatalf("paid=%d replays=%d", len(replay.paid), len(replay.replays))
+	}
+}

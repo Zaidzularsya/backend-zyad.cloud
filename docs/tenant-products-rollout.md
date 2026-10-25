@@ -114,10 +114,16 @@ mencatat log dan **tidak ada retry otomatis**: invoice `paid`, aktivasi tetap `o
 - Cari di log API: `activation payment: settle failed` (field `invoice_id`, `error`). Varian lain yang perlu
   dicek: `activation payment received but page was not published` (WARN; halaman tidak ditemukan/diarsipkan).
   Jangan cari di log worker: listener hanya terdaftar di proses API.
-- Pemulihan yang diharapkan: kirim ulang notifikasi DOKU untuk invoice itu (dari dashboard DOKU / minta
-  retry). Jalur pembayaran idempoten dan listener memanggil `SettleByInvoice` lagi. **Belum diuji nyata**:
-  pastikan di dev bahwa pembayaran ber-referensi sama yang sudah tercatat tetap memicu listener, sebelum
-  mengandalkannya di produksi.
+- Pemulihan: kirim ulang notifikasi DOKU untuk invoice itu (dari dashboard DOKU / minta retry) dengan
+  **referensi pembayaran yang sama**. Pembayaran yang sudah tercatat tidak dicatat ulang (`created=false`);
+  karena invoice sudah `paid`, receivable memanggil ulang **hanya** listener yang opt-in
+  `ReplayableListener` (saat ini hanya listener aktivasi landing), yang menjalankan `SettleByInvoice` lagi:
+  aktivasi `open`/`void` menjadi `paid`, halaman terbit, snapshot diambil, notifikasi pembeli dikirim sekali.
+  Bila aktivasi sudah `paid`, panggilan ulang tidak mengubah apa pun dan tidak mengirim notifikasi kedua.
+  Listener CRM (Won/contract) dan render ulang snapshot invoice **tidak** dijalankan ulang.
+  Catatan: `paid_at` aktivasi pada pemulihan ini = waktu notifikasi ulang diproses, bukan waktu bayar asli
+  (periode aktif pembeli bergeser maju sebesar jeda itu). Diuji dengan unit test; belum diuji dengan DOKU
+  sandbox nyata.
 - Alternatif manual (hanya panduan, **jangan dijalankan tanpa persetujuan pemilik**): tentukan dulu keadaan
   dengan SELECT.
 

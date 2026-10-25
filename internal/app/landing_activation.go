@@ -193,9 +193,19 @@ type landingActivationReceivableListener struct {
 func (l landingActivationReceivableListener) InvoicePaid(ctx context.Context, scope coretenant.Scope, inv receivableservice.InvoiceRef) {
 	l.paid.InvoicePaid(ctx, scope, inv.ID)
 }
+
+// InvoicePaidReplay opts landing into resent provider notifications: settle is
+// idempotent (a paid activation is a no-op with no second notice), so a settle
+// that failed after the payment committed is retried by resending the notification.
+func (l landingActivationReceivableListener) InvoicePaidReplay(ctx context.Context, scope coretenant.Scope, inv receivableservice.InvoiceRef) {
+	l.paid.InvoicePaid(ctx, scope, inv.ID)
+}
 func (landingActivationReceivableListener) ContractCreated(context.Context, coretenant.Scope, receivableservice.ContractRef) {
 }
 func (landingActivationReceivableListener) ContractEnded(context.Context, coretenant.Scope, receivableservice.ContractRef) {
 }
 
-var _ receivableservice.Listener = landingActivationReceivableListener{}
+var (
+	_ receivableservice.Listener           = landingActivationReceivableListener{}
+	_ receivableservice.ReplayableListener = landingActivationReceivableListener{}
+)

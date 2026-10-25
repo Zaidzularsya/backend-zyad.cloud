@@ -166,6 +166,15 @@ type Listener interface {
 	ContractEnded(ctx context.Context, scope coretenant.Scope, c ContractRef)
 }
 
+// ReplayableListener: opt-in untuk listener yang aman dipanggil ulang. Saat provider
+// mengirim ulang notifikasi untuk pembayaran yang sudah tercatat (invoice sudah lunas),
+// InvoicePaid TIDAK dipanggil lagi; hanya InvoicePaidReplay pada listener ini. Implementasi
+// wajib idempoten: invoice yang efeknya sudah selesai tidak boleh mengubah apa pun atau
+// mengirim notifikasi kedua.
+type ReplayableListener interface {
+	InvoicePaidReplay(ctx context.Context, scope coretenant.Scope, inv InvoiceRef)
+}
+
 // SettingsService mengelola pengaturan penagihan organisasi.
 type SettingsService interface {
 	Get(ctx context.Context, scope coretenant.Scope) (domain.Settings, error)

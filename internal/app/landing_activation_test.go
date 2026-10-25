@@ -9,6 +9,7 @@ import (
 
 	coreerrors "zyad.cloud/internal/core/errors"
 	coretenant "zyad.cloud/internal/core/tenant"
+	crmservice "zyad.cloud/internal/modules/crm/service"
 	landingrepo "zyad.cloud/internal/modules/landing/repository"
 	landingservice "zyad.cloud/internal/modules/landing/service"
 	organizationmodel "zyad.cloud/internal/modules/organization/model"
@@ -177,5 +178,75 @@ func TestActivationPreviewLinks(t *testing.T) {
 	}
 	if _, err := (activationPreviewLinks{domains: &fakeDomainLister{err: errors.New("db")}}).PreviewURL(context.Background(), activationScope(t), "T"); err == nil {
 		t.Fatal("lookup error must be returned")
+	}
+}
+
+// replaySettler meniru SettleByInvoice: open -> paid + publish sekali; berikutnya no-op.
+type replaySettler struct {
+	calls int
+	paid  bool
+}
+
+func (s *replaySettler) SettleByInvoice(_ context.Context, _ coretenant.Scope, _ string, paidAt time.Time) (landingrepo.ActivationSettlement, error) {
+	s.calls++
+	email := "budi@example.test"
+	out := landingrepo.ActivationSettlement{Found: true}
+	out.Activation.ID, out.Activation.PageID, out.Activation.BuyerEmail = "act-1", "page-a", &email
+	if s.paid {
+		return out, nil
+	}
+	s.paid = true
+	until := paidAt.AddDate(0, 0, 7)
+	out.Applied, out.PageFound, out.Published, out.PageSlug, out.ActiveUntil = true, true, true, "toko", &until
+	return out, nil
+}
+
+type countingNotifier struct{ n int }
+
+func (c *countingNotifier) PaymentReceived(context.Context, coretenant.Scope, landingservice.ActivationPaymentNotice) error {
+	c.n++
+	return nil
+}
+
+type plainListener struct{ paid int }
+
+func (p *plainListener) InvoicePaid(context.Context, coretenant.Scope, receivableservice.InvoiceRef) {
+	p.paid++
+}
+func (*plainListener) ContractCreated(context.Context, coretenant.Scope, receivableservice.ContractRef) {
+}
+func (*plainListener) ContractEnded(context.Context, coretenant.Scope, receivableservice.ContractRef) {
+}
+
+// Notifikasi DOKU yang dikirim ulang setelah settle aktivasi gagal: replay memanggil
+// listener landing (settle + publish + satu notifikasi); replay berikutnya no-op;
+// listener lain (mis. CRM) tidak dipanggil ulang.
+func TestLandingActivationListenerReplay(t *testing.T) {
+	settler, notifier, plain := &replaySettler{}, &countingNotifier{}, &plainListener{}
+	reg := receivableservice.NewRegistry()
+	reg.Add(plain)
+	reg.Add(landingActivationReceivableListener{paid: landingservice.NewActivationPaidListener(settler, notifier, nil, nil)})
+	scope := activationScope(t)
+	inv := receivableservice.InvoiceRef{ID: "inv-1"}
+
+	reg.InvoicePaidReplay(context.Background(), scope, inv)
+	if settler.calls != 1 || !settler.paid || notifier.n != 1 {
+		t.Fatalf("replay on open activation: settle=%d paid=%v notices=%d", settler.calls, settler.paid, notifier.n)
+	}
+	reg.InvoicePaidReplay(context.Background(), scope, inv)
+	if settler.calls != 2 || notifier.n != 1 {
+		t.Fatalf("replay on paid activation must be a no-op: settle=%d notices=%d", settler.calls, notifier.n)
+	}
+	if plain.paid != 0 {
+		t.Fatalf("non-replayable listener called %d times on replay", plain.paid)
+	}
+}
+
+func TestCRMReceivableListenerIsNotReplayable(t *testing.T) {
+	if _, ok := any(&crmservice.ReceivableListener{}).(receivableservice.ReplayableListener); ok {
+		t.Fatal("CRM listener must not opt in to replay (its side effects are not idempotent)")
+	}
+	if _, ok := any(landingActivationReceivableListener{}).(receivableservice.ReplayableListener); !ok {
+		t.Fatal("landing activation listener must opt in to replay")
 	}
 }
