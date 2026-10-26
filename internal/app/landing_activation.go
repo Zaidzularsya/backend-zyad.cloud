@@ -93,6 +93,19 @@ func activationBillingError(err error) error {
 
 var _ landingservice.ActivationBilling = receivableActivationBilling{}
 
+// activationPaymentLinks gives the public payment link of an activation invoice. The receivable module
+// stores that link encrypted, so the same link can be read again whenever the reseller needs to resend it.
+type activationPaymentLinks struct {
+	invoices receivableservice.InvoiceService
+}
+
+func (l activationPaymentLinks) PaymentURL(ctx context.Context, scope coretenant.Scope, invoiceID string) (string, error) {
+	url, _, err := l.invoices.Link(ctx, scope, invoiceID, "")
+	return url, err
+}
+
+var _ landingservice.ActivationPaymentLinks = activationPaymentLinks{}
+
 // activeDomainLister is the subset of the organization domain repository used
 // to find the reseller's public host.
 type activeDomainLister interface {

@@ -135,25 +135,33 @@ func normalizeActivationInput(in ActivationInput) (normalizedActivation, error) 
 		return n, activationValidation("Masa aktif di luar batas (maksimal 2 tahun).")
 	}
 
-	switch {
-	case in.InvoiceDueHours != nil && in.InvoiceDueDays != nil:
-		return n, activationValidation("Isi salah satu: jatuh tempo dalam jam atau hari.")
-	case in.InvoiceDueHours != nil:
-		h := *in.InvoiceDueHours
-		if h < 1 || h > maxActivationDueHours {
-			return n, activationValidation("Jatuh tempo invoice 1–720 jam.")
-		}
-		n.dueAfter = time.Duration(h) * time.Hour
-	case in.InvoiceDueDays != nil:
-		d := *in.InvoiceDueDays
-		if d < 1 || d > maxActivationDueDays {
-			return n, activationValidation("Jatuh tempo invoice 1–30 hari.")
-		}
-		n.dueAfter = time.Duration(d) * 24 * time.Hour
-	default:
-		n.dueAfter = time.Hour
+	dueAfter, err := activationDueAfter(in.InvoiceDueHours, in.InvoiceDueDays, time.Hour)
+	if err != nil {
+		return n, err
 	}
+	n.dueAfter = dueAfter
 	return n, nil
+}
+
+// activationDueAfter maps the "due in hours / days" form to a duration. At most one of the two may be
+// set; neither means fallback.
+func activationDueAfter(hours, days *int, fallback time.Duration) (time.Duration, error) {
+	switch {
+	case hours != nil && days != nil:
+		return 0, activationValidation("Isi salah satu: jatuh tempo dalam jam atau hari.")
+	case hours != nil:
+		if *hours < 1 || *hours > maxActivationDueHours {
+			return 0, activationValidation("Jatuh tempo invoice 1–720 jam.")
+		}
+		return time.Duration(*hours) * time.Hour, nil
+	case days != nil:
+		if *days < 1 || *days > maxActivationDueDays {
+			return 0, activationValidation("Jatuh tempo invoice 1–30 hari.")
+		}
+		return time.Duration(*days) * 24 * time.Hour, nil
+	default:
+		return fallback, nil
+	}
 }
 
 func (s *activationService) requireFeatures(ctx context.Context, scope tenant.Scope) error {

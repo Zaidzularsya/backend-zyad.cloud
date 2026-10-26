@@ -479,3 +479,10 @@ type CreateActivationInvoiceRequest struct {
 	InvoiceDueHours *int   `json:"invoice_due_hours"`
 	InvoiceDueDays  *int   `json:"invoice_due_days"`
 }
+
+// RenewActivationRequest (POST /app/landing/activations/:id/renew): how long the renewed preview window
+// lasts. At most one of the two; neither means 24 hours. The body may be empty.
+type RenewActivationRequest struct {
+	InvoiceDueHours *int `json:"invoice_due_hours"`
+	InvoiceDueDays  *int `json:"invoice_due_days"`
+}

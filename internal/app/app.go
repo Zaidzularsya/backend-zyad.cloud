@@ -530,6 +530,12 @@ func New(ctx context.Context) (*App, error) {
 		Billing: receivableActivationBilling{accounts: receivableModule.Accounts, invoices: receivableModule.Invoices},
 		Links:   activationPreviewLinks{domains: organizationrepo.NewDomainRepository(db)},
 	}))
+	// Dashboard invoice reseller: daftar invoice aktivasi + perbarui link preview (token diputar).
+	landingActivationInvoicesHandler := landinghandler.NewActivationInvoicesHandler(landingservice.NewActivationManager(landingservice.ActivationManagerDeps{
+		Activations: landingActivationRepo, Features: crmEntitlementChecker,
+		Links:    activationPreviewLinks{domains: organizationrepo.NewDomainRepository(db)},
+		Payments: activationPaymentLinks{invoices: receivableModule.Invoices},
+	}))
 	// Lunas -> halaman terbit otomatis. Didaftarkan di proses API saja: InvoicePaid hanya dipicu oleh
 	// webhook DOKU / pencatatan pembayaran manual (payment_service); worker billing run tidak memicunya.
 	receivableModule.Listeners.Add(landingActivationReceivableListener{paid: landingservice.NewActivationPaidListener(
@@ -674,6 +680,7 @@ func New(ctx context.Context) (*App, error) {
 		UserHandler:                      userHandler,
 		LandingAdminPageHandler:          landingAdminPageHandler,
 		LandingActivationHandler:         landingActivationHandler,
+		LandingActivationInvoicesHandler: landingActivationInvoicesHandler,
 		LandingAdminSectionHandler:       landingAdminSectionHandler,
 		LandingAdminDocumentHandler:      landingAdminDocumentHandler,
 		LandingAdminPageTemplateHandler:  landingAdminPageTemplateHandler,

@@ -1997,6 +1997,10 @@ paths:
         - Landing Pages
       security:
         - BearerAuth: []
+      description: >-
+        A page that was sold to a client cannot be deleted while it is paid and still published, or
+        while its activation invoice is awaiting payment and not yet due: 409
+        `PAGE_HAS_ACTIVE_ACTIVATION`. Expired pages, overdue invoices and ordinary pages can be deleted.
       responses:
         "200":
           description: Landing page deleted successfully
@@ -2004,6 +2008,11 @@ paths:
             application/json:
               schema:
                 type: object
+        "409":
+          description: The page was sold and is still live or awaiting payment (PAGE_HAS_ACTIVE_ACTIVATION)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
   /api/v1/admin/landing-pages/{id}/access:
     put:
       summary: Update landing page access
@@ -2092,12 +2101,148 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "422":
-          description: Invalid input (VALIDATION_ERROR) or page not eligible (ACTIVATION_PAGE_NOT_ELIGIBLE)
+          description: >-
+            Invalid input (VALIDATION_ERROR), page not eligible (ACTIVATION_PAGE_NOT_ELIGIBLE), or the
+            organization has no active domain/subdomain so the preview link could not be built
+            (ACTIVATION_NO_PUBLIC_HOST); no invoice is created in that case
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "502":
           description: Invoice could not be created (ACTIVATION_INVOICE_FAILED); retry is safe
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+  /api/v1/app/landing/activations:
+    get:
+      summary: List the reseller's page activation invoices
+      operationId: listLandingActivations
+      tags:
+        - Landing Pages
+      security:
+        - BearerAuth: []
+      description: >-
+        Requires permission `landing.page.update`. Newest first. `state` is `awaiting_payment` (open, invoice
+        not yet due), `expired` (open, past due: the preview link is closed but the invoice can still be paid),
+        `paid` or `void`. `payment_url` is the public payment link (empty for void). The preview link is never
+        listed because only its hash is stored; use renew to get a new one. `Cache-Control: private, no-store`.
+      parameters:
+        - {name: status, in: query, schema: {type: string, enum: [open, paid, void]}}
+        - {name: page, in: query, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: per_page, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        "200":
+          description: Activation invoices
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id: {type: string, format: uuid}
+                            page_id: {type: string, format: uuid}
+                            page_title: {type: string}
+                            page_slug: {type: string}
+                            page_status: {type: string}
+                            page_active_until: {type: string, format: date-time, nullable: true}
+                            invoice_id: {type: string, format: uuid, nullable: true}
+                            buyer_name: {type: string}
+                            buyer_contact: {type: string}
+                            buyer_email: {type: string, nullable: true}
+                            price: {type: string}
+                            duration_value: {type: integer}
+                            duration_unit: {type: string}
+                            invoice_due_at: {type: string, format: date-time}
+                            status: {type: string, enum: [open, paid, void]}
+                            state: {type: string, enum: [awaiting_payment, expired, paid, void]}
+                            paid_at: {type: string, format: date-time, nullable: true}
+                            created_at: {type: string, format: date-time}
+                            payment_url: {type: string}
+                      meta:
+                        type: object
+                        properties:
+                          total: {type: integer}
+                          page: {type: integer}
+                          per_page: {type: integer}
+                          total_pages: {type: integer}
+        "403":
+          description: Missing `landing.page.update`
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "422":
+          description: Invalid status filter (VALIDATION_ERROR)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+  /api/v1/app/landing/activations/{id}/renew:
+    post:
+      summary: Give an open activation a new preview link and a fresh preview window
+      operationId: renewLandingActivation
+      tags:
+        - Landing Pages
+      security:
+        - BearerAuth: []
+      description: >-
+        Requires permission `landing.page.update` and entitlements `landing.enabled` and
+        `landing.page_activation`. Only for an OPEN activation (including one past its due time). The preview
+        token is rotated: the old preview link stops working and the new raw-token `preview_url` is returned
+        only in this response, valid for `invoice_due_hours` (1-720) or `invoice_due_days` (1-30), default 24
+        hours. The payment link does not change. The body may be empty. If the organization has no active
+        domain the call fails (422 `ACTIVATION_NO_PUBLIC_HOST`) before the old token is replaced.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                invoice_due_hours: {type: integer, minimum: 1, maximum: 720}
+                invoice_due_days: {type: integer, minimum: 1, maximum: 30}
+      responses:
+        "200":
+          description: New links
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  data:
+                    type: object
+                    properties:
+                      activation: {type: object}
+                      preview_url: {type: string}
+                      payment_url: {type: string}
+        "403":
+          description: Missing permission or entitlement (FEATURE_NOT_ENABLED)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Unknown activation or of another organization (ACTIVATION_NOT_FOUND)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "409":
+          description: Already paid, voided or without an invoice yet (ACTIVATION_NOT_OPEN)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "422":
+          description: Invalid due window (VALIDATION_ERROR) or no public host (ACTIVATION_NO_PUBLIC_HOST)
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}

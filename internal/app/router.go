@@ -190,6 +190,10 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.LandingActivationHandler != nil {
 		deps.LandingActivationHandler.RegisterRoutes(protected, deps.PermissionChecker)
 	}
+	// GET /app/landing/activations + POST /app/landing/activations/:id/renew (dashboard invoice reseller).
+	if deps.LandingActivationInvoicesHandler != nil {
+		deps.LandingActivationInvoicesHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
 	if deps.LandingAdminSectionHandler != nil {
 		deps.LandingAdminSectionHandler.RegisterRoutes(protected, deps.PermissionChecker)
 	}
