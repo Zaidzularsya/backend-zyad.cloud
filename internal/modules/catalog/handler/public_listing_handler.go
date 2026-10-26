@@ -8,6 +8,7 @@ import (
 
 	coreerrors "zyad.cloud/internal/core/errors"
 	corehttp "zyad.cloud/internal/core/http"
+	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/catalog/dto"
 )
@@ -70,5 +71,36 @@ func (h *PublicListingHandler) TenantList(c *gin.Context) {
 	// cache bersama wajib memisahkan per host agar katalog tenant A tak sampai ke B.
 	c.Header("Vary", "Host, X-Forwarded-Host")
 	c.Header("Cache-Control", "public, max-age=60")
+	corehttp.OK(c, "success", result)
+}
+
+// RegisterAppRoutes memasang listing milik org yang sedang login. Dipakai editor landing
+// (pratinjau kanvas + panel blok Pricing Katalog) yang berjalan di host platform, sehingga
+// tidak bisa memakai /public/tenant-catalog yang menentukan tenant dari host.
+func (h *PublicListingHandler) RegisterAppRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker) {
+	router.GET("/listings", permissionmiddleware.RequireOrganizationOrGlobal(p, "catalog_product.read"), h.AppList)
+}
+
+func (h *PublicListingHandler) AppList(c *gin.Context) {
+	tc, err := coretenant.RequireContext(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	var result dto.PublicCatalogResponse
+	if tc.OrganizationType() == coretenant.OrganizationTypePlatform {
+		result, err = h.svc.Listings(c.Request.Context())
+	} else {
+		var scope coretenant.Scope
+		if scope, err = coretenant.NewScope(tc); err == nil {
+			result, err = h.svc.TenantListings(c.Request.Context(), scope)
+		}
+	}
+	if err != nil {
+		failCatalog(c, err)
+		return
+	}
+	// Respons per-org dan butuh login: jangan masuk cache bersama.
+	c.Header("Cache-Control", "private, no-store")
 	corehttp.OK(c, "success", result)
 }

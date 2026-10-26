@@ -6955,6 +6955,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/catalog/listings:
+    get:
+      summary: List public product cards of the signed-in organization
+      operationId: listOwnCatalogListings
+      tags:
+      - Catalog
+      security:
+      - BearerAuth: []
+      description: >-
+        Permission: `catalog_product.read`. Same card structure as `/public/tenant-catalog`, but for the
+        organization of the signed-in session (never an id from the client), so the landing editor, which
+        runs on the platform host, can preview and configure the "Pricing Katalog" block. A tenant
+        organization gets its own public products (`needs_update` products omitted); the platform
+        organization gets the same cards as `/public/catalog/listings`. `Cache-Control: private, no-store`.
+      responses:
+        "200":
+          description: Listings of the active organization
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      categories:
+                        type: array
+                        description: Same item schema as `/public/tenant-catalog`.
+                        items:
+                          type: object
+        "403":
+          description: Missing `catalog_product.read`
   /api/v1/app/catalog/products:
     get:
       summary: List tenant catalog products
