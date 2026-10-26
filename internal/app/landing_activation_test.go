@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -172,9 +173,16 @@ func TestActivationPreviewLinks(t *testing.T) {
 		t.Fatalf("lookup org=%s filter=%+v", lister.org, lister.filter)
 	}
 
+	// Reseller tanpa host publik aktif: link yang hanya berupa path tidak bisa dibuka siapa pun
+	// (rute preview mencari tenant dari host), jadi invoice ditolak dengan pesan yang bisa ditindaklanjuti.
 	empty := &fakeDomainLister{}
-	if url, _ := (activationPreviewLinks{domains: empty}).PreviewURL(context.Background(), activationScope(t), "TOKEN"); url != "/preview/TOKEN" {
-		t.Fatalf("fallback url=%q", url)
+	url, err = (activationPreviewLinks{domains: empty}).PreviewURL(context.Background(), activationScope(t), "TOKEN")
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "ACTIVATION_NO_PUBLIC_HOST" || appErr.Status != http.StatusUnprocessableEntity || url != "" {
+		t.Fatalf("tanpa host: url=%q err=%v, want 422 ACTIVATION_NO_PUBLIC_HOST", url, err)
+	}
+	if appErr != nil && !strings.Contains(appErr.Message, "domain") {
+		t.Fatalf("pesan harus menyebut domain: %q", appErr.Message)
 	}
 	if _, err := (activationPreviewLinks{domains: &fakeDomainLister{err: errors.New("db")}}).PreviewURL(context.Background(), activationScope(t), "T"); err == nil {
 		t.Fatal("lookup error must be returned")

@@ -53,7 +53,8 @@ func TestPlanResellerBundleListsOnlyMissingFeatures(t *testing.T) {
 		active: map[string]map[string]bool{
 			"org-partial": {"landing.enabled": true, "landing.max_pages": true},
 			"org-done": {"landing.enabled": true, "landing.max_pages": true,
-				"landing.max_sections_per_page": true, "storage.max_bytes": true},
+				"landing.max_sections_per_page": true, "storage.max_bytes": true,
+				"domain.enabled": true, "domain.max_domains": true},
 		},
 	}
 	plan, err := PlanResellerBundle(context.Background(), store, time.Now())
@@ -63,15 +64,16 @@ func TestPlanResellerBundleListsOnlyMissingFeatures(t *testing.T) {
 	if len(plan.Changes) != 2 || plan.Unchanged != 1 {
 		t.Fatalf("changes=%d unchanged=%d, want 2/1", len(plan.Changes), plan.Unchanged)
 	}
-	if got := len(plan.Changes[0].Missing); got != 4 {
-		t.Fatalf("org baru harus kekurangan 4 fitur, got %d", got)
+	if got := len(plan.Changes[0].Missing); got != 6 {
+		t.Fatalf("org baru harus kekurangan 6 fitur, got %d", got)
 	}
 	keys := map[string]bool{}
 	for _, g := range plan.Changes[1].Missing {
 		keys[g.Key] = true
 	}
-	if len(keys) != 2 || !keys["landing.max_sections_per_page"] || !keys["storage.max_bytes"] {
-		t.Fatalf("org sebagian hanya kurang 2 fitur: %v", keys)
+	if len(keys) != 4 || !keys["landing.max_sections_per_page"] || !keys["storage.max_bytes"] ||
+		!keys["domain.enabled"] || !keys["domain.max_domains"] {
+		t.Fatalf("org sebagian harus kurang 4 fitur: %v", keys)
 	}
 }
 
@@ -89,7 +91,7 @@ func TestResellerBundleReportAndApply(t *testing.T) {
 
 	writer := &fakeBundleWriter{}
 	n, err := ApplyResellerBundle(context.Background(), plan, writer, time.Now())
-	if err != nil || n != 1 || len(writer.calls) != 1 || len(writer.grants["org-new"]) != 4 {
+	if err != nil || n != 1 || len(writer.calls) != 1 || len(writer.grants["org-new"]) != 6 {
 		t.Fatalf("apply n=%d err=%v calls=%v", n, err, writer.calls)
 	}
 }

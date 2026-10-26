@@ -101,8 +101,9 @@ type activeDomainLister interface {
 
 // activationPreviewLinks builds the preview URL on the organization's active
 // public host (primary first), because the public preview route resolves the
-// tenant from the request host. Without an active host it falls back to the
-// relative path.
+// tenant from the request host. Without an active host the link could not be
+// opened by anyone (a bare path, or a host of another organization, is "not
+// found"), so the invoice is refused instead of handing out a dead link.
 type activationPreviewLinks struct {
 	domains activeDomainLister
 }
@@ -120,7 +121,9 @@ func (l activationPreviewLinks) PreviewURL(ctx context.Context, scope coretenant
 			return "https://" + host + path, nil
 		}
 	}
-	return path, nil
+	return "", coreerrors.New("ACTIVATION_NO_PUBLIC_HOST",
+		"Tambahkan domain atau subdomain aktif di menu Domain dulu, supaya link preview halaman bisa dibuka pelanggan Anda.",
+		http.StatusUnprocessableEntity)
 }
 
 var _ landingservice.ActivationLinks = activationPreviewLinks{}

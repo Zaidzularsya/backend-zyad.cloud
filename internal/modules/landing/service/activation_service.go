@@ -105,10 +105,10 @@ func normalizeActivationInput(in ActivationInput) (normalizedActivation, error) 
 		durationUnit:  in.DurationUnit,
 	}
 	if c := utf8.RuneCountInString(n.buyerName); c < 1 || c > maxActivationNameRunes {
-		return n, activationValidation("Nama penagih wajib diisi (1–200 karakter).")
+		return n, activationValidation("Nama pelanggan wajib diisi (1–200 karakter).")
 	}
 	if c := utf8.RuneCountInString(n.buyerContact); c < 1 || c > maxActivationContactRunes {
-		return n, activationValidation("Kontak wajib diisi (1–50 karakter).")
+		return n, activationValidation("Nomor WhatsApp wajib diisi (1–50 karakter).")
 	}
 	if n.buyerEmail != "" {
 		addr, err := mail.ParseAddress(n.buyerEmail)

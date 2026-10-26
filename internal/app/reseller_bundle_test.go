@@ -27,6 +27,8 @@ func TestWithResellerBundleAddsImpliedFeatures(t *testing.T) {
 		"landing.max_pages":             "10",
 		"landing.max_sections_per_page": "12",
 		"storage.max_bytes":             "209715200",
+		"domain.enabled":                "true",
+		"domain.max_domains":            "1",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %v, want %v", got, want)

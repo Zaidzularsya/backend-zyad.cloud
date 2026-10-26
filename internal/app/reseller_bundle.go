@@ -27,6 +27,10 @@ var resellerBundleSpec = []struct{ Key, ValueType, Value string }{
 	{"landing.max_pages", "integer", strconv.Itoa(resellerMaxPages)},
 	{"landing.max_sections_per_page", "integer", strconv.Itoa(resellerMaxSectionsPerPage)},
 	{"storage.max_bytes", "integer", strconv.Itoa(resellerStorageBytes)},
+	// Link preview halaman dibuka di host milik reseller sendiri (rute preview mencari tenant dari host),
+	// jadi reseller harus bisa menambah satu subdomain.
+	{"domain.enabled", "boolean", "true"},
+	{"domain.max_domains", "integer", "1"},
 }
 
 func resellerBundle() []crmdomain.FeatureSnapshot {
