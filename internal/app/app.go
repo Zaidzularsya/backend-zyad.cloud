@@ -272,6 +272,7 @@ func New(ctx context.Context) (*App, error) {
 		landingSectionRepo,
 		landingservice.WithLandingPageQuotaGuard(entitlementGuard),
 		landingservice.WithLandingPageBrandingRepo(landingBrandingRepo),
+		landingservice.WithLandingPageActivationGuard(landingActivationRepo),
 	)
 	landingSectionSvc := landingservice.NewSectionService(
 		landingSectionRepo,
