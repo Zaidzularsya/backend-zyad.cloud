@@ -9,6 +9,8 @@
 //
 //	accessmigrate free-plan            # DRY-RUN (default): cetak rencana, tidak menulis apa pun
 //	accessmigrate free-plan --apply    # selaraskan produk FREE + re-provision workspace ber-akses default
+//	accessmigrate reseller-bundle      # DRY-RUN (default): fitur bundle reseller yang belum aktif (landing.enabled, max_pages, ...)
+//	accessmigrate reseller-bundle --apply  # lengkapi bundle untuk workspace yang sudah memegang landing.page_activation
 //	accessmigrate audit-quota          # baca-saja, informasional: produk/contract tanpa key kuota baru (uncapped)
 package main
 
@@ -28,13 +30,13 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: accessmigrate preflight|backfill-default|free-plan [--apply]|audit-quota")
+		fmt.Fprintln(os.Stderr, "usage: accessmigrate preflight|backfill-default|free-plan [--apply]|reseller-bundle [--apply]|audit-quota")
 		os.Exit(2)
 	}
 	// Flag diparse sebelum koneksi DB supaya salah pakai gagal tanpa menyentuh database.
 	apply := false
-	if os.Args[1] == "free-plan" {
-		fs := flag.NewFlagSet("free-plan", flag.ExitOnError)
+	if os.Args[1] == "free-plan" || os.Args[1] == "reseller-bundle" {
+		fs := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
 		dryRun := fs.Bool("dry-run", false, "cetak rencana saja (perilaku default)")
 		fs.BoolVar(&apply, "apply", false, "tulis perubahan (tanpa flag ini selalu dry-run)")
 		_ = fs.Parse(os.Args[2:])
@@ -82,6 +84,11 @@ func main() {
 	case "free-plan":
 		if err := app.RunFreePlan(ctx, cfg, db, apply, os.Stdout); err != nil {
 			logger.Error("free-plan failed", "error", err)
+			os.Exit(1)
+		}
+	case "reseller-bundle":
+		if err := app.RunResellerBundle(ctx, db, apply, os.Stdout); err != nil {
+			logger.Error("reseller-bundle failed", "error", err)
 			os.Exit(1)
 		}
 	case "audit-quota":
