@@ -267,3 +267,49 @@ func periodLabel(from, to *time.Time) string {
 	f := func(t time.Time) string { return fmt.Sprintf("%d %s %d", t.Day(), monthsID[t.Month()-1], t.Year()) }
 	return f(*from) + " – " + f(*to)
 }
+
+// Bills mengembalikan tagihan yang DITERIMA workspace pembeli dari penjualnya: invoice sales order dan
+// kontrak milik company yang tertaut ke workspace itu. seller adalah scope org penjual (bisa org
+// platform atau tenant), bukan org pembeli; company dicari dengan tenantOrganizationID pembeli
+// sehingga hanya tagihan workspace itu yang terbaca. Read-only: tidak menghitung status langganan
+// maupun hitung mundur suspend.
+func (a *TenantAccess) Bills(ctx context.Context, seller coretenant.Scope, tenantOrganizationID string) ([]SubscriptionInvoice, error) {
+	if a.subscription == nil {
+		return nil, errors.New("tenant access: subscription is not configured")
+	}
+	company, err := a.companies.FindByTenantOrganization(ctx, seller, tenantOrganizationID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return []SubscriptionInvoice{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read linked company: %w", err)
+	}
+	orders, err := a.companyOrders(ctx, seller, company.ID)
+	if err != nil {
+		return nil, err
+	}
+	invoices := map[string]BillingInvoice{}
+	for _, so := range orders {
+		if so.Status == domain.SalesOrderCancelled {
+			continue
+		}
+		list, err := a.subscription.InvoicesBySource(ctx, seller, string(receivabledomain.SourceSalesOrder), so.ID)
+		if err != nil {
+			return nil, fmt.Errorf("read sales order invoices: %w", err)
+		}
+		for _, inv := range list {
+			invoices[inv.ID] = inv
+		}
+		if so.ContractID == "" {
+			continue
+		}
+		list, err = a.subscription.InvoicesByContract(ctx, seller, so.ContractID)
+		if err != nil {
+			return nil, fmt.Errorf("read contract invoices: %w", err)
+		}
+		for _, inv := range list {
+			invoices[inv.ID] = inv
+		}
+	}
+	return a.subscriptionInvoices(ctx, seller, invoices), nil
+}

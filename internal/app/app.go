@@ -630,7 +630,8 @@ func New(ctx context.Context) (*App, error) {
 		crmservice.NewTenantSelfServeResolver(workspaceOwnerRepo{db: db}, crmPipelineRepo),
 	), time.Now)
 	crmSelfServeHandler := crmhandler.NewSelfServeHandler(selfServeSvc, selfServePlatformScopes, permService).
-		WithSubscription(withSubscriptionView(crmTenantAccess, cfg, db, receivableModule.Invoices, receivableModule.Contracts, catalogProductService), cfg.SelfServe.GraceDays)
+		WithSubscription(withSubscriptionView(crmTenantAccess, cfg, db, receivableModule.Invoices, receivableModule.Contracts, catalogProductService), cfg.SelfServe.GraceDays).
+		WithBills(crmTenantAccess, newBillSellers(db))
 
 	// Checkout publik pelanggan tenant (Bagian 2B): tenant dari host, pembeli dari Google, workspace
 	// per tenant-pembeli, rantai self-serve di scope tenant.
