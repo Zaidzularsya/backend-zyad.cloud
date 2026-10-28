@@ -166,7 +166,9 @@ type receivableBuild struct {
 	AppName            string
 	FrontendURL        string
 	NotificationLocale string
-	RateCounter        middleware.RateCounter
+	// ManualCreation membuka POST /receivable/invoices dan /accounts (default mati).
+	ManualCreation bool
+	RateCounter    middleware.RateCounter
 	// Doku & DokuNotificationURL: klien dan URL webhook yang sama dengan billing (S6).
 	Doku                doku.Client
 	DokuNotificationURL string
@@ -256,8 +258,8 @@ func buildReceivable(b receivableBuild) receivableModule {
 		WithSettlementRecorder(receivableservice.NewSettlementRecorder(receivablerepo.NewSettlementRepository(db)))
 
 	return receivableModule{
-		AccountHandler:    receivablehandler.NewAccountHandler(accountSvc),
-		InvoiceHandler:    receivablehandler.NewInvoiceHandler(invoiceSvc, sendSvc),
+		AccountHandler:    receivablehandler.NewAccountHandler(accountSvc).WithManualCreation(b.ManualCreation),
+		InvoiceHandler:    receivablehandler.NewInvoiceHandler(invoiceSvc, sendSvc).WithManualCreation(b.ManualCreation),
 		PaymentHandler:    receivablehandler.NewPaymentHandler(paymentSvc),
 		SettingsHandler:   receivablehandler.NewSettingsHandler(settingsSvc),
 		PublicHandler:     receivablehandler.NewPublicInvoiceHandler(publicSvc, b.RateCounter).WithPayments(onlinePayment),

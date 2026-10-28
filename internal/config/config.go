@@ -62,6 +62,9 @@ type AppConfig struct {
 	Port           int
 	OrganizationID string
 	Env            string
+	// ReceivableManualCreation membuka pembuatan invoice/pelanggan manual lewat HTTP.
+	// Default mati: pelanggan hanya lewat kontak CRM.
+	ReceivableManualCreation bool
 }
 
 type DatabaseConfig struct {

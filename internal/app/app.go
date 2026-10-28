@@ -523,6 +523,7 @@ func New(ctx context.Context) (*App, error) {
 		RateCounter: redisClient, Doku: dokuClient, DokuNotificationURL: dokuNotificationURL,
 		InvoiceQuota:       crmQuotaEnforcer,
 		ActivationInvoices: activationInvoiceChecker{activations: landingActivationRepo},
+		ManualCreation:     cfg.App.ReceivableManualCreation,
 	})
 	// Aktivasi halaman (2C): reseller menagih klien lewat invoice receivable di organisasinya sendiri.
 	landingActivationHandler := landinghandler.NewActivationHandler(landingservice.NewActivationService(landingservice.ActivationServiceDeps{

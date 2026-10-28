@@ -21,17 +21,25 @@ type InvoiceHandler struct {
 	invoices service.InvoiceService
 	sends    service.SendService
 	perm     permissionmiddleware.CombinedPermissionChecker
+	// manualCreation: tanpa WithManualCreation(true), POST /invoices ditolak.
+	manualCreation bool
 }
 
 func NewInvoiceHandler(invoices service.InvoiceService, sends service.SendService) *InvoiceHandler {
 	return &InvoiceHandler{invoices: invoices, sends: sends}
 }
 
+// WithManualCreation mengizinkan pembuatan invoice manual lewat HTTP.
+func (h *InvoiceHandler) WithManualCreation(enabled bool) *InvoiceHandler {
+	h.manualCreation = enabled
+	return h
+}
+
 func (h *InvoiceHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker) {
 	h.perm = p
 	group := router.Group("/invoices")
 	group.GET("", permissionmiddleware.RequireOrganizationOrGlobal(p, "invoice.read"), h.List)
-	group.POST("", permissionmiddleware.RequireOrganizationOrGlobal(p, "invoice.create"), h.Create)
+	group.POST("", permissionmiddleware.RequireOrganizationOrGlobal(p, "invoice.create"), requireManualCreation(h.manualCreation), h.Create)
 	group.GET("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "invoice.read"), h.Get)
 	group.PUT("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "invoice.update"), h.Update)
 	// Menerbitkan juga mengirim invoice ke pelanggan, jadi butuh izin kirim.

@@ -20,6 +20,8 @@ func LoadApp() AppConfig {
 		Port:           getEnvInt("APP_PORT", 3000),
 		OrganizationID: getEnv("APP_ORGANIZATION_ID", ""),
 		Env:            getEnv("NODE_ENV", "development"),
+
+		ReceivableManualCreation: getEnvBool("RECEIVABLE_MANUAL_CREATION_ENABLED", false),
 	}
 }
 
