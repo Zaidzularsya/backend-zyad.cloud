@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/netip"
 	"regexp"
 	"strings"
@@ -149,9 +151,20 @@ func (s *RouterService) checkHostPolicy(ctx context.Context, host string, useTLS
 	return nil
 }
 
+// scrub replaces every non-empty secret in msg with "***".
+func scrub(msg string, secrets ...string) string {
+	for _, secret := range secrets {
+		if secret != "" {
+			msg = strings.ReplaceAll(msg, secret, "***")
+		}
+	}
+	return msg
+}
+
 // translateClientError maps platform errors to module errors. Unknown errors
-// are returned unchanged.
-func translateClientError(err error) error {
+// are not trusted to be free of credentials: they are logged scrubbed and
+// replaced by the fixed unreachable-class error.
+func translateClientError(err error, secrets ...string) error {
 	var tlsErr *pmk.TLSUntrustedError
 	switch {
 	case err == nil:
@@ -165,7 +178,28 @@ func translateClientError(err error) error {
 	case errors.Is(err, pmk.ErrUnreachable):
 		return mikrotik.ErrUnreachable
 	default:
+		slog.Warn("mikrotik: unclassified router error", "error", scrub(err.Error(), secrets...), "type", fmt.Sprintf("%T", err))
+		return mikrotik.ErrUnreachable
+	}
+}
+
+// storeError keeps known repository sentinels and replaces anything else with a
+// fixed message, since the raw error could echo the values we tried to store.
+func storeError(err error, secrets ...string) error {
+	if errors.Is(err, mikrotik.ErrRouterNotFound) || errors.Is(err, mikrotik.ErrRouterNameTaken) {
 		return err
+	}
+	slog.Warn("mikrotik: router store failed", "error", scrub(err.Error(), secrets...), "type", fmt.Sprintf("%T", err))
+	return errors.New("store router failed")
+}
+
+// audit writes an audit entry after a mutation has already been committed.
+// The repository has no transaction shared with this service, so a failure here
+// cannot undo the mutation; it is logged instead of failing a request that
+// actually succeeded.
+func (s *RouterService) audit(ctx context.Context, scope coretenant.Scope, entry repository.AuditEntry) {
+	if err := s.repo.InsertAudit(ctx, scope, entry); err != nil {
+		slog.Warn("mikrotik: audit insert failed", "router_id", entry.TargetID, "event", entry.Event, "error", scrub(err.Error()))
 	}
 }
 
@@ -228,7 +262,7 @@ func (s *RouterService) Register(ctx context.Context, scope coretenant.Scope, in
 	}
 	apiType, version, err := s.factory.Detect(ctx, s.endpoint(in.Host, in.Port, in.UseTLS, in.TLSFingerprint, in.Username, in.Password))
 	if err != nil {
-		return domain.Router{}, translateClientError(err)
+		return domain.Router{}, translateClientError(err, in.Password)
 	}
 	encrypted, err := corecrypto.EncryptSecret(s.secret, in.Password)
 	if err != nil {
@@ -247,13 +281,11 @@ func (s *RouterService) Register(ctx context.Context, scope coretenant.Scope, in
 		CreatedBy:         in.ActorUserID,
 	})
 	if err != nil {
-		return domain.Router{}, err
+		return domain.Router{}, storeError(err, in.Password, encrypted)
 	}
-	if err := s.repo.InsertAudit(ctx, scope, repository.AuditEntry{
+	s.audit(ctx, scope, repository.AuditEntry{
 		Event: "router.created", ActorUserID: in.ActorUserID, TargetID: router.ID, Metadata: auditMetadata(router),
-	}); err != nil {
-		return router, err
-	}
+	})
 	return router, nil
 }
 
@@ -302,7 +334,7 @@ func (s *RouterService) probe(ctx context.Context, router domain.Router) (string
 	}
 	version, err := client.Version(ctx)
 	if err != nil {
-		return "", translateClientError(err)
+		return "", translateClientError(err, password, router.PasswordEncrypted)
 	}
 	return version, nil
 }
@@ -383,7 +415,7 @@ func (s *RouterService) Update(ctx context.Context, scope coretenant.Scope, id s
 		}
 		apiType, version, err := s.factory.Detect(ctx, s.endpoint(next.Host, next.Port, next.UseTLS, next.TLSFingerprint, next.Username, password))
 		if err != nil {
-			return domain.Router{}, translateClientError(err)
+			return domain.Router{}, translateClientError(err, password, current.PasswordEncrypted, derefStr(params.PasswordEncrypted))
 		}
 		at := domain.APIType(apiType)
 		params.APIType, params.RouterOSVersion = &at, &version
@@ -391,18 +423,17 @@ func (s *RouterService) Update(ctx context.Context, scope coretenant.Scope, id s
 
 	updated, err := s.repo.Update(ctx, scope, id, params)
 	if err != nil {
-		return domain.Router{}, err
+		return domain.Router{}, storeError(err, newPassword, s.storedPassword(current), derefStr(params.PasswordEncrypted), current.PasswordEncrypted)
 	}
 	if connectionChanged {
+		// Bookkeeping after a committed update (no shared transaction): log, do not fail.
 		if err := s.repo.RecordCheck(ctx, scope, id, CheckStatusOK, updated.RouterOSVersion); err != nil {
-			return updated, err
+			slog.Warn("mikrotik: record check after update failed", "router_id", id, "error", scrub(err.Error()))
 		}
 	}
-	if err := s.repo.InsertAudit(ctx, scope, repository.AuditEntry{
+	s.audit(ctx, scope, repository.AuditEntry{
 		Event: "router.updated", ActorUserID: in.ActorUserID, TargetID: id, Metadata: auditMetadata(updated),
-	}); err != nil {
-		return updated, err
-	}
+	})
 	return updated, nil
 }
 
@@ -415,7 +446,25 @@ func (s *RouterService) Delete(ctx context.Context, scope coretenant.Scope, id, 
 	if err := s.repo.SoftDelete(ctx, scope, id, by); err != nil {
 		return err
 	}
-	return s.repo.InsertAudit(ctx, scope, repository.AuditEntry{
+	s.audit(ctx, scope, repository.AuditEntry{
 		Event: "router.deleted", ActorUserID: by, TargetID: id, Metadata: auditMetadata(router),
 	})
+	return nil
+}
+
+func derefStr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+// storedPassword decrypts the stored password only so it can be scrubbed from
+// logs; failures yield an empty string.
+func (s *RouterService) storedPassword(r domain.Router) string {
+	plain, err := corecrypto.DecryptSecret(s.secret, r.PasswordEncrypted)
+	if err != nil {
+		return ""
+	}
+	return plain
 }

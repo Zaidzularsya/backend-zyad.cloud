@@ -1,9 +1,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"strings"
 	"testing"
@@ -28,11 +30,17 @@ type fakeRepo struct {
 	seq     int
 	audits  []repository.AuditEntry
 	checks  []string
+
+	// Error injection.
+	auditErr, checkErr, createErr, updateErr error
 }
 
 func newFakeRepo() *fakeRepo { return &fakeRepo{routers: map[string]domain.Router{}} }
 
 func (f *fakeRepo) Create(_ context.Context, scope coretenant.Scope, p repository.CreateRouterParams) (domain.Router, error) {
+	if f.createErr != nil {
+		return domain.Router{}, f.createErr
+	}
 	f.seq++
 	r := domain.Router{
 		ID: fmt.Sprintf("00000000-0000-0000-0000-%012d", f.seq), OrganizationID: scope.OrganizationID(),
@@ -61,6 +69,9 @@ func (f *fakeRepo) List(context.Context, coretenant.Scope, int, int) ([]domain.R
 }
 
 func (f *fakeRepo) Update(_ context.Context, _ coretenant.Scope, id string, p repository.UpdateRouterParams) (domain.Router, error) {
+	if f.updateErr != nil {
+		return domain.Router{}, f.updateErr
+	}
 	r, ok := f.routers[id]
 	if !ok {
 		return domain.Router{}, mikrotik.ErrRouterNotFound
@@ -97,6 +108,9 @@ func (f *fakeRepo) Update(_ context.Context, _ coretenant.Scope, id string, p re
 }
 
 func (f *fakeRepo) RecordCheck(_ context.Context, _ coretenant.Scope, id, status, version string) error {
+	if f.checkErr != nil {
+		return f.checkErr
+	}
 	r, ok := f.routers[id]
 	if !ok {
 		return mikrotik.ErrRouterNotFound
@@ -123,6 +137,9 @@ func (f *fakeRepo) SoftDelete(_ context.Context, _ coretenant.Scope, id, _ strin
 }
 
 func (f *fakeRepo) InsertAudit(_ context.Context, _ coretenant.Scope, e repository.AuditEntry) error {
+	if f.auditErr != nil {
+		return f.auditErr
+	}
 	f.audits = append(f.audits, e)
 	return nil
 }
@@ -439,20 +456,134 @@ func TestAuditEventsRecorded(t *testing.T) {
 	}
 }
 
-func TestErrorsNeverContainPassword(t *testing.T) {
-	svc, _, factory := newTestService(t)
+func TestBookkeepingFailuresDoNotFailCommittedRequests(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(prev)
+
+	svc, repo, _ := newTestService(t)
 	ctx, scope := context.Background(), testScope(t)
-	for _, e := range []error{pmk.ErrAuthFailed, pmk.ErrUnreachable, &pmk.TLSUntrustedError{Fingerprint: "ff"}} {
-		factory.detectErr = e
-		_, err := svc.Register(ctx, scope, validInput())
-		if err == nil || strings.Contains(err.Error(), testPassword) {
-			t.Fatalf("err = %v", err)
+	repo.auditErr = errors.New("audit table down")
+
+	r, err := svc.Register(ctx, scope, validInput())
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if _, ok := repo.routers[r.ID]; !ok {
+		t.Fatal("router must be persisted")
+	}
+
+	name := "Renamed"
+	if _, err := svc.Update(ctx, scope, r.ID, UpdateInput{Name: &name}); err != nil || repo.routers[r.ID].Name != name {
+		t.Fatalf("Update: %v", err)
+	}
+
+	repo.checkErr = errors.New("check table down")
+	host := "10.8.0.7"
+	if _, err := svc.Update(ctx, scope, r.ID, UpdateInput{Host: &host}); err != nil || repo.routers[r.ID].Host != host {
+		t.Fatalf("Update with failing RecordCheck: %v", err)
+	}
+
+	if err := svc.Delete(ctx, scope, r.ID, testActor); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, ok := repo.routers[r.ID]; ok {
+		t.Fatal("router must be deleted")
+	}
+	out := logs.String()
+	for _, want := range []string{"audit insert failed", "router.created", "router.deleted", "record check after update failed"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("log missing %q:\n%s", want, out)
 		}
 	}
-	in := validInput()
-	in.Host = "bad@host"
-	_, err := svc.Register(ctx, scope, in)
-	if err == nil || strings.Contains(err.Error(), testPassword) {
-		t.Fatalf("err = %v", err)
+	if strings.Contains(out, testPassword) {
+		t.Fatal("log leaks password")
+	}
+}
+
+func assertNoSecret(t *testing.T, label string, err error, secrets ...string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("%s: expected an error", label)
+	}
+	for _, secret := range secrets {
+		if secret != "" && strings.Contains(err.Error(), secret) {
+			t.Fatalf("%s: error leaks a secret: %v", label, err)
+		}
+	}
+}
+
+func TestErrorsNeverContainPassword(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(prev)
+
+	leaky := []error{
+		errors.New("boom: " + testPassword),
+		fmt.Errorf("wrapped: %w", errors.New("inner "+testPassword)),
+		fmt.Errorf("auth with %s: %w", testPassword, pmk.ErrAuthFailed),
+	}
+	ctx, scope := context.Background(), testScope(t)
+
+	for i, leak := range leaky {
+		// Register: Detect error.
+		svc, repo, factory := newTestService(t)
+		factory.detectErr = leak
+		_, err := svc.Register(ctx, scope, validInput())
+		assertNoSecret(t, fmt.Sprintf("Register/Detect[%d]", i), err, testPassword)
+
+		// Register: repository error echoing both secrets.
+		svc, repo, _ = newTestService(t)
+		repo.createErr = errors.New("insert failed for " + testPassword)
+		_, err = svc.Register(ctx, scope, validInput())
+		assertNoSecret(t, fmt.Sprintf("Register/Create[%d]", i), err, testPassword)
+
+		// Check: client Version error.
+		svc, repo, factory = newTestService(t)
+		r := registerOne(t, svc)
+		enc := repo.routers[r.ID].PasswordEncrypted
+		factory.client.Err = leak
+		_, err = svc.Check(ctx, scope, r.ID)
+		assertNoSecret(t, fmt.Sprintf("Check[%d]", i), err, testPassword, enc)
+
+		// Update: probe error and repository error.
+		factory.detectErr = leak
+		host := "10.8.0.8"
+		_, err = svc.Update(ctx, scope, r.ID, UpdateInput{Host: &host})
+		assertNoSecret(t, fmt.Sprintf("Update/Detect[%d]", i), err, testPassword, enc)
+
+		factory.detectErr = nil
+		repo.updateErr = errors.New("update failed " + testPassword + " " + enc)
+		newPass := "new-" + testPassword
+		_, err = svc.Update(ctx, scope, r.ID, UpdateInput{Password: &newPass})
+		assertNoSecret(t, fmt.Sprintf("Update/Store[%d]", i), err, testPassword, enc, newPass)
+	}
+
+	// Decrypt failure (corrupt ciphertext) on Check and Update.
+	svc, repo, _ := newTestService(t)
+	r := registerOne(t, svc)
+	corrupt := repo.routers[r.ID]
+	corrupt.PasswordEncrypted = "corrupt-" + testPassword
+	repo.routers[r.ID] = corrupt
+	_, err := svc.Check(ctx, scope, r.ID)
+	assertNoSecret(t, "Check/decrypt", err, testPassword, corrupt.PasswordEncrypted)
+	host := "10.8.0.8"
+	_, err = svc.Update(ctx, scope, r.ID, UpdateInput{Host: &host})
+	assertNoSecret(t, "Update/decrypt", err, testPassword, corrupt.PasswordEncrypted)
+
+	// Unclassified errors are the unreachable class with a fixed message.
+	svc, _, factory := newTestService(t)
+	factory.detectErr = leaky[0]
+	_, err = svc.Register(ctx, scope, validInput())
+	if !errors.Is(err, mikrotik.ErrUnreachable) || err.Error() != mikrotik.ErrUnreachable.Error() {
+		t.Fatalf("unclassified error = %v, want fixed ErrUnreachable", err)
+	}
+	if strings.Contains(logs.String(), testPassword) {
+		t.Fatalf("logs leak password:\n%s", logs.String())
+	}
+	if !strings.Contains(logs.String(), "***") {
+		t.Fatal("expected scrubbed original in log")
 	}
 }
