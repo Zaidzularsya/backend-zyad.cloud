@@ -1,7 +1,10 @@
 package app
 
 import (
+	"github.com/gin-gonic/gin"
+
 	"zyad.cloud/internal/config"
+	"zyad.cloud/internal/core/middleware"
 	mikrotikhandler "zyad.cloud/internal/modules/mikrotik/handler"
 	mikrotikrepo "zyad.cloud/internal/modules/mikrotik/repository"
 	mikrotikservice "zyad.cloud/internal/modules/mikrotik/service"
@@ -18,4 +21,21 @@ func buildMikrotik(cfg config.Config, db *database.Pool) *mikrotikhandler.Router
 		cfg.Mikrotik.AllowedPrivateCIDRs,
 	)
 	return mikrotikhandler.NewRouterHandler(svc)
+}
+
+// registerMikrotikRoutes mounts /app/mikrotik under the authenticated group.
+// Tenant rules match CRM/receivable and the whole group is gated by the
+// mikrotik.enabled entitlement. Kept separate from newRouter so the gate can be
+// tested without the full dependency graph.
+func registerMikrotikRoutes(protected *gin.RouterGroup, deps Dependencies) {
+	if deps.MikrotikRouterHandler == nil {
+		return
+	}
+	group := protected.Group("/app/mikrotik")
+	group.Use(
+		middleware.RequireActiveTenant(),
+		middleware.RequireCustomerOrPlatformTenant(),
+		middleware.RequireEntitlement(deps.CRMEntitlementChecker, "mikrotik.enabled"),
+	)
+	deps.MikrotikRouterHandler.RegisterRoutes(group, deps.PermissionChecker)
 }
