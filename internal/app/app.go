@@ -726,6 +726,7 @@ func New(ctx context.Context) (*App, error) {
 		CRMSelfServeHandler:              crmSelfServeHandler,
 		CRMTenantCheckoutHandler:         crmTenantCheckoutHandler,
 		ReceivableAccountHandler:         receivableModule.AccountHandler,
+		MikrotikRouterHandler:            buildMikrotik(cfg, db),
 		ReceivableInvoiceHandler:         receivableModule.InvoiceHandler,
 		ReceivablePaymentHandler:         receivableModule.PaymentHandler,
 		ReceivableSettingsHandler:        receivableModule.SettingsHandler,

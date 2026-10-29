@@ -356,6 +356,18 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		}
 	}
 
+	// Mikrotik: router tenant untuk isolir PPPoE. Aturan tenant sama dengan CRM/receivable,
+	// digerbang mikrotik.enabled.
+	if deps.MikrotikRouterHandler != nil {
+		mikrotikGroup := protected.Group("/app/mikrotik")
+		mikrotikGroup.Use(
+			middleware.RequireActiveTenant(),
+			middleware.RequireCustomerOrPlatformTenant(),
+			middleware.RequireEntitlement(deps.CRMEntitlementChecker, "mikrotik.enabled"),
+		)
+		deps.MikrotikRouterHandler.RegisterRoutes(mikrotikGroup, deps.PermissionChecker)
+	}
+
 	// Katalog produk tenant (dipakai quotation CRM dan invoice receivable). Aturan tenant sama
 	// dengan CRM; entitlement cukup salah satu dari crm.enabled / receivable.enabled.
 	if deps.CatalogProductHandler != nil {

@@ -14,6 +14,7 @@ import (
 	financehandler "zyad.cloud/internal/modules/finance/handler"
 	landinghandler "zyad.cloud/internal/modules/landing/handler"
 	mailboxhandler "zyad.cloud/internal/modules/mailbox/handler"
+	mikrotikhandler "zyad.cloud/internal/modules/mikrotik/handler"
 	organizationhandler "zyad.cloud/internal/modules/organization/handler"
 	producthandler "zyad.cloud/internal/modules/product/handler"
 	receivablehandler "zyad.cloud/internal/modules/receivable/handler"
@@ -92,6 +93,7 @@ type Dependencies struct {
 	ReceivableOverviewHandler        *receivablehandler.OverviewHandler
 	ReceivableSettlementHandler      *receivablehandler.SettlementHandler
 	ReceivableAccountHandler         *receivablehandler.AccountHandler
+	MikrotikRouterHandler            *mikrotikhandler.RouterHandler
 	ReceivableInvoiceHandler         *receivablehandler.InvoiceHandler
 	ReceivablePaymentHandler         *receivablehandler.PaymentHandler
 	ReceivableSettingsHandler        *receivablehandler.SettingsHandler
