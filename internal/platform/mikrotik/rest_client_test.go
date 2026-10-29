@@ -346,3 +346,48 @@ func TestFakeClient(t *testing.T) {
 }
 
 var _ RouterClient = (*FakeClient)(nil)
+
+func TestRESTClientRefusesRedirects(t *testing.T) {
+	var hit bool
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		_, _ = w.Write([]byte(`{"version":"7.1"}`))
+	}))
+	defer other.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+"/rest/system/resource", http.StatusFound)
+	}))
+	defer srv.Close()
+	_, err := newREST(t, endpointFor(t, srv, false)).Version(context.Background())
+	if err == nil {
+		t.Fatal("expected an error for a redirect")
+	}
+	if hit {
+		t.Fatal("redirect target must never be contacted")
+	}
+	if strings.Contains(err.Error(), testPassword) {
+		t.Fatalf("password leaked: %v", err)
+	}
+}
+
+func TestRESTClientScrubsPasswordAcrossTruncation(t *testing.T) {
+	const pw = "Zq9!xKw#7mPv"
+	msg := strings.Repeat("a", 195) + pw + strings.Repeat("b", 50)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		b, _ := json.Marshal(map[string]string{"message": msg})
+		_, _ = w.Write(b)
+	}))
+	defer srv.Close()
+	ep := endpointFor(t, srv, false)
+	ep.Password = pw
+	_, err := newREST(t, ep).Version(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	for n := 3; n <= len(pw); n++ {
+		if strings.Contains(err.Error(), pw[:n]) {
+			t.Fatalf("password prefix %q leaked: %v", pw[:n], err)
+		}
+	}
+}

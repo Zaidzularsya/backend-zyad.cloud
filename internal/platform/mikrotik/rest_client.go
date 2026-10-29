@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 type restClient struct {
@@ -33,7 +34,13 @@ func newRESTClient(ep Endpoint) *restClient {
 		TLSHandshakeTimeout: ep.timeout(),
 		DisableKeepAlives:   true,
 	}
-	return &restClient{ep: ep, http: &http.Client{Transport: tr, Timeout: ep.timeout()}}
+	return &restClient{ep: ep, http: &http.Client{
+		Transport: tr,
+		Timeout:   ep.timeout(),
+		// RouterOS REST never redirects; following one would let a
+		// tenant-controlled router steer requests (and credentials) elsewhere.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}}
 }
 
 func normalizeFingerprint(s string) string {
@@ -126,23 +133,29 @@ func (c *restClient) do(ctx context.Context, method, path string, query url.Valu
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 		return nil, ErrAuthFailed
 	case resp.StatusCode < 200 || resp.StatusCode > 299:
-		return nil, errors.New(c.scrub(fmt.Sprintf("mikrotik: router returned %d: %s", resp.StatusCode, apiMessage(data))))
+		return nil, errors.New(c.scrub(fmt.Sprintf("mikrotik: router returned %d: %s", resp.StatusCode, c.apiMessage(data))))
 	}
 	return data, nil
 }
 
-// apiMessage extracts RouterOS' {"message","detail"} error text, bounded.
-func apiMessage(data []byte) string {
+// apiMessage extracts RouterOS' {"message","detail"} error text. The password
+// is scrubbed before truncating so a value echoed across the cut cannot leave
+// a prefix behind; truncation happens on a rune boundary.
+func (c *restClient) apiMessage(data []byte) string {
 	var e struct {
 		Message string `json:"message"`
 		Detail  string `json:"detail"`
 	}
-	msg := ""
-	if json.Unmarshal(data, &e) == nil {
-		msg = strings.TrimSpace(e.Message + " " + e.Detail)
+	if json.Unmarshal(data, &e) != nil {
+		return ""
 	}
+	msg := c.scrub(strings.TrimSpace(e.Message + " " + e.Detail))
 	if len(msg) > 200 {
-		msg = msg[:200]
+		cut := 200
+		for cut > 0 && !utf8.RuneStart(msg[cut]) {
+			cut--
+		}
+		msg = msg[:cut]
 	}
 	return msg
 }
