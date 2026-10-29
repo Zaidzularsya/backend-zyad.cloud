@@ -277,12 +277,6 @@ func TestRESTClientErrorNeverContainsPassword(t *testing.T) {
 	check("dns", err)
 }
 
-func TestNewClientBinaryNotYet(t *testing.T) {
-	if _, err := NewClient("binary", Endpoint{Host: "x"}); err == nil || !strings.Contains(err.Error(), "not implemented") {
-		t.Fatalf("want not-implemented error, got %v", err)
-	}
-}
-
 func TestNewClientUnknownType(t *testing.T) {
 	if _, err := NewClient("soap", Endpoint{}); err == nil {
 		t.Fatal("expected error")

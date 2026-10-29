@@ -162,7 +162,9 @@ func (c *restClient) apiMessage(data []byte) string {
 
 // classify maps transport failures onto the package sentinels. The cause text
 // is deliberately not included for unreachable errors beyond a fixed reason.
-func (c *restClient) classify(err error) error {
+func (c *restClient) classify(err error) error { return classifyNetError(err) }
+
+func classifyNetError(err error) error {
 	var tu *TLSUntrustedError
 	switch {
 	case errors.As(err, &tu):

@@ -98,7 +98,7 @@ func NewClient(apiType string, ep Endpoint) (RouterClient, error) {
 	case APITypeREST:
 		return newRESTClient(ep), nil
 	case APITypeBinary:
-		return nil, errors.New("mikrotik: binary API transport not implemented")
+		return newBinaryClient(ep), nil
 	default:
 		return nil, fmt.Errorf("mikrotik: unknown api type %q", apiType)
 	}
