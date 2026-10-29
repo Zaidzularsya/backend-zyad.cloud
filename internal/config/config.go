@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"sync"
 	"time"
 )
@@ -185,6 +186,9 @@ type MikrotikConfig struct {
 	Host     string
 	Username string
 	Password string
+	// AllowedPrivateCIDRs lists private ranges (e.g. a WireGuard tunnel) that
+	// tenant routers may use as host. Parsed from MIKROTIK_ALLOWED_PRIVATE_CIDRS.
+	AllowedPrivateCIDRs []netip.Prefix
 }
 
 // DokuConfig holds DOKU Checkout API credentials. ClientID + SecretKey drive

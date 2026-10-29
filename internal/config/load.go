@@ -2,6 +2,7 @@ package config
 
 import (
 	"bufio"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -198,7 +199,32 @@ func LoadMikrotik() MikrotikConfig {
 		Host:     getEnv("MIKROTIK_HOST", ""),
 		Username: getEnv("MIKROTIK_USERNAME", ""),
 		Password: getEnv("MIKROTIK_PASSWORD", ""),
+
+		AllowedPrivateCIDRs: parseAllowedPrivateCIDRs(getEnv("MIKROTIK_ALLOWED_PRIVATE_CIDRS", "")),
 	}
+}
+
+// parseAllowedPrivateCIDRs parses a comma-separated CIDR list. Invalid entries
+// and loopback, link-local or unspecified ranges are skipped so a typo in env
+// can never widen what tenant routers are allowed to reach.
+func parseAllowedPrivateCIDRs(raw string) []netip.Prefix {
+	var prefixes []netip.Prefix
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(part)
+		if err != nil {
+			continue
+		}
+		addr := prefix.Addr()
+		if addr.IsLoopback() || addr.IsLinkLocalUnicast() || addr.IsUnspecified() {
+			continue
+		}
+		prefixes = append(prefixes, prefix)
+	}
+	return prefixes
 }
 
 func LoadDoku() DokuConfig {
