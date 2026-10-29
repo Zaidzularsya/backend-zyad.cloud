@@ -143,7 +143,11 @@ func (c *binaryClient) run(ctx context.Context, words ...string) (*routeros.Repl
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
 
+	var lc *limitedConn
 	fail := func(err error) (*routeros.Reply, error) {
+		if lc != nil && lc.failure != nil {
+			return nil, lc.failure
+		}
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return nil, context.Canceled
 		}
@@ -156,7 +160,8 @@ func (c *binaryClient) run(ctx context.Context, words ...string) (*routeros.Repl
 		}
 	}
 
-	cl, err := routeros.NewClient(conn)
+	lc = &limitedConn{Conn: conn}
+	cl, err := routeros.NewClient(lc)
 	if err != nil {
 		return nil, errors.New("mikrotik: api client setup failed")
 	}

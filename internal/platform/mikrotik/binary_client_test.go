@@ -17,7 +17,10 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -84,9 +87,11 @@ type fakeROS struct {
 	ln        net.Listener
 	user      string
 	pass      string
-	silent    atomic.Bool // accept, never answer
-	trapEcho  atomic.Bool // add traps with the password echoed in the message
-	challenge atomic.Bool // pre-6.43 two-step login
+	silent    atomic.Bool  // accept, never answer
+	trapEcho  atomic.Bool  // add traps with the password echoed in the message
+	challenge atomic.Bool  // pre-6.43 two-step login
+	httpMode  atomic.Int32 // reaction to an HTTP probe: 0 drop, 1 silent, 2 answer 404, 3 answer 401
+	apiConns  atomic.Int32 // connections that spoke API (not HTTP)
 
 	mu     sync.Mutex
 	tables map[string][]Row
@@ -214,9 +219,22 @@ func (f *fakeROS) handle(c net.Conn) {
 	br := bufio.NewReader(c)
 	// An HTTP request (REST probe on the same port) is not API protocol:
 	// drop the connection like a router with the www service disabled.
-	if b, err := br.Peek(1); err != nil || b[0] == 'G' {
+	b, err := br.Peek(1)
+	if err != nil {
 		return
 	}
+	if b[0] == 'G' {
+		switch f.httpMode.Load() {
+		case 1:
+			_, _ = io.Copy(io.Discard, br) // swallow, never answer
+		case 2:
+			_, _ = io.WriteString(c, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+		case 3:
+			_, _ = io.WriteString(c, "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+		}
+		return
+	}
+	f.apiConns.Add(1)
 	for {
 		words, err := readSentence(br)
 		if err != nil {
@@ -270,6 +288,21 @@ func (f *fakeROS) command(c net.Conn, words []string) {
 	case cmd == "/system/resource/print":
 		writeSentence(c, "!re", "=version=6.48.6 (long-term)", "=uptime=1d")
 		writeSentence(c, "!done")
+	case cmd == "/huge/print":
+		// One word declaring ~2 GiB (0xF0 prefix), then the connection stalls.
+		writeWord(c, "!re")
+		_, _ = c.Write([]byte{0xF0, 0x80, 0x00, 0x00, 0x00})
+		time.Sleep(3 * time.Second)
+	case cmd == "/many/print":
+		// Endless small rows until the client hangs up.
+		row := []string{"!re", "=data=" + strings.Repeat("x", 900)}
+		for i := 0; i < 100000; i++ {
+			var sb strings.Builder
+			writeSentence(&sb, row...)
+			if _, err := io.WriteString(c, sb.String()); err != nil {
+				return
+			}
+		}
 	case verb == "print":
 		q := attrsOf(words[1:], "?")
 		for _, row := range f.tables[path] {
@@ -516,5 +549,133 @@ func TestDetectFallsBackToBinary(t *testing.T) {
 	typ, ver, err := Detect(context.Background(), ep)
 	if err != nil || typ != APITypeBinary || ver != "6.48.6 (long-term)" {
 		t.Fatalf("got %q %q %v", typ, ver, err)
+	}
+}
+
+func TestBinaryHugeWordRejectedBeforeAllocation(t *testing.T) {
+	f := newFakeROS(t, nil)
+	c := newBin(t, f.endpoint())
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	start := time.Now()
+	_, err := c.Print(context.Background(), "huge", nil)
+	runtime.ReadMemStats(&after)
+	if !errors.Is(err, ErrResponseTooLarge) {
+		t.Fatalf("want ErrResponseTooLarge, got %v", err)
+	}
+	if time.Since(start) > time.Second {
+		t.Fatalf("not rejected quickly: %v", time.Since(start))
+	}
+	if d := after.TotalAlloc - before.TotalAlloc; d > 4<<20 {
+		t.Fatalf("allocated %d bytes while rejecting", d)
+	}
+}
+
+func TestBinaryCumulativeCap(t *testing.T) {
+	f := newFakeROS(t, nil)
+	ep := f.endpoint()
+	ep.Timeout = 30 * time.Second // 8 MiB of rows is slow under -race
+	_, err := newBin(t, ep).Print(context.Background(), "many", nil)
+	if !errors.Is(err, ErrResponseTooLarge) {
+		t.Fatalf("want ErrResponseTooLarge, got %v", err)
+	}
+}
+
+func TestLimitedConnFraming(t *testing.T) {
+	// split prefix across reads; words under the cap pass
+	var sb strings.Builder
+	writeSentence(&sb, "!re", "=a="+strings.Repeat("y", 300)) // 2-byte prefix
+	data := []byte(sb.String())
+	lc := &limitedConn{}
+	for i := range data { // one byte at a time
+		if err := lc.scan(data[i : i+1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := (&limitedConn{}).scan([]byte{0xE0, 0x20, 0x00, 0x00}); err != nil { // 0x200000 = 2 MiB declared via 4-byte prefix
+		if !errors.Is(err, ErrResponseTooLarge) {
+			t.Fatal(err)
+		}
+	} else {
+		t.Fatal("2 MiB word accepted")
+	}
+}
+
+func TestDetectOrder(t *testing.T) {
+	if o := detectOrder(Endpoint{Port: 8728}); o[0] != APITypeBinary {
+		t.Fatal(o)
+	}
+	if o := detectOrder(Endpoint{Port: 8729}); o[0] != APITypeBinary {
+		t.Fatal(o)
+	}
+	if o := detectOrder(Endpoint{}); o[0] != APITypeREST {
+		t.Fatal(o)
+	}
+}
+
+func TestDetectBinaryFirstOnAPIPort(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:8728")
+	if err != nil {
+		t.Skip("port 8728 not available")
+	}
+	_ = ln.Close()
+	f := &fakeROS{t: t, user: "admin", pass: testPassword, tables: map[string][]Row{}}
+	f.ln, err = net.Listen("tcp", "127.0.0.1:8728")
+	if err != nil {
+		t.Skip("port 8728 taken")
+	}
+	t.Cleanup(func() { _ = f.ln.Close() })
+	go f.serve()
+	f.httpMode.Store(1) // an HTTP probe would hang: binary must go first
+	start := time.Now()
+	typ, _, err := Detect(context.Background(), f.endpoint())
+	if err != nil || typ != APITypeBinary || time.Since(start) > time.Second {
+		t.Fatalf("got %q %v after %v", typ, err, time.Since(start))
+	}
+}
+
+func TestDetectFallbackWhenRESTProbeIsSilent(t *testing.T) {
+	f := newFakeROS(t, nil)
+	f.httpMode.Store(1)
+	ep := f.endpoint()
+	ep.Timeout = 300 * time.Millisecond
+	start := time.Now()
+	typ, ver, err := Detect(context.Background(), ep)
+	if err != nil || typ != APITypeBinary || ver == "" {
+		t.Fatalf("got %q %q %v", typ, ver, err)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Fatalf("took %v", time.Since(start))
+	}
+}
+
+func TestDetectFallsBackOnRESTNon2xx(t *testing.T) {
+	f := newFakeROS(t, nil)
+	f.httpMode.Store(2) // webfig answering 404
+	typ, _, err := Detect(context.Background(), f.endpoint())
+	if err != nil || typ != APITypeBinary {
+		t.Fatalf("got %q %v", typ, err)
+	}
+}
+
+func TestDetectBothFailIsUnreachable(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler()) // REST 404; API probe gets an HTTP reply
+	defer srv.Close()
+	_, _, err := Detect(context.Background(), endpointFor(t, srv, false))
+	if !errors.Is(err, ErrUnreachable) || err.Error() != ErrUnreachable.Error() {
+		t.Fatalf("want bare ErrUnreachable, got %v", err)
+	}
+}
+
+func TestDetectREST401DoesNotTryBinary(t *testing.T) {
+	f := newFakeROS(t, nil)
+	f.httpMode.Store(3)
+	_, _, err := Detect(context.Background(), f.endpoint())
+	if !errors.Is(err, ErrAuthFailed) {
+		t.Fatalf("want ErrAuthFailed, got %v", err)
+	}
+	if n := f.apiConns.Load(); n != 0 {
+		t.Fatalf("binary contacted %d times", n)
 	}
 }

@@ -104,26 +104,78 @@ func NewClient(apiType string, ep Endpoint) (RouterClient, error) {
 	}
 }
 
-// Detect probes the router: REST first, then the binary API. Auth and TLS
-// trust errors are returned immediately (another transport would not help).
+// detectFirstProbeMax bounds the first probe when a second one can follow, so
+// a service that swallows the probe silently (an API port receiving HTTP waits
+// for a terminator and never answers) cannot eat the whole budget.
+const detectFirstProbeMax = 5 * time.Second
+
+// Detect probes the router with both transports and returns the one that
+// works. Order: REST first, except when ep.Port is 8728 or 8729 (the API
+// service ports), where binary goes first. The first probe gets
+// min(ep.Timeout, 5s); the second gets the endpoint timeout capped by what is
+// left of ctx, so callers should allow roughly 2x the endpoint timeout in ctx.
+//
+// Any failure of the first probe falls back to the other transport, except
+// ErrAuthFailed, TLS trust errors and ErrHostNotAllowed (another transport
+// would not help) and context cancellation, which are returned immediately.
+// If both fail: the second error when it is auth/TLS trust/host-not-allowed,
+// otherwise ErrUnreachable (fixed text, never raw router or library text).
 func Detect(ctx context.Context, ep Endpoint) (apiType, version string, err error) {
-	rest, err := NewClient(APITypeREST, ep)
-	if err != nil {
+	order := detectOrder(ep)
+
+	first := ep
+	if t := ep.timeout(); t > detectFirstProbeMax {
+		first.Timeout = detectFirstProbeMax
+	}
+	version, err = probe(ctx, order[0], first)
+	if err == nil {
+		return order[0], version, nil
+	}
+	if detectFatal(ctx, err) {
 		return "", "", err
 	}
-	version, restErr := rest.Version(ctx)
-	if restErr == nil {
-		return APITypeREST, version, nil
+
+	second := ep
+	if dl, ok := ctx.Deadline(); ok {
+		left := time.Until(dl)
+		if left <= 0 {
+			return "", "", ErrUnreachable
+		}
+		if left < second.timeout() {
+			second.Timeout = left
+		}
 	}
-	if !errors.Is(restErr, ErrUnreachable) {
-		return "", "", restErr
+	version, err = probe(ctx, order[1], second)
+	if err == nil {
+		return order[1], version, nil
 	}
-	bin, err := NewClient(APITypeBinary, ep)
-	if err != nil {
-		return "", "", restErr // binary unavailable: report the REST failure
-	}
-	if version, err = bin.Version(ctx); err != nil {
+	if detectFatal(ctx, err) {
 		return "", "", err
 	}
-	return APITypeBinary, version, nil
+	return "", "", ErrUnreachable
+}
+
+// detectOrder puts binary first on the API service ports, REST otherwise.
+func detectOrder(ep Endpoint) [2]string {
+	if ep.Port == 8728 || ep.Port == 8729 {
+		return [2]string{APITypeBinary, APITypeREST}
+	}
+	return [2]string{APITypeREST, APITypeBinary}
+}
+
+// detectFatal reports errors that another transport cannot cure.
+func detectFatal(ctx context.Context, err error) bool {
+	return ctx.Err() != nil ||
+		errors.Is(err, ErrAuthFailed) ||
+		errors.Is(err, ErrTLSUntrusted) ||
+		errors.Is(err, ErrHostNotAllowed) ||
+		errors.Is(err, context.Canceled)
+}
+
+func probe(ctx context.Context, apiType string, ep Endpoint) (string, error) {
+	c, err := NewClient(apiType, ep)
+	if err != nil {
+		return "", err
+	}
+	return c.Version(ctx)
 }
