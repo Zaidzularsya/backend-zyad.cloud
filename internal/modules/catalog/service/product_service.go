@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"math/big"
+	"net/http"
 	"regexp"
 	"strings"
 	"unicode/utf8"
 
+	coreerrors "zyad.cloud/internal/core/errors"
 	coretenant "zyad.cloud/internal/core/tenant"
 	catalogmodule "zyad.cloud/internal/modules/catalog"
 	"zyad.cloud/internal/modules/catalog/domain"
@@ -41,6 +43,10 @@ func validText(v string, max int, required bool) bool {
 	return (!required || v != "") && utf8.RuneCountInString(v) <= max
 }
 
+func errManageEntitlementsForbidden() error {
+	return coreerrors.New("FORBIDDEN", "Izin catalog_product.manage_entitlements diperlukan untuk mengelola fitur produk", http.StatusForbidden)
+}
+
 func (s *productService) Create(ctx context.Context, scope coretenant.Scope, in ProductInput, userID string) (domain.Product, error) {
 	in.Name, in.Unit, in.SKU = strings.TrimSpace(in.Name), strings.TrimSpace(in.Unit), strings.TrimSpace(in.SKU)
 	if in.Unit == "" {
@@ -57,14 +63,23 @@ func (s *productService) Create(ctx context.Context, scope coretenant.Scope, in 
 		!ValidMoney(in.BasePrice) || !ValidPercent(in.TaxPercent) {
 		return domain.Product{}, ErrInvalidProduct
 	}
-	if !in.Platform && (in.Listing != (repository.ListingParams{}) || len(in.Features) > 0) {
-		return domain.Product{}, ErrPlatformOnly
+	if err := validateListing(in.Listing, in.CategoryID); err != nil {
+		return domain.Product{}, err
 	}
-	if in.Platform {
-		if err := validateListing(in.Listing, in.CategoryID); err != nil {
+	if !in.Platform && in.Listing.IsPublic {
+		if err := s.requireOwnCategory(ctx, scope, in.CategoryID); err != nil {
 			return domain.Product{}, err
 		}
+	}
+	if in.Platform {
 		if err := s.validateFeatures(ctx, in.Features); err != nil {
+			return domain.Product{}, err
+		}
+	} else if len(in.Features) > 0 {
+		if !in.CanManageEntitlements {
+			return domain.Product{}, errManageEntitlementsForbidden()
+		}
+		if err := s.validateTenantFeatures(ctx, in.Features); err != nil {
 			return domain.Product{}, err
 		}
 	}
@@ -77,13 +92,22 @@ func (s *productService) Create(ctx context.Context, scope coretenant.Scope, in 
 	return s.withLabels(ctx, p, err)
 }
 
+// isTenantOrg: true bila ctx membawa org non-platform. Tanpa tenant context (mis.
+// pemanggil internal) produk tidak ditandai (fail-open), sehingga Product.NeedsUpdate
+// hanya andal di jalur handler. Gate listing/checkout WAJIB memakai
+// ProductsNeedingUpdate / ExcludeNeedsUpdate, bukan field itu.
+func isTenantOrg(ctx context.Context) bool {
+	tc, err := coretenant.RequireContext(ctx)
+	return err == nil && tc.OrganizationType() != coretenant.OrganizationTypePlatform
+}
+
 // withLabels melewatkan error repository apa adanya, dan memperkaya label fitur bila sukses.
 func (s *productService) withLabels(ctx context.Context, p domain.Product, err error) (domain.Product, error) {
 	if err != nil {
 		return p, err
 	}
 	list := []domain.Product{p}
-	if err := fillFeatureLabels(ctx, s.features, list); err != nil {
+	if err := fillFeatureInfo(ctx, s.features, list, isTenantOrg(ctx)); err != nil {
 		return p, err
 	}
 	return list[0], nil
@@ -106,7 +130,7 @@ func (s *productService) List(ctx context.Context, scope coretenant.Scope, f rep
 	if err != nil {
 		return list, total, err
 	}
-	return list, total, fillFeatureLabels(ctx, s.features, list)
+	return list, total, fillFeatureInfo(ctx, s.features, list, isTenantOrg(ctx))
 }
 
 func (s *productService) FindByIDs(ctx context.Context, scope coretenant.Scope, ids []string) (map[string]domain.Product, error) {
@@ -118,7 +142,7 @@ func (s *productService) FindByIDs(ctx context.Context, scope coretenant.Scope, 
 	for _, p := range m {
 		list = append(list, p)
 	}
-	if err := fillFeatureLabels(ctx, s.features, list); err != nil {
+	if err := fillFeatureInfo(ctx, s.features, list, isTenantOrg(ctx)); err != nil {
 		return m, err
 	}
 	for _, p := range list {
@@ -127,18 +151,44 @@ func (s *productService) FindByIDs(ctx context.Context, scope coretenant.Scope, 
 	return m, nil
 }
 
+// ProductsNeedingUpdate mengevaluasi domain.NeedsUpdate tanpa syarat (tidak bergantung
+// ctx) dengan satu FindByKeys. Pemanggil menjamin produk-produk ini non-platform.
+// Hasil: id produk -> true bila perlu diperbarui.
+func (s *productService) ProductsNeedingUpdate(ctx context.Context, products []domain.Product) (map[string]bool, error) {
+	cp := append([]domain.Product(nil), products...)
+	if err := fillFeatureInfo(ctx, s.features, cp, true); err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(cp))
+	for _, p := range cp {
+		if p.NeedsUpdate {
+			out[p.ID] = true
+		}
+	}
+	return out, nil
+}
+
 func (s *productService) ListFeatures(ctx context.Context) ([]domain.FeatureDef, error) {
 	return s.features.ListActive(ctx)
 }
 
-// validatePlatformUpdate memeriksa blok listing/fitur pada update. Kategori efektif
-// (yang tersimpan, atau yang baru dikirim) menentukan sah-tidaknya produk publik.
-func (s *productService) validatePlatformUpdate(ctx context.Context, scope coretenant.Scope, id string, in repository.UpdateProductParams) error {
-	if in.Features != nil {
-		if err := s.validateFeatures(ctx, *in.Features); err != nil {
-			return err
-		}
+// requireOwnCategory: produk publik org non-platform wajib memakai kategori aktif milik
+// org itu sendiri (FK komposit sudah menolak kategori org lain, tapi bukan yang terhapus).
+func (s *productService) requireOwnCategory(ctx context.Context, scope coretenant.Scope, categoryID string) error {
+	ok, err := s.repo.CategoryInScope(ctx, scope, strings.TrimSpace(categoryID))
+	if err != nil {
+		return err
 	}
+	if !ok {
+		return repository.ErrCategoryNotFound
+	}
+	return nil
+}
+
+// validateListingUpdate memeriksa blok listing pada update. Kategori efektif (yang
+// tersimpan, atau yang baru dikirim) menentukan sah-tidaknya produk publik; org
+// non-platform juga wajib memakai kategori miliknya sendiri.
+func (s *productService) validateListingUpdate(ctx context.Context, scope coretenant.Scope, id string, in repository.UpdateProductParams, platform bool) error {
 	if in.Listing == nil && in.CategoryID == nil {
 		return nil
 	}
@@ -157,12 +207,20 @@ func (s *productService) validatePlatformUpdate(ctx context.Context, scope coret
 	if in.CategoryID != nil {
 		category = *in.CategoryID
 	}
-	return validateListing(listing, category)
+	if err := validateListing(listing, category); err != nil {
+		return err
+	}
+	if !platform && listing.IsPublic {
+		return s.requireOwnCategory(ctx, scope, category)
+	}
+	return nil
 }
 
-func (s *productService) Update(ctx context.Context, scope coretenant.Scope, id string, in repository.UpdateProductParams, platform bool) (domain.Product, error) {
-	if !platform && (in.Listing != nil || in.Features != nil) {
-		return domain.Product{}, ErrPlatformOnly
+func (s *productService) Update(ctx context.Context, scope coretenant.Scope, id string, in repository.UpdateProductParams, platform, canManageEntitlements bool) (domain.Product, error) {
+	// Mengirim features (termasuk [] = hapus semua) mengubah entitlement, jadi butuh
+	// permission; update yang tidak menyentuh features tidak.
+	if !platform && in.Features != nil && !canManageEntitlements {
+		return domain.Product{}, errManageEntitlementsForbidden()
 	}
 	if (in.Name != nil && !validText(*in.Name, 200, true)) || (in.Unit != nil && !validText(*in.Unit, 30, true)) ||
 		(in.SKU != nil && !validText(*in.SKU, 64, false)) ||
@@ -176,10 +234,18 @@ func (s *productService) Update(ctx context.Context, scope coretenant.Scope, id 
 		}
 		in.Pricing = &attrs
 	}
-	if platform {
-		if err := s.validatePlatformUpdate(ctx, scope, id, in); err != nil {
+	if !platform && in.Features != nil {
+		if err := s.validateTenantFeatures(ctx, *in.Features); err != nil {
 			return domain.Product{}, err
 		}
+	}
+	if platform && in.Features != nil {
+		if err := s.validateFeatures(ctx, *in.Features); err != nil {
+			return domain.Product{}, err
+		}
+	}
+	if err := s.validateListingUpdate(ctx, scope, id, in, platform); err != nil {
+		return domain.Product{}, err
 	}
 	if in.Listing != nil {
 		l := *in.Listing

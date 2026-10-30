@@ -26,6 +26,9 @@ type publicResolverServiceStub struct {
 
 	homepageCalled bool
 	homepageErr    error
+
+	activationToken string
+	activationFn    func(token string) (service.ResolvedPage, error)
 }
 
 func (s *publicResolverServiceStub) ResolveHomepage(
@@ -47,6 +50,19 @@ func (s *publicResolverServiceStub) ResolveBySlug(
 	s.slug = slug
 	s.preview = previewToken
 	return s.resolvedPage, nil
+}
+
+func (s *publicResolverServiceStub) ResolveActivationPreview(
+	_ context.Context,
+	scope coretenant.Scope,
+	token string,
+) (service.ResolvedPage, error) {
+	s.scope = scope
+	s.activationToken = token
+	if s.activationFn != nil {
+		return s.activationFn(token)
+	}
+	return service.ResolvedPage{}, service.ErrActivationTokenNotFound
 }
 
 func (s *publicResolverServiceStub) ResolveByDomain(

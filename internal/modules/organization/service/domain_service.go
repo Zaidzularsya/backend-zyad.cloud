@@ -71,6 +71,7 @@ type DomainService struct {
 	store                 DomainStore
 	verifier              DomainVerifier
 	guard                 DomainBillingGuard
+	roomRequirer          DomainRoomRequirer
 	platformPrimaryDomain string
 	now                   func() time.Time
 	generateToken         func(int) (string, error)
@@ -92,7 +93,19 @@ type DomainBillingGuard interface {
 	) error
 }
 
+// DomainRoomRequirer is the consumer-side view of QuotaEnforcer.RequireRoom.
+type DomainRoomRequirer interface {
+	RequireRoom(ctx context.Context, organizationID, featureKey string) error
+}
+
 type DomainServiceOption func(*DomainService)
+
+// WithDomainQuotaEnforcer enforces FeatureDomainMaxDomains on every new domain.
+func WithDomainQuotaEnforcer(room DomainRoomRequirer) DomainServiceOption {
+	return func(service *DomainService) {
+		service.roomRequirer = room
+	}
+}
 
 func WithDomainBillingGuard(guard DomainBillingGuard) DomainServiceOption {
 	return func(service *DomainService) {
@@ -212,6 +225,11 @@ func (s *DomainService) Create(
 			return dto.DomainChallengeResponse{}, err
 		}
 	}
+	if s.roomRequirer != nil {
+		if err := s.roomRequirer.RequireRoom(ctx, strings.TrimSpace(organizationID), FeatureDomainMaxDomains); err != nil {
+			return dto.DomainChallengeResponse{}, err
+		}
+	}
 	if domainType == model.DomainTypeSubdomain {
 		// Subdomain platform berada di zona DNS milik platform sehingga
 		// tenant tidak mungkin memasang TXT challenge — langsung aktif.
@@ -305,6 +323,16 @@ func (s *DomainService) Create(
 		RecordValue:   token,
 	}, nil
 }
+
+// FeatureDomainMaxDomains caps the TOTAL number of domains (subdomain + custom,
+// not soft-deleted) an organization holds. Decision: a new key instead of
+// reusing domain.max_custom_domains, because Free must allow exactly one
+// platform subdomain while custom domains are hidden (landing.custom_domain =
+// false): a custom-only cap cannot express "1 subdomain, 2nd rejected", and
+// subdomain creation had no quota at all. domain.max_custom_domains stays as a
+// separate per-type cap for custom domains. Existing tenants over the cap keep
+// their domains; only new creations are blocked.
+const FeatureDomainMaxDomains = "domain.max_domains"
 
 const (
 	featureDomainEnabled          = "domain.enabled"

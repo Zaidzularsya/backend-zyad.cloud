@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -82,5 +84,46 @@ func TestResolveGrapesPage_HidesCRMConfigFromPublicForms(t *testing.T) {
 	}
 	if resolved.Forms[0].LeadOwnerUserID != "" || resolved.Forms[0].CreateCRMLead {
 		t.Fatalf("public form leaks CRM config: %+v", resolved.Forms[0])
+	}
+}
+
+func TestResolve_PublicFormsHideDefaultValue(t *testing.T) {
+	svc := &resolverService{
+		resolverRepo: &grapesResolverRepoStub{forms: []domain.LandingForm{{ID: "f1", Key: "k", IsActive: true}}},
+		formRepo: &grapesFormRepoStub{fields: map[string][]domain.LandingFormField{
+			"f1": {{Key: "interest", Type: domain.FormFieldTypeHidden, DefaultValue: "KODE-INTERNAL"}},
+		}},
+		documentRepo: grapesDocumentRepoStub{},
+	}
+	page := domain.LandingPage{ID: "p1", Builder: domain.PageBuilderGrapesJS}
+	resolved := svc.resolveGrapesPage(context.Background(), mustLandingScope(t), page, true)
+
+	if len(resolved.Forms) != 1 || len(resolved.Forms[0].Fields) != 1 {
+		t.Fatalf("Forms = %+v", resolved.Forms)
+	}
+	if got := resolved.Forms[0].Fields[0].DefaultValue; got != "" {
+		t.Fatalf("public form leaks default value %q", got)
+	}
+	raw, _ := json.Marshal(resolved)
+	if strings.Contains(string(raw), "KODE-INTERNAL") {
+		t.Fatalf("resolve JSON leaks default value: %s", raw)
+	}
+}
+
+func TestResolve_PublicFormsIncludeAfterSubmit(t *testing.T) {
+	svc := &resolverService{
+		resolverRepo: &grapesResolverRepoStub{forms: []domain.LandingForm{{
+			ID: "f1", Key: "k", IsActive: true,
+			AfterSubmit: domain.AfterSubmitWhatsApp, WhatsAppNumber: "6281234567890", WhatsAppMessage: "Halo {nama}",
+		}}},
+		formRepo:     &grapesFormRepoStub{fields: map[string][]domain.LandingFormField{}},
+		documentRepo: grapesDocumentRepoStub{},
+	}
+	page := domain.LandingPage{ID: "p1", Builder: domain.PageBuilderGrapesJS}
+	resolved := svc.resolveGrapesPage(context.Background(), mustLandingScope(t), page, true)
+
+	f := resolved.Forms[0]
+	if f.AfterSubmit != domain.AfterSubmitWhatsApp || f.WhatsAppNumber != "6281234567890" || f.WhatsAppMessage != "Halo {nama}" {
+		t.Fatalf("after-submit config must reach the public payload: %+v", f)
 	}
 }

@@ -661,8 +661,18 @@ Field tambahan halaman GrapesJS (R5-S3): `OrganizationType` (`"platform"` | `"cu
   - Idempotensi: `Idempotency-Key` klien atau kunci server (hash form+IP+payload, bucket 5 detik); duplikat mengembalikan hasil submission awal tanpa lead baru.
 - `POST /admin/landing-submissions/:id/crm-sync` (permission `landing.submission.update`): kirim ulang ke CRM; respons berbentuk sama dengan `GET /admin/landing-submissions/:id` (struct domain PascalCase: `CRMLeadID`, `CRMSyncStatus`, `CRMSyncError`). Tenant lain → `404 SUBMISSION_NOT_FOUND`.
 - Field baru form (admin): `create_crm_lead`, `lead_owner_user_id`; `GET /admin/landing-pages/:id/forms` kini menyertakan `Fields`.
+- **Form fleksibel (migration `000157`)**:
+  - Form (admin, create/update): `after_submit` (`message|redirect|whatsapp`, default `message`; klien lama yang hanya mengirim `redirect_url` diperlakukan `redirect`), `whatsapp_number` (dinormalisasi: buang spasi/`-`/`()`/`+`, awalan `0` → `62`; 8–15 digit), `whatsapp_message` (≤500). `redirect` wajib `redirect_url` valid; `whatsapp` wajib nomor.
+  - Field (admin, `PUT .../fields`): `default_value` (≤500; untuk `select` atau field hidden asal `select` harus salah satu `options`). Field `hidden` dipaksa `required=false`.
+  - Form dengan `create_crm_lead=true` wajib punya field `name`, `email`, `phone` yang tidak hidden dan wajib → selain itu `422 LANDING_FORM_CORE_FIELDS` ("Nama, Email, dan No. WA wajib untuk form yang meneruskan ke CRM."). Form tanpa field sama sekali dikecualikan; aturan hanya berlaku saat menulis (form lama tetap menerima submission). `ReplaceFields` memvalidasi seluruh daftar sebelum menghapus field lama.
+  - Submit: server membuang key yang bukan field form (kecuali `page_url`, `consent`), mengisi `default_value` untuk field hidden yang kosong (nilai pengunjung menang), lalu memeriksa field wajib (checkbox harus `true`). Gagal → `422 VALIDATION_ERROR` dengan `data.missing_fields: ["email", ...]`; tidak ada submission/lead dibuat. Form tanpa definisi field tidak diperiksa.
+  - Resolve publik: `Forms[]` memuat `AfterSubmit`, `WhatsAppNumber`, `WhatsAppMessage`; `Fields[].DefaultValue` selalu kosong (tidak boleh bocor).
 
 ### GET /public/landing/preview/:token
+
+Token aktivasi (halaman undangan berbayar) dibagikan ke pembeli sebagai halaman frontend
+`https://<host-tenant>/preview/:token` (`preview_url` saat invoice aktivasi dibuat); halaman itu memanggil
+endpoint ini dan merender `ResolvedPage` dengan renderer publik yang sama. 404 = token tidak dikenal/kedaluwarsa.
 
 Wajib mengirim:
 

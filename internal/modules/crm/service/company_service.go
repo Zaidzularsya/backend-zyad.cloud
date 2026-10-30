@@ -18,6 +18,7 @@ type companyService struct {
 	repo       repository.CompanyRepository
 	workspaces WorkspaceDirectory
 	linkHook   WorkspaceLinkHook
+	quota      QuotaRoomRequirer
 }
 
 // CompanyServiceOption mengaktifkan fitur tautan workspace (tanpa opsi, SetWorkspaceLink ditolak).
@@ -25,6 +26,11 @@ type CompanyServiceOption func(*companyService)
 
 func WithWorkspaceLinking(workspaces WorkspaceDirectory, hook WorkspaceLinkHook) CompanyServiceOption {
 	return func(s *companyService) { s.workspaces, s.linkHook = workspaces, hook }
+}
+
+// WithCompanyQuotaEnforcer enforces crm.max_companies in Create only.
+func WithCompanyQuotaEnforcer(quota QuotaRoomRequirer) CompanyServiceOption {
+	return func(s *companyService) { s.quota = quota }
 }
 
 func NewCompanyService(repo repository.CompanyRepository, opts ...CompanyServiceOption) CompanyService {
@@ -36,6 +42,11 @@ func NewCompanyService(repo repository.CompanyRepository, opts ...CompanyService
 }
 
 func (s *companyService) Create(ctx context.Context, scope coretenant.Scope, params repository.CreateCompanyParams) (domain.Company, error) {
+	if s.quota != nil {
+		if err := s.quota.RequireRoom(ctx, scope.OrganizationID(), domain.FeatureCRMMaxCompanies); err != nil {
+			return domain.Company{}, err
+		}
+	}
 	return s.repo.Create(ctx, scope, params)
 }
 
@@ -63,7 +74,13 @@ func (s *companyService) Delete(ctx context.Context, scope coretenant.Scope, id 
 	return crmmodule.MapNotFound(s.repo.Delete(ctx, scope, id, deletedBy), "COMPANY_NOT_FOUND", "company not found or already deleted")
 }
 
+// Restore brings the company back into the active count, so it needs room like Create.
 func (s *companyService) Restore(ctx context.Context, scope coretenant.Scope, id string, restoredBy string) error {
+	if s.quota != nil {
+		if err := s.quota.RequireRoom(ctx, scope.OrganizationID(), domain.FeatureCRMMaxCompanies); err != nil {
+			return err
+		}
+	}
 	return crmmodule.MapNotFound(s.repo.Restore(ctx, scope, id, restoredBy), "COMPANY_NOT_FOUND", "company not found or not deleted")
 }
 
@@ -156,6 +173,36 @@ func (s *companyService) SetWorkspaceLink(ctx context.Context, scope coretenant.
 		}
 	}
 	return updated, nil
+}
+
+func (s *companyService) LinkWorkspaceBySystem(ctx context.Context, scope coretenant.Scope, companyID, workspaceOrgID string) error {
+	workspaceOrgID = strings.TrimSpace(workspaceOrgID)
+	if workspaceOrgID == "" {
+		return coreerrors.New("WORKSPACE_NOT_FOUND", "workspace is required", http.StatusUnprocessableEntity)
+	}
+	if workspaceOrgID == scope.OrganizationID() {
+		return coreerrors.New("WORKSPACE_SELF_LINK", "a company cannot be linked to its own organization", http.StatusUnprocessableEntity)
+	}
+	current, err := s.repo.FindByID(ctx, scope, companyID)
+	if err != nil {
+		return crmmodule.MapNotFound(err, "COMPANY_NOT_FOUND", "company not found or already deleted")
+	}
+	if current.TenantOrganizationID != nil && *current.TenantOrganizationID != "" {
+		if *current.TenantOrganizationID == workspaceOrgID {
+			return nil // idempoten
+		}
+		return coreerrors.New("COMPANY_ALREADY_LINKED", "company is already linked to another workspace", http.StatusConflict)
+	}
+	// Unique index hanya per org CRM; tanpa guard ini satu workspace bisa tertaut di beberapa org dan
+	// SyncContract masing-masing org akan menulis organization_entitlements workspace yang sama.
+	if linkedID, found, err := s.repo.FindWorkspaceLinkAnyOrg(ctx, workspaceOrgID); err != nil {
+		return err
+	} else if found && linkedID != companyID {
+		return coreerrors.New("WORKSPACE_ALREADY_LINKED", "workspace is already linked to another company", http.StatusConflict)
+	}
+	// Validasi customer, penanganan konflik unique index, dan hook sinkronisasi memakai jalur yang sama dengan tautan manual.
+	_, err = s.SetWorkspaceLink(ctx, scope, companyID, &workspaceOrgID, "")
+	return err
 }
 
 func nilIfEmpty(v string) *string {

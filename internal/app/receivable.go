@@ -166,23 +166,33 @@ type receivableBuild struct {
 	AppName            string
 	FrontendURL        string
 	NotificationLocale string
-	RateCounter        middleware.RateCounter
+	// ManualCreation membuka POST /receivable/invoices dan /accounts (default mati).
+	ManualCreation bool
+	RateCounter    middleware.RateCounter
 	// Doku & DokuNotificationURL: klien dan URL webhook yang sama dengan billing (S6).
 	Doku                doku.Client
 	DokuNotificationURL string
+	// InvoiceQuota enforces receivable.max_invoices_per_month on manual/API and
+	// sales-order invoices. Nil in the worker: its only invoice source, the contract
+	// billing run, is deliberately never blocked (see invoiceService.CreateAndIssue).
+	InvoiceQuota receivableservice.QuotaRoomRequirer
+	// ActivationInvoices: landing activation invoices are payable online with landing.page_activation
+	// (no receivable.online_payment needed). Nil = existing rule only.
+	ActivationInvoices receivableservice.ActivationInvoiceChecker
 }
 
 // receivableModule menampung handler untuk router dan service yang dibagikan ke modul lain
 // (S4: SalesOrder membuat invoice lewat Invoices/Accounts dan mendaftar Listeners).
 type receivableModule struct {
-	AccountHandler  *receivablehandler.AccountHandler
-	InvoiceHandler  *receivablehandler.InvoiceHandler
-	PaymentHandler  *receivablehandler.PaymentHandler
-	SettingsHandler *receivablehandler.SettingsHandler
-	PublicHandler   *receivablehandler.PublicInvoiceHandler
-	OnlinePayment   *receivableservice.OnlinePayment
-	ContractHandler *receivablehandler.ContractHandler
-	OverviewHandler *receivablehandler.OverviewHandler
+	AccountHandler    *receivablehandler.AccountHandler
+	InvoiceHandler    *receivablehandler.InvoiceHandler
+	PaymentHandler    *receivablehandler.PaymentHandler
+	SettingsHandler   *receivablehandler.SettingsHandler
+	PublicHandler     *receivablehandler.PublicInvoiceHandler
+	OnlinePayment     *receivableservice.OnlinePayment
+	ContractHandler   *receivablehandler.ContractHandler
+	OverviewHandler   *receivablehandler.OverviewHandler
+	SettlementHandler *receivablehandler.SettlementHandler
 
 	Invoices  receivableservice.InvoiceService
 	Contracts receivableservice.ContractService
@@ -210,17 +220,18 @@ func buildReceivable(b receivableBuild) receivableModule {
 	sendSvc := receivableservice.NewSendService(receivableservice.SendDeps{
 		Invoices: invoiceRepo, Sends: sendRepo, Settings: settingsRepo, Docs: lazyInvoiceDocs{svc: &invoiceSvc}, Issuers: issuer,
 		// Kanal kirim: adapter di modul mailbox & whatsapp (receivable tidak mengimpor mereka).
-		Email:        mailboxservice.NewInvoiceMailer(b.Mailboxes, b.Messages),
-		WhatsApp:     whatsappservice.NewInvoiceSender(b.WhatsApp, b.Entitlements),
-		Notifier:     receivableNotifier{publisher: b.Publisher, appName: b.AppName, frontendURL: b.FrontendURL, locale: b.NotificationLocale},
-		Members:      members,
-		Entitlements: b.Entitlements,
+		Email:              mailboxservice.NewInvoiceMailer(b.Mailboxes, b.Messages),
+		WhatsApp:           whatsappservice.NewInvoiceSender(b.WhatsApp, b.Entitlements),
+		Notifier:           receivableNotifier{publisher: b.Publisher, appName: b.AppName, frontendURL: b.FrontendURL, locale: b.NotificationLocale},
+		Members:            members,
+		Entitlements:       b.Entitlements,
+		ActivationInvoices: b.ActivationInvoices,
 	})
 	invoiceSvc = receivableservice.NewInvoiceService(receivableservice.InvoiceDeps{
 		Accounts: accountRepo, Invoices: invoiceRepo, Counters: counterRepo, Settings: settingsRepo, Issuers: issuer,
 		Files: b.Assets, Renderer: docpdf.NewRenderer(), Links: b.Links, Sender: sendSvc, Members: members,
 		Listeners: listeners, FrontendURL: b.FrontendURL,
-	})
+	}, receivableservice.WithInvoiceQuotaEnforcer(b.InvoiceQuota))
 	accountSvc := receivableservice.NewAccountService(accountRepo)
 	paymentSvc := receivableservice.NewPaymentService(receivableservice.PaymentDeps{
 		Payments: paymentRepo, Invoices: invoiceSvc, Listeners: listeners,
@@ -236,24 +247,27 @@ func buildReceivable(b receivableBuild) receivableModule {
 		b.Links,
 		organizationservice.NewWorkerResolver(organizationrepo.NewOrganizationRepository(db), receivableservice.PublicLinkIdentity),
 		invoiceSvc, issuer, b.Entitlements, nil,
-	)
+	).WithActivationInvoices(b.ActivationInvoices)
 
 	workerResolver := organizationservice.NewWorkerResolver(organizationrepo.NewOrganizationRepository(db), receivableservice.PublicLinkIdentity)
 	onlinePayment := receivableservice.NewOnlinePayment(
 		receivableservice.OnlinePaymentConfig{FrontendURL: b.FrontendURL, NotificationURL: b.DokuNotificationURL},
 		b.Doku, receivablerepo.NewCheckoutRepository(db), invoiceSvc, paymentSvc, b.Links, workerResolver, b.Entitlements, nil,
-	)
+	).WithActivationInvoices(b.ActivationInvoices).
+		// Ledger penyelesaian: hanya jalur notifikasi DOKU yang mengkredit (bukan pembayaran manual).
+		WithSettlementRecorder(receivableservice.NewSettlementRecorder(receivablerepo.NewSettlementRepository(db)))
 
 	return receivableModule{
-		AccountHandler:  receivablehandler.NewAccountHandler(accountSvc),
-		InvoiceHandler:  receivablehandler.NewInvoiceHandler(invoiceSvc, sendSvc),
-		PaymentHandler:  receivablehandler.NewPaymentHandler(paymentSvc),
-		SettingsHandler: receivablehandler.NewSettingsHandler(settingsSvc),
-		PublicHandler:   receivablehandler.NewPublicInvoiceHandler(publicSvc, b.RateCounter).WithPayments(onlinePayment),
-		OnlinePayment:   onlinePayment,
-		ContractHandler: receivablehandler.NewContractHandler(contractSvc).WithUpcoming(overviewSvc),
-		OverviewHandler: receivablehandler.NewOverviewHandler(overviewSvc),
-		Invoices:        invoiceSvc, Accounts: accountSvc, Payments: paymentSvc, Listeners: listeners,
+		AccountHandler:    receivablehandler.NewAccountHandler(accountSvc).WithManualCreation(b.ManualCreation),
+		InvoiceHandler:    receivablehandler.NewInvoiceHandler(invoiceSvc, sendSvc).WithManualCreation(b.ManualCreation),
+		PaymentHandler:    receivablehandler.NewPaymentHandler(paymentSvc),
+		SettingsHandler:   receivablehandler.NewSettingsHandler(settingsSvc),
+		PublicHandler:     receivablehandler.NewPublicInvoiceHandler(publicSvc, b.RateCounter).WithPayments(onlinePayment),
+		OnlinePayment:     onlinePayment,
+		ContractHandler:   receivablehandler.NewContractHandler(contractSvc).WithUpcoming(overviewSvc),
+		OverviewHandler:   receivablehandler.NewOverviewHandler(overviewSvc),
+		SettlementHandler: receivablehandler.NewSettlementHandler(receivableservice.NewSettlementService(receivablerepo.NewSettlementLedgerRepository(db))),
+		Invoices:          invoiceSvc, Accounts: accountSvc, Payments: paymentSvc, Listeners: listeners,
 		Contracts: contractSvc, Billing: orderBilling,
 	}
 }

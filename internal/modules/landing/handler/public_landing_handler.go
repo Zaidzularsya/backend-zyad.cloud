@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -18,6 +19,7 @@ import (
 	"zyad.cloud/internal/modules/landing/dto"
 	"zyad.cloud/internal/modules/landing/repository"
 	"zyad.cloud/internal/modules/landing/service"
+	"zyad.cloud/internal/shared/response"
 )
 
 type PublicLandingHandler struct {
@@ -159,6 +161,15 @@ func (h *PublicLandingHandler) RenderHTML(c *gin.Context) {
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(document))
 }
 
+// Preview serves a page by preview token. The tenant still comes from the
+// host (public middleware); the token never selects a different tenant.
+//
+//  1. Activation preview link (reseller sells the page): the page is chosen by
+//     the token alone, served while the activation is open and its invoice not
+//     yet due. A due/paid/void token is 404 (a paid page is public anyway).
+//  2. Otherwise, the legacy signed draft-preview token with an explicit
+//     ?slug= (unchanged). Without a slug an unknown token is 404: it must
+//     never fall back to the host's page.
 func (h *PublicLandingHandler) Preview(c *gin.Context) {
 	tenantContext, err := coretenant.RequireContext(c.Request.Context())
 	if err != nil {
@@ -178,20 +189,17 @@ func (h *PublicLandingHandler) Preview(c *gin.Context) {
 		return
 	}
 
-	customDomain := tenantContext.RequestHost()
-
-	var resolved service.ResolvedPage
-	var resolveErr error
-
-	if slug != "" {
+	resolved, resolveErr := h.resolverSvc.ResolveActivationPreview(c.Request.Context(), scope, token)
+	switch {
+	case resolveErr == nil:
+		// A slug that names another page must not be satisfied by this token.
+		if slug != "" && !strings.EqualFold(slug, resolved.Page.Slug) {
+			corehttp.Fail(c, publicResolveError(service.ErrPageNotFound))
+			return
+		}
+	case errors.Is(resolveErr, service.ErrActivationTokenNotFound) && slug != "":
 		resolved, resolveErr = h.resolverSvc.ResolveBySlug(c.Request.Context(), scope, slug, token)
-	} else if customDomain != "" && customDomain != "localhost" && customDomain != "localhost:8080" {
-		resolved, resolveErr = h.resolverSvc.ResolveByDomain(c.Request.Context(), scope, customDomain, token)
-	} else {
-		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "Slug or valid domain is required", http.StatusBadRequest))
-		return
 	}
-
 	if resolveErr != nil {
 		corehttp.Fail(c, publicResolveError(resolveErr))
 		return
@@ -294,6 +302,7 @@ func (h *PublicLandingHandler) SubmitForm(c *gin.Context) {
 		return
 	}
 	isPlatformOrg := tenantContext.OrganizationType() == coretenant.OrganizationTypePlatform
+	var missing *service.ErrMissingRequired
 	result, err := h.submissionSvc.SubmitPublic(c.Request.Context(), scope, params, isPlatformOrg)
 	if err != nil {
 		switch {
@@ -301,6 +310,8 @@ func (h *PublicLandingHandler) SubmitForm(c *gin.Context) {
 			corehttp.Fail(c, coreerrors.New("LANDING_FORM_NOT_FOUND", "form was not found", http.StatusNotFound))
 		case errors.Is(err, service.ErrSpamDetected):
 			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "invalid submission", http.StatusUnprocessableEntity))
+		case errors.As(err, &missing):
+			response.ErrorWithData(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "Field wajib belum diisi.", gin.H{"missing_fields": missing.Keys})
 		case errors.Is(err, service.ErrInvalidSubmission):
 			corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
 		default:

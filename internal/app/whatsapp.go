@@ -124,7 +124,7 @@ func NewWhatsAppInboundProcessor(cfg config.Config, db *database.Pool, bus *what
 		SessionSvc:    NewWhatsAppSessionService(cfg, db, nil, log),
 		Conversations: whatsapprepo.NewConversationRepository(db),
 		LIDs:          client,
-		CRM:           NewWhatsAppCRMGateway(db),
+		CRM:           NewWhatsAppCRMGateway(db, whatsappServiceLeadQuota(db)),
 		Logger:        log,
 	}
 	if bus != nil {
@@ -134,13 +134,25 @@ func NewWhatsAppInboundProcessor(cfg config.Config, db *database.Pool, bus *what
 }
 
 // NewWhatsAppCRMGateway gives the whatsapp module its CRM access.
-func NewWhatsAppCRMGateway(db *database.Pool) *whatsappservice.CRMGateway {
+func NewWhatsAppCRMGateway(db *database.Pool, options ...whatsappservice.CRMGatewayOption) *whatsappservice.CRMGateway {
 	return whatsappservice.NewCRMGateway(
 		crmrepo.NewLeadRepository(db),
 		crmrepo.NewContactRepository(db),
 		crmrepo.NewActivityRepository(db),
 		crmrepo.NewMemberRepository(db),
+		options...,
 	)
+}
+
+// whatsappServiceLeadQuota gives the worker's auto-create-lead path the same
+// crm.max_leads enforcement as LeadService.Create. Only the inbound processor
+// creates leads; the API-side ConversationService gateway never does.
+func whatsappServiceLeadQuota(db *database.Pool) whatsappservice.CRMGatewayOption {
+	guard := organizationservice.NewEntitlementGuard(
+		organizationservice.NewEntitlementService(organizationrepo.NewEntitlementRepository(db)),
+		organizationservice.WithOrganizationTypeResolver(organizationrepo.NewOrganizationRepository(db)),
+	)
+	return whatsappservice.WithLeadQuota(newCRMQuotaEnforcer(guard, db))
 }
 
 // NewWhatsAppConversationService wires conversations and sending. Sending

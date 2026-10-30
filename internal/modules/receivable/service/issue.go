@@ -51,6 +51,11 @@ func dueDate(issue time.Time, terms int, periodStart *time.Time) time.Time {
 }
 
 func (s *invoiceService) Issue(ctx context.Context, scope coretenant.Scope, id, actorUserID string) (domain.Invoice, error) {
+	return s.issue(ctx, scope, id, actorUserID, nil)
+}
+
+// issue menerbitkan draft; dueOverride (opsional) menggantikan termin pembayaran settings.
+func (s *invoiceService) issue(ctx context.Context, scope coretenant.Scope, id, actorUserID string, dueOverride *time.Time) (domain.Invoice, error) {
 	inv, err := s.Get(ctx, scope, id)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -73,7 +78,14 @@ func (s *invoiceService) Issue(ctx context.Context, scope coretenant.Scope, id, 
 		return domain.Invoice{}, err
 	}
 	number := invoiceNumber(today.Year(), seq)
-	_, err = s.invoices.Issue(ctx, scope, id, number, today, dueDate(today, settings.PaymentTermsDays, inv.PeriodStart), actorUserID)
+	due := dueDate(today, settings.PaymentTermsDays, inv.PeriodStart)
+	if dueOverride != nil {
+		due = businesstime.DayOf(*dueOverride)
+		if due.Before(today) {
+			due = today
+		}
+	}
+	_, err = s.invoices.Issue(ctx, scope, id, number, today, due, actorUserID)
 	if errors.Is(err, repository.ErrInvoiceNotDraft) {
 		// Request lain menerbitkan lebih dulu; nomor yang terbuang diterima. Pemenang yang mengirim.
 		return s.Get(ctx, scope, id)
@@ -104,35 +116,47 @@ func (s *invoiceService) Issue(ctx context.Context, scope coretenant.Scope, id, 
 func invoiceNumber(year, seq int) string { return fmt.Sprintf("INV-%d-%04d", year, seq) }
 
 func (s *invoiceService) CreateAndIssue(ctx context.Context, scope coretenant.Scope, in InvoiceInput, actorUserID string) (domain.Invoice, error) {
-	idempotent := in.SourceID != "" && in.IdempotencyKey != "" && in.SourceType != "" && in.SourceType != domain.SourceManual
+	sourceType := in.SourceType
+	if sourceType == "" {
+		sourceType = domain.SourceManual
+	}
+	// Manual invoices with a source (landing activation) are idempotent too; the DB unique index
+	// (organization_id, source_type, source_id, idempotency_key) backs this for every source type.
+	idempotent := in.SourceID != "" && in.IdempotencyKey != ""
 	if idempotent {
-		existing, err := s.invoices.FindBySource(ctx, scope, string(in.SourceType), in.SourceID, in.IdempotencyKey)
+		existing, err := s.invoices.FindBySource(ctx, scope, string(sourceType), in.SourceID, in.IdempotencyKey)
 		if err == nil {
-			return s.issueExisting(ctx, scope, existing, actorUserID)
+			return s.issueExisting(ctx, scope, existing, actorUserID, in.DueDate)
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return domain.Invoice{}, err
 		}
 	}
-	draft, err := s.CreateDraft(ctx, scope, in, actorUserID)
+	// Quota policy: invoices from the recurring billing run (SourceContract) are counted by the
+	// receivable.max_invoices_per_month meter but never blocked. Rejecting one would silently
+	// drop the tenant's billing for that period; the run has no user to show an error to and
+	// the contract would be retried every hour. Invoices from a sales order (BillOrder,
+	// BillDelivery) are enforced like manual ones; an idempotent re-issue returned above.
+	enforceQuota := in.SourceType != domain.SourceContract
+	draft, err := s.createDraft(ctx, scope, in, actorUserID, enforceQuota)
 	if errors.Is(err, repository.ErrDuplicateSource) && idempotent {
 		// Balapan: pemanggil lain membuat invoice sumber yang sama lebih dulu.
-		existing, findErr := s.invoices.FindBySource(ctx, scope, string(in.SourceType), in.SourceID, in.IdempotencyKey)
+		existing, findErr := s.invoices.FindBySource(ctx, scope, string(sourceType), in.SourceID, in.IdempotencyKey)
 		if findErr != nil {
 			return domain.Invoice{}, findErr
 		}
-		return s.issueExisting(ctx, scope, existing, actorUserID)
+		return s.issueExisting(ctx, scope, existing, actorUserID, in.DueDate)
 	}
 	if err != nil {
 		return domain.Invoice{}, err
 	}
-	return s.Issue(ctx, scope, draft.ID, actorUserID)
+	return s.issue(ctx, scope, draft.ID, actorUserID, in.DueDate)
 }
 
 // issueExisting: invoice yang sudah terbit dikembalikan apa adanya; draft sisa proses yang terputus dilanjutkan.
-func (s *invoiceService) issueExisting(ctx context.Context, scope coretenant.Scope, inv domain.Invoice, actorUserID string) (domain.Invoice, error) {
+func (s *invoiceService) issueExisting(ctx context.Context, scope coretenant.Scope, inv domain.Invoice, actorUserID string, dueOverride *time.Time) (domain.Invoice, error) {
 	if inv.Status == domain.InvoiceDraft {
-		return s.Issue(ctx, scope, inv.ID, actorUserID)
+		return s.issue(ctx, scope, inv.ID, actorUserID, dueOverride)
 	}
 	return inv, nil
 }

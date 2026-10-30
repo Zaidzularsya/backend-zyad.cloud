@@ -21,17 +21,34 @@ type PlatformScopeResolver interface {
 	PlatformScope(ctx context.Context) (coretenant.Scope, error)
 }
 
+// EntitlementChecker: nil berarti org punya fitur (sama dengan middleware.EntitlementChecker).
+type EntitlementChecker interface {
+	RequireFeature(ctx context.Context, organizationID, featureKey string) error
+}
+
+// Fitur org tenant yang wajib ada agar kartu listingnya boleh checkout.
+var tenantCheckoutFeatures = []string{"receivable.enabled", "receivable.online_payment"}
+
 type PublicListingService struct {
-	products repository.ProductRepository
-	features FeatureRegistry
-	scopes   PlatformScopeResolver
+	products     repository.ProductRepository
+	features     FeatureRegistry
+	scopes       PlatformScopeResolver
+	entitlements EntitlementChecker
+}
+
+// WithEntitlements memasang checker untuk gerbang checkout listing tenant. Tanpa
+// checker, kartu tenant tidak pernah checkout_enabled (fail closed).
+func (s *PublicListingService) WithEntitlements(e EntitlementChecker) *PublicListingService {
+	s.entitlements = e
+	return s
 }
 
 func NewPublicListingService(products repository.ProductRepository, features FeatureRegistry, scopes PlatformScopeResolver) *PublicListingService {
 	return &PublicListingService{products: products, features: features, scopes: scopes}
 }
 
-// Listings menyusun produk publik platform: kategori → kartu (listing_code) → varian (frekuensi).
+// Listings menyusun produk publik platform (tidak pernah ditandai perlu diperbarui;
+// listing org non-platform wajib melewatkan produk lewat ExcludeNeedsUpdate): kategori → kartu (listing_code) → varian (frekuensi).
 func (s *PublicListingService) Listings(ctx context.Context) (dto.PublicCatalogResponse, error) {
 	empty := dto.PublicCatalogResponse{Categories: []dto.PublicCategory{}}
 	scope, err := s.scopes.PlatformScope(ctx)
@@ -48,7 +65,42 @@ func (s *PublicListingService) Listings(ctx context.Context) (dto.PublicCatalogR
 	if err := fillFeatureLabels(ctx, s.features, products); err != nil {
 		return empty, err
 	}
+	return buildPublicCatalog(products, func(p domain.Product) bool { return checkoutEnabled(p) })
+}
 
+// TenantListings menyusun produk publik satu org tenant (scope berasal dari host
+// yang sudah diverifikasi, bukan input klien). Produk yang perlu diperbarui
+// dibuang lewat ExcludeNeedsUpdate (tidak bergantung ctx), dan checkout_enabled
+// butuh receivable.enabled + receivable.online_payment, dievaluasi sekali.
+func (s *PublicListingService) TenantListings(ctx context.Context, scope coretenant.Scope) (dto.PublicCatalogResponse, error) {
+	empty := dto.PublicCatalogResponse{Categories: []dto.PublicCategory{}}
+	products, err := s.products.ListPublic(ctx, scope)
+	if err != nil {
+		return empty, err
+	}
+	products, err = ExcludeNeedsUpdate(ctx, s.features, products)
+	if err != nil {
+		return empty, err
+	}
+	canCheckout := s.tenantCanCheckout(ctx, scope.OrganizationID())
+	return buildPublicCatalog(products, func(p domain.Product) bool { return canCheckout && tenantCheckoutEnabled(p) })
+}
+
+func (s *PublicListingService) tenantCanCheckout(ctx context.Context, organizationID string) bool {
+	if s.entitlements == nil {
+		return false
+	}
+	for _, key := range tenantCheckoutFeatures {
+		if s.entitlements.RequireFeature(ctx, organizationID, key) != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// buildPublicCatalog: kategori → kartu (listing_code) → varian (frekuensi).
+func buildPublicCatalog(products []domain.Product, checkout func(domain.Product) bool) (dto.PublicCatalogResponse, error) {
+	empty := dto.PublicCatalogResponse{Categories: []dto.PublicCategory{}}
 	sort.SliceStable(products, func(i, j int) bool {
 		a, b := products[i], products[j]
 		if ra, rb := domain.FrequencyRank(a.Pricing.Frequency), domain.FrequencyRank(b.Pricing.Frequency); ra != rb {
@@ -86,7 +138,7 @@ func (s *PublicListingService) Listings(ctx context.Context) (dto.PublicCatalogR
 		card.Variants = append(card.Variants, dto.PublicVariant{
 			ProductID: p.ID, SKU: p.SKU, ChargeType: string(p.Pricing.ChargeType), BillingFrequency: string(p.Pricing.Frequency),
 			PaymentTiming: string(p.Pricing.PaymentTiming), Currency: p.Currency, BasePrice: p.BasePrice, TaxPercent: p.TaxPercent,
-			PriceWithTax: priced, CheckoutEnabled: checkoutEnabled(p),
+			PriceWithTax: priced, CheckoutEnabled: checkout(p),
 		})
 	}
 
@@ -144,9 +196,15 @@ func priceWithTax(p domain.Product) (string, error) {
 	return net.Add(net, tax).FloatString(2), nil
 }
 
-// checkoutEnabled: hanya langganan prabayar berharga dan berfitur yang bisa dibeli mandiri.
+// checkoutEnabled (platform): hanya langganan prabayar berharga dan berfitur yang bisa dibeli mandiri.
 func checkoutEnabled(p domain.Product) bool {
+	return tenantCheckoutEnabled(p) && len(p.Features) > 0
+}
+
+// tenantCheckoutEnabled: produk tenant boleh tanpa fitur (spec §4.2: pelanggan tetap mendapat login,
+// info produk, tagihan, payment); syarat langganan prabayar berharga tetap berlaku.
+func tenantCheckoutEnabled(p domain.Product) bool {
 	price, ok := new(big.Rat).SetString(p.BasePrice)
 	return ok && price.Sign() > 0 && p.Pricing.ChargeType == pricing.Recurring &&
-		p.Pricing.PaymentTiming == pricing.Prepaid && len(p.Features) > 0
+		p.Pricing.PaymentTiming == pricing.Prepaid
 }

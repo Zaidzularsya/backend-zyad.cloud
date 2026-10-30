@@ -23,7 +23,11 @@ type ssWorld struct {
 	failOnce map[string]bool // "lead.create", "convert", "quote.create", "quote.accept", "so.approve", "so.confirm", "link"
 	locked   bool
 	subscr   bool
-	paid     bool
+	// activeProducts: produk yang sudah punya contract aktif di company (pemeriksaan scope tenant).
+	activeProducts map[string]bool
+	featureChecks  int
+	productChecks  int
+	paid           bool
 
 	products map[string]catalogdomain.Product
 	contacts []domain.Contact // contact yang ada di CRM (milik company tertentu)
@@ -71,7 +75,12 @@ func (w *ssWorld) Buyer(context.Context, string) (string, string, string, error)
 }
 func (w *ssWorld) WorkspaceName(context.Context, string) (string, error) { return "Studio Rina", nil }
 func (w *ssWorld) HasActiveFeatureContract(context.Context, coretenant.Scope, string) (bool, error) {
+	w.featureChecks++
 	return w.subscr, nil
+}
+func (w *ssWorld) HasActiveContractForProduct(_ context.Context, _ coretenant.Scope, _, productID string) (bool, error) {
+	w.productChecks++
+	return w.activeProducts[productID], nil
 }
 
 // ---- catalog / pipeline
@@ -288,7 +297,7 @@ func newSS(t *testing.T) (SelfServeService, *ssWorld) {
 	svc := NewSelfServeService(SelfServeDeps{
 		Leads: w, Companies: w, Contacts: w, Deals: w, Pipelines: w, Quotations: quotationsAdapter{w}, Orders: w, Invoices: w,
 		Products: w, Buyers: w, Subscriptions: w, Locker: w,
-	}, SelfServeConfig{BotUserID: "bot", DealOwnerUserID: "owner", PipelineID: "pipe"},
+	}, StaticSelfServeConfig(SelfServeConfig{BotUserID: "bot", DealOwnerUserID: "owner", PipelineID: "pipe"}),
 		func() time.Time { return time.Date(2026, 10, 7, 3, 0, 0, 0, time.UTC) }) // 10:00 WIB
 	return svc, w
 }
@@ -543,5 +552,195 @@ func TestCheckoutProductDeactivatedBetweenClicks(t *testing.T) {
 	}
 	if w.count("so.cancel") != 0 || w.count("deal.lost") != 0 {
 		t.Fatalf("old deal must stay: %v", w.calls)
+	}
+}
+
+func newSSWithResolver(t *testing.T, r SelfServeConfigResolver) (SelfServeService, *ssWorld) {
+	t.Helper()
+	w := &ssWorld{failOnce: map[string]bool{}, products: map[string]catalogdomain.Product{"p-free": newProduct("p-free", "FREELANCER-M")}}
+	svc := NewSelfServeService(SelfServeDeps{
+		Leads: w, Companies: w, Contacts: w, Deals: w, Pipelines: w, Quotations: quotationsAdapter{w}, Orders: w, Invoices: w,
+		Products: w, Buyers: w, Subscriptions: w, Locker: w,
+	}, r, func() time.Time { return time.Date(2026, 10, 7, 3, 0, 0, 0, time.UTC) })
+	return svc, w
+}
+
+type scopedResolver map[string]SelfServeConfig
+
+func (m scopedResolver) Resolve(_ context.Context, s coretenant.Scope) (SelfServeConfig, error) {
+	cfg, ok := m[s.OrganizationID()]
+	if !ok {
+		return SelfServeConfig{}, ErrSelfServeNotConfigured
+	}
+	return cfg, nil
+}
+
+func TestSelfServe_TenantScope_UsesTenantOwnerAndPipeline(t *testing.T) {
+	tenant := validTestScope(t, "tenant-1")
+	svc, w := newSSWithResolver(t, scopedResolver{"tenant-1": {BotUserID: "t-owner", DealOwnerUserID: "t-owner", PipelineID: "t-pipe"}})
+	if _, err := svc.Checkout(context.Background(), tenant, ssReq); err != nil {
+		t.Fatal(err)
+	}
+	if w.lastLead.OwnerUserID != "t-owner" || w.lastLead.CreatedBy != "t-owner" ||
+		w.lastConvert.OwnerUserID != "t-owner" || w.lastConvert.Deal.OwnerUserID != "t-owner" || w.lastConvert.Deal.PipelineID != "t-pipe" {
+		t.Fatalf("lead=%+v convert=%+v", w.lastLead, w.lastConvert)
+	}
+	if w.lastQuote.CreatedBy != "t-owner" {
+		t.Fatalf("quote creator = %q", w.lastQuote.CreatedBy)
+	}
+}
+
+func TestSelfServe_Platform_Unchanged(t *testing.T) {
+	platform := validTestScope(t, "platform")
+	svc, w := newSSWithResolver(t, StaticSelfServeConfig(SelfServeConfig{BotUserID: "bot", DealOwnerUserID: "owner", PipelineID: "pipe"}))
+	if _, err := svc.Checkout(context.Background(), platform, ssReq); err != nil {
+		t.Fatal(err)
+	}
+	if w.lastLead.OwnerUserID != "owner" || w.lastLead.CreatedBy != "bot" || w.lastConvert.Deal.PipelineID != "pipe" {
+		t.Fatalf("lead=%+v convert=%+v", w.lastLead, w.lastConvert)
+	}
+	// konfigurasi tak tersedia -> ErrSelfServeNotConfigured (handler memetakan ke 503), tanpa menyentuh CRM.
+	svc, w = newSSWithResolver(t, scopedResolver{})
+	if _, err := svc.Checkout(context.Background(), platform, ssReq); !errors.Is(err, ErrSelfServeNotConfigured) {
+		t.Fatalf("err = %v, want ErrSelfServeNotConfigured", err)
+	}
+	if len(w.calls) != 0 {
+		t.Fatalf("calls = %v, want none", w.calls)
+	}
+}
+
+// newTenantSS: rantai yang sama, tetapi resolver menandai scope tenant (produk tanpa fitur sah).
+func newTenantSS(t *testing.T) (SelfServeService, *ssWorld) {
+	t.Helper()
+	w := &ssWorld{failOnce: map[string]bool{}, activeProducts: map[string]bool{}, products: map[string]catalogdomain.Product{
+		"p-free": newProduct("p-free", "WIFI-10"),
+	}}
+	svc := NewSelfServeService(SelfServeDeps{
+		Leads: w, Companies: w, Contacts: w, Deals: w, Pipelines: w, Quotations: quotationsAdapter{w}, Orders: w, Invoices: w,
+		Products: w, Buyers: w, Subscriptions: w, Locker: w,
+	}, StaticSelfServeConfig(SelfServeConfig{BotUserID: "bot", DealOwnerUserID: "owner", PipelineID: "pipe", TenantScope: true}),
+		func() time.Time { return time.Date(2026, 10, 7, 3, 0, 0, 0, time.UTC) })
+	return svc, w
+}
+
+func TestCheckoutTenantScopeAcceptsFeaturelessProduct(t *testing.T) {
+	svc, w := newTenantSS(t)
+	p := w.products["p-free"]
+	p.Features = nil
+	w.products["p-free"] = p
+	res, err := svc.Checkout(context.Background(), ssScope(), ssReq)
+	if err != nil {
+		t.Fatalf("featureless tenant product must be purchasable: %v", err)
+	}
+	if res.InvoiceURL == "" || w.count("so.confirm") != 1 {
+		t.Fatalf("res=%+v calls=%v", res, w.calls)
+	}
+}
+
+func TestCheckoutTenantScopeStillRequiresRecurringPrepaidPriced(t *testing.T) {
+	for name, m := range map[string]func(*catalogdomain.Product){
+		"postpaid": func(p *catalogdomain.Product) { p.Pricing.PaymentTiming = pricing.Postpaid },
+		"one_time": func(p *catalogdomain.Product) {
+			p.Pricing = pricing.Attributes{ChargeType: pricing.OneTime, PaymentTiming: pricing.Prepaid}
+		},
+		"harga 0": func(p *catalogdomain.Product) { p.BasePrice = "0" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc, w := newTenantSS(t)
+			p := w.products["p-free"]
+			p.Features = nil
+			m(&p)
+			w.products["p-free"] = p
+			if _, err := svc.Checkout(context.Background(), ssScope(), ssReq); !errors.Is(err, ErrSelfServeProductUnavailable) {
+				t.Fatalf("err = %v", err)
+			}
+		})
+	}
+}
+
+func TestCheckoutTenantScopeRejectsRepurchaseOfActiveProduct(t *testing.T) {
+	svc, w := newTenantSS(t)
+	p := w.products["p-free"]
+	p.Features = nil
+	w.products["p-free"] = p
+	w.company = &domain.Company{ID: "co1", Name: "Studio Rina"}
+	w.activeProducts["p-free"] = true
+	if _, err := svc.Checkout(context.Background(), ssScope(), ssReq); !errors.Is(err, ErrSelfServeAlreadySubscribed) {
+		t.Fatalf("err = %v", err)
+	}
+	if w.count("lead.create") != 0 || w.featureChecks != 0 || w.productChecks != 1 {
+		t.Fatalf("tenant scope must use the per-product check only: %v", w.calls)
+	}
+}
+
+func TestCheckoutTenantScopeAllowsOtherProductWhileOneIsActive(t *testing.T) {
+	svc, w := newTenantSS(t)
+	w.company = &domain.Company{ID: "co1", Name: "Studio Rina"}
+	w.activeProducts["p-other"] = true
+	if _, err := svc.Checkout(context.Background(), ssScope(), ssReq); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// Regresi: scope platform tetap memakai pemeriksaan kontrak berfitur, bukan per produk.
+func TestCheckoutPlatformScopeUsesFeatureSubscriptionCheck(t *testing.T) {
+	svc, w := newSS(t)
+	w.company = &domain.Company{ID: "co1", Name: "Studio Rina"}
+	w.subscr = true
+	if _, err := svc.Checkout(context.Background(), ssScope(), ssReq); !errors.Is(err, ErrSelfServeAlreadySubscribed) {
+		t.Fatalf("err = %v", err)
+	}
+	if w.productChecks != 0 || w.featureChecks != 1 {
+		t.Fatalf("platform scope must not use the per-product check: %v", w.calls)
+	}
+}
+
+// Scope tenant: deal open buatan staf (tanpa quote self-serve) di company yang sama
+// tidak boleh diambil alih; rantai baru dibuat di sampingnya.
+func TestCheckoutTenantScopeDoesNotTakeOverStaffDeal(t *testing.T) {
+	svc, w := newTenantSS(t)
+	w.company = &domain.Company{ID: "co1", Name: "Studio Rina"}
+	staff := domain.Deal{ID: "staff1", Title: "Instalasi kantor cabang", Value: "7500000", StageID: "st1", Status: domain.DealStatusOpen}
+	w.deals = []domain.Deal{staff}
+
+	res, err := svc.Checkout(context.Background(), ssScope(), ssReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.DealID == "staff1" || w.count("deal.update") != 0 || w.count("lead.create") != 1 || w.count("convert") != 1 {
+		t.Fatalf("res=%+v calls=%v", res, w.calls)
+	}
+	if w.deals[0] != staff {
+		t.Fatalf("staff deal modified: %+v", w.deals[0])
+	}
+	if w.quote == nil || *w.quote.DealID != res.DealID {
+		t.Fatalf("quote must attach to the new deal: %+v", w.quote)
+	}
+
+	// Checkout ulang produk yang sama melanjutkan deal self-serve, bukan deal staf.
+	w.calls = nil
+	again, err := svc.Checkout(context.Background(), ssScope(), ssReq)
+	if err != nil || again.DealID != res.DealID {
+		t.Fatalf("again=%+v err=%v", again, err)
+	}
+	if got := strings.Join(w.calls, ","); got != "link,unlock" {
+		t.Fatalf("calls = %s, want only link", got)
+	}
+	if w.deals[0] != staff {
+		t.Fatalf("staff deal modified on resume: %+v", w.deals[0])
+	}
+}
+
+// Regresi platform: deal open tanpa quote di pipeline Self-Serve tetap dilanjutkan (alignDeal).
+func TestCheckoutPlatformScopeResumesDealWithoutQuote(t *testing.T) {
+	svc, w := newSS(t)
+	w.company = &domain.Company{ID: "co1", Name: "Studio Rina"}
+	w.deals = []domain.Deal{{ID: "d-old", Title: "lama", Value: "1", StageID: "st0", Status: domain.DealStatusOpen}}
+	res, err := svc.Checkout(context.Background(), ssScope(), ssReq)
+	if err != nil || res.DealID != "d-old" {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if w.count("deal.update") != 1 || w.count("lead.create") != 0 {
+		t.Fatalf("calls = %v", w.calls)
 	}
 }

@@ -252,7 +252,10 @@ type CurrentUser struct {
 	Profile         CurrentUserProfile
 	Roles           []string
 	Permissions     []string
-	Session         CurrentSession
+	// ActiveOrganizationPermissions: permission dari role org pada organisasi
+	// aktif sesi. Hanya untuk tampilan UI; tidak dipakai sebagai guard global.
+	ActiveOrganizationPermissions []string
+	Session                       CurrentSession
 }
 
 type CurrentUserProfile struct {
@@ -484,15 +487,17 @@ func (s *AuthService) Login(ctx context.Context, req dto.LoginRequest, metadata 
 	}, nil
 }
 
-func (s *AuthService) GoogleAuth(ctx context.Context, req dto.GoogleAuthRequest, metadata LoginHistoryRecord) (dto.GoogleAuthResponse, error) {
+// verifyGoogleToken memeriksa konfigurasi Google dan memverifikasi ID token. Penolakan
+// email_verified=false sengaja diserahkan ke pemanggil (status HTTP-nya berbeda per jalur).
+func (s *AuthService) verifyGoogleToken(ctx context.Context, idToken string, metadata LoginHistoryRecord) (coreauth.GoogleIDTokenClaims, error) {
 	if !s.googleEnabled {
-		return dto.GoogleAuthResponse{}, coreerrors.New("AUTH_GOOGLE_DISABLED", "google authentication is disabled", http.StatusForbidden)
+		return coreauth.GoogleIDTokenClaims{}, coreerrors.New("AUTH_GOOGLE_DISABLED", "google authentication is disabled", http.StatusForbidden)
 	}
 	if s.googleVerifier == nil {
-		return dto.GoogleAuthResponse{}, coreerrors.New("AUTH_GOOGLE_DISABLED", "google authentication is not configured", http.StatusForbidden)
+		return coreauth.GoogleIDTokenClaims{}, coreerrors.New("AUTH_GOOGLE_DISABLED", "google authentication is not configured", http.StatusForbidden)
 	}
 
-	claims, err := s.googleVerifier.Verify(ctx, req.IDToken)
+	claims, err := s.googleVerifier.Verify(ctx, idToken)
 	if err != nil {
 		code := "AUTH_GOOGLE_TOKEN_INVALID"
 		message := "google id token is invalid"
@@ -509,7 +514,15 @@ func (s *AuthService) GoogleAuth(ctx context.Context, req dto.GoogleAuthRequest,
 			DeviceName: metadata.DeviceName,
 			Reason:     "google_token_invalid",
 		})
-		return dto.GoogleAuthResponse{}, coreerrors.New(code, message, http.StatusUnauthorized)
+		return coreauth.GoogleIDTokenClaims{}, coreerrors.New(code, message, http.StatusUnauthorized)
+	}
+	return claims, nil
+}
+
+func (s *AuthService) GoogleAuth(ctx context.Context, req dto.GoogleAuthRequest, metadata LoginHistoryRecord) (dto.GoogleAuthResponse, error) {
+	claims, err := s.verifyGoogleToken(ctx, req.IDToken, metadata)
+	if err != nil {
+		return dto.GoogleAuthResponse{}, err
 	}
 	if !claims.EmailVerified {
 		s.recordLoginAttempt(ctx, LoginHistoryRecord{
@@ -1249,9 +1262,10 @@ func currentUserResponse(user CurrentUser) dto.CurrentUserResponse {
 			Timezone:   user.Profile.Timezone,
 			Language:   user.Profile.Language,
 		},
-		Roles:               user.Roles,
-		Permissions:         user.Permissions,
-		CurrentOrganization: nil,
+		Roles:                         user.Roles,
+		Permissions:                   user.Permissions,
+		ActiveOrganizationPermissions: user.ActiveOrganizationPermissions,
+		CurrentOrganization:           nil,
 		Session: dto.CurrentSession{
 			ID:         user.Session.ID,
 			DeviceName: user.Session.DeviceName,

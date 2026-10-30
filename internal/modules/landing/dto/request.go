@@ -196,6 +196,11 @@ type CreateFormRequest struct {
 	// CreateCRMLead nil -> true (default). LeadOwnerUserID is a user UUID or "".
 	CreateCRMLead   *bool   `json:"create_crm_lead"`
 	LeadOwnerUserID *string `json:"lead_owner_user_id" binding:"omitnil,uuid|eq="`
+	// AfterSubmit nil -> "message" (atau "redirect" bila redirect_url terisi). WhatsAppNumber
+	// dinormalisasi service (0812... -> 62812...).
+	AfterSubmit     *string `json:"after_submit" binding:"omitnil,oneof=message redirect whatsapp"`
+	WhatsAppNumber  *string `json:"whatsapp_number" binding:"omitnil,max=40"`
+	WhatsAppMessage *string `json:"whatsapp_message" binding:"omitnil,max=500"`
 }
 
 // UpdateFormRequest binds form updates.
@@ -209,6 +214,10 @@ type UpdateFormRequest struct {
 	CreateCRMLead  *bool           `json:"create_crm_lead"`
 	// LeadOwnerUserID is a user UUID, or "" to clear the PIC.
 	LeadOwnerUserID *string `json:"lead_owner_user_id" binding:"omitnil,uuid|eq="`
+	AfterSubmit     *string `json:"after_submit" binding:"omitnil,oneof=message redirect whatsapp"`
+	// WhatsAppNumber/WhatsAppMessage: "" mengosongkan.
+	WhatsAppNumber  *string `json:"whatsapp_number" binding:"omitnil,max=40"`
+	WhatsAppMessage *string `json:"whatsapp_message" binding:"omitnil,max=500"`
 }
 
 // FormFieldItem binds a single field specification.
@@ -221,6 +230,8 @@ type FormFieldItem struct {
 	Validation  map[string]any `json:"validation"`
 	Required    bool           `json:"required"`
 	SortOrder   int            `json:"sort_order" binding:"min=0"`
+	// DefaultValue: nilai server-side untuk field hidden bila pengunjung tidak mengirim nilai.
+	DefaultValue string `json:"default_value" binding:"max=500"`
 }
 
 // ReplaceFormFieldsRequest binds the bulk replace structure.
@@ -453,3 +464,25 @@ func ValidateRedirectURL(raw string) error {
 }
 
 var errInvalidRedirectURL = errors.New("redirect_url must be empty, a path starting with /, or an http(s) URL")
+
+// CreateActivationInvoiceRequest is the reseller's "Create invoice" form
+// (POST /app/landing/pages/:id/activation-invoice). price is decimal text;
+// at most one of invoice_due_hours / invoice_due_days (default 1 hour).
+// Business validation lives in the activation service.
+type CreateActivationInvoiceRequest struct {
+	BuyerName       string `json:"buyer_name"`
+	BuyerContact    string `json:"buyer_contact"`
+	BuyerEmail      string `json:"buyer_email"`
+	Price           string `json:"price"`
+	DurationValue   int    `json:"duration_value"`
+	DurationUnit    string `json:"duration_unit"`
+	InvoiceDueHours *int   `json:"invoice_due_hours"`
+	InvoiceDueDays  *int   `json:"invoice_due_days"`
+}
+
+// RenewActivationRequest (POST /app/landing/activations/:id/renew): how long the renewed preview window
+// lasts. At most one of the two; neither means 24 hours. The body may be empty.
+type RenewActivationRequest struct {
+	InvoiceDueHours *int `json:"invoice_due_hours"`
+	InvoiceDueDays  *int `json:"invoice_due_days"`
+}

@@ -19,6 +19,8 @@ const featureSelectColumns = `
 	COALESCE(unit, ''),
 	reset_strategy,
 	is_active,
+	tenant_offerable,
+	tenant_max,
 	created_at,
 	updated_at
 `
@@ -36,14 +38,16 @@ type FeatureListFilter struct {
 }
 
 type CreateFeatureParams struct {
-	Key           string
-	Module        string
-	Name          string
-	Description   string
-	ValueType     model.FeatureValueType
-	Unit          string
-	ResetStrategy model.ResetStrategy
-	IsActive      bool
+	Key             string
+	Module          string
+	Name            string
+	Description     string
+	ValueType       model.FeatureValueType
+	Unit            string
+	ResetStrategy   model.ResetStrategy
+	IsActive        bool
+	TenantOfferable bool
+	TenantMax       *int
 }
 
 type UpdateFeatureParams struct {
@@ -55,6 +59,10 @@ type UpdateFeatureParams struct {
 	Unit          *string
 	ResetStrategy *model.ResetStrategy
 	IsActive      *bool
+	// TenantOfferable/TenantMax selalu nilai akhir (sudah digabung dengan fitur yang ada
+	// dan divalidasi service), jadi ditulis apa adanya, termasuk NULL.
+	TenantOfferable bool
+	TenantMax       *int
 }
 
 func NewFeatureRepository(db *database.Pool) *FeatureRepository {
@@ -76,9 +84,11 @@ func (r *FeatureRepository) Create(ctx context.Context, params CreateFeaturePara
 			value_type,
 			unit,
 			reset_strategy,
-			is_active
+			is_active,
+			tenant_offerable,
+			tenant_max
 		)
-		VALUES ($1, $2, $3, NULLIF($4, ''), $5, NULLIF($6, ''), $7, $8)
+		VALUES ($1, $2, $3, NULLIF($4, ''), $5, NULLIF($6, ''), $7, $8, $9, $10)
 		RETURNING `+featureSelectColumns,
 		canonicalKey(params.Key),
 		canonicalKey(params.Module),
@@ -88,6 +98,8 @@ func (r *FeatureRepository) Create(ctx context.Context, params CreateFeaturePara
 		strings.TrimSpace(params.Unit),
 		string(resetStrategy),
 		params.IsActive,
+		params.TenantOfferable,
+		params.TenantMax,
 	).Scan(featureScanDest(&feature)...)
 	if err != nil {
 		return model.Feature{}, err
@@ -160,6 +172,8 @@ func (r *FeatureRepository) Update(ctx context.Context, params UpdateFeaturePara
 			unit = CASE WHEN $7::boolean THEN NULLIF($8, '') ELSE unit END,
 			reset_strategy = COALESCE(NULLIF($9, ''), reset_strategy),
 			is_active = COALESCE($10, is_active),
+			tenant_offerable = $11,
+			tenant_max = $12,
 			updated_at = now()
 		WHERE id = $1::uuid
 		RETURNING `+featureSelectColumns,
@@ -173,6 +187,8 @@ func (r *FeatureRepository) Update(ctx context.Context, params UpdateFeaturePara
 		stringValue(params.Unit),
 		resetStrategyValue(params.ResetStrategy),
 		params.IsActive,
+		params.TenantOfferable,
+		params.TenantMax,
 	).Scan(featureScanDest(&feature)...)
 	if err != nil {
 		return model.Feature{}, err
@@ -212,6 +228,8 @@ func featureScanDest(feature *model.Feature) []any {
 		&feature.Unit,
 		&feature.ResetStrategy,
 		&feature.IsActive,
+		&feature.TenantOfferable,
+		&feature.TenantMax,
 		&feature.CreatedAt,
 		&feature.UpdatedAt,
 	}

@@ -46,19 +46,21 @@ type AuthUserView struct {
 }
 
 type CurrentUserResponse struct {
-	ID                  string             `json:"id"`
-	Name                string             `json:"name"`
-	Email               string             `json:"email"`
-	Username            string             `json:"username,omitempty"`
-	Phone               string             `json:"phone,omitempty"`
-	Status              string             `json:"status"`
-	EmailVerifiedAt     *string            `json:"email_verified_at"`
-	PhoneVerifiedAt     *string            `json:"phone_verified_at"`
-	Profile             CurrentUserProfile `json:"profile"`
-	Roles               []string           `json:"roles"`
-	Permissions         []string           `json:"permissions"`
-	CurrentOrganization any                `json:"current_organization"`
-	Session             CurrentSession     `json:"session"`
+	ID              string             `json:"id"`
+	Name            string             `json:"name"`
+	Email           string             `json:"email"`
+	Username        string             `json:"username,omitempty"`
+	Phone           string             `json:"phone,omitempty"`
+	Status          string             `json:"status"`
+	EmailVerifiedAt *string            `json:"email_verified_at"`
+	PhoneVerifiedAt *string            `json:"phone_verified_at"`
+	Profile         CurrentUserProfile `json:"profile"`
+	Roles           []string           `json:"roles"`
+	Permissions     []string           `json:"permissions"`
+	// ActiveOrganizationPermissions: permission role org pada organisasi aktif sesi (untuk UI).
+	ActiveOrganizationPermissions []string       `json:"active_organization_permissions"`
+	CurrentOrganization           any            `json:"current_organization"`
+	Session                       CurrentSession `json:"session"`
 }
 
 type CurrentUserProfile struct {

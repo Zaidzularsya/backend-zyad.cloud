@@ -138,6 +138,10 @@ sebelum repository landing dipanggil.
   `landing_forms.lead_owner_user_id uuid NULL REFERENCES users(id) ON DELETE SET NULL` (PIC lead);
   `landing_submissions.crm_lead_id uuid NULL`, `crm_sync_status varchar(20) NOT NULL DEFAULT 'skipped'`
   (CHECK `skipped|created|merged|failed`), `crm_sync_error text NULL`. Aditif; baris lama mendapat default aman.
+- **Form fleksibel (migration `000157`)**: `landing_form_fields.default_value text NULL` (default server untuk field hidden);
+  `landing_forms.after_submit varchar(20) NOT NULL DEFAULT 'message'` (CHECK `message|redirect|whatsapp`),
+  `whatsapp_number varchar(20) NULL`, `whatsapp_message text NULL`. Backfill: form dengan `redirect_url` terisi → `after_submit='redirect'`.
+  Aditif; kode lama tidak membaca kolom baru, jadi rollback aplikasi tidak butuh migration down.
 - **Soft delete**: pola `deleted_at IS NULL` dipakai konsisten di `users`, `organizations`,
   `organization_domains`, dan sebagian besar tabel `landing_*` — index unique banyak yang partial
   (`WHERE deleted_at IS NULL`) agar slug/identifier bisa dipakai ulang setelah soft-delete.

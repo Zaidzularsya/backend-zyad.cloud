@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"regexp"
 	"strings"
@@ -65,6 +66,29 @@ func validateListing(l repository.ListingParams, categoryID string) error {
 }
 
 func (s *productService) validateFeatures(ctx context.Context, features []repository.FeatureValue) error {
+	return s.validateFeaturesWith(ctx, features, nil)
+}
+
+// validateTenantFeatures: validasi dasar yang sama, ditambah batas katalog
+// (CheckTenantFeature) untuk org non-platform.
+func (s *productService) validateTenantFeatures(ctx context.Context, features []repository.FeatureValue) error {
+	return s.validateFeaturesWith(ctx, features, tenantFeatureCheck)
+}
+
+func tenantFeatureCheck(def domain.FeatureDef, value json.RawMessage) error {
+	switch err := domain.CheckTenantFeature(def, value); {
+	case err == nil:
+		return nil
+	case errors.Is(err, domain.ErrFeatureNotOfferable):
+		return ErrFeatureNotOfferable
+	case errors.Is(err, domain.ErrFeatureAboveMax):
+		return ErrFeatureAboveMax
+	default:
+		return ErrInvalidFeature
+	}
+}
+
+func (s *productService) validateFeaturesWith(ctx context.Context, features []repository.FeatureValue, check func(domain.FeatureDef, json.RawMessage) error) error {
 	if len(features) > maxProductFeatures {
 		return ErrInvalidFeature
 	}
@@ -89,6 +113,11 @@ func (s *productService) validateFeatures(ctx context.Context, features []reposi
 		if !ok || !def.IsActive || !ValidateFeatureValue(def, f.Value) {
 			return ErrInvalidFeature
 		}
+		if check != nil {
+			if err := check(def, f.Value); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -96,6 +125,12 @@ func (s *productService) validateFeatures(ctx context.Context, features []reposi
 // fillFeatureLabels mengisi Features[i].Label dengan satu panggilan registry. Key
 // nonaktif tetap diberi label supaya produk lama tetap terbaca.
 func fillFeatureLabels(ctx context.Context, registry FeatureRegistry, products []domain.Product) error {
+	return fillFeatureInfo(ctx, registry, products, false)
+}
+
+// fillFeatureInfo: label + (bila flagNeedsUpdate) Product.NeedsUpdate, dari satu
+// panggilan FindByKeys. flagNeedsUpdate hanya untuk produk org non-platform.
+func fillFeatureInfo(ctx context.Context, registry FeatureRegistry, products []domain.Product, flagNeedsUpdate bool) error {
 	var keys []string
 	seen := map[string]bool{}
 	for _, p := range products {
@@ -114,6 +149,9 @@ func fillFeatureLabels(ctx context.Context, registry FeatureRegistry, products [
 		return err
 	}
 	for i := range products {
+		if flagNeedsUpdate {
+			products[i].NeedsUpdate = domain.NeedsUpdate(products[i], defs)
+		}
 		for j := range products[i].Features {
 			f := &products[i].Features[j]
 			def, ok := defs[f.FeatureKey]
@@ -128,4 +166,19 @@ func fillFeatureLabels(ctx context.Context, registry FeatureRegistry, products [
 		}
 	}
 	return nil
+}
+
+// ExcludeNeedsUpdate membuang produk non-platform yang perlu diperbarui (satu
+// panggilan FindByKeys). Dipakai listing publik org non-platform dan checkout.
+func ExcludeNeedsUpdate(ctx context.Context, registry FeatureRegistry, products []domain.Product) ([]domain.Product, error) {
+	if err := fillFeatureInfo(ctx, registry, products, true); err != nil {
+		return nil, err
+	}
+	out := make([]domain.Product, 0, len(products))
+	for _, p := range products {
+		if !p.NeedsUpdate {
+			out = append(out, p)
+		}
+	}
+	return out, nil
 }

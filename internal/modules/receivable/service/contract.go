@@ -67,7 +67,10 @@ type InvoiceInput struct {
 	SourceID, ContractID, IdempotencyKey, Currency, Notes, PICUserID string
 	Channels                                                         []string // kosong → settings.DefaultChannels
 	PeriodStart, PeriodEnd                                           *time.Time
-	Lines                                                            []LineInput
+	// DueDate (opsional, hanya CreateAndIssue): jatuh tempo eksplisit; tanggal kalender WIB dari
+	// instan ini, tidak sebelum tanggal terbit. Nil → tanggal terbit + PaymentTermsDays.
+	DueDate *time.Time
+	Lines   []LineInput
 }
 
 type InvoicePDF struct {
@@ -78,7 +81,8 @@ type InvoicePDF struct {
 type InvoiceService interface {
 	CreateDraft(ctx context.Context, scope coretenant.Scope, in InvoiceInput, userID string) (domain.Invoice, error)
 	UpdateDraft(ctx context.Context, scope coretenant.Scope, id string, in InvoiceInput, userID string) (domain.Invoice, error)
-	// CreateAndIssue: idempoten by (SourceType, SourceID, IdempotencyKey) — duplikat → kembalikan invoice lama
+	// CreateAndIssue: idempoten by (SourceType, SourceID, IdempotencyKey) bila SourceID dan IdempotencyKey
+	// terisi (termasuk SourceManual, dipakai invoice aktivasi landing) — duplikat → kembalikan invoice lama
 	// tanpa kirim ulang. Mengirim otomatis (trigger "auto") setelah terbit. Dipakai S4/S5.
 	CreateAndIssue(ctx context.Context, scope coretenant.Scope, in InvoiceInput, actorUserID string) (domain.Invoice, error)
 	// Issue: terbit + kirim otomatis; idempoten (sudah issued → kembalikan apa adanya, tanpa kirim).
@@ -118,8 +122,9 @@ type ManualPaymentInput struct {
 
 type PaymentService interface {
 	RecordManual(ctx context.Context, scope coretenant.Scope, invoiceID string, in ManualPaymentInput, userID string) (domain.Invoice, domain.Payment, error)
-	// RecordProvider: dipakai S6 (DOKU). Idempoten by reference.
-	RecordProvider(ctx context.Context, scope coretenant.Scope, invoiceID string, p repository.PaymentParams) (domain.Invoice, error)
+	// RecordProvider: dipakai S6 (DOKU). Idempoten by reference: notifikasi ulang
+	// mengembalikan baris payment yang sudah ada (dipakai ledger penyelesaian).
+	RecordProvider(ctx context.Context, scope coretenant.Scope, invoiceID string, p repository.PaymentParams) (domain.Invoice, domain.Payment, error)
 	List(ctx context.Context, scope coretenant.Scope, invoiceID string) ([]domain.Payment, error)
 	ListAll(ctx context.Context, scope coretenant.Scope, limit, offset int) ([]domain.Payment, int64, error)
 }
@@ -159,6 +164,15 @@ type Listener interface {
 	ContractCreated(ctx context.Context, scope coretenant.Scope, c ContractRef) // dipanggil mulai S4
 	// ContractEnded: tepat sekali per contract, saat statusnya berubah menjadi ended (End atau billing run).
 	ContractEnded(ctx context.Context, scope coretenant.Scope, c ContractRef)
+}
+
+// ReplayableListener: opt-in untuk listener yang aman dipanggil ulang. Saat provider
+// mengirim ulang notifikasi untuk pembayaran yang sudah tercatat (invoice sudah lunas),
+// InvoicePaid TIDAK dipanggil lagi; hanya InvoicePaidReplay pada listener ini. Implementasi
+// wajib idempoten: invoice yang efeknya sudah selesai tidak boleh mengubah apa pun atau
+// mengirim notifikasi kedua.
+type ReplayableListener interface {
+	InvoicePaidReplay(ctx context.Context, scope coretenant.Scope, inv InvoiceRef)
 }
 
 // SettingsService mengelola pengaturan penagihan organisasi.

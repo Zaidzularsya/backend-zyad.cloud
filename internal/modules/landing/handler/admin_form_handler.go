@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -94,14 +95,17 @@ func (h *AdminFormHandler) CreateForm(c *gin.Context) {
 	}
 
 	params := repository.CreateFormParams{
-		LandingPageID:  pageID,
-		Name:           req.Name,
-		Key:            req.Key,
-		SubmitLabel:    req.SubmitLabel,
-		SuccessMessage: successMsg,
-		RedirectURL:    redirectURL,
-		IsActive:       req.IsActive,
-		CreatedBy:      permissionmiddleware.UserID(c),
+		AfterSubmit:     afterSubmitFromRequest(req.AfterSubmit),
+		WhatsAppNumber:  derefString(req.WhatsAppNumber),
+		WhatsAppMessage: derefString(req.WhatsAppMessage),
+		LandingPageID:   pageID,
+		Name:            req.Name,
+		Key:             req.Key,
+		SubmitLabel:     req.SubmitLabel,
+		SuccessMessage:  successMsg,
+		RedirectURL:     redirectURL,
+		IsActive:        req.IsActive,
+		CreatedBy:       permissionmiddleware.UserID(c),
 
 		CreateCRMLead:   createCRMLead,
 		LeadOwnerUserID: leadOwner,
@@ -109,7 +113,7 @@ func (h *AdminFormHandler) CreateForm(c *gin.Context) {
 
 	form, err := h.formSvc.CreateForm(c.Request.Context(), scope, params)
 	if err != nil {
-		corehttp.Fail(c, err)
+		failFormWrite(c, err)
 		return
 	}
 
@@ -148,11 +152,17 @@ func (h *AdminFormHandler) UpdateForm(c *gin.Context) {
 
 		CreateCRMLead:   req.CreateCRMLead,
 		LeadOwnerUserID: req.LeadOwnerUserID,
+		WhatsAppNumber:  req.WhatsAppNumber,
+		WhatsAppMessage: req.WhatsAppMessage,
+	}
+	if req.AfterSubmit != nil {
+		action := domain.AfterSubmitAction(*req.AfterSubmit)
+		params.AfterSubmit = &action
 	}
 
 	form, err := h.formSvc.UpdateForm(c.Request.Context(), scope, formID, params)
 	if err != nil {
-		corehttp.Fail(c, err)
+		failFormWrite(c, err)
 		return
 	}
 
@@ -203,14 +213,47 @@ func (h *AdminFormHandler) ReplaceFields(c *gin.Context) {
 			Validation:  f.Validation,
 			IsRequired:  f.Required,
 			SortOrder:   f.SortOrder,
+
+			DefaultValue: f.DefaultValue,
 		})
 	}
 
 	fields, err := h.formSvc.ReplaceFields(c.Request.Context(), scope, formID, params)
 	if err != nil {
-		corehttp.Fail(c, err)
+		failFormWrite(c, err)
 		return
 	}
 
 	corehttp.OK(c, "Form fields replaced successfully", fields)
+}
+
+const coreFieldsMessage = "Nama, Email, dan No. WA wajib untuk form yang meneruskan ke CRM."
+
+// failFormWrite memetakan error aturan tulis form ke 422; error lain jatuh ke corehttp.Fail.
+func failFormWrite(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, service.ErrCoreFieldsRequired):
+		corehttp.Fail(c, coreerrors.New("LANDING_FORM_CORE_FIELDS", coreFieldsMessage, http.StatusUnprocessableEntity))
+	case errors.Is(err, service.ErrInvalidDefaultValue),
+		errors.Is(err, service.ErrInvalidWhatsAppNumber),
+		errors.Is(err, service.ErrInvalidAfterSubmit),
+		errors.Is(err, service.ErrInvalidFieldType):
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+	default:
+		corehttp.Fail(c, err)
+	}
+}
+
+func afterSubmitFromRequest(v *string) domain.AfterSubmitAction {
+	if v == nil {
+		return ""
+	}
+	return domain.AfterSubmitAction(*v)
+}
+
+func derefString(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
 }

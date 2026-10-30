@@ -32,20 +32,50 @@ type invoiceService struct {
 	sender      AutoSender
 	members     MemberDirectory
 	listeners   *Registry
+	quota       QuotaRoomRequirer
 	frontendURL string
 	now         func() time.Time
 }
 
-func NewInvoiceService(d InvoiceDeps) InvoiceService {
+// QuotaRoomRequirer is the narrow consumer-side view of
+// organization/service.QuotaEnforcer (receivable must not import the CRM
+// service, which has its own copy of this interface).
+type QuotaRoomRequirer interface {
+	RequireRoom(ctx context.Context, organizationID, featureKey string) error
+}
+
+// InvoiceServiceOption configures optional behaviour of the invoice service.
+type InvoiceServiceOption func(*invoiceService)
+
+// WithInvoiceQuotaEnforcer enforces receivable.max_invoices_per_month when a
+// NEW invoice is created by a user/API (CreateDraft) or derived from a sales
+// order (CreateAndIssue). It is never consulted for payments, credit notes,
+// refunds, void or updates, and never for contract billing runs (see CreateAndIssue).
+func WithInvoiceQuotaEnforcer(quota QuotaRoomRequirer) InvoiceServiceOption {
+	return func(s *invoiceService) { s.quota = quota }
+}
+
+func (s *invoiceService) requireRoom(ctx context.Context, scope coretenant.Scope) error {
+	if s.quota == nil {
+		return nil
+	}
+	return s.quota.RequireRoom(ctx, scope.OrganizationID(), domain.FeatureReceivableMaxInvoicesPerMonth)
+}
+
+func NewInvoiceService(d InvoiceDeps, opts ...InvoiceServiceOption) InvoiceService {
 	now := d.Now
 	if now == nil {
 		now = time.Now
 	}
-	return &invoiceService{
+	s := &invoiceService{
 		accounts: d.Accounts, invoices: d.Invoices, counters: d.Counters, settings: d.Settings, issuers: d.Issuers,
 		files: d.Files, renderer: d.Renderer, links: d.Links, sender: d.Sender, members: d.Members, listeners: d.Listeners,
 		frontendURL: d.FrontendURL, now: now,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 var currencyPattern = regexp.MustCompile(`^[A-Z]{3}$`)
@@ -166,9 +196,20 @@ func normalizeChannels(in []string) ([]string, error) {
 }
 
 func (s *invoiceService) CreateDraft(ctx context.Context, scope coretenant.Scope, in InvoiceInput, userID string) (domain.Invoice, error) {
+	return s.createDraft(ctx, scope, in, userID, true)
+}
+
+// createDraft validates first and checks the quota only when enforceQuota is set,
+// so a rejected create is cheap and never reaches the repository.
+func (s *invoiceService) createDraft(ctx context.Context, scope coretenant.Scope, in InvoiceInput, userID string, enforceQuota bool) (domain.Invoice, error) {
 	p, err := s.buildParams(ctx, scope, in, userID)
 	if err != nil {
 		return domain.Invoice{}, err
+	}
+	if enforceQuota {
+		if err := s.requireRoom(ctx, scope); err != nil {
+			return domain.Invoice{}, err
+		}
 	}
 	return s.invoices.Create(ctx, scope, p)
 }

@@ -34,6 +34,9 @@ type SelfServeHandler struct {
 
 	subscriptions SubscriptionProvider
 	graceDays     int
+
+	bills   BillsProvider
+	sellers BillSellerResolver
 }
 
 // SubscriptionProvider membangun ringkasan langganan workspace (service.TenantAccess).
@@ -47,6 +50,30 @@ func (h *SelfServeHandler) WithSubscription(p SubscriptionProvider, graceDays in
 	return h
 }
 
+// BillSeller adalah penjual yang menagih workspace pembeli: scope org penjual (platform atau tenant)
+// untuk membaca tagihan, dan nama tampilnya.
+type BillSeller struct {
+	Scope coretenant.Scope
+	Name  string
+}
+
+// BillSellerResolver menemukan penjual dari workspace pembeli. Pembeli HANYA berasal dari konteks
+// tenant sesi, tidak pernah dari klien. found=false bila workspace tidak tertaut ke company mana pun.
+type BillSellerResolver interface {
+	SellerOf(ctx context.Context, buyerOrganizationID string) (BillSeller, bool, error)
+}
+
+// BillsProvider membaca tagihan yang diterima workspace pembeli di scope penjualnya (service.TenantAccess).
+type BillsProvider interface {
+	Bills(ctx context.Context, seller coretenant.Scope, tenantOrganizationID string) ([]service.SubscriptionInvoice, error)
+}
+
+// WithBills mengaktifkan GET /app/self-serve/bills.
+func (h *SelfServeHandler) WithBills(p BillsProvider, sellers BillSellerResolver) *SelfServeHandler {
+	h.bills, h.sellers = p, sellers
+	return h
+}
+
 func NewSelfServeHandler(svc service.SelfServeService, platform SelfServePlatformScope, checker permissionmiddleware.OrganizationPermissionChecker) *SelfServeHandler {
 	return &SelfServeHandler{svc: svc, platform: platform, checker: checker}
 }
@@ -56,6 +83,7 @@ func (h *SelfServeHandler) RegisterRoutes(router *gin.RouterGroup) {
 	group.Use(middleware.RequireActiveTenant(), middleware.RequireCustomerTenant())
 	group.POST("/checkout", permissionmiddleware.RequireOrganization(h.checker, "organization.billing.manage"), h.Checkout)
 	group.GET("/subscription", permissionmiddleware.RequireOrganization(h.checker, "organization.billing.read"), h.Subscription)
+	group.GET("/bills", permissionmiddleware.RequireOrganization(h.checker, "organization.billing.read"), h.Bills)
 }
 
 type subscriptionProductResponse struct {
@@ -141,6 +169,56 @@ func (h *SelfServeHandler) Subscription(c *gin.Context) {
 	corehttp.OK(c, "subscription loaded", out)
 }
 
+type billSellerResponse struct {
+	Name string `json:"name"`
+}
+
+type billsResponse struct {
+	Seller   *billSellerResponse           `json:"seller"`
+	Invoices []subscriptionInvoiceResponse `json:"invoices"`
+}
+
+// Bills membaca tagihan yang diterima workspace pemanggil dari penjualnya. Pembeli diambil dari konteks
+// tenant dan penjual ditemukan di server lewat tautan company, sehingga klien tidak bisa menentukan
+// organisasi mana pun.
+func (h *SelfServeHandler) Bills(c *gin.Context) {
+	if h.bills == nil || h.sellers == nil {
+		corehttp.Fail(c, coreerrors.New("SELF_SERVE_NOT_CONFIGURED", "Pembelian mandiri belum dikonfigurasi.", http.StatusServiceUnavailable))
+		return
+	}
+	tenantContext, err := middleware.RequireTenantContext(c)
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	buyer := tenantContext.OrganizationID()
+	seller, found, err := h.sellers.SellerOf(c.Request.Context(), buyer)
+	if err != nil {
+		slog.ErrorContext(c.Request.Context(), "self-serve: resolve bill seller failed", "error", err)
+		corehttp.Fail(c, coreerrors.New("BILLS_UNAVAILABLE", "Tagihan belum bisa dimuat. Coba lagi.", http.StatusBadGateway))
+		return
+	}
+	out := billsResponse{Invoices: []subscriptionInvoiceResponse{}}
+	if !found {
+		corehttp.OK(c, "bills loaded", out)
+		return
+	}
+	invoices, err := h.bills.Bills(c.Request.Context(), seller.Scope, buyer)
+	if err != nil {
+		slog.ErrorContext(c.Request.Context(), "self-serve: bills failed", "error", err)
+		corehttp.Fail(c, coreerrors.New("BILLS_UNAVAILABLE", "Tagihan belum bisa dimuat. Coba lagi.", http.StatusBadGateway))
+		return
+	}
+	out.Seller = &billSellerResponse{Name: seller.Name}
+	for _, inv := range invoices {
+		out.Invoices = append(out.Invoices, subscriptionInvoiceResponse{
+			Number: inv.Number, Status: inv.Status, Total: inv.Total, PeriodLabel: inv.PeriodLabel, DueDate: dateString(inv.DueDate), URL: inv.URL,
+		})
+	}
+	c.Header("Cache-Control", "private, no-store")
+	corehttp.OK(c, "bills loaded", out)
+}
+
 type selfServeCheckoutRequest struct {
 	ProductID string `json:"product_id"`
 }
@@ -177,13 +255,14 @@ func (h *SelfServeHandler) Checkout(c *gin.Context) {
 		ProductID:            body.ProductID,
 	})
 	if err != nil {
-		h.fail(c, err)
+		failSelfServe(c, err)
 		return
 	}
 	corehttp.Created(c, "self-serve checkout ready", selfServeCheckoutResponse{InvoiceURL: result.InvoiceURL, DealID: result.DealID})
 }
 
-func (h *SelfServeHandler) fail(c *gin.Context, err error) {
+// failSelfServe memetakan galat rantai self-serve (dipakai checkout platform dan checkout tenant).
+func failSelfServe(c *gin.Context, err error) {
 	var step *service.SelfServeStepError
 	switch {
 	case errors.Is(err, service.ErrSelfServeProductUnavailable):

@@ -185,6 +185,15 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.LandingAdminPageHandler != nil {
 		deps.LandingAdminPageHandler.RegisterRoutes(protected, deps.PermissionChecker)
 	}
+	// POST /app/landing/pages/:id/activation-invoice (reseller). Entitlements
+	// landing.enabled + landing.page_activation are enforced by the service.
+	if deps.LandingActivationHandler != nil {
+		deps.LandingActivationHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
+	// GET /app/landing/activations + POST /app/landing/activations/:id/renew (dashboard invoice reseller).
+	if deps.LandingActivationInvoicesHandler != nil {
+		deps.LandingActivationInvoicesHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
 	if deps.LandingAdminSectionHandler != nil {
 		deps.LandingAdminSectionHandler.RegisterRoutes(protected, deps.PermissionChecker)
 	}
@@ -229,6 +238,12 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	}
 	if deps.AdminAssetHandler != nil {
 		deps.AdminAssetHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
+	// Ledger penyelesaian: permukaan platform (settlement.manage) dan baca-saja org sendiri
+	// (settlement.read); middleware tenant/izin dipasang di dalam RegisterXRoutes.
+	if deps.ReceivableSettlementHandler != nil {
+		deps.ReceivableSettlementHandler.RegisterPlatformRoutes(protected, deps.PermissionChecker)
+		deps.ReceivableSettlementHandler.RegisterOwnRoutes(protected, deps.PermissionChecker)
 	}
 	if deps.PlatformAssetHandler != nil {
 		deps.PlatformAssetHandler.RegisterRoutes(protected, deps.PermissionChecker)
@@ -341,6 +356,8 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		}
 	}
 
+	registerMikrotikRoutes(protected, deps)
+
 	// Katalog produk tenant (dipakai quotation CRM dan invoice receivable). Aturan tenant sama
 	// dengan CRM; entitlement cukup salah satu dari crm.enabled / receivable.enabled.
 	if deps.CatalogProductHandler != nil {
@@ -353,6 +370,9 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		deps.CatalogProductHandler.RegisterRoutes(catalogGroup, deps.PermissionChecker)
 		deps.CatalogCategoryHandler.RegisterRoutes(catalogGroup, deps.PermissionChecker)
 		deps.CatalogFeatureHandler.RegisterRoutes(catalogGroup, deps.PermissionChecker)
+		if deps.CatalogPublicListingHandler != nil {
+			deps.CatalogPublicListingHandler.RegisterAppRoutes(catalogGroup, deps.PermissionChecker)
+		}
 	}
 
 	// Email: each user's own mailboxes (CRM and receivable). Same tenant rules as CRM.
@@ -400,6 +420,14 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	)
 	if deps.PublicLandingHandler != nil {
 		deps.PublicLandingHandler.RegisterRoutes(publicModules)
+	}
+	if deps.CatalogPublicListingHandler != nil {
+		// Listing produk tenant: tenant dari host (sama dengan /public/landing/*).
+		deps.CatalogPublicListingHandler.RegisterTenantRoutes(publicModules)
+	}
+	if deps.CRMTenantCheckoutHandler != nil {
+		// Checkout publik tenant: tenant dari host (organization_id klien diabaikan), rate limit per IP & tenant.
+		deps.CRMTenantCheckoutHandler.RegisterRoutes(publicModules)
 	}
 	registerModuleRoutes(publicModules)
 	return router, nil

@@ -62,15 +62,26 @@ func (s *paymentService) record(ctx context.Context, scope coretenant.Scope, inv
 	if err != nil {
 		return domain.Invoice{}, domain.Payment{}, err
 	}
-	if created && inv.Status == domain.InvoicePaid {
-		s.afterPaid(ctx, scope, inv)
+	if inv.Status == domain.InvoicePaid {
+		if created {
+			s.afterPaid(ctx, scope, inv)
+		} else {
+			// Pembayaran ini sudah tercatat (notifikasi provider dikirim ulang). Hanya
+			// listener idempoten yang opt-in dipanggil lagi, agar efek pasca-bayar yang
+			// gagal setelah commit bisa dipulihkan tanpa menggandakan efek lain.
+			s.listeners.InvoicePaidReplay(ctx, scope, invoiceRef(inv))
+		}
 	}
 	return inv, pay, nil
 }
 
+func invoiceRef(inv domain.Invoice) InvoiceRef {
+	return InvoiceRef{ID: inv.ID, Number: inv.InvoiceNumber, SourceType: inv.SourceType, SourceID: inv.SourceID, ContractID: inv.ContractID}
+}
+
 // afterPaid berjalan SETELAH commit: kegagalan hanya dicatat, pembayaran tetap sah.
 func (s *paymentService) afterPaid(ctx context.Context, scope coretenant.Scope, inv domain.Invoice) {
-	s.listeners.InvoicePaid(ctx, scope, InvoiceRef{ID: inv.ID, Number: inv.InvoiceNumber, SourceType: inv.SourceType, SourceID: inv.SourceID, ContractID: inv.ContractID})
+	s.listeners.InvoicePaid(ctx, scope, invoiceRef(inv))
 	if s.invoices == nil {
 		return
 	}
@@ -86,12 +97,11 @@ func (s *paymentService) RecordManual(ctx context.Context, scope coretenant.Scop
 	})
 }
 
-func (s *paymentService) RecordProvider(ctx context.Context, scope coretenant.Scope, invoiceID string, p repository.PaymentParams) (domain.Invoice, error) {
+func (s *paymentService) RecordProvider(ctx context.Context, scope coretenant.Scope, invoiceID string, p repository.PaymentParams) (domain.Invoice, domain.Payment, error) {
 	if p.Method != "doku" || strings.TrimSpace(p.Reference) == "" {
-		return domain.Invoice{}, ErrInvalidPayment
+		return domain.Invoice{}, domain.Payment{}, ErrInvalidPayment
 	}
-	inv, _, err := s.record(ctx, scope, invoiceID, p)
-	return inv, err
+	return s.record(ctx, scope, invoiceID, p)
 }
 
 func (s *paymentService) List(ctx context.Context, scope coretenant.Scope, invoiceID string) ([]domain.Payment, error) {

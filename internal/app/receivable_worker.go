@@ -13,6 +13,7 @@ import (
 	catalogservice "zyad.cloud/internal/modules/catalog/service"
 	crmrepo "zyad.cloud/internal/modules/crm/repository"
 	crmservice "zyad.cloud/internal/modules/crm/service"
+	landingrepo "zyad.cloud/internal/modules/landing/repository"
 	mailboxrepo "zyad.cloud/internal/modules/mailbox/repository"
 	mailboxservice "zyad.cloud/internal/modules/mailbox/service"
 	organizationrepo "zyad.cloud/internal/modules/organization/repository"
@@ -74,6 +75,7 @@ func newWorkerReceivableModule(cfg config.Config, db *database.Pool, log *slog.L
 		Publisher:    notificationpublisher.NewOutboxPublisher(notificationrepo.NewOutboxRepository(db), cfg.Notification.MaxAttempts),
 		Members:      crmrepo.NewMemberRepository(db), Issuers: crmrepo.NewQuotationIssuerRepository(db),
 		AppName: cfg.App.Name, FrontendURL: cfg.App.FrontendURL, NotificationLocale: cfg.Notification.DefaultLocale,
+		ActivationInvoices: activationInvoiceChecker{activations: landingrepo.NewActivationRepository(db)},
 	})
 
 	return module, nil

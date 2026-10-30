@@ -46,7 +46,8 @@ type PublicInvoiceView struct {
 	TenantName string
 	Invoice    domain.Invoice
 	State      PublicInvoiceState
-	// CanPay: state open dan org punya receivable.online_payment.
+	// CanPay: state open dan org punya receivable.online_payment (atau invoice aktivasi
+	// halaman landing dan org punya landing.page_activation).
 	CanPay bool
 }
 
@@ -56,6 +57,7 @@ type PublicInvoiceService struct {
 	invoices     PublicInvoices
 	issuers      IssuerSource
 	entitlements Entitlements
+	activations  ActivationInvoiceChecker // optional, see WithActivationInvoices
 	now          func() time.Time
 }
 
@@ -141,8 +143,8 @@ func (s *PublicInvoiceService) View(ctx context.Context, token string) (PublicIn
 			v.TenantName = issuer.Name
 		}
 	}
-	v.CanPay = d.state == PublicInvoiceStateOpen && s.entitlements != nil &&
-		s.entitlements.RequireFeature(ctx, d.scope.OrganizationID(), "receivable.online_payment") == nil
+	v.CanPay = d.state == PublicInvoiceStateOpen &&
+		onlinePaymentAllowed(ctx, s.entitlements, s.activations, d.scope, d.inv.ID)
 	return v, nil
 }
 

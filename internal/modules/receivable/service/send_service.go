@@ -87,6 +87,8 @@ type SendDeps struct {
 	Notifier     SendNotifier   // nil = tanpa notifikasi
 	Members      MemberDirectory
 	Entitlements Entitlements
+	// ActivationInvoices (optional): landing activation invoices are payable online via landing.page_activation.
+	ActivationInvoices ActivationInvoiceChecker
 }
 
 type sendService struct{ SendDeps }

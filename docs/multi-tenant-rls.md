@@ -58,3 +58,22 @@ Notification tables remain excluded until nullable organization semantics and
 platform-global events are normalized. Organization control-plane tables also
 remain excluded until their public resolver and platform maintenance paths use
 explicit RLS-compatible access.
+
+## Narrow Cross-Organization Lookups
+
+`SECURITY DEFINER` functions do not bypass these policies: `FORCE ROW LEVEL
+SECURITY` applies to the table owner as well, so only a superuser or a
+`BYPASSRLS` role would see other organizations' rows. A deliberate cross-org
+read therefore needs an explicit policy exception, like
+`landing_section_templates` (migration `000042`).
+
+`crm_companies` (migration `000167`) allows SELECT only of rows linked to one
+customer workspace when the transaction sets:
+
+```sql
+SELECT set_config('app.crm_workspace_link_lookup', '<workspace-uuid>', true);
+```
+
+`app.organization_id` stays empty in that transaction, writes keep the strict
+organization check, and only `companyRepository.FindWorkspaceLinkAnyOrg` sets
+the setting.

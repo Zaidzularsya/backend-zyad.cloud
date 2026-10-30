@@ -129,7 +129,7 @@ Lihat [module-map.md](module-map.md) untuk tabel lengkap 18 modul. Ringkasan sta
 | Stabil | `user`, `organization` |
 | Stabil, aktif dikembangkan | `landing` |
 | WIP (sangat baru) | `billing` |
-| Stub/scaffold kosong | `account`, `asset`, `contract`, `dashboard`, `landingpage`, `mikrotik`, `newsaggregator`, `order`, `payment`, `product`, `provisioning`, `radius`, `resource` |
+| Stub/scaffold kosong | `account`, `asset`, `contract`, `dashboard`, `landingpage`, `newsaggregator`, `order`, `payment`, `product`, `provisioning`, `radius`, `resource` |
 
 ## 6. Flow Utama Aplikasi
 

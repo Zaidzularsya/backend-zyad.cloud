@@ -566,3 +566,15 @@ script** untuk crawler / klien no-JS. Halaman non-GrapesJS → 404.
 akses langsung untuk slug GrapesJS ke `/api/v1/public/landing/render/$slug`
 (mis. `map $http_user_agent $is_bot` + `location`), SPA tetap ke index. Cukup
 tambah CSP page biasa di vhost bila mau — endpoint sudah kirim CSP sendiri.
+
+### Form Konsultasi fleksibel (panel kanan)
+
+Spec: `docs/superpowers/specs/2026-10-16-lead-form-flex-design.md`. Panel blok Form Konsultasi (`GrapesLeadFormPanel.vue`) berisi:
+
+1. **Form** — pilih form halaman atau "Buat form baru" dengan preset Ringkas (default) / Standar / Lengkap.
+2. **Field** (`GrapesLeadFormFields.vue`) — `name`, `email`, `phone`, `consent` terkunci (gembok; label/placeholder field inti tetap bisa diubah). `company`, `company_size`, `interest`, `message`: Tampil · Wajib · Sembunyi, detail (label, placeholder, opsi select, nilai default saat Sembunyi), urutan ↑↓, tombol preset (dengan konfirmasi). **Autosave** debounce 600 ms lewat `PUT …/forms/:id/fields` dengan seluruh daftar; respons lama diabaikan, perubahan tertunda di-flush saat panel ditutup, 422 mengembalikan ke status tersimpan terakhir.
+3. **Tampilan** (`GrapesLeadFormAppearance.vue`) — gaya, mode inline/popup, aksen, latar & teks, sudut, kolom, font, isi Split, pengaturan popup. Disimpan di atribut blok, jadi baru berlaku setelah halaman disimpan/dipublikasi.
+4. **Setelah kirim** (`GrapesLeadFormAfterSubmit.vue`) — pesan sukses / redirect / WhatsApp (nomor dinormalisasi seperti server) dan judul tombol. Aksi redirect/whatsapp baru dikirim ke server setelah inputnya valid.
+5. **Penerusan ke CRM** — toggle dan PIC lead.
+
+Pratinjau kanvas memakai `LeadFormView` (komponen yang sama dengan halaman publik, dinonaktifkan) lewat `createApp`, sehingga identik dengan hasil publish; CSS disuntik ke dokumen kanvas. Aturan server: `docs/reference-landing-page.md` (Slot Form Konsultasi) dan `docs/landing-page-public-api-contract.md`.

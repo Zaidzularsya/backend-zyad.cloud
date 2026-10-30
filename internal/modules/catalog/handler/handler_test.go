@@ -77,6 +77,7 @@ type fakeProductService struct {
 	created  []service.ProductInput
 	updated  []repository.UpdateProductParams
 	platform []bool
+	canMng   []bool
 	err      error
 	features []domain.FeatureDef
 }
@@ -86,10 +87,15 @@ func (f *fakeProductService) Create(_ context.Context, _ coretenant.Scope, in se
 	return domain.Product{ID: "p1", Features: []domain.ProductFeature{{FeatureKey: "crm", Value: json.RawMessage(`true`), Label: "CRM"}}}, f.err
 }
 
-func (f *fakeProductService) Update(_ context.Context, _ coretenant.Scope, id string, in repository.UpdateProductParams, platform bool) (domain.Product, error) {
+func (f *fakeProductService) Update(_ context.Context, _ coretenant.Scope, id string, in repository.UpdateProductParams, platform, canManage bool) (domain.Product, error) {
+	f.canMng = append(f.canMng, canManage)
 	f.updated = append(f.updated, in)
 	f.platform = append(f.platform, platform)
 	return domain.Product{ID: id}, f.err
+}
+
+func (f *fakeProductService) ProductsNeedingUpdate(context.Context, []domain.Product) (map[string]bool, error) {
+	return nil, nil
 }
 
 func (f *fakeProductService) ListFeatures(context.Context) ([]domain.FeatureDef, error) {
@@ -97,11 +103,30 @@ func (f *fakeProductService) ListFeatures(context.Context) ([]domain.FeatureDef,
 }
 
 func productRouter(t *testing.T, orgType coretenant.OrganizationType, svc *fakeProductService) *gin.Engine {
+	return productRouterWith(t, orgType, svc, allowAll{})
+}
+
+func productRouterWith(t *testing.T, orgType coretenant.OrganizationType, svc *fakeProductService, p permissionmiddleware.CombinedPermissionChecker) *gin.Engine {
 	r := routerFor(t, orgType)
 	g := r.Group("")
-	NewProductHandler(svc).RegisterRoutes(g, allowAll{})
-	NewFeatureHandler(svc).RegisterRoutes(g, allowAll{})
+	NewProductHandler(svc).RegisterRoutes(g, p)
+	NewFeatureHandler(svc).RegisterRoutes(g, p)
 	return r
+}
+
+// denyEntitlements mengizinkan semua permission kecuali catalog_product.manage_entitlements.
+type denyEntitlements struct{}
+
+func (denyEntitlements) Can(_ context.Context, _ string, perms []string) error {
+	return denyEntitlements{}.CanOrganization(nil, "", "", perms)
+}
+func (denyEntitlements) CanOrganization(_ context.Context, _, _ string, perms []string) error {
+	for _, p := range perms {
+		if p == "catalog_product.manage_entitlements" {
+			return errors.New("denied")
+		}
+	}
+	return nil
 }
 
 const featureBody = `{"name":"A","features":[{"feature_key":"crm","value":true,"display_label":"CRM lengkap","position":3},{"feature_key":"users","value":5.0}]}`
@@ -115,6 +140,18 @@ func TestCreateProductCustomerGetsPlatformFalseAnd422(t *testing.T) {
 	}
 	if len(svc.created) != 1 || svc.created[0].Platform {
 		t.Fatalf("service input = %+v", svc.created)
+	}
+}
+
+func TestCreateProductForeignCategoryIs422(t *testing.T) {
+	svc := &fakeProductService{err: repository.ErrCategoryNotFound}
+	r := productRouter(t, coretenant.OrganizationTypeCustomer, svc)
+	code, body := doBody(r, http.MethodPost, "/products", `{"name":"A","category_id":"c-other","is_public":true,"listing_code":"a"}`)
+	if code != http.StatusUnprocessableEntity || !strings.Contains(body, "CATEGORY_NOT_FOUND") {
+		t.Fatalf("code=%d body=%s", code, body)
+	}
+	if in := svc.created[0]; in.Platform || !in.Listing.IsPublic || in.Listing.ListingCode != "a" {
+		t.Fatalf("listing tenant harus diteruskan: %+v", in)
 	}
 }
 
@@ -155,13 +192,58 @@ func TestUpdateProductPartialListingIs422WithoutService(t *testing.T) {
 	}
 }
 
-func TestListFeaturesPlatformOnly(t *testing.T) {
-	svc := &fakeProductService{features: []domain.FeatureDef{{Key: "crm", Name: "CRM", ValueType: "boolean"}}}
-	if code := do(productRouter(t, coretenant.OrganizationTypeCustomer, svc), http.MethodGet, "/features", ""); code != http.StatusForbidden {
-		t.Fatalf("customer code = %d", code)
+func TestListFeatures_TenantOnlyOfferableWithMax(t *testing.T) {
+	ten := 10
+	svc := &fakeProductService{features: []domain.FeatureDef{
+		{Key: "crm", Name: "CRM", ValueType: "boolean", ResetStrategy: "never", TenantOfferable: true},
+		{Key: "users", Name: "User", ValueType: "integer", ResetStrategy: "never", TenantOfferable: true, TenantMax: &ten},
+		{Key: "internal", Name: "Internal", ValueType: "boolean", ResetStrategy: "never"},
+	}}
+	code, body := doBody(productRouter(t, coretenant.OrganizationTypeCustomer, svc), http.MethodGet, "/features", "")
+	if code != http.StatusOK || strings.Contains(body, `"internal"`) || !strings.Contains(body, `"key":"crm"`) || !strings.Contains(body, `"tenant_max":10`) {
+		t.Fatalf("code=%d body=%s", code, body)
 	}
+	code, body = doBody(productRouterWith(t, coretenant.OrganizationTypeCustomer, svc, denyEntitlements{}), http.MethodGet, "/features", "")
+	if code != http.StatusForbidden || !strings.Contains(body, "FORBIDDEN") {
+		t.Fatalf("tanpa permission code=%d body=%s", code, body)
+	}
+	code, body = doBody(productRouter(t, coretenant.OrganizationTypePlatform, svc), http.MethodGet, "/features", "")
+	if code != http.StatusOK || !strings.Contains(body, `"key":"internal"`) {
+		t.Fatalf("platform code=%d body=%s", code, body)
+	}
+}
+
+func TestProductHandlerForwardsCanManageEntitlements(t *testing.T) {
+	svc := &fakeProductService{}
+	r := productRouter(t, coretenant.OrganizationTypeCustomer, svc)
+	do(r, http.MethodPost, "/products", featureBody)
+	do(r, http.MethodPatch, "/products/p1", `{"features":[]}`)
+	if !svc.created[0].CanManageEntitlements || !svc.canMng[0] {
+		t.Fatalf("flag harus true: %+v %v", svc.created, svc.canMng)
+	}
+	svc = &fakeProductService{}
+	r = productRouterWith(t, coretenant.OrganizationTypeCustomer, svc, denyEntitlements{})
+	do(r, http.MethodPost, "/products", featureBody)
+	do(r, http.MethodPatch, "/products/p1", `{"name":"B"}`)
+	if svc.created[0].CanManageEntitlements || svc.canMng[0] {
+		t.Fatalf("flag harus false: %+v %v", svc.created, svc.canMng)
+	}
+}
+
+func TestNewFeatureErrorsMapTo422(t *testing.T) {
+	for _, e := range []error{service.ErrFeatureNotOfferable, service.ErrFeatureAboveMax} {
+		svc := &fakeProductService{err: e}
+		code, body := doBody(productRouter(t, coretenant.OrganizationTypeCustomer, svc), http.MethodPost, "/products", `{"name":"A"}`)
+		if code != http.StatusUnprocessableEntity || !strings.Contains(body, "VALIDATION_ERROR") {
+			t.Errorf("%v: code=%d body=%s", e, code, body)
+		}
+	}
+}
+
+func TestListFeaturesPlatformUnchanged(t *testing.T) {
+	svc := &fakeProductService{features: []domain.FeatureDef{{Key: "crm", Name: "CRM", ValueType: "boolean", ResetStrategy: "never"}}}
 	code, body := doBody(productRouter(t, coretenant.OrganizationTypePlatform, svc), http.MethodGet, "/features", "")
-	if code != http.StatusOK || !strings.Contains(body, `"value_type":"boolean"`) {
+	if code != http.StatusOK || !strings.Contains(body, `"value_type":"boolean"`) || !strings.Contains(body, `"reset_strategy":"never"`) {
 		t.Fatalf("platform code=%d body=%s", code, body)
 	}
 }

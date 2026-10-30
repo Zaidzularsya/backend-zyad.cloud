@@ -45,6 +45,22 @@ type PageResponse struct {
 	CreatedAt        time.Time            `json:"created_at"`
 	UpdatedAt        time.Time            `json:"updated_at"`
 	DeletedAt        *time.Time           `json:"deleted_at,omitempty"`
+
+	// Page activation (reseller sells the page): none | preview | publish | expired.
+	ActivationState string                  `json:"activation_state"`
+	ActiveUntil     *time.Time              `json:"active_until"`
+	OpenActivation  *OpenActivationResponse `json:"open_activation"`
+}
+
+// OpenActivationResponse is the page's open activation invoice. It never
+// carries the preview token or its hash; the raw token is returned once, at
+// creation, and plugged into PreviewURLTemplate.
+type OpenActivationResponse struct {
+	ID                 string    `json:"id"`
+	BuyerName          string    `json:"buyer_name"`
+	Price              string    `json:"price"`
+	InvoiceDueAt       time.Time `json:"invoice_due_at"`
+	PreviewURLTemplate string    `json:"preview_url_template"`
 }
 
 // PageListResponse wraps pages and metadata.
@@ -78,6 +94,9 @@ type FormResponse struct {
 	IsActive        bool           `json:"is_active"`
 	CreateCRMLead   bool           `json:"create_crm_lead"`
 	LeadOwnerUserID *string        `json:"lead_owner_user_id"`
+	AfterSubmit     string         `json:"after_submit"`
+	WhatsAppNumber  *string        `json:"whatsapp_number"`
+	WhatsAppMessage *string        `json:"whatsapp_message"`
 	Consent         map[string]any `json:"consent,omitempty"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
@@ -85,15 +104,16 @@ type FormResponse struct {
 
 // FormFieldResponse represents form input field metadata.
 type FormFieldResponse struct {
-	ID          string         `json:"id"`
-	Key         string         `json:"key"`
-	Type        string         `json:"type"`
-	Label       string         `json:"label"`
-	Placeholder string         `json:"placeholder"`
-	Options     []string       `json:"options"`
-	Validation  map[string]any `json:"validation"`
-	Required    bool           `json:"required"`
-	SortOrder   int            `json:"sort_order"`
+	ID           string         `json:"id"`
+	Key          string         `json:"key"`
+	Type         string         `json:"type"`
+	Label        string         `json:"label"`
+	Placeholder  string         `json:"placeholder"`
+	Options      []string       `json:"options"`
+	Validation   map[string]any `json:"validation"`
+	Required     bool           `json:"required"`
+	DefaultValue string         `json:"default_value"`
+	SortOrder    int            `json:"sort_order"`
 }
 
 // SubmissionResponse represents a client form entry.
@@ -314,4 +334,59 @@ type LandingDocumentResponse struct {
 	HTML          string         `json:"html"`
 	CSS           string         `json:"css"`
 	UpdatedAt     time.Time      `json:"updated_at"`
+}
+
+// ActivationResponse is one page activation. The preview token hash is never
+// exposed.
+type ActivationResponse struct {
+	ID            string     `json:"id"`
+	PageID        string     `json:"page_id"`
+	InvoiceID     *string    `json:"invoice_id"`
+	BuyerName     string     `json:"buyer_name"`
+	BuyerContact  string     `json:"buyer_contact"`
+	BuyerEmail    *string    `json:"buyer_email"`
+	Price         string     `json:"price"`
+	DurationValue int        `json:"duration_value"`
+	DurationUnit  string     `json:"duration_unit"`
+	InvoiceDueAt  time.Time  `json:"invoice_due_at"`
+	Status        string     `json:"status"`
+	PaidAt        *time.Time `json:"paid_at"`
+	CreatedAt     time.Time  `json:"created_at"`
+}
+
+// ActivationInvoiceResponse: preview_url carries the raw token and is only
+// returned by this response.
+type ActivationInvoiceResponse struct {
+	Activation ActivationResponse `json:"activation"`
+	PreviewURL string             `json:"preview_url"`
+	PaymentURL string             `json:"payment_url"`
+}
+
+// ActivationInvoiceListItem is one row of the reseller's invoice dashboard. state is
+// awaiting_payment | expired | paid | void. payment_url is empty for void invoices.
+type ActivationInvoiceListItem struct {
+	ID              string     `json:"id"`
+	PageID          string     `json:"page_id"`
+	PageTitle       string     `json:"page_title"`
+	PageSlug        string     `json:"page_slug"`
+	PageStatus      string     `json:"page_status"`
+	PageActiveUntil *time.Time `json:"page_active_until"`
+	InvoiceID       *string    `json:"invoice_id"`
+	BuyerName       string     `json:"buyer_name"`
+	BuyerContact    string     `json:"buyer_contact"`
+	BuyerEmail      *string    `json:"buyer_email"`
+	Price           string     `json:"price"`
+	DurationValue   int        `json:"duration_value"`
+	DurationUnit    string     `json:"duration_unit"`
+	InvoiceDueAt    time.Time  `json:"invoice_due_at"`
+	Status          string     `json:"status"`
+	State           string     `json:"state"`
+	PaidAt          *time.Time `json:"paid_at"`
+	CreatedAt       time.Time  `json:"created_at"`
+	PaymentURL      string     `json:"payment_url"`
+}
+
+type ActivationInvoiceListResponse struct {
+	Items []ActivationInvoiceListItem `json:"items"`
+	Meta  PaginationMeta              `json:"meta"`
 }

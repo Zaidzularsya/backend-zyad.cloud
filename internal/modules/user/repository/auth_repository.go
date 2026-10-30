@@ -768,8 +768,13 @@ func (r *AuthRepository) FindCurrentUser(ctx context.Context, userID string, ses
 	if err != nil {
 		return service.CurrentUser{}, err
 	}
+	organizationPermissions, err := r.activeOrganizationPermissionSlugs(ctx, user.ID, sessionID)
+	if err != nil {
+		return service.CurrentUser{}, err
+	}
 	user.Roles = roles
 	user.Permissions = permissions
+	user.ActiveOrganizationPermissions = organizationPermissions
 
 	return user, nil
 }
@@ -861,6 +866,67 @@ func (r *AuthRepository) roleSlugs(ctx context.Context, userID string) ([]string
 		WHERE ur.user_id = $1
 		ORDER BY 1
 	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanStrings(rows)
+}
+
+// activeOrganizationPermissionSlugs mengembalikan permission dari role org
+// (mis. organization_owner) pada organisasi aktif sesi. Sengaja dipisah dari
+// permissionSlugs: field Permissions tetap hanya role global agar guard
+// permission global tidak ikut meloloskan owner tenant; UI memakai gabungan
+// keduanya untuk menampilkan aksi, sedangkan backend tetap memeriksa per-org.
+//
+// Org efektif sama dengan resolver request (authenticated_resolver.go): org aktif
+// session, atau — bila kosong — satu-satunya membership aktif user. Tanpa fallback,
+// session hasil login yang belum pernah switch org mendapat daftar kosong sehingga UI
+// menyembunyikan aksi yang sebenarnya diizinkan API.
+func (r *AuthRepository) activeOrganizationPermissionSlugs(ctx context.Context, userID string, sessionID string) ([]string, error) {
+	rows, err := r.db.Query(ctx, `
+		WITH session_org AS (
+			SELECT s.user_id,
+				COALESCE(s.active_organization_id, (
+					SELECT CASE WHEN count(*) = 1 THEN (array_agg(m.organization_id))[1] END
+					FROM organization_memberships m
+					JOIN organizations o ON o.id = m.organization_id
+					WHERE m.user_id = s.user_id
+						AND m.status = 'active'
+						AND m.removed_at IS NULL
+						AND o.deleted_at IS NULL
+						AND o.status <> 'archived'
+				)) AS organization_id
+			FROM sessions s
+			WHERE s.id = $2
+				AND s.user_id = $1
+		)
+		SELECT DISTINCT permission_slug
+		FROM (
+			SELECT COALESCE(NULLIF(p.slug, ''), p.permission_name) AS permission_slug
+			FROM session_org so
+			JOIN user_roles ur ON ur.user_id = so.user_id
+				AND ur.organization_id = so.organization_id
+			JOIN role_permissions rp ON rp.role_id = ur.role_id
+			JOIN permissions p ON p.id = rp.permission_id
+			UNION
+			SELECT COALESCE(NULLIF(p.slug, ''), p.permission_name) AS permission_slug
+			FROM session_org so
+			JOIN user_permissions up ON up.user_id = so.user_id
+				AND up.organization_id = so.organization_id
+			JOIN permissions p ON p.id = up.permission_id
+			WHERE up.effect = 'allow'
+			EXCEPT
+			SELECT COALESCE(NULLIF(p.slug, ''), p.permission_name) AS permission_slug
+			FROM session_org so
+			JOIN user_permissions up ON up.user_id = so.user_id
+				AND up.organization_id = so.organization_id
+			JOIN permissions p ON p.id = up.permission_id
+			WHERE up.effect = 'deny'
+		) permissions
+		ORDER BY permission_slug
+	`, userID, sessionID)
 	if err != nil {
 		return nil, err
 	}

@@ -2,6 +2,7 @@ package config
 
 import (
 	"bufio"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -20,6 +21,8 @@ func LoadApp() AppConfig {
 		Port:           getEnvInt("APP_PORT", 3000),
 		OrganizationID: getEnv("APP_ORGANIZATION_ID", ""),
 		Env:            getEnv("NODE_ENV", "development"),
+
+		ReceivableManualCreation: getEnvBool("RECEIVABLE_MANUAL_CREATION_ENABLED", false),
 	}
 }
 
@@ -196,7 +199,54 @@ func LoadMikrotik() MikrotikConfig {
 		Host:     getEnv("MIKROTIK_HOST", ""),
 		Username: getEnv("MIKROTIK_USERNAME", ""),
 		Password: getEnv("MIKROTIK_PASSWORD", ""),
+
+		AllowedPrivateCIDRs: parseAllowedPrivateCIDRs(getEnv("MIKROTIK_ALLOWED_PRIVATE_CIDRS", "")),
+		SetupAllowREST:      getEnvBool("MIKROTIK_SETUP_ALLOW_REST", false),
 	}
+}
+
+// forbiddenAllowRanges may never be (even partly) inside the tenant router
+// allow list: loopback, link-local (incl. cloud metadata), "this network",
+// unspecified and multicast.
+var forbiddenAllowRanges = []netip.Prefix{
+	netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("::1/128"),
+	netip.MustParsePrefix("169.254.0.0/16"),
+	netip.MustParsePrefix("fe80::/10"),
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("::/128"),
+	netip.MustParsePrefix("224.0.0.0/4"),
+	netip.MustParsePrefix("ff00::/8"),
+}
+
+// parseAllowedPrivateCIDRs parses a comma-separated CIDR list. Invalid entries
+// and any prefix that overlaps a forbidden range are skipped, so a typo or an
+// over-wide prefix in env (e.g. 64.0.0.0/2, which contains 127/8) can never
+// widen what tenant routers are allowed to reach. Choosing a narrow range that
+// holds only tenant routers stays the operator's responsibility.
+func parseAllowedPrivateCIDRs(raw string) []netip.Prefix {
+	var prefixes []netip.Prefix
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(part)
+		if err != nil || overlapsForbidden(prefix) {
+			continue
+		}
+		prefixes = append(prefixes, prefix)
+	}
+	return prefixes
+}
+
+func overlapsForbidden(p netip.Prefix) bool {
+	for _, f := range forbiddenAllowRanges {
+		if p.Overlaps(f) {
+			return true
+		}
+	}
+	return false
 }
 
 func LoadDoku() DokuConfig {

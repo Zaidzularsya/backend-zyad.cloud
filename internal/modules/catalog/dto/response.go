@@ -26,6 +26,7 @@ type ProductResponse struct {
 	ListingCode      *string                  `json:"listing_code"`
 	ListingOrder     int                      `json:"listing_order"`
 	Features         []ProductFeatureResponse `json:"features"`
+	NeedsUpdate      bool                     `json:"needs_update"`
 	CreatedAt        time.Time                `json:"created_at"`
 	UpdatedAt        time.Time                `json:"updated_at"`
 }
@@ -44,6 +45,10 @@ type FeatureDefResponse struct {
 	Module    string `json:"module"`
 	ValueType string `json:"value_type"`
 	Unit      string `json:"unit,omitempty"`
+	// ResetStrategy: never|monthly|yearly|custom, read-only registry metadata.
+	ResetStrategy string `json:"reset_strategy"`
+	// TenantMax: batas atas integer untuk produk tenant; hanya terisi pada daftar fitur tenant.
+	TenantMax *int `json:"tenant_max,omitempty"`
 }
 
 func ProductFromDomain(p domain.Product) ProductResponse {
@@ -62,7 +67,7 @@ func ProductFromDomain(p domain.Product) ProductResponse {
 	}
 	return ProductResponse{ChargeType: string(p.Pricing.ChargeType), BillingFrequency: freq, PaymentTiming: string(p.Pricing.PaymentTiming), ID: p.ID, CategoryID: p.CategoryID, CategoryName: p.CategoryName, SKU: p.SKU, Name: p.Name,
 		Description: p.Description, Unit: p.Unit, BasePrice: p.BasePrice, TaxPercent: p.TaxPercent,
-		Currency: p.Currency, IsActive: p.IsActive, IsPublic: p.IsPublic, ListingCode: code, ListingOrder: p.ListingOrder, Features: features, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}
+		Currency: p.Currency, IsActive: p.IsActive, IsPublic: p.IsPublic, ListingCode: code, ListingOrder: p.ListingOrder, Features: features, NeedsUpdate: p.NeedsUpdate, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}
 }
 
 type CategoryResponse struct {

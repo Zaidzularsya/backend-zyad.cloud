@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"math/big"
 	"strings"
 	"sync"
@@ -44,8 +43,8 @@ func (b selfServeBuyers) WorkspaceName(ctx context.Context, organizationID strin
 	return org.Name, nil
 }
 
-// selfServeSubscriptions: company dianggap sudah berlangganan bila punya SO confirmed/completed dengan
-// contract aktif yang memuat produk berfitur.
+// selfServeSubscriptions: pemeriksaan "sudah berlangganan" dari SO confirmed/completed dengan contract
+// aktif — berfitur (platform) atau produk yang sama (tenant).
 type selfServeSubscriptions struct {
 	orders    crmrepo.SalesOrderRepository
 	contracts crmReceivableReader
@@ -53,6 +52,36 @@ type selfServeSubscriptions struct {
 }
 
 func (s selfServeSubscriptions) HasActiveFeatureContract(ctx context.Context, scope coretenant.Scope, companyID string) (bool, error) {
+	return s.anyActiveContractProduct(ctx, scope, companyID, func(ids []string) (bool, error) {
+		products, err := s.products.FindByIDs(ctx, scope, ids)
+		if err != nil {
+			return false, err
+		}
+		for _, p := range products {
+			if len(p.Features) > 0 {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+}
+
+// HasActiveContractForProduct: company punya SO confirmed/completed dengan contract aktif yang memuat
+// produk ini (scope tenant: produk tanpa fitur juga dihitung).
+func (s selfServeSubscriptions) HasActiveContractForProduct(ctx context.Context, scope coretenant.Scope, companyID, productID string) (bool, error) {
+	return s.anyActiveContractProduct(ctx, scope, companyID, func(ids []string) (bool, error) {
+		for _, id := range ids {
+			if id == productID {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+}
+
+// anyActiveContractProduct memanggil match dengan id produk tiap SO confirmed/completed yang contract-nya
+// aktif, berhenti pada kecocokan pertama. Semua query memakai scope (organization_id) pemanggil.
+func (s selfServeSubscriptions) anyActiveContractProduct(ctx context.Context, scope coretenant.Scope, companyID string, match func(ids []string) (bool, error)) (bool, error) {
 	list, _, err := s.orders.List(ctx, scope, crmrepo.SalesOrderListFilter{CompanyID: companyID, Limit: 200})
 	if err != nil {
 		return false, err
@@ -81,14 +110,9 @@ func (s selfServeSubscriptions) HasActiveFeatureContract(ctx context.Context, sc
 		if len(ids) == 0 {
 			continue
 		}
-		products, err := s.products.FindByIDs(ctx, scope, ids)
-		if err != nil {
-			return false, err
-		}
-		for _, p := range products {
-			if len(p.Features) > 0 {
-				return true, nil
-			}
+		ok, err := match(ids)
+		if err != nil || ok {
+			return ok, err
 		}
 	}
 	return false, nil
@@ -144,52 +168,45 @@ func (d selfServeDeals) CloseLost(ctx context.Context, scope coretenant.Scope, i
 
 // ---- konfigurasi runtime ----
 
-// selfServeResolver membangun SelfServeService saat pertama dibutuhkan. Bot, pemilik deal, dan pipeline
-// Self-Serve dibuat oleh seeder; bila belum ada, API tetap hidup dan endpoint membalas 503 sampai seeder
-// dijalankan (tanpa perlu restart).
+// selfServeResolver adalah resolver konfigurasi self-serve untuk org platform. Bot, pemilik deal, dan
+// pipeline Self-Serve dibuat oleh seeder; di-resolve lazily saat dibutuhkan sehingga API tetap hidup dan
+// endpoint membalas 503 (ErrSelfServeNotConfigured dari service) sampai seeder dijalankan, tanpa restart.
 type selfServeResolver struct {
 	db       *database.Pool
 	cfg      selfServeRuntimeConfig
 	pipeline crmrepo.PipelineRepository
-	build    func(crmservice.SelfServeConfig) crmservice.SelfServeService
 
-	mu    sync.Mutex
-	inner crmservice.SelfServeService
+	mu     sync.Mutex
+	cached *crmservice.SelfServeConfig
 }
 
 type selfServeRuntimeConfig struct{ BotEmail, DealOwnerEmail string }
 
-func (r *selfServeResolver) Checkout(ctx context.Context, platform coretenant.Scope, req crmservice.SelfServeCheckoutRequest) (crmservice.SelfServeCheckoutResult, error) {
-	svc, err := r.service(ctx, platform)
-	if err != nil {
-		slog.ErrorContext(ctx, "self-serve is not configured", "error", err)
-		return crmservice.SelfServeCheckoutResult{}, crmservice.ErrSelfServeNotConfigured
-	}
-	return svc.Checkout(ctx, platform, req)
-}
+var _ crmservice.SelfServeConfigResolver = (*selfServeResolver)(nil)
 
-func (r *selfServeResolver) service(ctx context.Context, platform coretenant.Scope) (crmservice.SelfServeService, error) {
+func (r *selfServeResolver) Resolve(ctx context.Context, platform coretenant.Scope) (crmservice.SelfServeConfig, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.inner != nil {
-		return r.inner, nil
+	if r.cached != nil {
+		return *r.cached, nil
 	}
 	botID, err := r.userIDByEmail(ctx, r.cfg.BotEmail)
 	if err != nil {
-		return nil, fmt.Errorf("self-serve bot %q: %w (jalankan: cmd/seed -name self-serve)", r.cfg.BotEmail, err)
+		return crmservice.SelfServeConfig{}, fmt.Errorf("self-serve bot %q: %w (jalankan: cmd/seed -name self-serve)", r.cfg.BotEmail, err)
 	}
 	ownerID := botID
 	if email := strings.TrimSpace(r.cfg.DealOwnerEmail); email != "" {
 		if ownerID, err = r.userIDByEmail(ctx, email); err != nil {
-			return nil, fmt.Errorf("self-serve deal owner %q: %w", email, err)
+			return crmservice.SelfServeConfig{}, fmt.Errorf("self-serve deal owner %q: %w", email, err)
 		}
 	}
 	pipeline, err := r.pipeline.FindBySystemKey(ctx, platform, "self_serve")
 	if err != nil {
-		return nil, fmt.Errorf("self-serve pipeline: %w (jalankan: cmd/seed -name self-serve)", err)
+		return crmservice.SelfServeConfig{}, fmt.Errorf("self-serve pipeline: %w (jalankan: cmd/seed -name self-serve)", err)
 	}
-	r.inner = r.build(crmservice.SelfServeConfig{BotUserID: botID, DealOwnerUserID: ownerID, PipelineID: pipeline.ID})
-	return r.inner, nil
+	cfg := crmservice.SelfServeConfig{BotUserID: botID, DealOwnerUserID: ownerID, PipelineID: pipeline.ID}
+	r.cached = &cfg
+	return cfg, nil
 }
 
 func (r *selfServeResolver) userIDByEmail(ctx context.Context, email string) (string, error) {

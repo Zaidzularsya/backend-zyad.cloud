@@ -20,6 +20,10 @@ type CreateFormParams struct {
 	// CreateCRMLead: nilai kolom create_crm_lead untuk form baru.
 	CreateCRMLead   bool
 	LeadOwnerUserID string
+	// AfterSubmit kosong -> "message".
+	AfterSubmit     domain.AfterSubmitAction
+	WhatsAppNumber  string
+	WhatsAppMessage string
 }
 
 type UpdateFormParams struct {
@@ -33,6 +37,10 @@ type UpdateFormParams struct {
 	CreateCRMLead  *bool
 	// LeadOwnerUserID: nil = tidak diubah, "" = kosongkan.
 	LeadOwnerUserID *string
+	AfterSubmit     *domain.AfterSubmitAction
+	// WhatsAppNumber/WhatsAppMessage: nil = tidak diubah, "" = kosongkan (NULL).
+	WhatsAppNumber  *string
+	WhatsAppMessage *string
 }
 
 type CreateFormFieldParams struct {
@@ -45,6 +53,8 @@ type CreateFormFieldParams struct {
 	Validation  map[string]any
 	IsRequired  bool
 	SortOrder   int
+	// DefaultValue: nilai default field hidden.
+	DefaultValue string
 }
 
 type UpdateFormFieldParams struct {

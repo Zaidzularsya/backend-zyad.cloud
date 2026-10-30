@@ -14,6 +14,7 @@ import (
 	financehandler "zyad.cloud/internal/modules/finance/handler"
 	landinghandler "zyad.cloud/internal/modules/landing/handler"
 	mailboxhandler "zyad.cloud/internal/modules/mailbox/handler"
+	mikrotikhandler "zyad.cloud/internal/modules/mikrotik/handler"
 	organizationhandler "zyad.cloud/internal/modules/organization/handler"
 	producthandler "zyad.cloud/internal/modules/product/handler"
 	receivablehandler "zyad.cloud/internal/modules/receivable/handler"
@@ -47,6 +48,8 @@ type Dependencies struct {
 	UserAuthHandler                  *userhandler.AuthHandler
 	UserHandler                      *userhandler.UserHandler
 	LandingAdminPageHandler          *landinghandler.AdminPageHandler
+	LandingActivationHandler         *landinghandler.ActivationHandler
+	LandingActivationInvoicesHandler *landinghandler.ActivationInvoicesHandler
 	LandingAdminSectionHandler       *landinghandler.AdminSectionHandler
 	LandingAdminDocumentHandler      *landinghandler.AdminDocumentHandler
 	LandingAdminPageTemplateHandler  *landinghandler.AdminPageTemplateHandler
@@ -83,11 +86,18 @@ type Dependencies struct {
 	CRMQuotationHandler              *crmhandler.QuotationHandler
 	CRMPublicQuotationHandler        *crmhandler.PublicQuotationHandler
 	CRMSelfServeHandler              *crmhandler.SelfServeHandler
+	CRMTenantCheckoutHandler         *crmhandler.TenantCheckoutHandler
 	CRMSalesOrderHandler             *crmhandler.SalesOrderHandler
 	CRMDealOrdersHandler             *crmhandler.DealOrdersHandler
 	ReceivableContractHandler        *receivablehandler.ContractHandler
 	ReceivableOverviewHandler        *receivablehandler.OverviewHandler
+	ReceivableSettlementHandler      *receivablehandler.SettlementHandler
 	ReceivableAccountHandler         *receivablehandler.AccountHandler
+	MikrotikRouterHandler            *mikrotikhandler.RouterHandler
+	MikrotikSetupHandler             *mikrotikhandler.SetupHandler
+	// MikrotikRateCounter backs the per-organization limit on router-contacting
+	// mikrotik routes; nil disables it (fail open).
+	MikrotikRateCounter              middleware.RateCounter
 	ReceivableInvoiceHandler         *receivablehandler.InvoiceHandler
 	ReceivablePaymentHandler         *receivablehandler.PaymentHandler
 	ReceivableSettingsHandler        *receivablehandler.SettingsHandler

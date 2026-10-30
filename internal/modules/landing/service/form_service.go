@@ -26,6 +26,23 @@ func NewFormService(formRepo repository.FormRepository) FormService {
 }
 
 func (s *formService) CreateForm(ctx context.Context, scope coretenant.Scope, params repository.CreateFormParams) (domain.LandingForm, error) {
+	number, err := NormalizeWhatsAppNumber(params.WhatsAppNumber)
+	if err != nil {
+		return domain.LandingForm{}, err
+	}
+	params.WhatsAppNumber = number
+
+	// Klien lama hanya mengirim redirect_url: perlakukan sebagai aksi redirect (sama dengan backfill migration).
+	if params.AfterSubmit == "" {
+		params.AfterSubmit = domain.AfterSubmitMessage
+		if params.RedirectURL != "" {
+			params.AfterSubmit = domain.AfterSubmitRedirect
+		}
+	}
+	// Field inti belum dicek di sini: form baru dibuat kosong, lalu diisi lewat ReplaceFields.
+	if err := checkAfterSubmit(params.AfterSubmit, params.RedirectURL, params.WhatsAppNumber); err != nil {
+		return domain.LandingForm{}, err
+	}
 	return s.formRepo.Create(ctx, scope, params)
 }
 
@@ -68,6 +85,59 @@ func (s *formService) ListFormsByPage(ctx context.Context, scope coretenant.Scop
 }
 
 func (s *formService) UpdateForm(ctx context.Context, scope coretenant.Scope, formID string, params repository.UpdateFormParams) (domain.LandingForm, error) {
+	if params.WhatsAppNumber != nil {
+		number, err := NormalizeWhatsAppNumber(*params.WhatsAppNumber)
+		if err != nil {
+			return domain.LandingForm{}, err
+		}
+		params.WhatsAppNumber = &number
+	}
+
+	touchesAfterSubmit := params.AfterSubmit != nil || params.WhatsAppNumber != nil || params.RedirectURL != nil
+	enablesCRM := params.CreateCRMLead != nil && *params.CreateCRMLead
+	if !touchesAfterSubmit && !enablesCRM {
+		return s.formRepo.Update(ctx, scope, formID, params)
+	}
+
+	current, err := s.formRepo.FindByID(ctx, scope, formID)
+	if err != nil {
+		return domain.LandingForm{}, err
+	}
+
+	if touchesAfterSubmit {
+		action, redirect, number := current.AfterSubmit, current.RedirectURL, current.WhatsAppNumber
+		if params.RedirectURL != nil {
+			redirect = *params.RedirectURL
+		}
+		if params.WhatsAppNumber != nil {
+			number = *params.WhatsAppNumber
+		}
+		switch {
+		case params.AfterSubmit != nil:
+			action = *params.AfterSubmit
+		case params.RedirectURL != nil && redirect != "" && action == domain.AfterSubmitMessage:
+			// Klien lama hanya mengirim redirect_url.
+			action = domain.AfterSubmitRedirect
+			params.AfterSubmit = &action
+		case params.RedirectURL != nil && redirect == "" && action == domain.AfterSubmitRedirect:
+			action = domain.AfterSubmitMessage
+			params.AfterSubmit = &action
+		}
+		if err := checkAfterSubmit(action, redirect, number); err != nil {
+			return domain.LandingForm{}, err
+		}
+	}
+
+	if enablesCRM {
+		fields, err := s.formRepo.ListFieldsByForm(ctx, scope, formID)
+		if err != nil {
+			return domain.LandingForm{}, err
+		}
+		if err := checkCoreFields(true, shapesFromFields(fields)); err != nil {
+			return domain.LandingForm{}, err
+		}
+	}
+
 	return s.formRepo.Update(ctx, scope, formID, params)
 }
 
@@ -96,13 +166,31 @@ func (s *formService) DeleteField(ctx context.Context, scope coretenant.Scope, f
 }
 
 func (s *formService) ReplaceFields(ctx context.Context, scope coretenant.Scope, formID string, params []repository.CreateFormFieldParams) ([]domain.LandingFormField, error) {
-	// 1. Fetch existing fields
+	// 1. Validasi seluruh daftar SEBELUM menghapus apa pun, supaya penolakan tidak meninggalkan form kosong.
+	for _, param := range params {
+		if !param.Type.IsValid() {
+			return nil, ErrInvalidFieldType
+		}
+	}
+	params, err := normalizeFieldParams(params)
+	if err != nil {
+		return nil, err
+	}
+	form, err := s.formRepo.FindByID(ctx, scope, formID)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkCoreFields(form.CreateCRMLead, shapesFromParams(params)); err != nil {
+		return nil, err
+	}
+
+	// 2. Fetch existing fields
 	existingFields, err := s.formRepo.ListFieldsByForm(ctx, scope, formID)
 	if err != nil {
 		return nil, err
 	}
 
-	// 2. Delete existing fields
+	// 3. Delete existing fields
 	for _, field := range existingFields {
 		err := s.formRepo.DeleteField(ctx, scope, field.ID)
 		if err != nil {
@@ -110,13 +198,10 @@ func (s *formService) ReplaceFields(ctx context.Context, scope coretenant.Scope,
 		}
 	}
 
-	// 3. Create new fields
+	// 4. Create new fields
 	var createdFields []domain.LandingFormField
 	for _, param := range params {
 		param.FormID = formID
-		if !param.Type.IsValid() {
-			return nil, ErrInvalidFieldType
-		}
 		field, err := s.formRepo.CreateField(ctx, scope, param)
 		if err != nil {
 			return nil, err

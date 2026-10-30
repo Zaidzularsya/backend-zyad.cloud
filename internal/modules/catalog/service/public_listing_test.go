@@ -108,3 +108,198 @@ func TestPublicListingsPlatformMissingIsEmpty(t *testing.T) {
 		t.Fatalf("error lain harus diteruskan: %v", err)
 	}
 }
+
+func TestExcludeNeedsUpdate(t *testing.T) {
+	reg := newFakeRegistry()
+	good := pub("good", "Paket", 1, "a", 1, pricing.Monthly, "100", boolFeat("tcrm", true))
+	bad := pub("bad", "Paket", 1, "a", 1, pricing.Quarterly, "100", boolFeat("wa", true)) // wa tidak tenant_offerable
+	got, err := ExcludeNeedsUpdate(context.Background(), reg, []domain.Product{good, bad})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "good" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+// --- listing tenant (Task 8) ---
+
+type orgPublicRepo struct {
+	repository.ProductRepository
+	byOrg map[string][]domain.Product
+}
+
+func (f orgPublicRepo) ListPublic(_ context.Context, s coretenant.Scope) ([]domain.Product, error) {
+	return append([]domain.Product(nil), f.byOrg[s.OrganizationID()]...), nil
+}
+
+type fakeEntitlements struct{ granted map[string]bool }
+
+func (f fakeEntitlements) RequireFeature(_ context.Context, _ string, key string) error {
+	if f.granted[key] {
+		return nil
+	}
+	return errors.New("not entitled")
+}
+
+func tenantScope(t *testing.T, orgID string) coretenant.Scope {
+	t.Helper()
+	tc, err := coretenant.NewVerifiedContext(coretenant.VerifiedContextInput{
+		OrganizationID: orgID, OrganizationSlug: "org-" + orgID[:4], OrganizationType: coretenant.OrganizationTypeCustomer,
+		OrganizationStatus: coretenant.OrganizationStatusActive, MembershipID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+		MembershipStatus: "active", MembershipVersion: 1, ResolutionSource: coretenant.ResolutionSourceCustomDomain,
+		DataPlacement: coretenant.DataPlacementShared,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := coretenant.NewScope(tc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+const (
+	orgA = "11111111-1111-1111-1111-111111111111"
+	orgB = "22222222-2222-2222-2222-222222222222"
+)
+
+var bothReceivable = fakeEntitlements{granted: map[string]bool{"receivable.enabled": true, "receivable.online_payment": true}}
+
+func tenantCard(id string, feats ...domain.ProductFeature) domain.Product {
+	return pub(id, "Layanan", 0, "code-"+id, 0, pricing.Monthly, "100000.00", feats...)
+}
+
+func TestTenantListingsOnlyOwnProducts(t *testing.T) {
+	tcrm := boolFeat("tcrm", true)
+	repo := orgPublicRepo{byOrg: map[string][]domain.Product{
+		orgA: {tenantCard("a1", tcrm)},
+		orgB: {tenantCard("b1", tcrm)},
+	}}
+	svc := NewPublicListingService(repo, newFakeRegistry(), fakeScopes{}).WithEntitlements(bothReceivable)
+	got, err := svc.TenantListings(context.Background(), tenantScope(t, orgA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Categories) != 1 || len(got.Categories[0].Listings) != 1 || got.Categories[0].Listings[0].Variants[0].ProductID != "a1" {
+		t.Fatalf("got = %+v", got)
+	}
+}
+
+// ctx tanpa tenant context: gerbang needs_update tidak boleh bergantung pada ctx.
+func TestTenantListingsExcludesNeedsUpdate(t *testing.T) {
+	repo := orgPublicRepo{byOrg: map[string][]domain.Product{orgA: {
+		tenantCard("ok", boolFeat("tcrm", true)),
+		tenantCard("stale", boolFeat("crm", true)), // crm bukan tenant_offerable
+		tenantCard("gone", boolFeat("hilang", true)),
+	}}}
+	svc := NewPublicListingService(repo, newFakeRegistry(), fakeScopes{}).WithEntitlements(bothReceivable)
+	got, err := svc.TenantListings(context.Background(), tenantScope(t, orgA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Categories) != 1 || len(got.Categories[0].Listings) != 1 || got.Categories[0].Listings[0].Variants[0].ProductID != "ok" {
+		t.Fatalf("got = %+v", got)
+	}
+}
+
+func TestTenantListingsCheckoutGate(t *testing.T) {
+	repo := orgPublicRepo{byOrg: map[string][]domain.Product{orgA: {tenantCard("a1", boolFeat("tcrm", true))}}}
+	cases := []struct {
+		name string
+		ent  EntitlementChecker
+		want bool
+	}{
+		{"keduanya", bothReceivable, true},
+		{"tanpa online_payment", fakeEntitlements{granted: map[string]bool{"receivable.enabled": true}}, false},
+		{"tanpa enabled", fakeEntitlements{granted: map[string]bool{"receivable.online_payment": true}}, false},
+		{"tanpa checker", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := NewPublicListingService(repo, newFakeRegistry(), fakeScopes{})
+			if tc.ent != nil {
+				svc = svc.WithEntitlements(tc.ent)
+			}
+			got, err := svc.TenantListings(context.Background(), tenantScope(t, orgA))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if v := got.Categories[0].Listings[0].Variants[0]; v.CheckoutEnabled != tc.want {
+				t.Fatalf("checkout_enabled = %v, want %v", v.CheckoutEnabled, tc.want)
+			}
+		})
+	}
+}
+
+// Produk tak layak checkout tetap false walau entitlement lengkap.
+func TestTenantListingsCheckoutNeedsValidProduct(t *testing.T) {
+	free := tenantCard("free", boolFeat("tcrm", true))
+	free.BasePrice = "0.00"
+	repo := orgPublicRepo{byOrg: map[string][]domain.Product{orgA: {free}}}
+	svc := NewPublicListingService(repo, newFakeRegistry(), fakeScopes{}).WithEntitlements(bothReceivable)
+	got, err := svc.TenantListings(context.Background(), tenantScope(t, orgA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Categories[0].Listings[0].Variants[0].CheckoutEnabled {
+		t.Fatal("harga 0 tidak boleh checkout")
+	}
+}
+
+// Regresi: listing platform tak terpengaruh entitlement maupun gerbang needs_update.
+func TestPlatformListingsUnaffectedByTenantGate(t *testing.T) {
+	repo := fakePublicRepo{products: []domain.Product{pub("p", "Zyad Cloud", 0, "pro", 0, pricing.Monthly, "100000.00", boolFeat("crm", true))}}
+	svc := NewPublicListingService(repo, newFakeRegistry(), fakeScopes{}).WithEntitlements(fakeEntitlements{})
+	got, err := svc.Listings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Categories) != 1 || !got.Categories[0].Listings[0].Variants[0].CheckoutEnabled {
+		t.Fatalf("got = %+v", got)
+	}
+}
+
+// Spec §4.2: produk tenant tanpa fitur bisa dibeli; aturan harga/recurring/prabayar tetap berlaku.
+func TestTenantListingsFeaturelessProductCheckout(t *testing.T) {
+	plain := tenantCard("plain")
+	postpaid := tenantCard("post")
+	postpaid.Pricing.PaymentTiming = pricing.Postpaid
+	oneTime := tenantCard("once")
+	oneTime.Pricing = pricing.Attributes{ChargeType: pricing.OneTime, PaymentTiming: pricing.Prepaid}
+	free := tenantCard("free")
+	free.BasePrice = "0.00"
+	repo := orgPublicRepo{byOrg: map[string][]domain.Product{orgA: {plain, postpaid, oneTime, free}}}
+	svc := NewPublicListingService(repo, newFakeRegistry(), fakeScopes{}).WithEntitlements(bothReceivable)
+	got, err := svc.TenantListings(context.Background(), tenantScope(t, orgA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{"plain": true, "post": false, "once": false, "free": false}
+	seen := 0
+	for _, l := range got.Categories[0].Listings {
+		for _, v := range l.Variants {
+			seen++
+			if v.CheckoutEnabled != want[v.ProductID] {
+				t.Errorf("%s: checkout_enabled = %v, want %v", v.ProductID, v.CheckoutEnabled, want[v.ProductID])
+			}
+		}
+	}
+	if seen != len(want) {
+		t.Fatalf("variants seen = %d", seen)
+	}
+}
+
+// Regresi: listing platform tetap mensyaratkan fitur.
+func TestPlatformListingsStillRequireFeatures(t *testing.T) {
+	repo := fakePublicRepo{products: []domain.Product{pub("p", "Zyad Cloud", 0, "pro", 0, pricing.Monthly, "100000.00")}}
+	svc := NewPublicListingService(repo, newFakeRegistry(), fakeScopes{}).WithEntitlements(bothReceivable)
+	got, err := svc.Listings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Categories[0].Listings[0].Variants[0].CheckoutEnabled {
+		t.Fatal("platform product without features must not be checkout_enabled")
+	}
+}

@@ -345,3 +345,144 @@ func TestFormTenantIsolationSuite(t *testing.T) {
 	}
 	testutil.RunTenantIsolationSuite(t, adapter)
 }
+
+// newFlexFormFixture menyiapkan org + halaman untuk test kolom form fleksibel (migration 000157).
+func newFlexFormFixture(t *testing.T) (context.Context, repository.FormRepository, coretenant.Scope, string) {
+	t.Helper()
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+
+	_, err := db.Exec(ctx, `
+		INSERT INTO users (id, name, email, status)
+		VALUES ('11111111-1111-1111-1111-111111111111', 'Mock User A', 'mock_a@example.com', 'active')
+		ON CONFLICT DO NOTHING`)
+	if err != nil {
+		t.Fatalf("insert mock user: %v", err)
+	}
+	_, err = db.Exec(ctx, `
+		INSERT INTO organizations (id, type, slug, name, status)
+		VALUES ($1, 'customer', 'organization-a', 'Organization A', 'active')
+		ON CONFLICT DO NOTHING`, tenants.A.OrganizationID)
+	if err != nil {
+		t.Fatalf("insert mock organization: %v", err)
+	}
+
+	page, err := repository.NewPageRepository(db).Create(ctx, tenants.A.Scope, repository.CreatePageParams{
+		Name:       "Flex Page",
+		Title:      "Flex",
+		Slug:       strings.ReplaceAll("page-"+testutil.UniqueCode("formflex"), ".", "-"),
+		Type:       domain.PageTypeCampaign,
+		Status:     domain.PageStatusDraft,
+		Visibility: domain.PageVisibilityPublic,
+		Locale:     "id-ID",
+		Timezone:   "Asia/Jakarta",
+		CreatedBy:  "11111111-1111-1111-1111-111111111111",
+	})
+	if err != nil {
+		t.Fatalf("create page: %v", err)
+	}
+	return ctx, repository.NewFormRepository(db), tenants.A.Scope, page.ID
+}
+
+func TestFormRepository_AfterSubmitAndWhatsAppRoundTrip(t *testing.T) {
+	ctx, repo, scope, pageID := newFlexFormFixture(t)
+
+	created, err := repo.Create(ctx, scope, repository.CreateFormParams{
+		LandingPageID:   pageID,
+		Name:            "Konsultasi",
+		Key:             "konsultasi-wa",
+		SubmitLabel:     "Kirim",
+		IsActive:        true,
+		AfterSubmit:     domain.AfterSubmitWhatsApp,
+		WhatsAppNumber:  "6281234567890",
+		WhatsAppMessage: "Halo {nama}",
+	})
+	if err != nil {
+		t.Fatalf("create form: %v", err)
+	}
+	got, err := repo.FindByID(ctx, scope, created.ID)
+	if err != nil {
+		t.Fatalf("find form: %v", err)
+	}
+	if got.AfterSubmit != domain.AfterSubmitWhatsApp || got.WhatsAppNumber != "6281234567890" || got.WhatsAppMessage != "Halo {nama}" {
+		t.Fatalf("round trip mismatch: %+v", got)
+	}
+
+	empty := ""
+	after := domain.AfterSubmitMessage
+	updated, err := repo.Update(ctx, scope, created.ID, repository.UpdateFormParams{
+		AfterSubmit:     &after,
+		WhatsAppNumber:  &empty,
+		WhatsAppMessage: &empty,
+	})
+	if err != nil {
+		t.Fatalf("update form: %v", err)
+	}
+	if updated.AfterSubmit != domain.AfterSubmitMessage || updated.WhatsAppNumber != "" || updated.WhatsAppMessage != "" {
+		t.Fatalf("expected cleared whatsapp fields, got %+v", updated)
+	}
+}
+
+func TestFormRepository_DefaultAfterSubmitIsMessage(t *testing.T) {
+	ctx, repo, scope, pageID := newFlexFormFixture(t)
+
+	created, err := repo.Create(ctx, scope, repository.CreateFormParams{
+		LandingPageID: pageID, Name: "Default", Key: "default-after", SubmitLabel: "Kirim", IsActive: true,
+	})
+	if err != nil {
+		t.Fatalf("create form: %v", err)
+	}
+	if created.AfterSubmit != domain.AfterSubmitMessage {
+		t.Fatalf("expected default after_submit=message, got %q", created.AfterSubmit)
+	}
+}
+
+func TestFormRepository_FieldDefaultValueRoundTrip(t *testing.T) {
+	ctx, repo, scope, pageID := newFlexFormFixture(t)
+
+	form, err := repo.Create(ctx, scope, repository.CreateFormParams{
+		LandingPageID: pageID, Name: "Field Default", Key: "field-default", SubmitLabel: "Kirim", IsActive: true,
+	})
+	if err != nil {
+		t.Fatalf("create form: %v", err)
+	}
+	if _, err := repo.CreateField(ctx, scope, repository.CreateFormFieldParams{
+		FormID: form.ID, Key: "interest", Type: domain.FormFieldTypeHidden, Label: "Minat",
+		DefaultValue: "Paket 20 Mbps", SortOrder: 0,
+	}); err != nil {
+		t.Fatalf("create field: %v", err)
+	}
+	fields, err := repo.ListFieldsByForm(ctx, scope, form.ID)
+	if err != nil || len(fields) != 1 {
+		t.Fatalf("list fields: %v len=%d", err, len(fields))
+	}
+	if fields[0].DefaultValue != "Paket 20 Mbps" {
+		t.Fatalf("expected default value to round trip, got %q", fields[0].DefaultValue)
+	}
+}
+
+func TestMigration000157_BackfillsRedirect(t *testing.T) {
+	ctx, repo, scope, pageID := newFlexFormFixture(t)
+
+	withRedirect, err := repo.Create(ctx, scope, repository.CreateFormParams{
+		LandingPageID: pageID, Name: "R", Key: "mig-redirect", SubmitLabel: "Kirim", IsActive: true,
+		RedirectURL: "/terima-kasih",
+	})
+	if err != nil {
+		t.Fatalf("create form: %v", err)
+	}
+	// Backfill adalah satu UPDATE di migration; ulangi pernyataan yang sama terhadap baris baru
+	// untuk membuktikan semantiknya (up sudah dijalankan OpenTestDatabase terhadap data kosong).
+	db := testutil.OpenTestDatabase(t)
+	if _, err := db.Exec(ctx, `UPDATE landing_forms SET after_submit = 'redirect' WHERE coalesce(trim(redirect_url), '') <> ''`); err != nil {
+		t.Fatalf("apply backfill: %v", err)
+	}
+	got, err := repo.FindByID(ctx, scope, withRedirect.ID)
+	if err != nil {
+		t.Fatalf("find form: %v", err)
+	}
+	if got.AfterSubmit != domain.AfterSubmitRedirect {
+		t.Fatalf("expected redirect after backfill, got %q", got.AfterSubmit)
+	}
+}
