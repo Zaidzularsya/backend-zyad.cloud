@@ -12,15 +12,17 @@ import (
 )
 
 // buildMikrotik assembles the Mikrotik router module: repository, production
-// RouterOS client factory, service and HTTP handler.
-func buildMikrotik(cfg config.Config, db *database.Pool) *mikrotikhandler.RouterHandler {
+// RouterOS client factory, services and HTTP handlers.
+func buildMikrotik(cfg config.Config, db *database.Pool) (*mikrotikhandler.RouterHandler, *mikrotikhandler.SetupHandler) {
+	repo := mikrotikrepo.NewRouterRepository(db)
 	svc := mikrotikservice.NewRouterService(
-		mikrotikrepo.NewRouterRepository(db),
+		repo,
 		mikrotikservice.NewPlatformClientFactory(),
 		cfg.App.Secret,
 		cfg.Mikrotik.AllowedPrivateCIDRs,
 	)
-	return mikrotikhandler.NewRouterHandler(svc)
+	setup := mikrotikservice.NewSetupService(svc, repo)
+	return mikrotikhandler.NewRouterHandler(svc), mikrotikhandler.NewSetupHandler(setup)
 }
 
 // registerMikrotikRoutes mounts /app/mikrotik under the authenticated group.
@@ -38,4 +40,7 @@ func registerMikrotikRoutes(protected *gin.RouterGroup, deps Dependencies) {
 		middleware.RequireEntitlement(deps.CRMEntitlementChecker, "mikrotik.enabled"),
 	)
 	deps.MikrotikRouterHandler.RegisterRoutes(group, deps.PermissionChecker)
+	if deps.MikrotikSetupHandler != nil {
+		deps.MikrotikSetupHandler.RegisterRoutes(group, deps.PermissionChecker)
+	}
 }

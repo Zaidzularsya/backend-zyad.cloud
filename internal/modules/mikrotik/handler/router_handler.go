@@ -174,6 +174,8 @@ func (h *RouterHandler) Check(c *gin.Context) {
 func failRouter(c *gin.Context, err error) {
 	var invalidErr *mikrotik.InvalidInputError
 	var tlsErr *mikrotik.TLSUntrustedError
+	var conflictErr *mikrotik.SetupConflictError
+	var stepErr *mikrotik.SetupStepError
 	switch {
 	case errors.Is(err, mikrotik.ErrRouterNotFound):
 		response.Error(c, http.StatusNotFound, "MIKROTIK_ROUTER_NOT_FOUND", "router not found")
@@ -181,6 +183,10 @@ func failRouter(c *gin.Context, err error) {
 		response.Error(c, http.StatusConflict, "MIKROTIK_ROUTER_NAME_TAKEN", "router name is already used")
 	case errors.As(err, &invalidErr):
 		response.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", invalidErr.Message)
+	case errors.Is(err, mikrotik.ErrPlanChanged):
+		response.Error(c, http.StatusConflict, "MIKROTIK_SETUP_PLAN_CHANGED", "router state changed since preview; preview again before applying")
+	case errors.As(err, &conflictErr):
+		response.Error(c, http.StatusConflict, "MIKROTIK_SETUP_CONFLICT", conflictErr.Error())
 	case errors.Is(err, mikrotik.ErrHostNotAllowed):
 		response.Error(c, http.StatusUnprocessableEntity, "MIKROTIK_HOST_NOT_ALLOWED", "router host is not allowed")
 	case errors.Is(err, mikrotik.ErrTLSRequired):
@@ -195,6 +201,12 @@ func failRouter(c *gin.Context, err error) {
 		response.Error(c, http.StatusBadGateway, "MIKROTIK_AUTH_FAILED", "router rejected the credentials")
 	case errors.Is(err, mikrotik.ErrUnreachable):
 		response.Error(c, http.StatusBadGateway, "MIKROTIK_UNREACHABLE", "router is unreachable")
+	case errors.Is(err, mikrotik.ErrSetupStateNotSaved):
+		response.Error(c, http.StatusInternalServerError, "MIKROTIK_SETUP_STATE_NOT_SAVED", err.Error())
+	case errors.As(err, &stepErr) && errors.Is(err, mikrotik.ErrSetupFailed):
+		// Transport causes (unreachable, auth, TLS) were matched above through Unwrap.
+		response.Error(c, http.StatusBadGateway, "MIKROTIK_SETUP_FAILED",
+			"router rejected setup step ("+stepErr.Step+"); isolir is not marked ready, apply is safe to retry")
 	default:
 		c.Error(err) // logged by middleware, not exposed
 		response.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")

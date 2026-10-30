@@ -94,6 +94,7 @@ type Dependencies struct {
 	ReceivableSettlementHandler      *receivablehandler.SettlementHandler
 	ReceivableAccountHandler         *receivablehandler.AccountHandler
 	MikrotikRouterHandler            *mikrotikhandler.RouterHandler
+	MikrotikSetupHandler             *mikrotikhandler.SetupHandler
 	ReceivableInvoiceHandler         *receivablehandler.InvoiceHandler
 	ReceivablePaymentHandler         *receivablehandler.PaymentHandler
 	ReceivableSettingsHandler        *receivablehandler.SettingsHandler

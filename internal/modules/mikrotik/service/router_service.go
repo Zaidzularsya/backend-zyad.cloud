@@ -321,22 +321,48 @@ func (s *RouterService) Check(ctx context.Context, scope coretenant.Scope, id st
 }
 
 func (s *RouterService) probe(ctx context.Context, router domain.Router) (string, error) {
-	password, err := corecrypto.DecryptSecret(s.secret, router.PasswordEncrypted)
+	client, password, err := s.dial(ctx, router)
 	if err != nil {
-		return "", errors.New("decrypt router password")
-	}
-	if err := s.checkHostPolicy(ctx, router.Host, router.UseTLS); err != nil {
 		return "", err
-	}
-	client, err := s.factory.New(string(router.APIType), s.endpoint(router.Host, router.Port, router.UseTLS, router.TLSFingerprint, router.Username, password))
-	if err != nil {
-		return "", mikrotik.ErrUnreachable
 	}
 	version, err := client.Version(ctx)
 	if err != nil {
 		return "", translateClientError(err, password, router.PasswordEncrypted)
 	}
 	return version, nil
+}
+
+// dial decrypts the stored password, applies the host policy and builds a
+// client for the stored router. The plaintext password is returned only so the
+// caller (same package) can scrub it from errors and logs; it must never be
+// logged, stored or returned to API clients.
+func (s *RouterService) dial(ctx context.Context, router domain.Router) (pmk.RouterClient, string, error) {
+	password, err := corecrypto.DecryptSecret(s.secret, router.PasswordEncrypted)
+	if err != nil {
+		return nil, "", errors.New("decrypt router password")
+	}
+	if err := s.checkHostPolicy(ctx, router.Host, router.UseTLS); err != nil {
+		return nil, "", err
+	}
+	client, err := s.factory.New(string(router.APIType), s.endpoint(router.Host, router.Port, router.UseTLS, router.TLSFingerprint, router.Username, password))
+	if err != nil {
+		return nil, "", mikrotik.ErrUnreachable
+	}
+	return client, password, nil
+}
+
+// openClient loads a router by id and opens a RouterOS client for it. secrets
+// lists every value that must be scrubbed from anything derived from errors.
+func (s *RouterService) openClient(ctx context.Context, scope coretenant.Scope, id string) (domain.Router, pmk.RouterClient, []string, error) {
+	router, err := s.Get(ctx, scope, id)
+	if err != nil {
+		return domain.Router{}, nil, nil, err
+	}
+	client, password, err := s.dial(ctx, router)
+	if err != nil {
+		return domain.Router{}, nil, nil, err
+	}
+	return router, client, []string{password, router.PasswordEncrypted}, nil
 }
 
 // Update applies a partial update. Changing the endpoint or credentials

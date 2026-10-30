@@ -108,3 +108,56 @@ func TestMikrotikRoutesAreGatedByEntitlement(t *testing.T) {
 		})
 	}
 }
+
+type countingSetupService struct{ calls int }
+
+func (s *countingSetupService) Preview(context.Context, coretenant.Scope, string, mikrotikservice.SetupInput) (mikrotikdomain.SetupPlan, error) {
+	s.calls++
+	return mikrotikdomain.SetupPlan{}, nil
+}
+func (s *countingSetupService) Apply(context.Context, coretenant.Scope, string, mikrotikservice.SetupInput, string, string) (mikrotikdomain.Router, error) {
+	s.calls++
+	return mikrotikdomain.Router{}, nil
+}
+func (s *countingSetupService) Cleanup(context.Context, coretenant.Scope, string, string) (mikrotikdomain.Router, error) {
+	s.calls++
+	return mikrotikdomain.Router{}, nil
+}
+
+func TestMikrotikSetupRoutesAreGatedByEntitlement(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tenantContext, err := coretenant.NewVerifiedContext(coretenant.VerifiedContextInput{
+		OrganizationID: "11111111-1111-1111-1111-111111111111", OrganizationSlug: "organization-a",
+		OrganizationType: coretenant.OrganizationTypeCustomer, OrganizationStatus: coretenant.OrganizationStatusActive,
+		MembershipID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", MembershipStatus: "active", MembershipVersion: 1,
+		ResolutionSource: coretenant.ResolutionSourceSession, DataPlacement: coretenant.DataPlacementShared,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, allow := range []bool{false, true} {
+		checker := &recordingEntitlements{allow: allow}
+		setup := &countingSetupService{}
+		engine := gin.New()
+		protected := engine.Group("/api/v1")
+		protected.Use(func(c *gin.Context) {
+			c.Request = c.Request.WithContext(coretenant.WithContext(c.Request.Context(), tenantContext))
+			c.Next()
+		})
+		registerMikrotikRoutes(protected, Dependencies{
+			CRMEntitlementChecker: checker,
+			MikrotikRouterHandler: mikrotikhandler.NewRouterHandler(&countingRouterService{}),
+			MikrotikSetupHandler:  mikrotikhandler.NewSetupHandler(setup),
+		})
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/app/mikrotik/routers/33333333-3333-3333-3333-333333333333/setup/cleanup", nil)
+		engine.ServeHTTP(w, req)
+		wantCalls, wantStatus := 0, http.StatusForbidden
+		if allow {
+			wantCalls, wantStatus = 1, http.StatusOK
+		}
+		if setup.calls != wantCalls || w.Code != wantStatus {
+			t.Fatalf("allow=%v: status = %d (want %d), calls = %d (want %d)", allow, w.Code, wantStatus, setup.calls, wantCalls)
+		}
+	}
+}

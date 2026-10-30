@@ -30,6 +30,8 @@ type fakeRepo struct {
 	seq     int
 	audits  []repository.AuditEntry
 	checks  []string
+	setups  []setupCall
+	markErr error
 
 	// Error injection.
 	auditErr, checkErr, createErr, updateErr error
@@ -124,7 +126,24 @@ func (f *fakeRepo) RecordCheck(_ context.Context, _ coretenant.Scope, id, status
 	return nil
 }
 
-func (f *fakeRepo) MarkSetup(context.Context, coretenant.Scope, string, bool, string, string) error {
+type setupCall struct {
+	id          string
+	ready       bool
+	profile     string
+	redirectURL string
+}
+
+func (f *fakeRepo) MarkSetup(_ context.Context, _ coretenant.Scope, id string, ready bool, profile, redirectURL string) error {
+	if f.markErr != nil {
+		return f.markErr
+	}
+	r, ok := f.routers[id]
+	if !ok {
+		return mikrotik.ErrRouterNotFound
+	}
+	r.IsolirReady, r.IsolirProfileName, r.IsolirRedirectURL = ready, profile, redirectURL
+	f.routers[id] = r
+	f.setups = append(f.setups, setupCall{id, ready, profile, redirectURL})
 	return nil
 }
 
