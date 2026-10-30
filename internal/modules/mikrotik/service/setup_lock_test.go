@@ -39,7 +39,7 @@ func TestSetupLockHeldRefusesApplyAndCleanupWithoutTouchingAnything(t *testing.T
 		t.Fatal("held lock must leave isolir_ready untouched")
 	}
 	for _, k := range f.locker.keys {
-		if k != "mikrotik.setup:"+f.routerID {
+		if k != "mikrotik.setup:"+testScope(t).OrganizationID()+":"+f.routerID {
 			t.Fatalf("lock key = %q", k)
 		}
 	}
@@ -121,5 +121,27 @@ func TestPreviewDoesNotLock(t *testing.T) {
 	f.preview(t, validSetup())
 	if len(f.locker.keys) != 0 {
 		t.Fatal("preview must not take the setup lock")
+	}
+}
+
+func TestSetupConcurrencyCapRefusesWithoutLockingAndReleasesSlot(t *testing.T) {
+	f := newSetupFixture(t)
+	for i := 0; i < cap(f.svc.slots); i++ {
+		f.svc.slots <- struct{}{}
+	}
+	if _, err := f.svc.Cleanup(context.Background(), testScope(t), f.routerID, testActor); !errors.Is(err, mikrotik.ErrSetupInProgress) {
+		t.Fatalf("cleanup err = %v, want ErrSetupInProgress", err)
+	}
+	if f.locker.acquired != 0 {
+		t.Fatal("lock taken although all slots were busy")
+	}
+	for i := 0; i < cap(f.svc.slots); i++ {
+		<-f.svc.slots
+	}
+	if _, err := f.svc.Cleanup(context.Background(), testScope(t), f.routerID, testActor); err != nil {
+		t.Fatalf("cleanup after slots freed: %v", err)
+	}
+	if len(f.svc.slots) != 0 {
+		t.Fatalf("slot leaked: %d in use", len(f.svc.slots))
 	}
 }

@@ -75,7 +75,10 @@ organization aktif bertipe customer atau platform.
 - `cleanup` hanya menghapus objek `zyad-managed` dan aman diulang.
 - `apply` dan `cleanup` pada router yang sama diserialkan dengan advisory lock Postgres per router (try-lock, tidak
   menunggu) yang diambil sebelum state router dibaca. Bila lock sedang dipegang: 409 `MIKROTIK_SETUP_IN_PROGRESS`, tidak
-  ada yang dibaca atau ditulis. `preview` tidak mengambil lock.
+  ada yang dibaca atau ditulis. `preview` tidak mengambil lock. Kunci lock memuat organisasi dan router
+  (`mikrotik.setup:<org>:<router>`), jadi tenant lain tidak bisa menahan lock milik pemilik router. Karena tiap lock
+  menahan satu koneksi pool sampai beberapa menit, jumlah `apply`/`cleanup` yang berjalan bersamaan dibatasi 2 per
+  proses; yang melebihi batas mendapat 409 `MIKROTIK_SETUP_IN_PROGRESS` yang sama.
 - **Setup lewat REST dikunci**: jalur tulis REST (PUT add dengan `place-before`, filter query, PATCH/DELETE per `.id`)
   baru diuji dengan httptest. Selama env `MIKROTIK_SETUP_ALLOW_REST` bernilai `false` (default), `apply` dan `cleanup`
   untuk router `api_type=rest` ditolak dengan 422 `MIKROTIK_SETUP_REST_UNVERIFIED` sebelum ada tulisan ke router atau

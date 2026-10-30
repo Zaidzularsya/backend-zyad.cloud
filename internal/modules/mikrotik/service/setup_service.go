@@ -117,10 +117,16 @@ type SetupService struct {
 	repo    repository.RouterRepository
 	locker  SetupLocker
 	opts    SetupOptions
+	// slots caps concurrent Apply/Cleanup per process: each holds one pooled
+	// connection (the advisory lock) for up to minutes, and the pool is small.
+	slots chan struct{}
 }
 
+// maxConcurrentSetups leaves most of the pool free for ordinary requests.
+const maxConcurrentSetups = 2
+
 func NewSetupService(routers *RouterService, repo repository.RouterRepository, locker SetupLocker, opts SetupOptions) *SetupService {
-	return &SetupService{routers: routers, repo: repo, locker: locker, opts: opts}
+	return &SetupService{routers: routers, repo: repo, locker: locker, opts: opts, slots: make(chan struct{}, maxConcurrentSetups)}
 }
 
 // checkTransport refuses router writes over an unverified transport.
@@ -134,19 +140,31 @@ func (s *SetupService) checkTransport(r domain.Router) error {
 // lockSetup takes the per-router setup lock. Without it a Cleanup could list
 // and remove objects while an Apply that saw them as existing marks the router
 // ready (isolir_ready=true with the objects gone). Preview does not lock.
-func (s *SetupService) lockSetup(ctx context.Context, routerID string) (func(), error) {
+func (s *SetupService) lockSetup(ctx context.Context, scope coretenant.Scope, routerID string) (func(), error) {
 	if !validID(routerID) {
 		return nil, mikrotik.ErrRouterNotFound
 	}
-	unlock, ok, err := s.locker.TryLock(ctx, "mikrotik.setup:"+routerID)
+	select {
+	case s.slots <- struct{}{}:
+	default:
+		return nil, mikrotik.ErrSetupInProgress
+	}
+	// The key carries the organization so another tenant that knows a router
+	// UUID cannot hold the lock of the owner.
+	unlock, ok, err := s.locker.TryLock(ctx, "mikrotik.setup:"+scope.OrganizationID()+":"+routerID)
 	if err != nil {
+		<-s.slots
 		slog.Warn("mikrotik: acquire setup lock failed", "router_id", routerID, "error", scrub(err.Error()))
 		return nil, errors.New("acquire setup lock failed")
 	}
 	if !ok {
+		<-s.slots
 		return nil, mikrotik.ErrSetupInProgress
 	}
-	return unlock, nil
+	return func() {
+		unlock()
+		<-s.slots
+	}, nil
 }
 
 // ---- input validation --------------------------------------------------
@@ -759,7 +777,7 @@ func (s *SetupService) Apply(ctx context.Context, scope coretenant.Scope, router
 	}
 	// Lock before reading router state, so the plan and the ready check below
 	// cannot interleave with a concurrent Cleanup of the same router.
-	unlock, err := s.lockSetup(ctx, routerID)
+	unlock, err := s.lockSetup(ctx, scope, routerID)
 	if err != nil {
 		return domain.Router{}, err
 	}
@@ -882,7 +900,7 @@ func removable(r pmk.Row, query pmk.Row) bool {
 // dependency order, under the per-router setup lock (see Apply). Fail closed: isolir_ready is cleared before the first
 // Remove, and if that fails nothing is removed.
 func (s *SetupService) Cleanup(ctx context.Context, scope coretenant.Scope, routerID, actor string) (domain.Router, error) {
-	unlock, err := s.lockSetup(ctx, routerID)
+	unlock, err := s.lockSetup(ctx, scope, routerID)
 	if err != nil {
 		return domain.Router{}, err
 	}
