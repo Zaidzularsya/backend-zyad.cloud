@@ -330,3 +330,11 @@ MIKROTIK_LAB_WRITE=1 MIKROTIK_LAB_BACKUP_NAME=pre-zyad-isolir-$(date +%Y%m%d%H%M
 MIKROTIK_LAB_WRITE=1 go test -tags mikrotiklab -run 'TestLabIsolirTransports|TestLabIsolirMechanism' -v ./internal/platform/mikrotik/
 go test -tags mikrotiklab -run 'TestLabIsolirLeftovers' -v ./internal/platform/mikrotik/
 ```
+
+## 12. Operasional: timeout HTTP dan nginx
+
+Satu siklus lab preview + apply + preview + apply + cleanup makan ±70 dtk karena klien binary login ulang per
+panggilan. Handler mikrotik memperpanjang write deadline koneksi (apply/cleanup 4 menit, preview 90 dtk,
+registrasi/PATCH/check 45 dtk), tetapi reverse proxy punya batasnya sendiri: di DEV/prod set
+`proxy_read_timeout 300s;` untuk `location /api/v1/app/mikrotik/`. Tanpa itu klien bisa melihat 502 sementara
+operasi di backend tetap selesai. Detail: `docs/reference-mikrotik.md` bagian "Timeout dan nginx".

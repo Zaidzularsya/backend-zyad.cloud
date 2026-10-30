@@ -61,6 +61,21 @@ organization aktif bertipe customer atau platform.
 - Redirect **mati secara default**; hanya direncanakan bila `redirect_url` diisi.
 - Router yang belum disiapkan tetap terdaftar (`isolir_ready=false`).
 
+## Timeout dan nginx
+
+- Server memakai `HTTP_WRITE_TIMEOUT_SECONDS` (default 15 dtk), padahal pekerjaan router bisa lebih lama: klien binary
+  membuka satu koneksi + login per panggilan RouterOS, sehingga `apply`/`cleanup` di lab makan 15-25 dtk. Handler
+  mikrotik memperpanjang write deadline koneksinya sendiri (`http.NewResponseController`): `setup/apply` dan
+  `setup/cleanup` 4 menit, `setup/preview` 90 dtk, `POST /routers`, `PATCH /routers/{id}`, dan `/check` 45 dtk. Writer
+  yang tidak mendukung deadline diabaikan (request tetap jalan dengan default server).
+- Batas waktu sisi klien router: `Detect` (registrasi/PATCH) selesai dalam satu anggaran total maksimal 12 dtk (kecuali
+  `Endpoint.Timeout` dikonfigurasi lebih besar); probe pertama maksimal 5 dtk, probe kedua mendapat sisa anggaran.
+  Lookup DNS host router dibatasi 3 dtk dan kegagalannya dilaporkan sebagai `MIKROTIK_UNREACHABLE`. Satu panggilan
+  binary API memakai satu deadline untuk dial + TLS + login + perintah.
+- **nginx (DEV/prod)**: set `proxy_read_timeout 300s;` (minimal) untuk `location /api/v1/app/mikrotik/`. Tanpa itu
+  klien bisa menerima 502 dari nginx padahal operasi di backend tetap selesai; klien lalu cenderung mengulang.
+- Follow-up (belum dikerjakan): sesi binary per operasi (satu login untuk seluruh `apply`/`cleanup`) agar durasi turun.
+
 ## Kode error
 
 `MIKROTIK_ROUTER_NOT_FOUND` (404), `MIKROTIK_ROUTER_NAME_TAKEN` (409), `VALIDATION_ERROR` (422),

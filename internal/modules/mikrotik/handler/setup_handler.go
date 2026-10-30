@@ -44,6 +44,7 @@ func setupInput(r dto.SetupRequest) service.SetupInput {
 }
 
 func (h *SetupHandler) Preview(c *gin.Context) {
+	extendWriteDeadline(c, previewWriteDeadline)
 	scope, ok := scopeOrFail(c)
 	if !ok {
 		return
@@ -62,6 +63,7 @@ func (h *SetupHandler) Preview(c *gin.Context) {
 }
 
 func (h *SetupHandler) Apply(c *gin.Context) {
+	extendWriteDeadline(c, setupWriteDeadline)
 	scope, ok := scopeOrFail(c)
 	if !ok {
 		return
@@ -80,6 +82,7 @@ func (h *SetupHandler) Apply(c *gin.Context) {
 }
 
 func (h *SetupHandler) Cleanup(c *gin.Context) {
+	extendWriteDeadline(c, setupWriteDeadline)
 	scope, ok := scopeOrFail(c)
 	if !ok {
 		return

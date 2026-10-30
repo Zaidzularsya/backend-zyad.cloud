@@ -89,6 +89,7 @@ func (h *RouterHandler) List(c *gin.Context) {
 }
 
 func (h *RouterHandler) Create(c *gin.Context) {
+	extendWriteDeadline(c, probeWriteDeadline)
 	scope, ok := scopeOrFail(c)
 	if !ok {
 		return
@@ -123,6 +124,7 @@ func (h *RouterHandler) Get(c *gin.Context) {
 }
 
 func (h *RouterHandler) Update(c *gin.Context) {
+	extendWriteDeadline(c, probeWriteDeadline)
 	scope, ok := scopeOrFail(c)
 	if !ok {
 		return
@@ -158,6 +160,7 @@ func (h *RouterHandler) Delete(c *gin.Context) {
 // Check probes the router. The service persists the outcome even when the probe
 // fails, so a failure here only needs to be reported.
 func (h *RouterHandler) Check(c *gin.Context) {
+	extendWriteDeadline(c, probeWriteDeadline)
 	scope, ok := scopeOrFail(c)
 	if !ok {
 		return
