@@ -203,7 +203,16 @@ func New(ctx context.Context) (*App, error) {
 		organizationEntitlementRuntimeService,
 	)
 	organizationEntitlementHandler := organizationhandler.NewEntitlementHandler(
-		organizationEntitlementService,
+		entitlementAPIFacade{
+			EntitlementAPIService: organizationEntitlementService,
+			EntitlementSummaryService: organizationservice.NewEntitlementSummaryService(
+				organizationEntitlementRepository,
+				catalogFeatureRegistry{features: productrepo.NewFeatureRepository(db)},
+				newQuotaMeterRegistry(db),
+				organizationrepo.NewOrganizationRepository(db),
+				time.Now,
+			),
+		},
 		permService,
 		permService,
 	)
@@ -228,6 +237,7 @@ func New(ctx context.Context) (*App, error) {
 		organizationservice.NewDNSDomainVerifier(nil),
 		cfg.MultiTenant.PlatformPrimaryDomain,
 		organizationservice.WithDomainBillingGuard(entitlementGuard),
+		organizationservice.WithDomainQuotaEnforcer(newCRMQuotaEnforcer(entitlementGuard, db)),
 	)
 	organizationDomainHandler := organizationhandler.NewDomainHandler(
 		organizationDomainService,
@@ -368,6 +378,9 @@ func New(ctx context.Context) (*App, error) {
 	landingAnalyticsSvc := landingservice.NewAnalyticsService(landingAnalyticsRepo, landingPageRepo, db)
 
 	crmEntitlementChecker := entitlementChecker{guard: entitlementGuard}
+	// One enforcer for every "total" CRM quota (leads, companies, deals,
+	// pipelines); contacts keep their own guard.
+	crmQuotaEnforcer := newCRMQuotaEnforcer(entitlementGuard, db)
 	crmCompanyRepo := crmrepo.NewCompanyRepository(db)
 	crmContactRepo := crmrepo.NewContactRepository(db)
 	crmLeadRepo := crmrepo.NewLeadRepository(db)
@@ -382,6 +395,7 @@ func New(ctx context.Context) (*App, error) {
 		crmContactRepo,
 		crmCompanyRepo,
 		crmservice.WithLeadContactQuotaGuard(entitlementGuard),
+		crmservice.WithLeadQuotaEnforcer(crmQuotaEnforcer),
 		crmservice.WithLeadOwnerValidator(crmMemberRepo),
 		crmservice.WithLeadDealPipelines(crmPipelineRepo),
 		crmservice.WithLeadConvertedHook(whatsappservice.NewLeadConversionRelinker(whatsapprepo.NewConversationRepository(db))),
@@ -401,12 +415,14 @@ func New(ctx context.Context) (*App, error) {
 	crmPipelineSvc := crmservice.NewPipelineService(
 		crmPipelineRepo,
 		crmservice.WithPipelineFeatureGate(entitlementGuard),
+		crmservice.WithPipelineQuotaEnforcer(crmQuotaEnforcer),
 	)
 	crmDealSvc := crmservice.NewDealService(
 		crmDealRepo,
 		crmPipelineRepo,
 		crmservice.WithDealContactSync(crmContactRepo),
 		crmservice.WithDealSourceLeads(crmLeadRepo),
+		crmservice.WithDealQuotaEnforcer(crmQuotaEnforcer),
 	)
 	crmActivityRepo := crmrepo.NewActivityRepository(db)
 	crmActivitySvc := crmservice.NewActivityService(crmActivityRepo, crmLeadRepo, crmContactRepo, crmCompanyRepo, crmDealRepo)
@@ -501,6 +517,7 @@ func New(ctx context.Context) (*App, error) {
 		Members:   crmMemberRepo, Issuers: crmrepo.NewQuotationIssuerRepository(db),
 		AppName: cfg.App.Name, FrontendURL: cfg.App.FrontendURL, NotificationLocale: cfg.Notification.DefaultLocale,
 		RateCounter: redisClient, Doku: dokuClient, DokuNotificationURL: dokuNotificationURL,
+		InvoiceQuota: crmQuotaEnforcer,
 	})
 	// Webhook DOKU (URL tetap /webhooks/doku) hanya melayani invoice receivable (RCV-).
 	dokuWebhookHandler := receivablehandler.NewDokuWebhookHandler(
@@ -518,13 +535,14 @@ func New(ctx context.Context) (*App, error) {
 		Canceller: crmReceivableDocs,
 		Notifier:  notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts),
 		AppName:   cfg.App.Name, FrontendURL: cfg.App.FrontendURL, Locale: cfg.Notification.DefaultLocale,
-	}, crmWonEvaluator, time.Now)
+	}, crmWonEvaluator, time.Now, crmservice.WithSalesOrderQuotaEnforcer(crmQuotaEnforcer))
 	crmTenantAccess := withBillingSuspend(newCRMTenantAccess(db, receivableModule.Invoices, receivableModule.Contracts, defaultAccess), cfg, db, receivableModule.Invoices)
 	receivableModule.Listeners.Add(crmservice.NewReceivableListener(crmSalesOrderRepo, crmWonEvaluator, crmActivityRepo).
 		WithTenantAccess(crmTenantAccess).WithReactivation(crmTenantAccess, cfg.SelfServe.GraceDays))
 	// Tautan company ↔ workspace (R4-S3): mengubah tautan memindahkan entitlement contract.
 	crmCompanySvc := crmservice.NewCompanyService(crmCompanyRepo,
-		crmservice.WithWorkspaceLinking(workspaceDirectory{orgs: organizationrepo.NewOrganizationRepository(db)}, crmTenantAccess))
+		crmservice.WithWorkspaceLinking(workspaceDirectory{orgs: organizationrepo.NewOrganizationRepository(db)}, crmTenantAccess),
+		crmservice.WithCompanyQuotaEnforcer(crmQuotaEnforcer))
 	crmCompanyHandler := crmhandler.NewCompanyHandler(crmCompanySvc)
 	crmSalesOrderHandler := crmhandler.NewSalesOrderHandler(crmSalesOrderSvc, crmhandler.SalesOrderRefs{Invoices: crmReceivableDocs, Contracts: crmReceivableDocs})
 	crmDealOrdersHandler := crmhandler.NewDealOrdersHandler(crmSalesOrderHandler, crmWonEvaluator)
@@ -532,6 +550,9 @@ func New(ctx context.Context) (*App, error) {
 	// Quotation service dibuat setelah mailbox & WhatsApp karena memakai keduanya sebagai kanal kirim.
 	crmQuotationSvc := crmservice.NewQuotationService(crmQuotationRepo, crmDocumentCounterRepo,
 		crmservice.WithQuotationApprovedHook(crmSalesOrderSvc),
+		crmservice.WithQuotationQuotaEnforcer(crmQuotaEnforcer),
+		// Approving creates the sales order, so its room is checked before the state changes.
+		crmservice.WithQuotationOrderRoom(crmSalesOrderSvc.(crmservice.SalesOrderRoomChecker)),
 		crmservice.WithQuotationLinks(crmservice.QuotationLinkDeps{
 			Links:       publicLinkSvc,
 			FrontendURL: cfg.App.FrontendURL,
@@ -758,4 +779,11 @@ func (a *App) cleanup() {
 	if a.db != nil {
 		a.db.Close()
 	}
+}
+
+// entitlementAPIFacade combines the entitlement API service with the summary
+// service so one value satisfies the handler's OrganizationEntitlementService.
+type entitlementAPIFacade struct {
+	*organizationservice.EntitlementAPIService
+	*organizationservice.EntitlementSummaryService
 }

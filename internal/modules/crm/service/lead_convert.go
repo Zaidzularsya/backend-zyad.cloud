@@ -79,6 +79,19 @@ func (s *leadService) Convert(ctx context.Context, scope coretenant.Scope, id st
 		}
 	}
 
+	// Hanya company/deal yang benar-benar dibuat yang memakai kuota; yang
+	// existing tidak. Lead sendiri berpindah ke status terminal (tidak dihitung).
+	if tx.NewCompany != nil {
+		if err := s.requireRoom(ctx, scope, domain.FeatureCRMMaxCompanies); err != nil {
+			return domain.LeadConversionResult{}, err
+		}
+	}
+	if tx.Deal != nil {
+		if err := s.requireRoom(ctx, scope, domain.FeatureCRMMaxDeals); err != nil {
+			return domain.LeadConversionResult{}, err
+		}
+	}
+
 	result, err := s.repo.ConvertLead(ctx, scope, id, tx)
 	if err != nil {
 		return domain.LeadConversionResult{}, crmmodule.MapNotFound(err, "LEAD_NOT_FOUND", "lead not found or already deleted")
@@ -196,6 +209,9 @@ func (s *leadService) buildDealParams(ctx context.Context, scope coretenant.Scop
 func (s *leadService) CreateDealForLead(ctx context.Context, scope coretenant.Scope, leadID string, input ConvertDealInput, createdBy string) (domain.Lead, domain.Deal, error) {
 	params, err := s.buildDealParams(ctx, scope, input, createdBy)
 	if err != nil {
+		return domain.Lead{}, domain.Deal{}, err
+	}
+	if err := s.requireRoom(ctx, scope, domain.FeatureCRMMaxDeals); err != nil {
 		return domain.Lead{}, domain.Deal{}, err
 	}
 	lead, deal, err := s.repo.AttachDeal(ctx, scope, leadID, params)

@@ -35,7 +35,7 @@ func (h *FeatureHandler) List(c *gin.Context) {
 	}
 	out := make([]dto.FeatureDefResponse, 0, len(defs))
 	for _, d := range defs {
-		out = append(out, dto.FeatureDefResponse{Key: d.Key, Name: d.Name, Module: d.Module, ValueType: d.ValueType, Unit: d.Unit})
+		out = append(out, dto.FeatureDefResponse{Key: d.Key, Name: d.Name, Module: d.Module, ValueType: d.ValueType, Unit: d.Unit, ResetStrategy: d.ResetStrategy})
 	}
 	corehttp.OK(c, "success", out)
 }

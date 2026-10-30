@@ -1,6 +1,7 @@
 package organization
 
 import (
+	"errors"
 	"net/http"
 
 	coreerrors "zyad.cloud/internal/core/errors"
@@ -19,4 +20,10 @@ func FeatureNotEnabledError() error {
 
 func QuotaExceededError() error {
 	return coreerrors.New(ErrCodeQuotaExceeded, "billing quota has been exceeded", http.StatusConflict)
+}
+
+// IsQuotaExceeded reports whether err is (or wraps) the QUOTA_EXCEEDED refusal.
+func IsQuotaExceeded(err error) bool {
+	var appErr *coreerrors.AppError
+	return errors.As(err, &appErr) && appErr.Code == ErrCodeQuotaExceeded
 }

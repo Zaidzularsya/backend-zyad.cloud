@@ -14,12 +14,14 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"zyad.cloud/internal/core/businesstime"
+	coreerrors "zyad.cloud/internal/core/errors"
 	notificationdomain "zyad.cloud/internal/core/notification/domain"
 	notificationpublisher "zyad.cloud/internal/core/notification/publisher"
 	coretenant "zyad.cloud/internal/core/tenant"
 	crmmodule "zyad.cloud/internal/modules/crm"
 	"zyad.cloud/internal/modules/crm/domain"
 	"zyad.cloud/internal/modules/crm/repository"
+	"zyad.cloud/internal/modules/organization"
 	receivabledomain "zyad.cloud/internal/modules/receivable/domain"
 	receivableservice "zyad.cloud/internal/modules/receivable/service"
 	"zyad.cloud/internal/shared/pricing"
@@ -30,6 +32,8 @@ const (
 
 	soStartDateMaxPastDays = 30
 	billingFailedMessage   = "Penagihan gagal dibuat. Coba lagi beberapa saat."
+	// billingQuotaMessage tells the user retrying right away is pointless: the monthly invoice quota is full.
+	billingQuotaMessage = "Kuota invoice bulan ini habis. Upgrade paket atau tunggu bulan berikutnya, lalu coba lagi."
 )
 
 type salesOrderService struct {
@@ -37,15 +41,52 @@ type salesOrderService struct {
 	billing receivableservice.OrderBilling
 	deps    SalesOrderDeps
 	won     DealWonEvaluator
+	quota   QuotaRoomRequirer
 	now     func() time.Time
 }
 
+// SalesOrderServiceOption configures optional behaviour of the sales order service.
+type SalesOrderServiceOption func(*salesOrderService)
+
+// WithSalesOrderQuotaEnforcer enforces crm.max_sales_orders_per_month when a
+// sales order is created from an approved quotation. Confirm, cancel, delivery
+// and billing retries never consult it.
+func WithSalesOrderQuotaEnforcer(quota QuotaRoomRequirer) SalesOrderServiceOption {
+	return func(s *salesOrderService) { s.quota = quota }
+}
+
 func NewSalesOrderService(repo repository.SalesOrderRepository, billing receivableservice.OrderBilling, deps SalesOrderDeps,
-	won DealWonEvaluator, now func() time.Time) SalesOrderService {
+	won DealWonEvaluator, now func() time.Time, opts ...SalesOrderServiceOption) SalesOrderService {
 	if now == nil {
 		now = time.Now
 	}
-	return &salesOrderService{repo: repo, billing: billing, deps: deps, won: won, now: now}
+	s := &salesOrderService{repo: repo, billing: billing, deps: deps, won: won, now: now}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+// SalesOrderRoomChecker lets the quotation flows verify, before they change the
+// quotation's state, that approving it can still create its sales order.
+type SalesOrderRoomChecker interface {
+	RequireRoomForQuotation(ctx context.Context, scope coretenant.Scope, quotationID string) error
+}
+
+var _ SalesOrderRoomChecker = (*salesOrderService)(nil)
+
+// RequireRoomForQuotation is idempotent like QuotationApproved: when the
+// quotation already has a sales order nothing new will be created, so no room is needed.
+func (s *salesOrderService) RequireRoomForQuotation(ctx context.Context, scope coretenant.Scope, quotationID string) error {
+	if s.quota == nil {
+		return nil
+	}
+	if _, err := s.repo.FindByQuotation(ctx, scope, quotationID); err == nil {
+		return nil
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	return s.quota.RequireRoom(ctx, scope.OrganizationID(), domain.FeatureCRMMaxSalesOrdersPerMonth)
 }
 
 func notFound(err error) error {
@@ -54,12 +95,58 @@ func notFound(err error) error {
 
 // ---- hook approve ----
 
+// customerApprovalKey marks a context whose QuotationApproved call comes from
+// the customer's public approval link (not from tenant staff).
+type customerApprovalKey struct{}
+
+// withCustomerApproval is only set by PublicQuotationService; the key is
+// unexported so no other package can opt out of the sales order quota.
+func withCustomerApproval(ctx context.Context) context.Context {
+	return context.WithValue(ctx, customerApprovalKey{}, true)
+}
+
+// logCustomerApprovalQuotaError keeps the two cases apart in logs: a full
+// quota is expected (WARN); any other refusal (FEATURE_NOT_ENABLED from an
+// explicit enabled=false row, meter/DB failure, misconfiguration) is not (ERROR,
+// with its code). Neither blocks the customer's approval.
+func logCustomerApprovalQuotaError(ctx context.Context, organizationID, quotationID string, err error) {
+	if organization.IsQuotaExceeded(err) {
+		slog.WarnContext(ctx, "sales order quota exceeded on customer approval; creating anyway",
+			"organization_id", organizationID, "quotation_id", quotationID)
+		return
+	}
+	code := "UNKNOWN"
+	var appErr *coreerrors.AppError
+	if errors.As(err, &appErr) {
+		code = appErr.Code
+	}
+	slog.ErrorContext(ctx, "sales order quota check failed on customer approval; creating anyway",
+		"organization_id", organizationID, "quotation_id", quotationID, "error_code", code, "error", err)
+}
+
+func isCustomerApproval(ctx context.Context) bool {
+	v, _ := ctx.Value(customerApprovalKey{}).(bool)
+	return v
+}
+
 func (s *salesOrderService) QuotationApproved(ctx context.Context, scope coretenant.Scope, q domain.Quotation, actorUserID string) error {
 	if existing, err := s.repo.FindByQuotation(ctx, scope, q.ID); err == nil {
 		_ = existing // idempoten: SO sudah ada, tanpa nomor/aktivitas/notifikasi baru
 		return nil
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return err
+	}
+	// Defense in depth: the staff quotation flows already ran RequireRoomForQuotation
+	// before approving. This also covers hook callers that bypass them (self-serve
+	// checkout). A customer's public approval is the exception: it is never refused,
+	// the order is created (and counted by the meter) and the overrun is logged.
+	if s.quota != nil {
+		if err := s.quota.RequireRoom(ctx, scope.OrganizationID(), domain.FeatureCRMMaxSalesOrdersPerMonth); err != nil {
+			if !isCustomerApproval(ctx) {
+				return err
+			}
+			logCustomerApprovalQuotaError(ctx, scope.OrganizationID(), q.ID, err)
+		}
 	}
 	seq, err := s.deps.Counters.NextNumber(ctx, scope, "sales_order")
 	if err != nil {
@@ -334,10 +421,14 @@ func (s *salesOrderService) bill(ctx context.Context, scope coretenant.Scope, so
 	res, err := s.billing.BillOrder(ctx, scope, billingRequest(so, userID, orderLines(so.Items)))
 	if err != nil {
 		slog.ErrorContext(ctx, "sales order billing failed", "sales_order_id", so.ID, "error", err)
-		failed, setErr := s.repo.SetBillingResult(ctx, scope, so.ID, domain.BillingFailed, billingFailedMessage, "", "", "")
+		message := billingFailedMessage
+		if organization.IsQuotaExceeded(err) {
+			message = billingQuotaMessage // status stays failed, so RetryBilling works once there is room
+		}
+		failed, setErr := s.repo.SetBillingResult(ctx, scope, so.ID, domain.BillingFailed, message, "", "", "")
 		if setErr != nil {
 			slog.ErrorContext(ctx, "sales order: record billing failure failed", "sales_order_id", so.ID, "error", setErr)
-			so.BillingStatus, so.BillingError = domain.BillingFailed, billingFailedMessage
+			so.BillingStatus, so.BillingError = domain.BillingFailed, message
 			return so
 		}
 		return failed

@@ -119,6 +119,7 @@ func (c *fakeConversations) SetMessageStatus(_ context.Context, _ coretenant.Sco
 type fakeCRM struct {
 	matches    map[string]CRMMatch
 	created    []CreateLeadInput
+	createErr  error
 	activities []CRMActivityInput
 }
 
@@ -128,6 +129,9 @@ func (m *fakeCRM) MatchPhone(_ context.Context, _ coretenant.Scope, phone string
 }
 
 func (m *fakeCRM) CreateLead(_ context.Context, _ coretenant.Scope, input CreateLeadInput) (CRMMatch, error) {
+	if m.createErr != nil {
+		return CRMMatch{}, m.createErr
+	}
 	m.created = append(m.created, input)
 	return CRMMatch{EntityType: domain.RelatedEntityLead, EntityID: "lead-auto", Name: input.ContactName, OwnerUserID: input.OwnerUserID}, nil
 }
@@ -269,6 +273,23 @@ func TestInboundMessageAutoCreatesLeadForSessionCreator(t *testing.T) {
 	conversation := h.conversations.byChat[h.session.ID+"|6285555555555@c.us"]
 	if conversation.RelatedEntityID != "lead-auto" || conversation.AssigneeUserID != "creator-1" {
 		t.Fatalf("conversation = %+v", conversation)
+	}
+}
+
+func TestInboundMessageKeepsConversationWhenLeadQuotaSkipsAutoCreate(t *testing.T) {
+	h := newInboundHarness(t, true, webhookEvent("e1", "message.any",
+		`{"id":"m1","timestamp":1790000000,"from":"6285555555555@c.us","to":"x@c.us","fromMe":false,"body":"hi"}`))
+	h.crm.createErr = ErrAutoLeadSkipped
+
+	if result := h.run(t); result.Processed != 1 || result.Failed != 0 {
+		t.Fatalf("result = %+v, want processed without failure", result)
+	}
+	conversation := h.conversations.byChat[h.session.ID+"|6285555555555@c.us"]
+	if conversation.RelatedEntityID != "" {
+		t.Fatalf("conversation linked to %q, want no lead", conversation.RelatedEntityID)
+	}
+	if len(h.conversations.recorded) != 1 {
+		t.Fatalf("recorded = %d, want message stored", len(h.conversations.recorded))
 	}
 }
 

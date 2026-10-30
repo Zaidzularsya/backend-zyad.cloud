@@ -18,6 +18,7 @@ type companyService struct {
 	repo       repository.CompanyRepository
 	workspaces WorkspaceDirectory
 	linkHook   WorkspaceLinkHook
+	quota      QuotaRoomRequirer
 }
 
 // CompanyServiceOption mengaktifkan fitur tautan workspace (tanpa opsi, SetWorkspaceLink ditolak).
@@ -25,6 +26,11 @@ type CompanyServiceOption func(*companyService)
 
 func WithWorkspaceLinking(workspaces WorkspaceDirectory, hook WorkspaceLinkHook) CompanyServiceOption {
 	return func(s *companyService) { s.workspaces, s.linkHook = workspaces, hook }
+}
+
+// WithCompanyQuotaEnforcer enforces crm.max_companies in Create only.
+func WithCompanyQuotaEnforcer(quota QuotaRoomRequirer) CompanyServiceOption {
+	return func(s *companyService) { s.quota = quota }
 }
 
 func NewCompanyService(repo repository.CompanyRepository, opts ...CompanyServiceOption) CompanyService {
@@ -36,6 +42,11 @@ func NewCompanyService(repo repository.CompanyRepository, opts ...CompanyService
 }
 
 func (s *companyService) Create(ctx context.Context, scope coretenant.Scope, params repository.CreateCompanyParams) (domain.Company, error) {
+	if s.quota != nil {
+		if err := s.quota.RequireRoom(ctx, scope.OrganizationID(), domain.FeatureCRMMaxCompanies); err != nil {
+			return domain.Company{}, err
+		}
+	}
 	return s.repo.Create(ctx, scope, params)
 }
 
@@ -63,7 +74,13 @@ func (s *companyService) Delete(ctx context.Context, scope coretenant.Scope, id 
 	return crmmodule.MapNotFound(s.repo.Delete(ctx, scope, id, deletedBy), "COMPANY_NOT_FOUND", "company not found or already deleted")
 }
 
+// Restore brings the company back into the active count, so it needs room like Create.
 func (s *companyService) Restore(ctx context.Context, scope coretenant.Scope, id string, restoredBy string) error {
+	if s.quota != nil {
+		if err := s.quota.RequireRoom(ctx, scope.OrganizationID(), domain.FeatureCRMMaxCompanies); err != nil {
+			return err
+		}
+	}
 	return crmmodule.MapNotFound(s.repo.Restore(ctx, scope, id, restoredBy), "COMPANY_NOT_FOUND", "company not found or not deleted")
 }
 
