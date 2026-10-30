@@ -272,6 +272,7 @@ func New(ctx context.Context) (*App, error) {
 		landingSectionRepo,
 		landingservice.WithLandingPageQuotaGuard(entitlementGuard),
 		landingservice.WithLandingPageBrandingRepo(landingBrandingRepo),
+		landingservice.WithLandingPageActivationGuard(landingActivationRepo),
 	)
 	landingSectionSvc := landingservice.NewSectionService(
 		landingSectionRepo,
@@ -522,12 +523,19 @@ func New(ctx context.Context) (*App, error) {
 		RateCounter: redisClient, Doku: dokuClient, DokuNotificationURL: dokuNotificationURL,
 		InvoiceQuota:       crmQuotaEnforcer,
 		ActivationInvoices: activationInvoiceChecker{activations: landingActivationRepo},
+		ManualCreation:     cfg.App.ReceivableManualCreation,
 	})
 	// Aktivasi halaman (2C): reseller menagih klien lewat invoice receivable di organisasinya sendiri.
 	landingActivationHandler := landinghandler.NewActivationHandler(landingservice.NewActivationService(landingservice.ActivationServiceDeps{
 		Activations: landingActivationRepo, Pages: landingPageRepo, Features: crmEntitlementChecker,
 		Billing: receivableActivationBilling{accounts: receivableModule.Accounts, invoices: receivableModule.Invoices},
 		Links:   activationPreviewLinks{domains: organizationrepo.NewDomainRepository(db)},
+	}))
+	// Dashboard invoice reseller: daftar invoice aktivasi + perbarui link preview (token diputar).
+	landingActivationInvoicesHandler := landinghandler.NewActivationInvoicesHandler(landingservice.NewActivationManager(landingservice.ActivationManagerDeps{
+		Activations: landingActivationRepo, Features: crmEntitlementChecker,
+		Links:    activationPreviewLinks{domains: organizationrepo.NewDomainRepository(db)},
+		Payments: activationPaymentLinks{invoices: receivableModule.Invoices},
 	}))
 	// Lunas -> halaman terbit otomatis. Didaftarkan di proses API saja: InvoicePaid hanya dipicu oleh
 	// webhook DOKU / pencatatan pembayaran manual (payment_service); worker billing run tidak memicunya.
@@ -630,7 +638,8 @@ func New(ctx context.Context) (*App, error) {
 		crmservice.NewTenantSelfServeResolver(workspaceOwnerRepo{db: db}, crmPipelineRepo),
 	), time.Now)
 	crmSelfServeHandler := crmhandler.NewSelfServeHandler(selfServeSvc, selfServePlatformScopes, permService).
-		WithSubscription(withSubscriptionView(crmTenantAccess, cfg, db, receivableModule.Invoices, receivableModule.Contracts, catalogProductService), cfg.SelfServe.GraceDays)
+		WithSubscription(withSubscriptionView(crmTenantAccess, cfg, db, receivableModule.Invoices, receivableModule.Contracts, catalogProductService), cfg.SelfServe.GraceDays).
+		WithBills(crmTenantAccess, newBillSellers(db))
 
 	// Checkout publik pelanggan tenant (Bagian 2B): tenant dari host, pembeli dari Google, workspace
 	// per tenant-pembeli, rantai self-serve di scope tenant.
@@ -647,6 +656,8 @@ func New(ctx context.Context) (*App, error) {
 		WorkspaceLinks: crmCompanyRepo,
 		Locker:         crmrepo.NewAdvisoryLocker(db),
 	}), redisClient)
+
+	mikrotikRouterHandler, mikrotikSetupHandler := buildMikrotik(cfg, db)
 
 	router, err := newRouter(Dependencies{
 		Config:                           cfg,
@@ -672,6 +683,7 @@ func New(ctx context.Context) (*App, error) {
 		UserHandler:                      userHandler,
 		LandingAdminPageHandler:          landingAdminPageHandler,
 		LandingActivationHandler:         landingActivationHandler,
+		LandingActivationInvoicesHandler: landingActivationInvoicesHandler,
 		LandingAdminSectionHandler:       landingAdminSectionHandler,
 		LandingAdminDocumentHandler:      landingAdminDocumentHandler,
 		LandingAdminPageTemplateHandler:  landingAdminPageTemplateHandler,
@@ -716,6 +728,9 @@ func New(ctx context.Context) (*App, error) {
 		CRMSelfServeHandler:              crmSelfServeHandler,
 		CRMTenantCheckoutHandler:         crmTenantCheckoutHandler,
 		ReceivableAccountHandler:         receivableModule.AccountHandler,
+		MikrotikRouterHandler:            mikrotikRouterHandler,
+		MikrotikSetupHandler:             mikrotikSetupHandler,
+		MikrotikRateCounter:              redisClient,
 		ReceivableInvoiceHandler:         receivableModule.InvoiceHandler,
 		ReceivablePaymentHandler:         receivableModule.PaymentHandler,
 		ReceivableSettingsHandler:        receivableModule.SettingsHandler,

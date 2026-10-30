@@ -25,6 +25,22 @@ type CreateActivationParams struct {
 	CreatedBy        string
 }
 
+// ActivationListFilter narrows the reseller's invoice list. Status "" means every status.
+type ActivationListFilter struct {
+	Status domain.ActivationStatus
+	Limit  int
+	Offset int
+}
+
+// ActivationListItem is an activation with the facts of its page the invoice list shows.
+type ActivationListItem struct {
+	Activation      domain.LandingPageActivation
+	PageTitle       string
+	PageSlug        string
+	PageStatus      domain.PageStatus
+	PageActiveUntil *time.Time
+}
+
 // ErrActivationOpen: the page already has an open activation that is not
 // overdue (the one-open-per-page partial unique index refused the insert).
 var ErrActivationOpen = errors.New("page already has an open activation")
@@ -57,6 +73,14 @@ type ActivationRepository interface {
 	// ExistsForInvoice reports whether any activation (any status) of the
 	// scope references the invoice.
 	ExistsForInvoice(ctx context.Context, scope coretenant.Scope, invoiceID string) (bool, error)
+	// FindByID returns any-status activation of the scope; pgx.ErrNoRows when unknown or of another org.
+	FindByID(ctx context.Context, scope coretenant.Scope, id string) (domain.LandingPageActivation, error)
+	// ListByOrganization lists the scope's activations newest first with the page facts, and the total
+	// before paging.
+	ListByOrganization(ctx context.Context, scope coretenant.Scope, filter ActivationListFilter) ([]ActivationListItem, int64, error)
+	// RotatePreview replaces the preview token hash and the invoice due time of an OPEN activation, so
+	// the old preview link stops working; pgx.ErrNoRows when it is not open.
+	RotatePreview(ctx context.Context, scope coretenant.Scope, id, tokenHash string, invoiceDueAt time.Time) (domain.LandingPageActivation, error)
 }
 
 // ActivationSettlement is the outcome of recording a paid activation invoice.

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -329,3 +330,93 @@ func (r *activationRepository) SettleByInvoice(ctx context.Context, scope corete
 }
 
 var _ ActivationSettler = (*activationRepository)(nil)
+
+func (r *activationRepository) FindByID(ctx context.Context, scope coretenant.Scope, id string) (domain.LandingPageActivation, error) {
+	query := `SELECT ` + activationColumns + `
+		FROM landing_page_activations
+		WHERE organization_id = $1 AND id = $2`
+
+	var a domain.LandingPageActivation
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var err error
+		a, err = scanActivation(tx.QueryRow(ctx, query, scope.OrganizationID(), id))
+		return err
+	})
+	return a, err
+}
+
+// qualifiedActivationColumns prefixes activationColumns with a table alias, for joins where id,
+// organization_id, status and created_at also exist on the other table.
+func qualifiedActivationColumns(alias string) string {
+	cols := strings.Split(strings.TrimSpace(activationColumns), ",")
+	for i, c := range cols {
+		cols[i] = alias + "." + strings.TrimSpace(c)
+	}
+	return strings.Join(cols, ", ")
+}
+
+func (r *activationRepository) ListByOrganization(ctx context.Context, scope coretenant.Scope, filter ActivationListFilter) ([]ActivationListItem, int64, error) {
+	limit := filter.Limit
+	if limit < 1 {
+		limit = 20
+	}
+	offset := max(filter.Offset, 0)
+	status := string(filter.Status)
+
+	query := `SELECT ` + qualifiedActivationColumns("a") + `,
+			p.title, p.slug, p.status, p.active_until
+		FROM landing_page_activations a
+		JOIN landing_pages p ON p.id = a.page_id AND p.organization_id = a.organization_id
+		WHERE a.organization_id = $1 AND ($2 = '' OR a.status = $2)
+		ORDER BY a.created_at DESC, a.id
+		LIMIT $3 OFFSET $4`
+	count := `SELECT count(*) FROM landing_page_activations a
+		WHERE a.organization_id = $1 AND ($2 = '' OR a.status = $2)`
+
+	var items []ActivationListItem
+	var total int64
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, count, scope.OrganizationID(), status).Scan(&total); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, query, scope.OrganizationID(), status, limit, offset)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var it ActivationListItem
+			a := &it.Activation
+			if err := rows.Scan(
+				&a.ID, &a.OrganizationID, &a.PageID, &a.InvoiceID, &a.BuyerName, &a.BuyerContact, &a.BuyerEmail,
+				&a.Price, &a.DurationValue, &a.DurationUnit, &a.PreviewTokenHash, &a.InvoiceDueAt,
+				&a.Status, &a.PaidAt, &a.CreatedBy, &a.CreatedAt,
+				&it.PageTitle, &it.PageSlug, &it.PageStatus, &it.PageActiveUntil,
+			); err != nil {
+				return err
+			}
+			items = append(items, it)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
+func (r *activationRepository) RotatePreview(ctx context.Context, scope coretenant.Scope, id, tokenHash string, invoiceDueAt time.Time) (domain.LandingPageActivation, error) {
+	query := `
+		UPDATE landing_page_activations
+		SET preview_token_hash = $3, invoice_due_at = $4
+		WHERE organization_id = $1 AND id = $2 AND status = 'open'
+		RETURNING ` + activationColumns
+
+	var a domain.LandingPageActivation
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var err error
+		a, err = scanActivation(tx.QueryRow(ctx, query, scope.OrganizationID(), id, tokenHash, invoiceDueAt.UTC()))
+		return err
+	})
+	return a, err
+}

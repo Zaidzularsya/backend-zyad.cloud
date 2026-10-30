@@ -12,14 +12,24 @@ import (
 	"zyad.cloud/internal/shared/response"
 )
 
-type AccountHandler struct{ svc service.AccountService }
+type AccountHandler struct {
+	svc service.AccountService
+	// manualCreation: tanpa WithManualCreation(true), POST /accounts ditolak.
+	manualCreation bool
+}
 
 func NewAccountHandler(svc service.AccountService) *AccountHandler { return &AccountHandler{svc: svc} }
+
+// WithManualCreation mengizinkan pembuatan pelanggan manual (tanpa kontak CRM) lewat HTTP.
+func (h *AccountHandler) WithManualCreation(enabled bool) *AccountHandler {
+	h.manualCreation = enabled
+	return h
+}
 
 func (h *AccountHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker) {
 	group := router.Group("/accounts")
 	group.GET("", permissionmiddleware.RequireOrganizationOrGlobal(p, "invoice.read"), h.List)
-	group.POST("", permissionmiddleware.RequireOrganizationOrGlobal(p, "invoice.create"), h.Create)
+	group.POST("", permissionmiddleware.RequireOrganizationOrGlobal(p, "invoice.create"), requireManualCreation(h.manualCreation), h.Create)
 	group.GET("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "invoice.read"), h.Get)
 	group.PUT("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "invoice.update"), h.Update)
 }

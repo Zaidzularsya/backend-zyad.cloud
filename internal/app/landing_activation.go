@@ -93,6 +93,19 @@ func activationBillingError(err error) error {
 
 var _ landingservice.ActivationBilling = receivableActivationBilling{}
 
+// activationPaymentLinks gives the public payment link of an activation invoice. The receivable module
+// stores that link encrypted, so the same link can be read again whenever the reseller needs to resend it.
+type activationPaymentLinks struct {
+	invoices receivableservice.InvoiceService
+}
+
+func (l activationPaymentLinks) PaymentURL(ctx context.Context, scope coretenant.Scope, invoiceID string) (string, error) {
+	url, _, err := l.invoices.Link(ctx, scope, invoiceID, "")
+	return url, err
+}
+
+var _ landingservice.ActivationPaymentLinks = activationPaymentLinks{}
+
 // activeDomainLister is the subset of the organization domain repository used
 // to find the reseller's public host.
 type activeDomainLister interface {
@@ -101,8 +114,9 @@ type activeDomainLister interface {
 
 // activationPreviewLinks builds the preview URL on the organization's active
 // public host (primary first), because the public preview route resolves the
-// tenant from the request host. Without an active host it falls back to the
-// relative path.
+// tenant from the request host. Without an active host the link could not be
+// opened by anyone (a bare path, or a host of another organization, is "not
+// found"), so the invoice is refused instead of handing out a dead link.
 type activationPreviewLinks struct {
 	domains activeDomainLister
 }
@@ -120,7 +134,9 @@ func (l activationPreviewLinks) PreviewURL(ctx context.Context, scope coretenant
 			return "https://" + host + path, nil
 		}
 	}
-	return path, nil
+	return "", coreerrors.New("ACTIVATION_NO_PUBLIC_HOST",
+		"Tambahkan domain atau subdomain aktif di menu Domain dulu, supaya link preview halaman bisa dibuka pelanggan Anda.",
+		http.StatusUnprocessableEntity)
 }
 
 var _ landingservice.ActivationLinks = activationPreviewLinks{}

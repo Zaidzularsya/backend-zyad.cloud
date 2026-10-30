@@ -244,3 +244,104 @@ func TestSelfServeSubscriptionRequiresBillingRead(t *testing.T) {
 }
 
 func ptr(n int) *int { return &n }
+
+type ssBillsFake struct {
+	invoices []service.SubscriptionInvoice
+	tenant   string
+	scope    coretenant.Scope
+	calls    int
+}
+
+func (f *ssBillsFake) Bills(_ context.Context, seller coretenant.Scope, tenantOrgID string) ([]service.SubscriptionInvoice, error) {
+	f.calls++
+	f.tenant, f.scope = tenantOrgID, seller
+	return f.invoices, nil
+}
+
+type ssSellerFake struct {
+	seller BillSeller
+	found  bool
+	buyer  string
+	calls  int
+}
+
+func (f *ssSellerFake) SellerOf(_ context.Context, buyerOrgID string) (BillSeller, bool, error) {
+	f.calls++
+	f.buyer = buyerOrgID
+	return f.seller, f.found, nil
+}
+
+func newBillsRouter(t *testing.T, bills *ssBillsFake, seller *ssSellerFake, perms ssGrant) *gin.Engine {
+	t.Helper()
+	r := newTestRouter(t) // tenant customer 1111...
+	r.Use(func(c *gin.Context) { permissionmiddleware.SetUserID(c, "buyer-1"); c.Next() })
+	NewSelfServeHandler(&ssSvcFake{}, ssPlatformFake{}, perms).WithBills(bills, seller).RegisterRoutes(&r.RouterGroup)
+	return r
+}
+
+func TestSelfServeBillsUsesBuyerFromContextAndSellerScope(t *testing.T) {
+	bills := &ssBillsFake{invoices: []service.SubscriptionInvoice{{Number: "RCV-1", Status: "paid", Total: "112000.00", URL: "https://x/i/1"}}}
+	seller := &ssSellerFake{found: true, seller: BillSeller{Name: "Ethernet Net"}}
+	r := newBillsRouter(t, bills, seller, ssGrant{"organization.billing.read": true})
+	// query/param klien tidak boleh menggeser pembeli maupun penjual
+	w := performJSON(r, http.MethodGet, "/app/self-serve/bills?tenant_organization_id=other&seller=x", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body)
+	}
+	const buyer = "11111111-1111-1111-1111-111111111111"
+	if seller.buyer != buyer || bills.tenant != buyer {
+		t.Fatalf("pembeli harus dari konteks tenant: seller=%q bills=%q", seller.buyer, bills.tenant)
+	}
+	var env struct {
+		Data struct {
+			Seller   *struct{ Name string } `json:"seller"`
+			Invoices []struct {
+				Number string `json:"number"`
+				URL    string `json:"url"`
+			} `json:"invoices"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &env)
+	if env.Data.Seller == nil || env.Data.Seller.Name != "Ethernet Net" || len(env.Data.Invoices) != 1 ||
+		env.Data.Invoices[0].Number != "RCV-1" || env.Data.Invoices[0].URL == "" {
+		t.Fatalf("data = %+v", env.Data)
+	}
+}
+
+func TestSelfServeBillsWithoutSellerReturnsEmptyList(t *testing.T) {
+	bills := &ssBillsFake{}
+	seller := &ssSellerFake{found: false}
+	r := newBillsRouter(t, bills, seller, ssGrant{"organization.billing.read": true})
+	w := performJSON(r, http.MethodGet, "/app/self-serve/bills", "")
+	if w.Code != http.StatusOK || bills.calls != 0 {
+		t.Fatalf("status=%d billsCalls=%d body=%s", w.Code, bills.calls, w.Body)
+	}
+	var env struct {
+		Data struct {
+			Seller   any   `json:"seller"`
+			Invoices []any `json:"invoices"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &env)
+	if env.Data.Seller != nil || env.Data.Invoices == nil || len(env.Data.Invoices) != 0 {
+		t.Fatalf("data = %+v (seller null, invoices [] diharapkan)", env.Data)
+	}
+}
+
+func TestSelfServeBillsRequiresBillingRead(t *testing.T) {
+	bills := &ssBillsFake{}
+	seller := &ssSellerFake{found: true}
+	r := newBillsRouter(t, bills, seller, ssGrant{})
+	if w := performJSON(r, http.MethodGet, "/app/self-serve/bills", ""); w.Code != http.StatusForbidden || bills.calls != 0 || seller.calls != 0 {
+		t.Fatalf("status=%d calls=%d/%d", w.Code, bills.calls, seller.calls)
+	}
+}
+
+func TestSelfServeBillsNotConfigured(t *testing.T) {
+	r := newTestRouter(t)
+	r.Use(func(c *gin.Context) { permissionmiddleware.SetUserID(c, "buyer-1"); c.Next() })
+	NewSelfServeHandler(&ssSvcFake{}, ssPlatformFake{}, ssGrant{"organization.billing.read": true}).RegisterRoutes(&r.RouterGroup)
+	if w := performJSON(r, http.MethodGet, "/app/self-serve/bills", ""); w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d, want 503", w.Code)
+	}
+}

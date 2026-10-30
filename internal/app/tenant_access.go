@@ -86,7 +86,7 @@ type tenantEntitlementWriter struct {
 func (w tenantEntitlementWriter) GrantContract(
 	ctx context.Context, tenantOrgID, contractID, contractNumber string, features []crmdomain.FeatureSnapshot, actorUserID string,
 ) error {
-	grants, err := w.grants(ctx, features)
+	grants, err := w.grants(ctx, withResellerBundle(features))
 	if err != nil {
 		return err
 	}

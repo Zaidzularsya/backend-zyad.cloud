@@ -361,3 +361,32 @@ type ActivationInvoiceResponse struct {
 	PreviewURL string             `json:"preview_url"`
 	PaymentURL string             `json:"payment_url"`
 }
+
+// ActivationInvoiceListItem is one row of the reseller's invoice dashboard. state is
+// awaiting_payment | expired | paid | void. payment_url is empty for void invoices.
+type ActivationInvoiceListItem struct {
+	ID              string     `json:"id"`
+	PageID          string     `json:"page_id"`
+	PageTitle       string     `json:"page_title"`
+	PageSlug        string     `json:"page_slug"`
+	PageStatus      string     `json:"page_status"`
+	PageActiveUntil *time.Time `json:"page_active_until"`
+	InvoiceID       *string    `json:"invoice_id"`
+	BuyerName       string     `json:"buyer_name"`
+	BuyerContact    string     `json:"buyer_contact"`
+	BuyerEmail      *string    `json:"buyer_email"`
+	Price           string     `json:"price"`
+	DurationValue   int        `json:"duration_value"`
+	DurationUnit    string     `json:"duration_unit"`
+	InvoiceDueAt    time.Time  `json:"invoice_due_at"`
+	Status          string     `json:"status"`
+	State           string     `json:"state"`
+	PaidAt          *time.Time `json:"paid_at"`
+	CreatedAt       time.Time  `json:"created_at"`
+	PaymentURL      string     `json:"payment_url"`
+}
+
+type ActivationInvoiceListResponse struct {
+	Items []ActivationInvoiceListItem `json:"items"`
+	Meta  PaginationMeta              `json:"meta"`
+}

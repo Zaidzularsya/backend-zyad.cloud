@@ -190,6 +190,10 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.LandingActivationHandler != nil {
 		deps.LandingActivationHandler.RegisterRoutes(protected, deps.PermissionChecker)
 	}
+	// GET /app/landing/activations + POST /app/landing/activations/:id/renew (dashboard invoice reseller).
+	if deps.LandingActivationInvoicesHandler != nil {
+		deps.LandingActivationInvoicesHandler.RegisterRoutes(protected, deps.PermissionChecker)
+	}
 	if deps.LandingAdminSectionHandler != nil {
 		deps.LandingAdminSectionHandler.RegisterRoutes(protected, deps.PermissionChecker)
 	}
@@ -352,6 +356,8 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		}
 	}
 
+	registerMikrotikRoutes(protected, deps)
+
 	// Katalog produk tenant (dipakai quotation CRM dan invoice receivable). Aturan tenant sama
 	// dengan CRM; entitlement cukup salah satu dari crm.enabled / receivable.enabled.
 	if deps.CatalogProductHandler != nil {
@@ -364,6 +370,9 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		deps.CatalogProductHandler.RegisterRoutes(catalogGroup, deps.PermissionChecker)
 		deps.CatalogCategoryHandler.RegisterRoutes(catalogGroup, deps.PermissionChecker)
 		deps.CatalogFeatureHandler.RegisterRoutes(catalogGroup, deps.PermissionChecker)
+		if deps.CatalogPublicListingHandler != nil {
+			deps.CatalogPublicListingHandler.RegisterAppRoutes(catalogGroup, deps.PermissionChecker)
+		}
 	}
 
 	// Email: each user's own mailboxes (CRM and receivable). Same tenant rules as CRM.

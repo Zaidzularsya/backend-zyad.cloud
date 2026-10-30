@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"zyad.cloud/internal/core/middleware"
+	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/catalog/dto"
 )
@@ -127,5 +128,53 @@ func TestPlatformListingEndpointUnchanged(t *testing.T) {
 	code, body := getHost(listingRouter(t, svc), "anything.example.com", "/public/catalog/listings")
 	if code != http.StatusOK || !strings.Contains(body, `"platform"`) || len(svc.scopes) != 0 {
 		t.Fatalf("code=%d body=%s", code, body)
+	}
+}
+
+// /app/catalog/listings: listing milik org login untuk editor landing (pratinjau + panel
+// blok Pricing Katalog). Org selalu dari konteks tenant sesi, bukan dari klien.
+func appListingRouter(t *testing.T, orgType coretenant.OrganizationType, svc *fakeListingSvc, p permissionmiddleware.CombinedPermissionChecker) *gin.Engine {
+	r := routerFor(t, orgType)
+	NewPublicListingHandler(svc).RegisterAppRoutes(r.Group(""), p)
+	return r
+}
+
+func TestAppListingsTenantUsesSessionOrganization(t *testing.T) {
+	svc := &fakeListingSvc{}
+	r := appListingRouter(t, coretenant.OrganizationTypeCustomer, svc, allowAll{})
+	code, body := doBody(r, http.MethodGet, "/listings?organization_id=other", "")
+	if code != http.StatusOK || !strings.Contains(body, "cat-of-11111111-1111-1111-1111-111111111111") {
+		t.Fatalf("code=%d body=%s", code, body)
+	}
+	if len(svc.scopes) != 1 || svc.scopes[0] != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("scopes = %v", svc.scopes)
+	}
+}
+
+func TestAppListingsPlatformUsesPlatformListings(t *testing.T) {
+	svc := &fakeListingSvc{}
+	r := appListingRouter(t, coretenant.OrganizationTypePlatform, svc, allowAll{})
+	code, body := doBody(r, http.MethodGet, "/listings", "")
+	if code != http.StatusOK || !strings.Contains(body, `"platform"`) || len(svc.scopes) != 0 {
+		t.Fatalf("code=%d body=%s scopes=%v", code, body, svc.scopes)
+	}
+}
+
+func TestAppListingsRequiresProductReadPermission(t *testing.T) {
+	svc := &fakeListingSvc{}
+	r := appListingRouter(t, coretenant.OrganizationTypeCustomer, svc, denyAll{})
+	code, _ := doBody(r, http.MethodGet, "/listings", "")
+	if code != http.StatusForbidden || len(svc.scopes) != 0 {
+		t.Fatalf("code=%d scopes=%v", code, svc.scopes)
+	}
+}
+
+func TestAppListingsNotCachedBySharedCaches(t *testing.T) {
+	r := appListingRouter(t, coretenant.OrganizationTypeCustomer, &fakeListingSvc{}, allowAll{})
+	req := httptest.NewRequest(http.MethodGet, "/listings", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if cc := w.Header().Get("Cache-Control"); !strings.Contains(cc, "private") {
+		t.Fatalf("Cache-Control = %q", cc)
 	}
 }
