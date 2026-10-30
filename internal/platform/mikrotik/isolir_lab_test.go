@@ -191,6 +191,29 @@ func TestLabIsolirLeftovers(t *testing.T) {
 // their addresses (values are pool names / addresses, never secret names).
 func TestLabIsolirAddressing(t *testing.T) {
 	c := labBinary(t)
+	// Raw "disabled" values per path (how the API reports enabled objects).
+	for _, path := range []string{"/ip/pool", "/ppp/secret", "/ppp/profile", "/ip/firewall/filter", "/ip/firewall/nat", "/ip/firewall/address-list", "/ip/proxy/access"} {
+		vals := map[string]int{}
+		for _, r := range labPrint(t, c, path) {
+			v, ok := r["disabled"]
+			if !ok {
+				v = "<absent>"
+			}
+			vals[strconv.Quote(v)]++
+		}
+		t.Logf("disabled values %s: %v", path, vals)
+	}
+	// Input chain and raw table: what could affect DNS from the isolir pool to the router.
+	for _, r := range labPrint(t, c, "/ip/firewall/filter") {
+		if r["chain"] == "input" {
+			t.Logf("input id=%s action=%s disabled=%q protocol=%q dst-port=%q src-address=%q src-address-list=%q in-interface=%q in-interface-list=%q hotspot=%q connection-state=%q",
+				r[".id"], r["action"], r["disabled"], r["protocol"], r["dst-port"], r["src-address"], r["src-address-list"], r["in-interface"], r["in-interface-list"], r["hotspot"], r["connection-state"])
+		}
+	}
+	t.Logf("raw rules: %d", len(labPrint(t, c, "/ip/firewall/raw")))
+	for _, r := range labPrint(t, c, "/ip/firewall/raw") {
+		t.Logf("raw chain=%s action=%s disabled=%q matchers=%s", r["chain"], r["action"], r["disabled"], matcherKeys(r))
+	}
 	for _, r := range labPrint(t, c, "/ppp/profile") {
 		t.Logf("profile %q local=%q remote=%q rate=%q dns=%q address-list=%q only-one=%q", r["name"], r["local-address"], r["remote-address"], r["rate-limit"], r["dns-server"], r["address-list"], r["only-one"])
 	}
@@ -427,9 +450,6 @@ func TestLabIsolirMechanism(t *testing.T) {
 		}
 		active, err := c.Print(ctx, "/ppp/active", Row{"name": "zyad-labtest-user"})
 		t.Logf("active sessions for test secret: %d err=%v", len(active), err)
-		if err := c.Remove(ctx, "/ppp/active", "*FFFFFF"); err != nil {
-			t.Logf("remove non-existent active id: %v", err)
-		}
 		if err := c.Set(ctx, "/ppp/secret", secretID, Row{"profile": "default"}); err != nil {
 			t.Errorf("restore set profile: %v", err)
 		}
