@@ -27,6 +27,14 @@ const (
 	CheckStatusHostBlocked  = "host_not_allowed"
 )
 
+// CheckStatuses lists every CheckStatus* value. The last_check_status CHECK
+// constraint (migrations 000168, 000170) must accept all of them; a unit test
+// keeps this list in sync with the constants and an integration test stores
+// each one.
+var CheckStatuses = []string{
+	CheckStatusOK, CheckStatusUnreachable, CheckStatusAuthFailed, CheckStatusTLSUntrusted, CheckStatusHostBlocked,
+}
+
 const maxNameLength = 100
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
