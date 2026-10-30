@@ -43,7 +43,7 @@ Salin `.env.example` menjadi `.env` di root repo, lalu isi minimal variabel beri
 | `MAIL_HOST` | jika kosong, email fallback ke provider `noop` (tidak benar-benar mengirim) |
 | `WHATSAPP_PROVIDER`, `DISCORD_PROVIDER` | default `noop` |
 | `XENDIT_BASE_URL`, `XENDIT_API_KEY`, `XENDIT_WEBHOOK_TOKEN` | payment gateway — tanpa ini, flow pembayaran billing tidak akan berfungsi (modul `billing` masih WIP terkait ini, lihat [next-development-tasks.md](next-development-tasks.md)) |
-| `MIKROTIK_ALLOWED_PRIVATE_CIDRS` | kosong — semua host privat ditolak untuk router MikroTik; isi daftar CIDR dipisah koma untuk mengizinkan (mis. IP WireGuard). Lihat [reference-mikrotik.md](reference-mikrotik.md) |
+| `MIKROTIK_ALLOWED_PRIVATE_CIDRS` | kosong — semua host privat ditolak untuk router MikroTik; isi daftar CIDR dipisah koma untuk mengizinkan (mis. IP WireGuard). Pakai rentang tersempit yang hanya berisi router TENANT dan kecualikan host infrastruktur (database, Redis, RADIUS, layanan lain): setiap tenant bisa mengarahkan probe router ke host/port mana pun di dalamnya. Prefix yang beririsan dengan loopback, link-local, `0.0.0.0/8`, atau multicast diabaikan. Lihat [reference-mikrotik.md](reference-mikrotik.md) |
 | `TEST_DB_*` | konfigurasi database khusus test (lihat bagian Testing) |
 
 Daftar lengkap variabel ada di `.env.example` (root repo) — dokumen ini hanya menyoroti yang penting untuk

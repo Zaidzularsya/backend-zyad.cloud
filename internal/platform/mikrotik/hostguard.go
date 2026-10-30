@@ -15,10 +15,15 @@ import (
 var ErrHostNotAllowed = errors.New("mikrotik: host not allowed")
 
 // Router hosts come from tenants, so connecting to them is an SSRF vector.
-// Public addresses are always allowed. Non-public addresses (private,
-// loopback, CGNAT) are allowed only when covered by the operator-configured
-// allow list. Link-local (including cloud metadata 169.254.169.254) and
+// Public addresses are always allowed. Non-public addresses (private, CGNAT,
+// ULA) are allowed only when covered by the operator-configured allow list.
+// Loopback, link-local (including cloud metadata 169.254.169.254) and
 // unspecified addresses are never allowed, even if listed.
+
+// allowLoopbackForTests lets this package's own tests reach in-process fake
+// servers on 127.0.0.1 (they still have to list it). Only TestMain in a
+// _test.go file sets it; production code never does.
+var allowLoopbackForTests bool
 
 var carrierGradeNAT = netip.MustParsePrefix("100.64.0.0/10")
 
@@ -49,6 +54,9 @@ func isNeverAllowed(addr netip.Addr) bool {
 func checkAddress(addr netip.Addr, allowedPrivate []netip.Prefix) (allowed, public bool) {
 	addr = addr.Unmap()
 	if isNeverAllowed(addr) {
+		return false, false
+	}
+	if addr.IsLoopback() && !allowLoopbackForTests {
 		return false, false
 	}
 	if isPublicAddress(addr) {

@@ -17,6 +17,7 @@ func prefixes(t *testing.T, cidrs ...string) []netip.Prefix {
 }
 
 func TestValidateHost(t *testing.T) {
+	withoutLoopbackHook(t) // production loopback rules
 	orig := lookupNetIP
 	t.Cleanup(func() { lookupNetIP = orig })
 	lookupNetIP = func(_ context.Context, host string) ([]netip.Addr, error) {
@@ -53,7 +54,7 @@ func TestValidateHost(t *testing.T) {
 		{"public", "8.8.8.8", nil, false, true},
 		{"private allowed", "10.8.0.5", prefixes(t, "10.8.0.0/24"), false, false},
 		{"private not allowed", "10.8.0.5", nil, true, false},
-		{"loopback explicitly listed", "127.0.0.1", prefixes(t, "127.0.0.1/32"), false, false},
+		{"loopback rejected even if listed", "127.0.0.1", prefixes(t, "127.0.0.1/32"), true, false},
 		{"v4-mapped loopback", "::ffff:127.0.0.1", nil, true, false},
 		{"localhost", "localhost", nil, true, false},
 		{"hostname public", "router.example.com", nil, false, true},
@@ -90,6 +91,7 @@ func TestValidateHost(t *testing.T) {
 }
 
 func TestDialControl(t *testing.T) {
+	withoutLoopbackHook(t) // production loopback rules
 	tests := []struct {
 		name    string
 		address string
@@ -98,7 +100,7 @@ func TestDialControl(t *testing.T) {
 	}{
 		{"public", "8.8.8.8:443", nil, false},
 		{"loopback rejected", "127.0.0.1:443", nil, true},
-		{"loopback allowed when listed", "127.0.0.1:443", prefixes(t, "127.0.0.1/32"), false},
+		{"loopback rejected even if listed", "127.0.0.1:443", prefixes(t, "127.0.0.1/32"), true},
 		{"private allowed when listed", "10.8.0.5:443", prefixes(t, "10.8.0.0/24"), false},
 		{"metadata rejected even if listed", "169.254.169.254:80", prefixes(t, "169.254.0.0/16"), true},
 		{"unspecified rejected even if listed", "0.0.0.0:80", prefixes(t, "0.0.0.0/0"), true},

@@ -38,6 +38,12 @@ organization aktif bertipe customer atau platform.
 
 - **Guard SSRF**: host di-resolve dan hanya boleh publik, atau berada di CIDR privat yang diizinkan lewat env
   `MIKROTIK_ALLOWED_PRIVATE_CIDRS` (daftar dipisah koma; kosong berarti semua privat ditolak). Pelanggaran: `MIKROTIK_HOST_NOT_ALLOWED`.
+  Daftar ini dipakai bersama oleh **semua tenant**: isi dengan rentang tersempit yang hanya memuat router tenant (mis.
+  subnet tunnel WireGuard router) dan kecualikan host infrastruktur (database, Redis, RADIUS, layanan lain), karena
+  setiap tenant bisa mengarahkan probe router ke host/port mana pun di dalamnya. Prefix yang beririsan dengan loopback
+  (`127.0.0.0/8`, `::1`), link-local (`169.254.0.0/16`, `fe80::/10`), `0.0.0.0/8`, alamat unspecified, atau multicast
+  diabaikan saat config dibaca (mis. `64.0.0.0/2` ditolak karena memuat `127/8`). Loopback tidak pernah diizinkan,
+  walau terdaftar.
 - **TLS wajib untuk host publik** (`MIKROTIK_TLS_REQUIRED`). Sertifikat tidak tepercaya ditolak dengan
   `MIKROTIK_TLS_UNTRUSTED` yang membawa `fingerprint` dan `pin_mismatch` agar UI dapat menawarkan **pin fingerprint**
   (`tls_fingerprint`, SHA-256 leaf).
