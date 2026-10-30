@@ -14,6 +14,10 @@ const (
 	APITypeBinary APIType = "binary"
 )
 
+// MaxRouterPageSize is the largest router list page. The repository clamps to
+// it and the handler reports the same effective size in pagination meta.
+const MaxRouterPageSize = 200
+
 // Router is a tenant-owned Mikrotik router. PasswordEncrypted is ciphertext and
 // must never be returned to API clients.
 type Router struct {

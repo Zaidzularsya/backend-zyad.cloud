@@ -166,6 +166,30 @@ func TestListRoutersPaginates(t *testing.T) {
 	}
 }
 
+func TestListRoutersClampsPerPageInMeta(t *testing.T) {
+	var gotLimit, gotOffset int
+	r := routerFor(t, &fakeService{listFn: func(limit, offset int) ([]domain.Router, int64, error) {
+		gotLimit, gotOffset = limit, offset
+		return nil, 450, nil
+	}})
+	w := performJSON(r, http.MethodGet, "/app/mikrotik/routers?page=2&per_page=500", "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body)
+	}
+	if gotLimit != domain.MaxRouterPageSize || gotOffset != domain.MaxRouterPageSize {
+		t.Fatalf("limit/offset = %d/%d, want %d/%d", gotLimit, gotOffset, domain.MaxRouterPageSize, domain.MaxRouterPageSize)
+	}
+	var body struct {
+		Meta map[string]any `json:"meta"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Meta["per_page"] != float64(domain.MaxRouterPageSize) || body.Meta["total_pages"] != float64(3) {
+		t.Fatalf("meta = %v, want per_page=%d total_pages=3", body.Meta, domain.MaxRouterPageSize)
+	}
+}
+
 func TestErrorMappingTable(t *testing.T) {
 	cases := []struct {
 		err    error

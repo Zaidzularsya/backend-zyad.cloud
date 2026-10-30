@@ -108,6 +108,7 @@ func TestSetupErrorMapping(t *testing.T) {
 		"state not saved": {mikrotik.ErrSetupStateNotSaved, 500, "MIKROTIK_SETUP_STATE_NOT_SAVED"},
 		"unknown":         {errors.New("boom password=" + testPassword), 500, "INTERNAL_ERROR"},
 		"in progress":     {mikrotik.ErrSetupInProgress, 409, "MIKROTIK_SETUP_IN_PROGRESS"},
+		"mark failed":     {mikrotik.ErrSetupMarkFailed, 500, "MIKROTIK_SETUP_MARK_FAILED"},
 		"rest unverified": {mikrotik.ErrSetupRESTUnverified, 422, "MIKROTIK_SETUP_REST_UNVERIFIED"},
 	} {
 		t.Run(name, func(t *testing.T) {

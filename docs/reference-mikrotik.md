@@ -24,7 +24,11 @@ Semua di bawah `/api/v1/app/mikrotik`, memakai envelope standar. Detail skema ad
 | POST | `/routers/{id}/setup/apply` | `mikrotik_router.setup` | Terapkan rencana (`plan_hash` wajib) |
 | POST | `/routers/{id}/setup/cleanup` | `mikrotik_router.setup` | Hapus objek `zyad-managed` |
 
-Registrasi (`POST /routers`) mewajibkan `port` >= 1 (maksimal 65535) di lapisan HTTP.
+Registrasi (`POST /routers`) mewajibkan `port` >= 1 (maksimal 65535) di lapisan HTTP. **RouterOS v6** (tanpa REST)
+wajib didaftarkan dengan port API: `8728`, atau `8729` untuk API-SSL. Deteksi transport mencoba REST dan binary pada
+port yang **sama** (binary lebih dulu di 8728/8729), jadi port HTTP 80/443 tidak akan menemukan API binary.
+
+List: `per_page` default 20, maksimal 200; nilai lebih besar dipotong dan `meta.per_page` memuat ukuran efektif.
 
 Respons router tidak pernah memuat password, hanya `has_password`. Tabel: `mikrotik_routers` (migration `000168`),
 permission di migration `000169`.
@@ -66,7 +70,8 @@ organization aktif bertipe customer atau platform.
   (`MIKROTIK_SETUP_CONFLICT`), tidak pernah diadopsi atau diubah.
 - **Fail-closed**: `isolir_ready` dikosongkan sebelum menulis dan baru true setelah semua langkah sukses. Kegagalan langkah
   menghasilkan `MIKROTIK_SETUP_FAILED`; bila objek berubah tetapi status gagal tersimpan: `MIKROTIK_SETUP_STATE_NOT_SAVED`
-  (ulangi operasi yang sama, idempoten).
+  (ulangi operasi yang sama, idempoten). Bila `isolir_ready` tidak bisa dikosongkan sebelum perubahan, router tidak
+  disentuh sama sekali: `MIKROTIK_SETUP_MARK_FAILED` (aman diulang).
 - `cleanup` hanya menghapus objek `zyad-managed` dan aman diulang.
 - `apply` dan `cleanup` pada router yang sama diserialkan dengan advisory lock Postgres per router (try-lock, tidak
   menunggu) yang diambil sebelum state router dibaca. Bila lock sedang dipegang: 409 `MIKROTIK_SETUP_IN_PROGRESS`, tidak
@@ -99,7 +104,7 @@ organization aktif bertipe customer atau platform.
 `MIKROTIK_ROUTER_NOT_FOUND` (404), `MIKROTIK_ROUTER_NAME_TAKEN` (409), `VALIDATION_ERROR` (422),
 `MIKROTIK_HOST_NOT_ALLOWED` (422), `MIKROTIK_TLS_REQUIRED` (422), `MIKROTIK_TLS_UNTRUSTED` (422), `MIKROTIK_SETUP_REST_UNVERIFIED` (422),
 `MIKROTIK_AUTH_FAILED` (502), `MIKROTIK_UNREACHABLE` (502), `MIKROTIK_SETUP_PLAN_CHANGED` (409),
-`MIKROTIK_SETUP_CONFLICT` (409), `MIKROTIK_SETUP_IN_PROGRESS` (409), `MIKROTIK_SETUP_FAILED` (502), `MIKROTIK_SETUP_STATE_NOT_SAVED` (500), `RATE_LIMITED` (429), `INTERNAL_ERROR` (500).
+`MIKROTIK_SETUP_CONFLICT` (409), `MIKROTIK_SETUP_IN_PROGRESS` (409), `MIKROTIK_SETUP_FAILED` (502), `MIKROTIK_SETUP_STATE_NOT_SAVED` (500), `MIKROTIK_SETUP_MARK_FAILED` (500), `RATE_LIMITED` (429), `INTERNAL_ERROR` (500).
 
 ## Tidak termasuk Fase 1
 

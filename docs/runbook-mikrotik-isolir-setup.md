@@ -271,6 +271,10 @@ sebagai konfigurasi, bukan hardcode.
 
 ## 8. Perbedaan v6 dan v7 yang relevan
 
+Pendaftaran router v6: isi `port` dengan port API (`8728`, atau `8729` untuk API-SSL). Deteksi transport mencoba REST
+dan binary pada port yang sama (binary dulu di 8728/8729), dan lapisan HTTP mewajibkan `port` >= 1, sehingga router v6
+yang didaftarkan dengan port 80/443 tidak akan terdeteksi.
+
 | Butir | v6 | v7 | Status |
 |---|---|---|---|
 | REST | tidak ada | ada (`www-ssl`; `www` mulai 7.9 menurut dokumentasi) | 7.8: 404 lewat `www` teramati di log; sisanya belum terbukti |

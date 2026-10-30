@@ -91,6 +91,10 @@ func (h *RouterHandler) List(c *gin.Context) {
 	if perPage <= 0 {
 		perPage = 20
 	}
+	if perPage > domain.MaxRouterPageSize {
+		// Same clamp as the repository, so meta.per_page is the real page size.
+		perPage = domain.MaxRouterPageSize
+	}
 	routers, total, err := h.svc.List(c.Request.Context(), scope, perPage, (page-1)*perPage)
 	if err != nil {
 		failRouter(c, err)
@@ -221,7 +225,8 @@ func failRouter(c *gin.Context, err error) {
 	case errors.Is(err, mikrotik.ErrUnreachable):
 		response.Error(c, http.StatusBadGateway, "MIKROTIK_UNREACHABLE", "router is unreachable")
 	case errors.Is(err, mikrotik.ErrSetupMarkFailed):
-		response.Error(c, http.StatusInternalServerError, "MIKROTIK_SETUP_STATE_NOT_SAVED", err.Error())
+		// Nothing changed on the router (fail closed); distinct from STATE_NOT_SAVED.
+		response.Error(c, http.StatusInternalServerError, "MIKROTIK_SETUP_MARK_FAILED", err.Error())
 	case errors.Is(err, mikrotik.ErrSetupStateNotSaved):
 		response.Error(c, http.StatusInternalServerError, "MIKROTIK_SETUP_STATE_NOT_SAVED", err.Error())
 	case errors.As(err, &stepErr) && errors.Is(err, mikrotik.ErrSetupFailed):

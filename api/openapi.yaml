@@ -10177,7 +10177,8 @@ paths:
         schema: {type: integer}
       - name: per_page
         in: query
-        schema: {type: integer}
+        description: "Default 20, maksimal 200 (nilai lebih besar dipotong ke 200; `meta.per_page` memuat ukuran halaman efektif)."
+        schema: {type: integer, maximum: 200}
       responses:
         '200':
           description: "Success"
@@ -10206,7 +10207,7 @@ paths:
       - Mikrotik
       security:
       - BearerAuth: []
-      description: "Mendaftarkan router. Host divalidasi (guard SSRF: host publik atau CIDR privat yang diizinkan `MIKROTIK_ALLOWED_PRIVATE_CIDRS`); host publik wajib `use_tls=true`. Password disimpan terenkripsi dan tidak pernah dikembalikan. Permission: `mikrotik_router.create`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      description: "Mendaftarkan router. Untuk RouterOS v6 isi `port` dengan port API (8728, atau 8729 dengan TLS) karena deteksi mencoba kedua transport pada port yang sama. Host divalidasi (guard SSRF: host publik atau CIDR privat yang diizinkan `MIKROTIK_ALLOWED_PRIVATE_CIDRS`); host publik wajib `use_tls=true`. Password disimpan terenkripsi dan tidak pernah dikembalikan. Permission: `mikrotik_router.create`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
       requestBody:
         required: true
         content:
@@ -10491,7 +10492,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '500':
-          description: "INTERNAL_ERROR | MIKROTIK_SETUP_STATE_NOT_SAVED (objek router sudah berubah tetapi status isolir gagal disimpan, atau status tidak bisa dicatat sebelum perubahan sehingga router tidak disentuh; ulangi operasi yang sama, idempoten)"
+          description: "INTERNAL_ERROR"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -10559,7 +10560,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '500':
-          description: "INTERNAL_ERROR | MIKROTIK_SETUP_STATE_NOT_SAVED (objek router sudah berubah tetapi status isolir gagal disimpan, atau status tidak bisa dicatat sebelum perubahan sehingga router tidak disentuh; ulangi operasi yang sama, idempoten)"
+          description: "INTERNAL_ERROR | MIKROTIK_SETUP_STATE_NOT_SAVED (objek router SUDAH berubah tetapi status isolir gagal disimpan; ulangi operasi yang sama, idempoten) | MIKROTIK_SETUP_MARK_FAILED (status isolir tidak bisa dikosongkan sebelum perubahan sehingga router TIDAK disentuh; aman diulang)"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -10622,7 +10623,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '500':
-          description: "INTERNAL_ERROR | MIKROTIK_SETUP_STATE_NOT_SAVED (objek router sudah berubah tetapi status isolir gagal disimpan, atau status tidak bisa dicatat sebelum perubahan sehingga router tidak disentuh; ulangi operasi yang sama, idempoten)"
+          description: "INTERNAL_ERROR | MIKROTIK_SETUP_STATE_NOT_SAVED (objek router SUDAH berubah tetapi status isolir gagal disimpan; ulangi operasi yang sama, idempoten) | MIKROTIK_SETUP_MARK_FAILED (status isolir tidak bisa dikosongkan sebelum perubahan sehingga router TIDAK disentuh; aman diulang)"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -15669,7 +15670,7 @@ components:
       properties:
         name: {type: string, maxLength: 100, description: "Unik per organization."}
         host: {type: string, maxLength: 255}
-        port: {type: integer, minimum: 1, maximum: 65535}
+        port: {type: integer, minimum: 1, maximum: 65535, description: "Port service router. Untuk RouterOS v6 (tanpa REST) isi port API: 8728, atau 8729 untuk API-SSL; deteksi transport mencoba REST dan binary pada port yang SAMA, jadi port HTTP (80/443) tidak akan menemukan API binary."}
         username: {type: string, maxLength: 100}
         password: {type: string, maxLength: 255}
         use_tls: {type: boolean}

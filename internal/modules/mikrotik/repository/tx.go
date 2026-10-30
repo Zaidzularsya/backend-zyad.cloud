@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	coretenant "zyad.cloud/internal/core/tenant"
+	"zyad.cloud/internal/modules/mikrotik/domain"
 	"zyad.cloud/internal/platform/database"
 )
 
@@ -46,8 +47,8 @@ func clampLimit(limit int) int {
 	if limit <= 0 {
 		return 50
 	}
-	if limit > 200 {
-		return 200
+	if limit > domain.MaxRouterPageSize {
+		return domain.MaxRouterPageSize
 	}
 	return limit
 }
