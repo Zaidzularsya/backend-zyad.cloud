@@ -10190,7 +10190,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '403':
-          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, ORGANIZATION_SETUP_ONLY, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED"
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -10224,7 +10224,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '403':
-          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, ORGANIZATION_SETUP_ONLY, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED"
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -10272,7 +10272,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '403':
-          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, ORGANIZATION_SETUP_ONLY, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED"
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -10311,7 +10311,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '403':
-          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, ORGANIZATION_SETUP_ONLY, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED"
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -10360,7 +10360,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '403':
-          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, ORGANIZATION_SETUP_ONLY, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED"
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -10395,7 +10395,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '403':
-          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, ORGANIZATION_SETUP_ONLY, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED"
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -10448,7 +10448,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '403':
-          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, ORGANIZATION_SETUP_ONLY, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED"
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -10511,7 +10511,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '403':
-          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, ORGANIZATION_SETUP_ONLY, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED"
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -10569,7 +10569,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '403':
-          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, ORGANIZATION_SETUP_ONLY, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED"
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
