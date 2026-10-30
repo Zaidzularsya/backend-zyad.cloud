@@ -176,14 +176,19 @@ func TestLabSetupLifecycle(t *testing.T) {
 	pools, _ := raw.Print(ctx, pathPool, pmk.Row{"name": setupPoolName})
 	profiles, _ := raw.Print(ctx, pathProfile, pmk.Row{"name": setupDefaultProf})
 	fwd, _ := raw.Print(ctx, pathFilter, pmk.Row{"chain": "forward"})
-	managedFwd := 0
-	for i, r := range fwd {
+	// Dynamic rows (e.g. hotspot) may sit above; position counts static rows only.
+	managedFwd, static := 0, 0
+	for _, r := range fwd {
+		if rowDynamic(r) {
+			continue
+		}
 		if r["comment"] == setupManaged {
-			if i != managedFwd {
-				t.Errorf("zyad forward rule at position %d, expected contiguous from top", i)
+			if static != managedFwd {
+				t.Errorf("zyad forward rule at static position %d, expected contiguous from top", static)
 			}
 			managedFwd++
 		}
+		static++
 	}
 	if len(pools) != 1 || len(profiles) != 1 || managedFwd != 4 {
 		t.Fatalf("pools=%d profiles=%d zyad forward rules=%d", len(pools), len(profiles), managedFwd)

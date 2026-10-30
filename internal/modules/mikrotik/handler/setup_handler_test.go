@@ -254,3 +254,26 @@ func TestSetupRoutesRequireSetupPermission(t *testing.T) {
 		}
 	}
 }
+
+func TestSetupFailedMessageIsOperationSpecific(t *testing.T) {
+	for _, tc := range []struct {
+		step, must, mustNot string
+	}{
+		{"create /ip/firewall/filter", "apply is safe to retry", "cleanup"},
+		{"remove /ip/pool", "cleanup is incomplete and can be retried", "apply is safe"},
+	} {
+		r := setupRouterFor(t, &fakeSetupService{cleanupFn: func() (domain.Router, error) {
+			return domain.Router{}, &mikrotik.SetupStepError{Step: tc.step, Cause: mikrotik.ErrSetupFailed}
+		}})
+		w := performJSON(r, http.MethodPost, setupBase+"/cleanup", "")
+		if w.Code != 502 || !strings.Contains(w.Body.String(), tc.must) || strings.Contains(w.Body.String(), tc.mustNot) {
+			t.Errorf("%s: status = %d body = %s", tc.step, w.Code, w.Body)
+		}
+	}
+	r := setupRouterFor(t, &fakeSetupService{cleanupFn: func() (domain.Router, error) {
+		return domain.Router{}, mikrotik.ErrSetupMarkFailed
+	}})
+	if w := performJSON(r, http.MethodPost, setupBase+"/cleanup", ""); w.Code != 500 || !strings.Contains(w.Body.String(), "nothing was changed") {
+		t.Errorf("mark failed: %d %s", w.Code, w.Body)
+	}
+}

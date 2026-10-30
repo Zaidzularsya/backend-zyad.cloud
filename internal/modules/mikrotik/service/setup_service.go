@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/mikrotik"
@@ -20,6 +21,16 @@ import (
 	"zyad.cloud/internal/modules/mikrotik/repository"
 	pmk "zyad.cloud/internal/platform/mikrotik"
 )
+
+// setupWriteTimeout bounds the write phase of Apply and all of Cleanup. These
+// run under context.WithoutCancel so a client or proxy disconnect cannot leave
+// the router half-configured; the timeout still prevents a hung router from
+// holding the request forever. Preview is read-only and keeps the request ctx.
+const setupWriteTimeout = 3 * time.Minute
+
+func writeContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), setupWriteTimeout)
+}
 
 // ErrPlanChanged is returned by Apply when the freshly computed plan differs
 // from the previewed one. Alias of mikrotik.ErrPlanChanged.
@@ -101,7 +112,12 @@ func normalizeHost(label, h string) (string, error) {
 	if len(h) > 253 {
 		return "", invalid(label + " is too long")
 	}
-	if _, err := netip.ParseAddr(h); err == nil {
+	if a, err := netip.ParseAddr(h); err == nil {
+		// IPv4 literals only: the allowlist is an IPv4 address-list and the
+		// router would reject IPv6 or zoned addresses mid-apply.
+		if !a.Is4() {
+			return "", invalid(label + " must be an IPv4 address or hostname")
+		}
 		return h, nil
 	}
 	if !fqdnPattern.MatchString(h) {
@@ -411,6 +427,14 @@ func (s *SetupService) plan(ctx context.Context, c pmk.RouterClient, n normalize
 	if err != nil {
 		return domain.SetupPlan{}, err
 	}
+	for _, e := range entries {
+		if e["list"] == setupAllowList && !rowDynamic(e) && !rowManaged(e) {
+			return domain.SetupPlan{}, &mikrotik.SetupConflictError{
+				Kind: "address-list", Name: setupAllowList,
+				Detail: "the allowlist already has entries not managed by zyad; remove or move them manually",
+			}
+		}
+	}
 	for _, h := range n.allowHosts {
 		sp := objSpec{
 			kind: "address-list", path: pathAddressList, name: h,
@@ -458,7 +482,8 @@ func planForward(fwd []pmk.Row) ([]domain.SetupAction, error) {
 	// The first forward rule that is not zyad-managed ({FIRST_FORWARD_ID}).
 	firstForeign := ""
 	for _, r := range fwd {
-		if !rowManaged(r) {
+		// Dynamic rows (e.g. the fasttrack "special dummy rule") are never anchors.
+		if !rowManaged(r) && !rowDynamic(r) {
 			firstForeign = r[".id"]
 			break
 		}
@@ -479,7 +504,7 @@ func planForward(fwd []pmk.Row) ([]domain.SetupAction, error) {
 	}
 	if lo >= 0 {
 		for i := 0; i <= hi; i++ {
-			if !rowManaged(fwd[i]) {
+			if !rowManaged(fwd[i]) && !rowDynamic(fwd[i]) {
 				return nil, conflictOrder("a non-zyad forward rule sits before or between zyad rules")
 			}
 		}
@@ -680,7 +705,8 @@ func (s *SetupService) audit(ctx context.Context, scope coretenant.Scope, event,
 // Apply recomputes the plan from the current router state, refuses with
 // ErrPlanChanged when it differs from the previewed planHash (writing nothing),
 // executes the actions in order, verifies by re-planning and marks the router
-// isolir-ready.
+// isolir-ready. Fail closed: a router that is already ready is marked not
+// ready before the first write, and ready again only after verification.
 func (s *SetupService) Apply(ctx context.Context, scope coretenant.Scope, routerID string, in SetupInput, planHash, actor string) (domain.Router, error) {
 	n, err := normalizeSetup(in)
 	if err != nil {
@@ -698,6 +724,23 @@ func (s *SetupService) Apply(ctx context.Context, scope coretenant.Scope, router
 		return domain.Router{}, ErrPlanChanged
 	}
 
+	// Write phase: detached from request cancellation (see setupWriteTimeout).
+	ctx, cancel := writeContext(ctx)
+	defer cancel()
+
+	needsWrite := false
+	for _, a := range plan.Actions {
+		if a.Kind != domain.SetupExists {
+			needsWrite = true
+		}
+	}
+	if needsWrite && router.IsolirReady {
+		if err := s.repo.MarkSetup(ctx, scope, routerID, false, "", ""); err != nil {
+			slog.Warn("mikrotik: mark not-ready before apply failed", "router_id", routerID, "error", scrub(err.Error(), secrets...))
+			return domain.Router{}, mikrotik.ErrSetupMarkFailed
+		}
+	}
+
 	created, updated, unchanged := 0, 0, 0
 	for _, a := range plan.Actions {
 		var werr error
@@ -705,6 +748,11 @@ func (s *SetupService) Apply(ctx context.Context, scope coretenant.Scope, router
 		case domain.SetupCreate:
 			_, werr = client.Add(ctx, a.Path, a.Attrs)
 		case domain.SetupUpdate:
+			// a.ID comes from a row that find() verified in Go: managed, not
+			// dynamic and equal on every match key.
+			if a.ID == "" {
+				return domain.Router{}, &mikrotik.SetupStepError{Step: "update " + a.Path, Cause: mikrotik.ErrSetupFailed, RouterWritten: created+updated > 0}
+			}
 			werr = client.Set(ctx, a.Path, a.ID, withoutKey(a.Attrs, "place-before"))
 		default:
 			unchanged++
@@ -750,25 +798,44 @@ func withoutKey(r pmk.Row, key string) pmk.Row {
 	return out
 }
 
+// removable reports whether a row returned by Print may be removed: it must be
+// zyad-managed, not dynamic and equal to every key/value of the query. This is
+// re-checked in Go because server-side filtering is not trusted.
+func removable(r pmk.Row, query pmk.Row) bool {
+	if !rowManaged(r) || rowDynamic(r) || r[".id"] == "" {
+		return false
+	}
+	for k, v := range query {
+		if r[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
 // Cleanup removes only zyad-managed objects created by this setup, in reverse
-// dependency order, then clears isolir_ready.
+// dependency order. Fail closed: isolir_ready is cleared before the first
+// Remove, and if that fails nothing is removed.
 func (s *SetupService) Cleanup(ctx context.Context, scope coretenant.Scope, routerID, actor string) (domain.Router, error) {
 	router, client, secrets, err := s.routers.openClient(ctx, scope, routerID)
 	if err != nil {
 		return domain.Router{}, err
 	}
+	// Detached from request cancellation (see setupWriteTimeout).
+	ctx, cancel := writeContext(ctx)
+	defer cancel()
 	fail := func(err error) (domain.Router, error) { return domain.Router{}, planError(err, secrets) }
 
 	type target struct {
 		path  string
 		query pmk.Row
-		// keep filters candidate rows further in Go; nil keeps all.
-		keep func(pmk.Row) bool
-		rev  bool
+		keep  func(pmk.Row) bool
+		rev   bool
 	}
 	managed := func(q pmk.Row) pmk.Row { q["comment"] = setupManaged; return q }
 
-	profiles, err := client.Print(ctx, pathPPPProfile, managed(pmk.Row{"address-list": setupIsolirList}))
+	profileQuery := managed(pmk.Row{"address-list": setupIsolirList})
+	profiles, err := client.Print(ctx, pathPPPProfile, profileQuery)
 	if err != nil {
 		return fail(err)
 	}
@@ -776,11 +843,18 @@ func (s *SetupService) Cleanup(ctx context.Context, scope coretenant.Scope, rout
 	// would silently fall off the router profile.
 	inUse := 0
 	for _, p := range profiles {
+		if !removable(p, profileQuery) {
+			continue
+		}
 		rows, err := client.Print(ctx, pathPPPSecret, pmk.Row{"profile": p["name"]})
 		if err != nil {
 			return fail(err)
 		}
-		inUse += len(rows)
+		for _, r := range rows {
+			if r["profile"] == p["name"] {
+				inUse++
+			}
+		}
 	}
 	if inUse > 0 {
 		return domain.Router{}, &mikrotik.SetupConflictError{
@@ -792,11 +866,12 @@ func (s *SetupService) Cleanup(ctx context.Context, scope coretenant.Scope, rout
 		{path: pathProxyAccess, query: managed(pmk.Row{}), keep: func(r pmk.Row) bool { return r["action"] == "allow" || r["action"] == "redirect" }},
 		{path: pathFirewallNAT, query: managed(pmk.Row{"chain": "dstnat", "src-address-list": setupIsolirList})},
 		{path: pathFirewallFilter, query: managed(pmk.Row{"chain": "forward", "src-address-list": setupIsolirList}), rev: true},
-		{path: pathAddressList, query: managed(pmk.Row{"list": setupAllowList}), keep: func(r pmk.Row) bool { return !rowDynamic(r) }},
-		{path: pathPPPProfile, query: managed(pmk.Row{"address-list": setupIsolirList})},
+		{path: pathAddressList, query: managed(pmk.Row{"list": setupAllowList})},
+		{path: pathPPPProfile, query: profileQuery},
 		{path: pathIPPool, query: managed(pmk.Row{"name": setupPoolName})},
 	}
-	removed := 0
+	type removal struct{ path, id string }
+	var removals []removal
 	for _, t := range targets {
 		rows, err := client.Print(ctx, t.path, t.query)
 		if err != nil {
@@ -808,20 +883,23 @@ func (s *SetupService) Cleanup(ctx context.Context, scope coretenant.Scope, rout
 			}
 		}
 		for _, r := range rows {
-			if (t.keep != nil && !t.keep(r)) || r[".id"] == "" {
+			if !removable(r, t.query) || (t.keep != nil && !t.keep(r)) {
 				continue
 			}
-			if err := client.Remove(ctx, t.path, r[".id"]); err != nil {
-				return domain.Router{}, &mikrotik.SetupStepError{Step: "remove " + t.path, Cause: stepCause(err, secrets), RouterWritten: removed > 0}
-			}
-			removed++
+			removals = append(removals, removal{t.path, r[".id"]})
 		}
 	}
 
+	// Fail closed before the first write.
 	if err := s.repo.MarkSetup(ctx, scope, routerID, false, "", ""); err != nil {
-		slog.Warn("mikrotik: mark setup failed after cleanup", "router_id", routerID, "error", scrub(err.Error(), secrets...))
-		return domain.Router{}, mikrotik.ErrSetupStateNotSaved
+		slog.Warn("mikrotik: mark not-ready before cleanup failed", "router_id", routerID, "error", scrub(err.Error(), secrets...))
+		return domain.Router{}, mikrotik.ErrSetupMarkFailed
 	}
-	s.audit(ctx, scope, "router.setup_cleaned", actor, router, map[string]any{"removed": removed})
+	for i, rm := range removals {
+		if err := client.Remove(ctx, rm.path, rm.id); err != nil {
+			return domain.Router{}, &mikrotik.SetupStepError{Step: "remove " + rm.path, Cause: stepCause(err, secrets), RouterWritten: i > 0}
+		}
+	}
+	s.audit(ctx, scope, "router.setup_cleaned", actor, router, map[string]any{"removed": len(removals)})
 	return s.routers.Get(ctx, scope, routerID)
 }

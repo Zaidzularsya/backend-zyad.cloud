@@ -306,6 +306,9 @@ Status: **belum terbukti** dengan user berhak minimum (membuat user/grup di rout
 10. User API berhak minimum cukup untuk penyiapan, isolir, restore, dan pembersihan.
 11. Hapus profile isolir yang masih dipakai secret.
 12. Penyiapan idempoten dengan kondisi "sebagian ada" (bagian 5).
+13. Router dengan FastTrack aktif: RouterOS menambah aturan dinamis "special dummy rule" di puncak daftar filter;
+    penyiapan mengabaikan baris `dynamic=true` saat memilih `{FIRST_FORWARD_ID}` dan saat memeriksa urutan. Hanya diuji
+    dengan fake client; **belum terbukti di router asli** (FastTrack disabled di lab).
 
 ## 11. Jejak lab
 

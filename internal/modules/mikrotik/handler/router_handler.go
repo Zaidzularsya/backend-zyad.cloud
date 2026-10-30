@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -201,12 +202,17 @@ func failRouter(c *gin.Context, err error) {
 		response.Error(c, http.StatusBadGateway, "MIKROTIK_AUTH_FAILED", "router rejected the credentials")
 	case errors.Is(err, mikrotik.ErrUnreachable):
 		response.Error(c, http.StatusBadGateway, "MIKROTIK_UNREACHABLE", "router is unreachable")
+	case errors.Is(err, mikrotik.ErrSetupMarkFailed):
+		response.Error(c, http.StatusInternalServerError, "MIKROTIK_SETUP_STATE_NOT_SAVED", err.Error())
 	case errors.Is(err, mikrotik.ErrSetupStateNotSaved):
 		response.Error(c, http.StatusInternalServerError, "MIKROTIK_SETUP_STATE_NOT_SAVED", err.Error())
 	case errors.As(err, &stepErr) && errors.Is(err, mikrotik.ErrSetupFailed):
 		// Transport causes (unreachable, auth, TLS) were matched above through Unwrap.
-		response.Error(c, http.StatusBadGateway, "MIKROTIK_SETUP_FAILED",
-			"router rejected setup step ("+stepErr.Step+"); isolir is not marked ready, apply is safe to retry")
+		msg := "router rejected setup step (" + stepErr.Step + "); isolir is not marked ready, apply is safe to retry"
+		if strings.HasPrefix(stepErr.Step, "remove ") {
+			msg = "router rejected setup step (" + stepErr.Step + "); cleanup is incomplete and can be retried"
+		}
+		response.Error(c, http.StatusBadGateway, "MIKROTIK_SETUP_FAILED", msg)
 	default:
 		c.Error(err) // logged by middleware, not exposed
 		response.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")

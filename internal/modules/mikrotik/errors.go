@@ -32,6 +32,10 @@ var (
 	ErrSetupStateNotSaved = errors.New("router objects were changed but the isolir state was not saved; repeat the same operation (it is idempotent)")
 )
 
+// ErrSetupMarkFailed: isolir_ready could not be cleared before a change, so
+// nothing was changed on the router (fail closed).
+var ErrSetupMarkFailed = errors.New("could not record the isolir state; nothing was changed on the router")
+
 // SetupConflictError names a pre-existing object that setup refuses to touch
 // (or a state it cannot repair), so the operator can resolve it manually.
 type SetupConflictError struct {

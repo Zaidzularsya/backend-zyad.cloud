@@ -13,6 +13,9 @@ type FakeClient struct {
 	// VersionString is returned by Version (default "7.0-fake").
 	VersionString string
 
+	// IgnoreFilters makes Print return every row of the path regardless of the
+	// query, to model a router/transport whose server-side filtering is unreliable.
+	IgnoreFilters bool
 	// WriteHook, when set, runs before every Add/Set/Remove (op is "add",
 	// "set" or "remove"); a non-nil result fails that call. The call still
 	// counts in WriteCalls.
@@ -98,6 +101,9 @@ func (f *FakeClient) Print(_ context.Context, path string, query Row) ([]Row, er
 	for _, r := range f.tables[path] {
 		match := true
 		for k, v := range query {
+			if f.IgnoreFilters {
+				break
+			}
 			if r[k] != v {
 				match = false
 				break
@@ -114,10 +120,13 @@ func (f *FakeClient) Print(_ context.Context, path string, query Row) ([]Row, er
 	return out, nil
 }
 
-func (f *FakeClient) Add(_ context.Context, path string, attrs Row) (string, error) {
+func (f *FakeClient) Add(ctx context.Context, path string, attrs Row) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.writes++
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if f.Err != nil {
 		return "", f.Err
 	}
@@ -157,10 +166,13 @@ func (f *FakeClient) Add(_ context.Context, path string, attrs Row) (string, err
 	return id, nil
 }
 
-func (f *FakeClient) Set(_ context.Context, path, id string, attrs Row) error {
+func (f *FakeClient) Set(ctx context.Context, path, id string, attrs Row) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.writes++
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if f.Err != nil {
 		return f.Err
 	}
@@ -178,10 +190,13 @@ func (f *FakeClient) Set(_ context.Context, path, id string, attrs Row) error {
 	return ErrNotFound
 }
 
-func (f *FakeClient) Remove(_ context.Context, path, id string) error {
+func (f *FakeClient) Remove(ctx context.Context, path, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.writes++
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if f.Err != nil {
 		return f.Err
 	}

@@ -319,6 +319,21 @@ func TestCleanupRemovesOnlyZyadManagedObjects(t *testing.T) {
 	if len(f.client.Rows(pathNAT)) != 2 || len(f.client.Rows(pathProxy)) != 3 {
 		t.Fatal("redirect objects expected when RedirectURL set")
 	}
+	// Look-alikes seeded after apply (Preview would refuse some of them).
+	f.client.Seed(pathList,
+		pmk.Row{"list": "zyad-isolir-allow", "address": "9.9.9.9", "comment": "owner"},                             // unmanaged static entry
+		pmk.Row{"list": "zyad-isolir-allow", "address": "10.77.0.1", "comment": "zyad.online", "dynamic": "true"},  // dynamic, comment = FQDN
+		pmk.Row{"list": "zyad-isolir-allow", "address": "10.77.0.2", "comment": "zyad-managed", "dynamic": "true"}, // dynamic even with the marker
+	)
+	f.client.Seed(pathPool, pmk.Row{"name": "zyad-isolir-pool-other", "ranges": "10.3.0.2-10.3.0.9", "comment": "owner"})
+	f.client.Seed(pathProfile, pmk.Row{"name": "zyad-isolir-other", "address-list": "zyad-isolir", "comment": "owner"})
+	f.client.Seed(pathFilter, pmk.Row{"chain": "forward", "action": "accept", "src-address-list": "zyad-isolir", "protocol": "udp", "dst-port": "53", "comment": "owner-lookalike"})
+	f.client.Seed(pathNAT, pmk.Row{"chain": "dstnat", "action": "redirect", "src-address-list": "zyad-isolir", "comment": "owner-lookalike"})
+	snapshot[pathList] += 3
+	snapshot[pathPool]++
+	snapshot[pathProfile]++
+	snapshot[pathFilter]++
+	snapshot[pathNAT]++
 	f.repo.audits = nil
 	router, err := f.svc.Cleanup(context.Background(), testScope(t), f.routerID, testActor)
 	if err != nil {
@@ -337,7 +352,7 @@ func TestCleanupRemovesOnlyZyadManagedObjects(t *testing.T) {
 			t.Errorf("%s: %d rows after cleanup, want %d (pre-existing)", p, len(rows), n)
 		}
 		for _, r := range rows {
-			if r["comment"] == "zyad-managed" {
+			if r["comment"] == "zyad-managed" && r["dynamic"] != "true" {
 				t.Errorf("%s: managed row left: %v", p, r)
 			}
 		}
@@ -633,4 +648,238 @@ func TestSetupErrorsNeverContainPassword(t *testing.T) {
 	if strings.Contains(logs.String(), testPassword) {
 		t.Fatalf("logs leak password:\n%s", logs.String())
 	}
+}
+
+func applyReady(t *testing.T, f *setupFixture) {
+	t.Helper()
+	plan := f.preview(t, validSetup())
+	if _, err := f.svc.Apply(context.Background(), testScope(t), f.routerID, validSetup(), plan.Hash, testActor); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+}
+
+func TestCleanupIgnoresServerSideFilterAndRemovesOnlyOurs(t *testing.T) {
+	f := newSetupFixture(t)
+	applyReady(t, f)
+	f.client.Seed(pathPool, pmk.Row{"name": "owner-pool", "ranges": "10.3.0.2-10.3.0.9"})
+	f.client.Seed(pathProfile, pmk.Row{"name": "default"})
+	f.client.Seed(pathList, pmk.Row{"list": "other", "address": "1.1.1.1", "comment": "zyad-managed"}, pmk.Row{"list": "zyad-isolir-allow", "address": "8.8.8.8"})
+	f.client.Seed(pathFilter, pmk.Row{"chain": "forward", "action": "accept", "comment": "owner"}, pmk.Row{"chain": "input", "action": "drop", "src-address-list": "zyad-isolir", "comment": "zyad-managed"})
+	f.client.Seed(pathNAT, pmk.Row{"chain": "dstnat", "action": "dst-nat", "comment": "owner"})
+	f.client.Seed(pathProxy, pmk.Row{"src-address": "10.0.0.0/8", "action": "deny", "comment": "owner"})
+	f.client.IgnoreFilters = true
+	if _, err := f.svc.Cleanup(context.Background(), testScope(t), f.routerID, testActor); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	f.client.IgnoreFilters = false
+	want := map[string]int{pathPool: 1, pathProfile: 1, pathList: 2, pathFilter: 2, pathNAT: 1, pathProxy: 1}
+	for p, n := range want {
+		if got := len(f.client.Rows(p)); got != n {
+			t.Errorf("%s: %d rows, want %d (only pre-existing rows must remain): %+v", p, got, n, f.client.Rows(p))
+		}
+	}
+	for _, r := range f.client.Rows(pathFilter) {
+		if r["comment"] == "zyad-managed" && r["chain"] == "forward" {
+			t.Errorf("our rule left: %v", r)
+		}
+	}
+}
+
+func TestCleanupFailsClosedWhenMarkNotReadyFails(t *testing.T) {
+	f := newSetupFixture(t)
+	applyReady(t, f)
+	f.repo.markErr = errors.New("db down")
+	before := f.client.WriteCalls()
+	_, err := f.svc.Cleanup(context.Background(), testScope(t), f.routerID, testActor)
+	if !errors.Is(err, mikrotik.ErrSetupMarkFailed) {
+		t.Fatalf("err = %v", err)
+	}
+	if f.client.WriteCalls() != before {
+		t.Fatal("cleanup removed objects although isolir_ready could not be cleared")
+	}
+}
+
+func TestFailedCleanupLeavesRouterNotReady(t *testing.T) {
+	f := newSetupFixture(t)
+	applyReady(t, f)
+	if !f.repo.routers[f.routerID].IsolirReady {
+		t.Fatal("precondition: ready")
+	}
+	f.client.WriteHook = func(op, path string, _ pmk.Row) error {
+		if op == "remove" && path == pathPool {
+			return errors.New("failure: in use")
+		}
+		return nil
+	}
+	_, err := f.svc.Cleanup(context.Background(), testScope(t), f.routerID, testActor)
+	var step *mikrotik.SetupStepError
+	if !errors.As(err, &step) || !strings.HasPrefix(step.Step, "remove ") {
+		t.Fatalf("err = %v", err)
+	}
+	if f.repo.routers[f.routerID].IsolirReady {
+		t.Fatal("failed cleanup must leave isolir_ready=false")
+	}
+}
+
+func TestFailedReapplyOfReadyRouterLeavesNotReady(t *testing.T) {
+	f := newSetupFixture(t)
+	applyReady(t, f)
+	for _, r := range f.client.Rows(pathFilter) {
+		if r["dst-address-list"] == "zyad-isolir-allow" {
+			_ = f.client.Remove(context.Background(), pathFilter, r[".id"])
+		}
+	}
+	f.client.WriteHook = func(op, path string, _ pmk.Row) error {
+		if op == "add" && path == pathFilter {
+			return errors.New("failure")
+		}
+		return nil
+	}
+	plan := f.preview(t, validSetup())
+	if _, err := f.svc.Apply(context.Background(), testScope(t), f.routerID, validSetup(), plan.Hash, testActor); err == nil {
+		t.Fatal("expected failure")
+	}
+	if f.repo.routers[f.routerID].IsolirReady {
+		t.Fatal("failed re-apply must leave isolir_ready=false")
+	}
+	// A no-op re-apply (all exists) of a ready router keeps it ready and does not toggle.
+	g := newSetupFixture(t)
+	applyReady(t, g)
+	calls := len(g.repo.setups)
+	plan = g.preview(t, validSetup())
+	if _, err := g.svc.Apply(context.Background(), testScope(t), g.routerID, validSetup(), plan.Hash, testActor); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range g.repo.setups[calls:] {
+		if !c.ready {
+			t.Fatal("no-op re-apply must not mark not-ready")
+		}
+	}
+}
+
+func TestReapplyMarkNotReadyFailureWritesNothing(t *testing.T) {
+	f := newSetupFixture(t)
+	applyReady(t, f)
+	for _, r := range f.client.Rows(pathFilter) {
+		if r["action"] == "drop" {
+			_ = f.client.Remove(context.Background(), pathFilter, r[".id"])
+		}
+	}
+	plan := f.preview(t, validSetup())
+	f.repo.markErr = errors.New("db down")
+	before := f.client.WriteCalls()
+	if _, err := f.svc.Apply(context.Background(), testScope(t), f.routerID, validSetup(), plan.Hash, testActor); !errors.Is(err, mikrotik.ErrSetupMarkFailed) {
+		t.Fatalf("err = %v", err)
+	}
+	if f.client.WriteCalls() != before {
+		t.Fatal("wrote despite failed mark-not-ready")
+	}
+}
+
+func TestDynamicForwardRuleIsNeverAnAnchor(t *testing.T) {
+	f := newSetupFixture(t)
+	f.client.Seed(pathFilter,
+		pmk.Row{"chain": "forward", "action": "passthrough", "dynamic": "true", "comment": "special dummy rule to show fasttrack counters"},
+		pmk.Row{"chain": "forward", "action": "accept", "comment": "owner"},
+	)
+	plan := f.preview(t, validSetup())
+	ownerID := ""
+	for _, r := range f.client.Rows(pathFilter) {
+		if r["comment"] == "owner" {
+			ownerID = r[".id"]
+		}
+	}
+	if got := plan.Actions[5].Attrs["place-before"]; got != ownerID {
+		t.Fatalf("place-before = %q, want first static non-zyad rule %q", got, ownerID)
+	}
+	if _, err := f.svc.Apply(context.Background(), testScope(t), f.routerID, validSetup(), plan.Hash, testActor); err != nil {
+		t.Fatalf("apply (incl. verify): %v", err)
+	}
+	// Second preview still all exists although the dynamic rule sits above the zyad block.
+	if k := countKinds(f.preview(t, validSetup())); k[domain.SetupExists] != 9 {
+		t.Fatalf("kinds = %v", k)
+	}
+}
+
+func TestAnyStaticUnmanagedAllowlistEntryIsRefused(t *testing.T) {
+	f := newSetupFixture(t)
+	f.client.Seed(pathList, pmk.Row{"list": "zyad-isolir-allow", "address": "203.0.113.9", "comment": "owner"})
+	_, err := f.svc.Preview(context.Background(), testScope(t), f.routerID, validSetup())
+	var c *mikrotik.SetupConflictError
+	if !errors.As(err, &c) || c.Kind != "address-list" || c.Name != "zyad-isolir-allow" || strings.Contains(err.Error(), "203.0.113.9") {
+		t.Fatalf("err = %v", err)
+	}
+	// Dynamic rows and other lists do not count.
+	g := newSetupFixture(t)
+	g.client.Seed(pathList,
+		pmk.Row{"list": "zyad-isolir-allow", "address": "10.1.1.1", "comment": "zyad.online", "dynamic": "true"},
+		pmk.Row{"list": "someone-else", "address": "1.2.3.4", "comment": "owner"})
+	g.preview(t, validSetup())
+}
+
+func TestApplyWritePhaseSurvivesRequestCancellation(t *testing.T) {
+	f := newSetupFixture(t)
+	plan := f.preview(t, validSetup())
+	ctx, cancel := context.WithCancel(context.Background())
+	first := true
+	f.client.WriteHook = func(string, string, pmk.Row) error {
+		if first {
+			first = false
+			cancel() // client disconnects after the first write
+		}
+		return nil
+	}
+	if _, err := f.svc.Apply(ctx, testScope(t), f.routerID, validSetup(), plan.Hash, testActor); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if f.client.WriteCalls() != 9 || !f.repo.routers[f.routerID].IsolirReady {
+		t.Fatalf("writes = %d ready = %v", f.client.WriteCalls(), f.repo.routers[f.routerID].IsolirReady)
+	}
+}
+
+func TestCleanupSurvivesRequestCancellation(t *testing.T) {
+	f := newSetupFixture(t)
+	applyReady(t, f)
+	ctx, cancel := context.WithCancel(context.Background())
+	first := true
+	f.client.WriteHook = func(string, string, pmk.Row) error {
+		if first {
+			first = false
+			cancel()
+		}
+		return nil
+	}
+	if _, err := f.svc.Cleanup(ctx, testScope(t), f.routerID, testActor); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	if len(f.client.Rows(pathFilter))+len(f.client.Rows(pathPool))+len(f.client.Rows(pathProfile))+len(f.client.Rows(pathList)) != 0 {
+		t.Fatal("cleanup aborted midway")
+	}
+}
+
+func TestAllowlistHostsMustBeIPv4OrFQDN(t *testing.T) {
+	for _, bad := range []string{"fe80::1", "fe80::1%eth0", "::1", "::ffff:1.2.3.4", "a b.com", "evil.com;x", "a.com\nb", "a\"b.com", "a=b.com", "a.com/x", "http://a.com", "a.com:80", "1.2.3.4/32", "-a.com", "localhost"} {
+		for _, field := range []string{"platform", "tenant", "doku"} {
+			f := newSetupFixture(t)
+			in := validSetup()
+			switch field {
+			case "platform":
+				in.PlatformHost = bad
+			case "tenant":
+				in.TenantIsolirHost = bad
+			default:
+				in.DokuHosts = []string{bad}
+			}
+			if _, err := f.svc.Preview(context.Background(), testScope(t), f.routerID, in); !errors.Is(err, mikrotik.ErrInvalidInput) {
+				t.Errorf("%s %q: err = %v, want invalid input", field, bad, err)
+			}
+			if f.client.WriteCalls() != 0 {
+				t.Fatal("wrote")
+			}
+		}
+	}
+	f := newSetupFixture(t)
+	in := validSetup()
+	in.DokuHosts = []string{"203.0.113.9"}
+	f.preview(t, in) // IPv4 literal is fine
 }
