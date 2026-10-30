@@ -13,6 +13,11 @@ type FakeClient struct {
 	// VersionString is returned by Version (default "7.0-fake").
 	VersionString string
 
+	// WriteHook, when set, runs before every Add/Set/Remove (op is "add",
+	// "set" or "remove"); a non-nil result fails that call. The call still
+	// counts in WriteCalls.
+	WriteHook func(op, path string, attrs Row) error
+
 	mu     sync.Mutex
 	tables map[string][]Row
 	nextID int
@@ -28,6 +33,49 @@ func (f *FakeClient) WriteCalls() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.writes
+}
+
+// Seed inserts rows directly (ids assigned when missing) without counting a
+// write, to model pre-existing router state.
+func (f *FakeClient) Seed(path string, rows ...Row) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.tables == nil {
+		f.tables = map[string][]Row{}
+	}
+	for _, r := range rows {
+		row := Row{}
+		for k, v := range r {
+			row[k] = v
+		}
+		if row[".id"] == "" {
+			f.nextID++
+			row[".id"] = "*" + strconv.FormatInt(int64(f.nextID), 16)
+		}
+		f.tables[path] = append(f.tables[path], row)
+	}
+}
+
+// Rows returns a copy of the table at path, in router order.
+func (f *FakeClient) Rows(path string) []Row {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]Row, 0, len(f.tables[path]))
+	for _, r := range f.tables[path] {
+		cp := make(Row, len(r))
+		for k, v := range r {
+			cp[k] = v
+		}
+		out = append(out, cp)
+	}
+	return out
+}
+
+func (f *FakeClient) hook(op, path string, attrs Row) error {
+	if f.WriteHook != nil {
+		return f.WriteHook(op, path, attrs)
+	}
+	return nil
 }
 
 func (f *FakeClient) Version(context.Context) (string, error) {
@@ -76,13 +124,36 @@ func (f *FakeClient) Add(_ context.Context, path string, attrs Row) (string, err
 	if f.tables == nil {
 		f.tables = map[string][]Row{}
 	}
+	if err := f.hook("add", path, attrs); err != nil {
+		return "", err
+	}
 	f.nextID++
 	id := "*" + strconv.FormatInt(int64(f.nextID), 16)
 	row := Row{".id": id}
+	before := ""
 	for k, v := range attrs {
+		if k == "place-before" {
+			// Like RouterOS: a placement hint, never stored on the record.
+			before = v
+			continue
+		}
 		row[k] = v
 	}
-	f.tables[path] = append(f.tables[path], row)
+	rows := f.tables[path]
+	if before != "" {
+		for i, r := range rows {
+			if r[".id"] == before {
+				out := make([]Row, 0, len(rows)+1)
+				out = append(out, rows[:i]...)
+				out = append(out, row)
+				out = append(out, rows[i:]...)
+				f.tables[path] = out
+				return id, nil
+			}
+		}
+		return "", ErrNotFound
+	}
+	f.tables[path] = append(rows, row)
 	return id, nil
 }
 
@@ -92,6 +163,9 @@ func (f *FakeClient) Set(_ context.Context, path, id string, attrs Row) error {
 	f.writes++
 	if f.Err != nil {
 		return f.Err
+	}
+	if err := f.hook("set", path, attrs); err != nil {
+		return err
 	}
 	for _, r := range f.tables[path] {
 		if r[".id"] == id {
@@ -110,6 +184,9 @@ func (f *FakeClient) Remove(_ context.Context, path, id string) error {
 	f.writes++
 	if f.Err != nil {
 		return f.Err
+	}
+	if err := f.hook("remove", path, nil); err != nil {
+		return err
 	}
 	rows := f.tables[path]
 	for i, r := range rows {
