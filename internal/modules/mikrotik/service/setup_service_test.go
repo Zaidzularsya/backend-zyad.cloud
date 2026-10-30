@@ -668,8 +668,13 @@ func TestCleanupIgnoresServerSideFilterAndRemovesOnlyOurs(t *testing.T) {
 	f.client.Seed(pathNAT, pmk.Row{"chain": "dstnat", "action": "dst-nat", "comment": "owner"})
 	f.client.Seed(pathProxy, pmk.Row{"src-address": "10.0.0.0/8", "action": "deny", "comment": "owner"})
 	f.client.IgnoreFilters = true
-	if _, err := f.svc.Cleanup(context.Background(), testScope(t), f.routerID, testActor); err != nil {
-		t.Fatalf("cleanup: %v", err)
+	_, err := f.svc.Cleanup(context.Background(), testScope(t), f.routerID, testActor)
+	var conflict *mikrotik.SetupConflictError
+	if !errors.Is(err, mikrotik.ErrSetupConflict) || !errors.As(err, &conflict) || !strings.Contains(conflict.Detail, "could not be verified as zyad-managed") {
+		t.Fatalf("cleanup err = %v, want typed unverified-rows error", err)
+	}
+	if f.repo.routers[f.routerID].IsolirReady {
+		t.Fatal("isolir_ready must stay false")
 	}
 	f.client.IgnoreFilters = false
 	want := map[string]int{pathPool: 1, pathProfile: 1, pathList: 2, pathFilter: 2, pathNAT: 1, pathProxy: 1}

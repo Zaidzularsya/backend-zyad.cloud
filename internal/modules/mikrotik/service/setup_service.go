@@ -798,19 +798,29 @@ func withoutKey(r pmk.Row, key string) pmk.Row {
 	return out
 }
 
-// removable reports whether a row returned by Print may be removed: it must be
-// zyad-managed, not dynamic and equal to every key/value of the query. This is
-// re-checked in Go because server-side filtering is not trusted.
-func removable(r pmk.Row, query pmk.Row) bool {
-	if !rowManaged(r) || rowDynamic(r) || r[".id"] == "" {
-		return false
+// classifyRemovable decides whether a row returned by Print may be removed: it
+// must be zyad-managed, not dynamic and equal to every key/value of the query
+// (re-checked in Go because server-side filtering is not trusted). Dynamic rows
+// are never ours and are skipped quietly; any other failure is "unverified" and
+// must be reported by the caller.
+func classifyRemovable(r pmk.Row, query pmk.Row) (ok, unverified bool) {
+	if rowDynamic(r) {
+		return false, false
+	}
+	if !rowManaged(r) || r[".id"] == "" {
+		return false, true
 	}
 	for k, v := range query {
 		if r[k] != v {
-			return false
+			return false, true
 		}
 	}
-	return true
+	return true, false
+}
+
+func removable(r pmk.Row, query pmk.Row) bool {
+	ok, _ := classifyRemovable(r, query)
+	return ok
 }
 
 // Cleanup removes only zyad-managed objects created by this setup, in reverse
@@ -872,7 +882,9 @@ func (s *SetupService) Cleanup(ctx context.Context, scope coretenant.Scope, rout
 	}
 	type removal struct{ path, id string }
 	var removals []removal
+	unverified := 0
 	for _, t := range targets {
+		skipped := 0
 		rows, err := client.Print(ctx, t.path, t.query)
 		if err != nil {
 			return fail(err)
@@ -883,10 +895,18 @@ func (s *SetupService) Cleanup(ctx context.Context, scope coretenant.Scope, rout
 			}
 		}
 		for _, r := range rows {
-			if !removable(r, t.query) || (t.keep != nil && !t.keep(r)) {
+			ok, bad := classifyRemovable(r, t.query)
+			if bad {
+				skipped++
+			}
+			if !ok || (t.keep != nil && !t.keep(r)) {
 				continue
 			}
 			removals = append(removals, removal{t.path, r[".id"]})
+		}
+		if skipped > 0 {
+			slog.Warn("mikrotik: cleanup skipped rows that could not be verified as zyad-managed", "path", t.path, "skipped", skipped)
+			unverified += skipped
 		}
 	}
 
@@ -900,6 +920,13 @@ func (s *SetupService) Cleanup(ctx context.Context, scope coretenant.Scope, rout
 			return domain.Router{}, &mikrotik.SetupStepError{Step: "remove " + rm.path, Cause: stepCause(err, secrets), RouterWritten: i > 0}
 		}
 	}
-	s.audit(ctx, scope, "router.setup_cleaned", actor, router, map[string]any{"removed": len(removals)})
+	s.audit(ctx, scope, "router.setup_cleaned", actor, router, map[string]any{"removed": len(removals), "unverified": unverified})
+	if unverified > 0 {
+		// Cleanup is incomplete as far as we can tell; isolir_ready is already false.
+		return domain.Router{}, &mikrotik.SetupConflictError{
+			Kind:   "router objects",
+			Detail: fmt.Sprintf("%d objects could not be verified as zyad-managed and were left untouched", unverified),
+		}
+	}
 	return s.routers.Get(ctx, scope, routerID)
 }
