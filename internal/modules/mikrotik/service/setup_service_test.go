@@ -69,7 +69,7 @@ func newSetupFixture(t *testing.T) *setupFixture {
 		t.Fatalf("register: %v", err)
 	}
 	locker := &fakeLocker{}
-	return &setupFixture{svc: NewSetupService(rs, repo, locker), repo: repo, client: factory.client, locker: locker, routerID: router.ID}
+	return &setupFixture{svc: NewSetupService(rs, repo, locker, SetupOptions{}), repo: repo, client: factory.client, locker: locker, routerID: router.ID}
 }
 
 func validSetup() SetupInput {

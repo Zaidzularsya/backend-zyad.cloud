@@ -303,6 +303,8 @@ Status: **belum terbukti** dengan user berhak minimum (membuat user/grup di rout
 7. Secret dengan `remote-address` sendiri: tetap terisolir lewat address-list.
 8. Pengalihan HTTP (opsi A atau B) mengantar browser ke halaman isolir tenant.
 9. Semua hal di atas pada RouterOS v6 (binary API) dan v7 lewat REST; binary API TLS (8729).
+   Selama REST belum terbukti, backend menolak setup `apply`/`cleanup` untuk router `api_type=rest`
+   (422 `MIKROTIK_SETUP_REST_UNVERIFIED`) kecuali env `MIKROTIK_SETUP_ALLOW_REST=true`; `preview` tetap jalan.
 10. User API berhak minimum cukup untuk penyiapan, isolir, restore, dan pembersihan.
 11. Hapus profile isolir yang masih dipakai secret.
 12. Penyiapan idempoten dengan kondisi "sebagian ada" (bagian 5).

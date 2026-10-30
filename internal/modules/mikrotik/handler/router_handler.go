@@ -200,6 +200,8 @@ func failRouter(c *gin.Context, err error) {
 		response.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", invalidErr.Message)
 	case errors.Is(err, mikrotik.ErrPlanChanged):
 		response.Error(c, http.StatusConflict, "MIKROTIK_SETUP_PLAN_CHANGED", "router state changed since preview; preview again before applying")
+	case errors.Is(err, mikrotik.ErrSetupRESTUnverified):
+		response.Error(c, http.StatusUnprocessableEntity, "MIKROTIK_SETUP_REST_UNVERIFIED", err.Error())
 	case errors.Is(err, mikrotik.ErrSetupInProgress):
 		response.Error(c, http.StatusConflict, "MIKROTIK_SETUP_IN_PROGRESS", err.Error())
 	case errors.As(err, &conflictErr):

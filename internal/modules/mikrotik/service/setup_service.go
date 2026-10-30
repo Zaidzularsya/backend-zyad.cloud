@@ -102,15 +102,33 @@ type SetupLocker interface {
 	TryLock(ctx context.Context, key string) (unlock func(), ok bool, err error)
 }
 
+// SetupOptions carries configuration for SetupService.
+type SetupOptions struct {
+	// AllowREST permits Apply/Cleanup on routers whose api_type is rest
+	// (MIKROTIK_SETUP_ALLOW_REST). The REST write path (PUT add with
+	// place-before, query filters, PATCH/DELETE by .id) has only been tested
+	// against httptest, so it is off by default. Preview is always allowed.
+	AllowREST bool
+}
+
 // SetupService plans, applies and removes the isolir objects on a router.
 type SetupService struct {
 	routers *RouterService
 	repo    repository.RouterRepository
 	locker  SetupLocker
+	opts    SetupOptions
 }
 
-func NewSetupService(routers *RouterService, repo repository.RouterRepository, locker SetupLocker) *SetupService {
-	return &SetupService{routers: routers, repo: repo, locker: locker}
+func NewSetupService(routers *RouterService, repo repository.RouterRepository, locker SetupLocker, opts SetupOptions) *SetupService {
+	return &SetupService{routers: routers, repo: repo, locker: locker, opts: opts}
+}
+
+// checkTransport refuses router writes over an unverified transport.
+func (s *SetupService) checkTransport(r domain.Router) error {
+	if r.APIType == domain.APITypeREST && !s.opts.AllowREST {
+		return mikrotik.ErrSetupRESTUnverified
+	}
+	return nil
 }
 
 // lockSetup takes the per-router setup lock. Without it a Cleanup could list
@@ -750,6 +768,9 @@ func (s *SetupService) Apply(ctx context.Context, scope coretenant.Scope, router
 	if err != nil {
 		return domain.Router{}, err
 	}
+	if err := s.checkTransport(router); err != nil {
+		return domain.Router{}, err
+	}
 	plan, err := s.plan(ctx, client, n)
 	if err != nil {
 		return domain.Router{}, planError(err, secrets)
@@ -868,6 +889,9 @@ func (s *SetupService) Cleanup(ctx context.Context, scope coretenant.Scope, rout
 	defer unlock()
 	router, client, secrets, err := s.routers.openClient(ctx, scope, routerID)
 	if err != nil {
+		return domain.Router{}, err
+	}
+	if err := s.checkTransport(router); err != nil {
 		return domain.Router{}, err
 	}
 	// Detached from request cancellation (see setupWriteTimeout).

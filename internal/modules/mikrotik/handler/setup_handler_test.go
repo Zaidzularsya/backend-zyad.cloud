@@ -108,6 +108,7 @@ func TestSetupErrorMapping(t *testing.T) {
 		"state not saved": {mikrotik.ErrSetupStateNotSaved, 500, "MIKROTIK_SETUP_STATE_NOT_SAVED"},
 		"unknown":         {errors.New("boom password=" + testPassword), 500, "INTERNAL_ERROR"},
 		"in progress":     {mikrotik.ErrSetupInProgress, 409, "MIKROTIK_SETUP_IN_PROGRESS"},
+		"rest unverified": {mikrotik.ErrSetupRESTUnverified, 422, "MIKROTIK_SETUP_REST_UNVERIFIED"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := setupRouterFor(t, &fakeSetupService{
@@ -167,7 +168,7 @@ func realSetupEngine(t *testing.T, client *pmk.FakeClient) *gin.Engine {
 	rs := service.NewRouterService(repo, fixedFactory{client}, secret, []netip.Prefix{netip.MustParsePrefix("10.8.0.0/24")})
 	r := newTestRouter(t)
 	r.Use(func(c *gin.Context) { permissionmiddleware.SetUserID(c, "user-1") })
-	NewSetupHandler(service.NewSetupService(rs, repo, noopLocker{})).RegisterRoutes(r.Group("/app/mikrotik"), nil, nil)
+	NewSetupHandler(service.NewSetupService(rs, repo, noopLocker{}, service.SetupOptions{})).RegisterRoutes(r.Group("/app/mikrotik"), nil, nil)
 	return r
 }
 

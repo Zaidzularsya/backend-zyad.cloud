@@ -71,6 +71,11 @@ organization aktif bertipe customer atau platform.
 - `apply` dan `cleanup` pada router yang sama diserialkan dengan advisory lock Postgres per router (try-lock, tidak
   menunggu) yang diambil sebelum state router dibaca. Bila lock sedang dipegang: 409 `MIKROTIK_SETUP_IN_PROGRESS`, tidak
   ada yang dibaca atau ditulis. `preview` tidak mengambil lock.
+- **Setup lewat REST dikunci**: jalur tulis REST (PUT add dengan `place-before`, filter query, PATCH/DELETE per `.id`)
+  baru diuji dengan httptest. Selama env `MIKROTIK_SETUP_ALLOW_REST` bernilai `false` (default), `apply` dan `cleanup`
+  untuk router `api_type=rest` ditolak dengan 422 `MIKROTIK_SETUP_REST_UNVERIFIED` sebelum ada tulisan ke router atau
+  perubahan `isolir_ready`. `preview` tetap diizinkan. Gunakan binary API (port 8728/8729) atau aktifkan flag hanya
+  untuk verifikasi.
 - Redirect **mati secara default**; hanya direncanakan bila `redirect_url` diisi.
 - Router yang belum disiapkan tetap terdaftar (`isolir_ready=false`).
 
@@ -92,7 +97,7 @@ organization aktif bertipe customer atau platform.
 ## Kode error
 
 `MIKROTIK_ROUTER_NOT_FOUND` (404), `MIKROTIK_ROUTER_NAME_TAKEN` (409), `VALIDATION_ERROR` (422),
-`MIKROTIK_HOST_NOT_ALLOWED` (422), `MIKROTIK_TLS_REQUIRED` (422), `MIKROTIK_TLS_UNTRUSTED` (422),
+`MIKROTIK_HOST_NOT_ALLOWED` (422), `MIKROTIK_TLS_REQUIRED` (422), `MIKROTIK_TLS_UNTRUSTED` (422), `MIKROTIK_SETUP_REST_UNVERIFIED` (422),
 `MIKROTIK_AUTH_FAILED` (502), `MIKROTIK_UNREACHABLE` (502), `MIKROTIK_SETUP_PLAN_CHANGED` (409),
 `MIKROTIK_SETUP_CONFLICT` (409), `MIKROTIK_SETUP_IN_PROGRESS` (409), `MIKROTIK_SETUP_FAILED` (502), `MIKROTIK_SETUP_STATE_NOT_SAVED` (500), `RATE_LIMITED` (429), `INTERNAL_ERROR` (500).
 

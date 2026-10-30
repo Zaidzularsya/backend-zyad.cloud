@@ -24,7 +24,8 @@ func buildMikrotik(cfg config.Config, db *database.Pool) (*mikrotikhandler.Route
 		cfg.App.Secret,
 		cfg.Mikrotik.AllowedPrivateCIDRs,
 	)
-	setup := mikrotikservice.NewSetupService(svc, repo, mikrotikrepo.NewAdvisoryLocker(db))
+	setup := mikrotikservice.NewSetupService(svc, repo, mikrotikrepo.NewAdvisoryLocker(db),
+		mikrotikservice.SetupOptions{AllowREST: cfg.Mikrotik.SetupAllowREST})
 	return mikrotikhandler.NewRouterHandler(svc), mikrotikhandler.NewSetupHandler(setup)
 }
 

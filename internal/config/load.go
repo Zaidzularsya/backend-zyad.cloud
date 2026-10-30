@@ -201,6 +201,7 @@ func LoadMikrotik() MikrotikConfig {
 		Password: getEnv("MIKROTIK_PASSWORD", ""),
 
 		AllowedPrivateCIDRs: parseAllowedPrivateCIDRs(getEnv("MIKROTIK_ALLOWED_PRIVATE_CIDRS", "")),
+		SetupAllowREST:      getEnvBool("MIKROTIK_SETUP_ALLOW_REST", false),
 	}
 }
 

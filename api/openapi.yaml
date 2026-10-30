@@ -10546,7 +10546,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '422':
-          description: "VALIDATION_ERROR | MIKROTIK_HOST_NOT_ALLOWED | MIKROTIK_TLS_REQUIRED | MIKROTIK_TLS_UNTRUSTED"
+          description: "VALIDATION_ERROR | MIKROTIK_HOST_NOT_ALLOWED | MIKROTIK_TLS_REQUIRED | MIKROTIK_TLS_UNTRUSTED | MIKROTIK_SETUP_REST_UNVERIFIED (router ber-`api_type=rest` dan `MIKROTIK_SETUP_ALLOW_REST` mati; tidak ada yang ditulis, pakai binary API port 8728/8729)"
           content:
             application/json:
               schema:
@@ -10608,6 +10608,14 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '422':
+          description: "MIKROTIK_HOST_NOT_ALLOWED | MIKROTIK_TLS_REQUIRED | MIKROTIK_TLS_UNTRUSTED | MIKROTIK_SETUP_REST_UNVERIFIED (router ber-`api_type=rest` dan `MIKROTIK_SETUP_ALLOW_REST` mati; tidak ada yang ditulis, pakai binary API port 8728/8729)"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - {$ref: '#/components/schemas/MikrotikErrorResponse'}
+                - {$ref: '#/components/schemas/MikrotikTLSUntrustedError'}
         '502':
           description: "MIKROTIK_AUTH_FAILED | MIKROTIK_UNREACHABLE | MIKROTIK_SETUP_FAILED"
           content:

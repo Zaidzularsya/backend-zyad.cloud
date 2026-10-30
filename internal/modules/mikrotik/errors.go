@@ -40,6 +40,10 @@ var ErrSetupMarkFailed = errors.New("could not record the isolir state; nothing 
 // nothing was read or written.
 var ErrSetupInProgress = errors.New("another setup apply or cleanup is running for this router; try again when it finishes")
 
+// ErrSetupRESTUnverified: setup apply/cleanup refused for a router on the REST
+// transport while MIKROTIK_SETUP_ALLOW_REST is off; nothing was written.
+var ErrSetupRESTUnverified = errors.New("setup over the REST transport has not been verified on a real router yet; use the binary API (port 8728/8729) or enable MIKROTIK_SETUP_ALLOW_REST")
+
 // SetupConflictError names a pre-existing object that setup refuses to touch
 // (or a state it cannot repair), so the operator can resolve it manually.
 type SetupConflictError struct {

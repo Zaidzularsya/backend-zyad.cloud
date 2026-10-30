@@ -45,3 +45,15 @@ func TestLoadMikrotikParsesAllowedPrivateCIDRs(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadMikrotikSetupAllowREST(t *testing.T) {
+	for _, tc := range []struct {
+		env  string
+		want bool
+	}{{"", false}, {"false", false}, {"true", true}, {"not-a-bool", false}} {
+		t.Setenv("MIKROTIK_SETUP_ALLOW_REST", tc.env)
+		if got := LoadMikrotik().SetupAllowREST; got != tc.want {
+			t.Fatalf("MIKROTIK_SETUP_ALLOW_REST=%q: SetupAllowREST = %v, want %v", tc.env, got, tc.want)
+		}
+	}
+}
