@@ -95,14 +95,40 @@ type normalizedSetup struct {
 	redirectData string
 }
 
+// SetupLocker serializes Apply and Cleanup per router across processes
+// (repository.AdvisoryLocker in production). TryLock never waits: ok=false
+// means another holder has the key. When ok, unlock must be called once.
+type SetupLocker interface {
+	TryLock(ctx context.Context, key string) (unlock func(), ok bool, err error)
+}
+
 // SetupService plans, applies and removes the isolir objects on a router.
 type SetupService struct {
 	routers *RouterService
 	repo    repository.RouterRepository
+	locker  SetupLocker
 }
 
-func NewSetupService(routers *RouterService, repo repository.RouterRepository) *SetupService {
-	return &SetupService{routers: routers, repo: repo}
+func NewSetupService(routers *RouterService, repo repository.RouterRepository, locker SetupLocker) *SetupService {
+	return &SetupService{routers: routers, repo: repo, locker: locker}
+}
+
+// lockSetup takes the per-router setup lock. Without it a Cleanup could list
+// and remove objects while an Apply that saw them as existing marks the router
+// ready (isolir_ready=true with the objects gone). Preview does not lock.
+func (s *SetupService) lockSetup(ctx context.Context, routerID string) (func(), error) {
+	if !validID(routerID) {
+		return nil, mikrotik.ErrRouterNotFound
+	}
+	unlock, ok, err := s.locker.TryLock(ctx, "mikrotik.setup:"+routerID)
+	if err != nil {
+		slog.Warn("mikrotik: acquire setup lock failed", "router_id", routerID, "error", scrub(err.Error()))
+		return nil, errors.New("acquire setup lock failed")
+	}
+	if !ok {
+		return nil, mikrotik.ErrSetupInProgress
+	}
+	return unlock, nil
 }
 
 // ---- input validation --------------------------------------------------
@@ -702,7 +728,8 @@ func (s *SetupService) audit(ctx context.Context, scope coretenant.Scope, event,
 	}
 }
 
-// Apply recomputes the plan from the current router state, refuses with
+// Apply holds the per-router setup lock for its whole run (ErrSetupInProgress
+// when another Apply/Cleanup holds it), recomputes the plan from the current router state, refuses with
 // ErrPlanChanged when it differs from the previewed planHash (writing nothing),
 // executes the actions in order, verifies by re-planning and marks the router
 // isolir-ready. Fail closed: a router that is already ready is marked not
@@ -712,6 +739,13 @@ func (s *SetupService) Apply(ctx context.Context, scope coretenant.Scope, router
 	if err != nil {
 		return domain.Router{}, err
 	}
+	// Lock before reading router state, so the plan and the ready check below
+	// cannot interleave with a concurrent Cleanup of the same router.
+	unlock, err := s.lockSetup(ctx, routerID)
+	if err != nil {
+		return domain.Router{}, err
+	}
+	defer unlock()
 	router, client, secrets, err := s.routers.openClient(ctx, scope, routerID)
 	if err != nil {
 		return domain.Router{}, err
@@ -824,9 +858,14 @@ func removable(r pmk.Row, query pmk.Row) bool {
 }
 
 // Cleanup removes only zyad-managed objects created by this setup, in reverse
-// dependency order. Fail closed: isolir_ready is cleared before the first
+// dependency order, under the per-router setup lock (see Apply). Fail closed: isolir_ready is cleared before the first
 // Remove, and if that fails nothing is removed.
 func (s *SetupService) Cleanup(ctx context.Context, scope coretenant.Scope, routerID, actor string) (domain.Router, error) {
+	unlock, err := s.lockSetup(ctx, routerID)
+	if err != nil {
+		return domain.Router{}, err
+	}
+	defer unlock()
 	router, client, secrets, err := s.routers.openClient(ctx, scope, routerID)
 	if err != nil {
 		return domain.Router{}, err

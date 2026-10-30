@@ -36,6 +36,10 @@ var (
 // nothing was changed on the router (fail closed).
 var ErrSetupMarkFailed = errors.New("could not record the isolir state; nothing was changed on the router")
 
+// ErrSetupInProgress: another Apply or Cleanup holds this router's setup lock;
+// nothing was read or written.
+var ErrSetupInProgress = errors.New("another setup apply or cleanup is running for this router; try again when it finishes")
+
 // SetupConflictError names a pre-existing object that setup refuses to touch
 // (or a state it cannot repair), so the operator can resolve it manually.
 type SetupConflictError struct {

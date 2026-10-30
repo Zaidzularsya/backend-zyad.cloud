@@ -107,6 +107,7 @@ func TestSetupErrorMapping(t *testing.T) {
 		"not found":       {mikrotik.ErrRouterNotFound, 404, "MIKROTIK_ROUTER_NOT_FOUND"},
 		"state not saved": {mikrotik.ErrSetupStateNotSaved, 500, "MIKROTIK_SETUP_STATE_NOT_SAVED"},
 		"unknown":         {errors.New("boom password=" + testPassword), 500, "INTERNAL_ERROR"},
+		"in progress":     {mikrotik.ErrSetupInProgress, 409, "MIKROTIK_SETUP_IN_PROGRESS"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := setupRouterFor(t, &fakeSetupService{
@@ -139,6 +140,12 @@ func (s *storeRepo) InsertAudit(context.Context, coretenant.Scope, repository.Au
 	return nil
 }
 
+// noopLocker always grants the setup lock (the real lock is tested in the
+// repository and service packages).
+type noopLocker struct{}
+
+func (noopLocker) TryLock(context.Context, string) (func(), bool, error) { return func() {}, true, nil }
+
 type fixedFactory struct{ client pmk.RouterClient }
 
 func (f fixedFactory) Detect(context.Context, pmk.Endpoint) (string, string, error) {
@@ -160,7 +167,7 @@ func realSetupEngine(t *testing.T, client *pmk.FakeClient) *gin.Engine {
 	rs := service.NewRouterService(repo, fixedFactory{client}, secret, []netip.Prefix{netip.MustParsePrefix("10.8.0.0/24")})
 	r := newTestRouter(t)
 	r.Use(func(c *gin.Context) { permissionmiddleware.SetUserID(c, "user-1") })
-	NewSetupHandler(service.NewSetupService(rs, repo)).RegisterRoutes(r.Group("/app/mikrotik"), nil)
+	NewSetupHandler(service.NewSetupService(rs, repo, noopLocker{})).RegisterRoutes(r.Group("/app/mikrotik"), nil)
 	return r
 }
 

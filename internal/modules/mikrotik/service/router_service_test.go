@@ -32,6 +32,7 @@ type fakeRepo struct {
 	checks  []string
 	setups  []setupCall
 	markErr error
+	finds   int
 
 	// Error injection.
 	auditErr, checkErr, createErr, updateErr error
@@ -55,6 +56,7 @@ func (f *fakeRepo) Create(_ context.Context, scope coretenant.Scope, p repositor
 }
 
 func (f *fakeRepo) FindByID(_ context.Context, _ coretenant.Scope, id string) (domain.Router, error) {
+	f.finds++
 	r, ok := f.routers[id]
 	if !ok {
 		return domain.Router{}, mikrotik.ErrRouterNotFound

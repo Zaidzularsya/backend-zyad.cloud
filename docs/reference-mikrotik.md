@@ -58,6 +58,9 @@ organization aktif bertipe customer atau platform.
   menghasilkan `MIKROTIK_SETUP_FAILED`; bila objek berubah tetapi status gagal tersimpan: `MIKROTIK_SETUP_STATE_NOT_SAVED`
   (ulangi operasi yang sama, idempoten).
 - `cleanup` hanya menghapus objek `zyad-managed` dan aman diulang.
+- `apply` dan `cleanup` pada router yang sama diserialkan dengan advisory lock Postgres per router (try-lock, tidak
+  menunggu) yang diambil sebelum state router dibaca. Bila lock sedang dipegang: 409 `MIKROTIK_SETUP_IN_PROGRESS`, tidak
+  ada yang dibaca atau ditulis. `preview` tidak mengambil lock.
 - Redirect **mati secara default**; hanya direncanakan bila `redirect_url` diisi.
 - Router yang belum disiapkan tetap terdaftar (`isolir_ready=false`).
 
@@ -81,7 +84,7 @@ organization aktif bertipe customer atau platform.
 `MIKROTIK_ROUTER_NOT_FOUND` (404), `MIKROTIK_ROUTER_NAME_TAKEN` (409), `VALIDATION_ERROR` (422),
 `MIKROTIK_HOST_NOT_ALLOWED` (422), `MIKROTIK_TLS_REQUIRED` (422), `MIKROTIK_TLS_UNTRUSTED` (422),
 `MIKROTIK_AUTH_FAILED` (502), `MIKROTIK_UNREACHABLE` (502), `MIKROTIK_SETUP_PLAN_CHANGED` (409),
-`MIKROTIK_SETUP_CONFLICT` (409), `MIKROTIK_SETUP_FAILED` (502), `MIKROTIK_SETUP_STATE_NOT_SAVED` (500), `INTERNAL_ERROR` (500).
+`MIKROTIK_SETUP_CONFLICT` (409), `MIKROTIK_SETUP_IN_PROGRESS` (409), `MIKROTIK_SETUP_FAILED` (502), `MIKROTIK_SETUP_STATE_NOT_SAVED` (500), `INTERNAL_ERROR` (500).
 
 ## Tidak termasuk Fase 1
 

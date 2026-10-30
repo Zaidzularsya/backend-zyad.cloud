@@ -121,7 +121,7 @@ func TestLabSetupLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	svc := NewSetupService(rs, repo)
+	svc := NewSetupService(rs, repo, &fakeLocker{})
 	t.Cleanup(func() {
 		// Safety net: removes only zyad-managed objects, idempotent.
 		if _, err := svc.Cleanup(ctx, testScope(t), router.ID, testActor); err != nil {

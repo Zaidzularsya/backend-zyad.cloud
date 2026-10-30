@@ -29,17 +29,47 @@ type setupFixture struct {
 	svc      *SetupService
 	repo     *fakeRepo
 	client   *pmk.FakeClient
+	locker   *fakeLocker
 	routerID string
+}
+
+// fakeLocker records TryLock/unlock calls. held simulates another holder.
+type fakeLocker struct {
+	held     bool
+	err      error
+	keys     []string
+	acquired int
+	released int
+	// onLock runs inside TryLock, e.g. to observe what was read before locking.
+	onLock func()
+}
+
+func (l *fakeLocker) TryLock(_ context.Context, key string) (func(), bool, error) {
+	l.keys = append(l.keys, key)
+	if l.onLock != nil {
+		l.onLock()
+	}
+	if l.err != nil {
+		return nil, false, l.err
+	}
+	if l.held {
+		return nil, false, nil
+	}
+	l.acquired++
+	return func() { l.released++ }, true, nil
 }
 
 func newSetupFixture(t *testing.T) *setupFixture {
 	t.Helper()
 	rs, repo, factory := newTestService(t)
+	// Port 8728 routers are detected as binary; REST setup has its own gate.
+	factory.detectAPI = pmk.APITypeBinary
 	router, err := rs.Register(context.Background(), testScope(t), validInput())
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	return &setupFixture{svc: NewSetupService(rs, repo), repo: repo, client: factory.client, routerID: router.ID}
+	locker := &fakeLocker{}
+	return &setupFixture{svc: NewSetupService(rs, repo, locker), repo: repo, client: factory.client, locker: locker, routerID: router.ID}
 }
 
 func validSetup() SetupInput {

@@ -10539,7 +10539,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '409':
-          description: "MIKROTIK_SETUP_PLAN_CHANGED (state router atau input berubah sejak preview) | MIKROTIK_SETUP_CONFLICT"
+          description: "MIKROTIK_SETUP_PLAN_CHANGED (state router atau input berubah sejak preview) | MIKROTIK_SETUP_CONFLICT | MIKROTIK_SETUP_IN_PROGRESS (apply atau cleanup lain sedang berjalan untuk router ini; tidak ada yang dibaca atau ditulis, coba lagi setelah selesai)"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -10589,7 +10589,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '409':
-          description: "MIKROTIK_SETUP_CONFLICT"
+          description: "MIKROTIK_SETUP_CONFLICT | MIKROTIK_SETUP_IN_PROGRESS (apply atau cleanup lain sedang berjalan untuk router ini; tidak ada yang dibaca atau ditulis, coba lagi setelah selesai)"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
