@@ -24,6 +24,8 @@ Semua di bawah `/api/v1/app/mikrotik`, memakai envelope standar. Detail skema ad
 | POST | `/routers/{id}/setup/apply` | `mikrotik_router.setup` | Terapkan rencana (`plan_hash` wajib) |
 | POST | `/routers/{id}/setup/cleanup` | `mikrotik_router.setup` | Hapus objek `zyad-managed` |
 
+Registrasi (`POST /routers`) mewajibkan `port` >= 1 (maksimal 65535) di lapisan HTTP.
+
 Respons router tidak pernah memuat password, hanya `has_password`. Tabel: `mikrotik_routers` (migration `000168`),
 permission di migration `000169`.
 
@@ -45,6 +47,8 @@ organization aktif bertipe customer atau platform.
 
 ## Semantik setup
 
+- Input setup (`preview` dan `apply`): `platform_host` dan `pool_cidr` wajib. `pool_cidr` adalah jaringan IPv4 privat, prefix /16 sampai /29, bit host nol (mis. `10.255.254.0/24`). `profile_name` opsional, default `zyad-isolir`, harus diawali `zyad-`. `rate_limit` opsional, format seperti `512k/512k`. Host allowlist (`platform_host`, `tenant_isolir_host`, `doku_hosts`) hanya literal IPv4 atau FQDN (tanpa IPv6, skema, atau port). Pelanggaran: 422 `VALIDATION_ERROR`.
+- `PATCH /routers/{id}` memprobe ulang router bila host, port, use_tls, tls_fingerprint, username, atau password berubah (bisa 502 `MIKROTIK_AUTH_FAILED`/`MIKROTIK_UNREACHABLE`); perubahan endpoint (host, port, api_type, use_tls, tls_fingerprint) mereset `isolir_ready` ke false.
 - `preview` membaca router dan menghasilkan daftar tindakan plus `hash`; tidak menulis apa pun.
 - `apply` menerima input yang sama plus `plan_hash`. Bila state router atau input berubah sejak preview:
   `MIKROTIK_SETUP_PLAN_CHANGED`, tidak ada yang ditulis.
