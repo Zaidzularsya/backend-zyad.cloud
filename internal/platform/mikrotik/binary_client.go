@@ -27,6 +27,12 @@ type binaryClient struct {
 	ep Endpoint
 }
 
+// binaryDial opens the TCP connection; a variable only so tests can simulate a
+// slow connect.
+var binaryDial = func(ctx context.Context, d *net.Dialer, address string) (net.Conn, error) {
+	return d.DialContext(ctx, "tcp", address)
+}
+
 func newBinaryClient(ep Endpoint) *binaryClient { return &binaryClient{ep: ep} }
 
 func (e Endpoint) binaryPort() int {
@@ -104,11 +110,24 @@ func (c *binaryClient) deviceMessage(de *routeros.DeviceError) string {
 	return msg
 }
 
+// opDeadline is the single deadline for one call: ep.timeout() from now, or
+// the ctx deadline if sooner. It is computed before dialing and covers dial,
+// TLS handshake, login and the command together.
+func (c *binaryClient) opDeadline(ctx context.Context) time.Time {
+	deadline := time.Now().Add(c.ep.timeout())
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	return deadline
+}
+
 // dial opens the TCP (and optionally TLS) connection with the SSRF guard on
-// the dialer and the pin/verify logic shared with REST.
-func (c *binaryClient) dial(ctx context.Context) (net.Conn, error) {
-	d := &net.Dialer{Control: DialControl(c.ep.AllowedPrivate), Timeout: c.ep.timeout()}
-	conn, err := d.DialContext(ctx, "tcp", net.JoinHostPort(c.ep.Host, strconv.Itoa(c.ep.binaryPort())))
+// the dialer and the pin/verify logic shared with REST. The dialer uses the
+// call's single deadline, so a slow connect leaves less time for the command
+// instead of starting a fresh timeout.
+func (c *binaryClient) dial(ctx context.Context, deadline time.Time) (net.Conn, error) {
+	d := &net.Dialer{Control: DialControl(c.ep.AllowedPrivate), Deadline: deadline}
+	conn, err := binaryDial(ctx, d, net.JoinHostPort(c.ep.Host, strconv.Itoa(c.ep.binaryPort())))
 	if err != nil {
 		return nil, err
 	}
@@ -127,16 +146,13 @@ func (c *binaryClient) run(ctx context.Context, words ...string) (*routeros.Repl
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	conn, err := c.dial(ctx)
+	deadline := c.opDeadline(ctx)
+	conn, err := c.dial(ctx, deadline)
 	if err != nil {
 		return nil, classifyNetError(err)
 	}
 	defer conn.Close()
 
-	deadline := time.Now().Add(c.ep.timeout())
-	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
-		deadline = d
-	}
 	_ = conn.SetDeadline(deadline)
 	// The library's sync mode ignores ctx while blocked on a read; closing the
 	// connection on cancellation unblocks it.

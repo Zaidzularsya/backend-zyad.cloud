@@ -107,27 +107,39 @@ func NewClient(apiType string, ep Endpoint) (RouterClient, error) {
 // detectFirstProbeMax bounds the first probe when a second one can follow, so
 // a service that swallows the probe silently (an API port receiving HTTP waits
 // for a terminator and never answers) cannot eat the whole budget.
-const detectFirstProbeMax = 5 * time.Second
+var detectFirstProbeMax = 5 * time.Second
+
+// detectTotalBudget bounds the whole Detect (both probes, including the DNS
+// lookups done by the dialers) unless Endpoint.Timeout is configured larger.
+// A variable only so tests can shorten it.
+var detectTotalBudget = 12 * time.Second
 
 // Detect probes the router with both transports and returns the one that
 // works. Order: REST first, except when ep.Port is 8728 or 8729 (the API
-// service ports), where binary goes first. The first probe gets
-// min(ep.Timeout, 5s); the second gets the endpoint timeout capped by what is
-// left of ctx, so callers should allow roughly 2x the endpoint timeout in ctx.
+// service ports), where binary goes first.
+//
+// The whole Detect runs under ONE deadline: min(ctx deadline, now +
+// detectBudget(ep)), i.e. at most 12s unless ep.Timeout is configured larger.
+// The first probe gets min(ep timeout, 5s); the second gets the endpoint
+// timeout capped by what is left of that single budget.
 //
 // Any failure of the first probe falls back to the other transport, except
 // ErrAuthFailed, TLS trust errors and ErrHostNotAllowed (another transport
-// would not help) and context cancellation, which are returned immediately.
-// If both fail: the second error when it is auth/TLS trust/host-not-allowed,
-// otherwise ErrUnreachable (fixed text, never raw router or library text).
+// would not help) and cancellation of the caller's ctx, which are returned
+// immediately. If both fail: the second error when it is auth/TLS
+// trust/host-not-allowed, otherwise ErrUnreachable (fixed text, never raw
+// router or library text). Running out of the Detect budget itself is
+// reported as ErrUnreachable.
 func Detect(ctx context.Context, ep Endpoint) (apiType, version string, err error) {
 	order := detectOrder(ep)
+	bctx, cancel := context.WithTimeout(ctx, detectBudget(ep))
+	defer cancel()
 
 	first := ep
 	if t := ep.timeout(); t > detectFirstProbeMax {
 		first.Timeout = detectFirstProbeMax
 	}
-	version, err = probe(ctx, order[0], first)
+	version, err = probe(bctx, order[0], first)
 	if err == nil {
 		return order[0], version, nil
 	}
@@ -136,16 +148,15 @@ func Detect(ctx context.Context, ep Endpoint) (apiType, version string, err erro
 	}
 
 	second := ep
-	if dl, ok := ctx.Deadline(); ok {
-		left := time.Until(dl)
-		if left <= 0 {
-			return "", "", ErrUnreachable
-		}
-		if left < second.timeout() {
-			second.Timeout = left
-		}
+	dl, _ := bctx.Deadline() // always set by WithTimeout
+	left := time.Until(dl)
+	if left <= 0 {
+		return "", "", ErrUnreachable
 	}
-	version, err = probe(ctx, order[1], second)
+	if left < second.timeout() {
+		second.Timeout = left
+	}
+	version, err = probe(bctx, order[1], second)
 	if err == nil {
 		return order[1], version, nil
 	}
@@ -178,4 +189,13 @@ func probe(ctx context.Context, apiType string, ep Endpoint) (string, error) {
 		return "", err
 	}
 	return c.Version(ctx)
+}
+
+// detectBudget is the total time Detect may take: detectTotalBudget, or the
+// endpoint timeout when one is explicitly configured larger.
+func detectBudget(ep Endpoint) time.Duration {
+	if ep.Timeout > detectTotalBudget {
+		return ep.Timeout
+	}
+	return detectTotalBudget
 }

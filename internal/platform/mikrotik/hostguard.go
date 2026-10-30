@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/netip"
 	"syscall"
+	"time"
 )
 
 // ErrHostNotAllowed is returned when a router host resolves to an address the
@@ -20,6 +21,11 @@ var ErrHostNotAllowed = errors.New("mikrotik: host not allowed")
 // unspecified addresses are never allowed, even if listed.
 
 var carrierGradeNAT = netip.MustParsePrefix("100.64.0.0/10")
+
+// dnsLookupBudget bounds the host lookup in ValidateHost so a slow or
+// blackholed resolver cannot eat the request budget. A variable only so tests
+// can shorten it.
+var dnsLookupBudget = 3 * time.Second
 
 // lookupNetIP is a variable so tests can inject DNS answers.
 var lookupNetIP = func(ctx context.Context, host string) ([]netip.Addr, error) {
@@ -65,9 +71,16 @@ func ValidateHost(ctx context.Context, host string, allowedPrivate []netip.Prefi
 	if addr, perr := netip.ParseAddr(host); perr == nil {
 		resolved = []netip.Addr{addr.Unmap()}
 	} else {
-		resolved, err = lookupNetIP(ctx, host)
+		lctx, cancel := context.WithTimeout(ctx, dnsLookupBudget)
+		resolved, err = lookupNetIP(lctx, host)
+		cancel()
 		if err != nil {
-			return nil, false, fmt.Errorf("mikrotik: resolve %q: %w", host, err)
+			if ctx.Err() != nil && errors.Is(err, context.Canceled) {
+				return nil, false, context.Canceled
+			}
+			// Lookup failure or timeout: the router cannot be reached from
+			// here. Unreachable-class, never host-not-allowed.
+			return nil, false, fmt.Errorf("%w: dns lookup failed for %q", ErrUnreachable, host)
 		}
 		if len(resolved) == 0 {
 			return nil, false, fmt.Errorf("%w: %s resolves to no address", ErrHostNotAllowed, host)
