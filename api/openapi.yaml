@@ -10162,6 +10162,417 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/mikrotik/routers:
+    get:
+      summary: List Mikrotik routers
+      operationId: listMikrotikRouters
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Daftar router milik organization aktif, berpaginasi (default page=1, per_page=20). Respons tidak pernah memuat password, hanya `has_password`. Permission: `mikrotik_router.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: page
+        in: query
+        schema: {type: integer}
+      - name: per_page
+        in: query
+        schema: {type: integer}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikRouterListEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: "Forbidden (permission, tenant, atau entitlement `mikrotik.enabled` tidak terpenuhi)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    post:
+      summary: Register a Mikrotik router
+      operationId: createMikrotikRouter
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Mendaftarkan router. Host divalidasi (guard SSRF: host publik atau CIDR privat yang diizinkan `MIKROTIK_ALLOWED_PRIVATE_CIDRS`); host publik wajib `use_tls=true`. Password disimpan terenkripsi dan tidak pernah dikembalikan. Permission: `mikrotik_router.create`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MikrotikCreateRouterRequest'}
+      responses:
+        '201':
+          description: "Created"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikRouterEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: "Forbidden (permission, tenant, atau entitlement `mikrotik.enabled` tidak terpenuhi)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR | MIKROTIK_HOST_NOT_ALLOWED | MIKROTIK_TLS_REQUIRED | MIKROTIK_TLS_UNTRUSTED (yang terakhir memuat data fingerprint dan pin_mismatch, lihat MikrotikTLSUntrustedError)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: "MIKROTIK_ROUTER_NAME_TAKEN"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: "MIKROTIK_AUTH_FAILED | MIKROTIK_UNREACHABLE"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/mikrotik/routers/{id}:
+    get:
+      summary: Get a Mikrotik router
+      operationId: getMikrotikRouter
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Detail router tanpa password. Permission: `mikrotik_router.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikRouterEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: "Forbidden (permission, tenant, atau entitlement `mikrotik.enabled` tidak terpenuhi)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "MIKROTIK_ROUTER_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    patch:
+      summary: Update a Mikrotik router
+      operationId: updateMikrotikRouter
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Update parsial: field yang tidak dikirim tetap. `password` hanya diganti bila dikirim. Permission: `mikrotik_router.update`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MikrotikUpdateRouterRequest'}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikRouterEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: "Forbidden (permission, tenant, atau entitlement `mikrotik.enabled` tidak terpenuhi)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "MIKROTIK_ROUTER_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR | MIKROTIK_HOST_NOT_ALLOWED | MIKROTIK_TLS_REQUIRED | MIKROTIK_TLS_UNTRUSTED (yang terakhir memuat data fingerprint dan pin_mismatch, lihat MikrotikTLSUntrustedError)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: "MIKROTIK_ROUTER_NAME_TAKEN"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+    delete:
+      summary: Delete a Mikrotik router
+      operationId: deleteMikrotikRouter
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Menghapus pendaftaran router di aplikasi. Tidak membersihkan objek `zyad-*` di router; jalankan cleanup lebih dulu bila perlu. Permission: `mikrotik_router.delete`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '204':
+          description: "Deleted"
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: "Forbidden (permission, tenant, atau entitlement `mikrotik.enabled` tidak terpenuhi)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "MIKROTIK_ROUTER_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/mikrotik/routers/{id}/check:
+    post:
+      summary: Check router connectivity
+      operationId: checkMikrotikRouter
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Menguji koneksi dan mendeteksi versi RouterOS. Hasil (`last_check_status`, `routeros_version`, `api_type`) disimpan juga saat uji gagal; kegagalan dilaporkan sebagai error. Nilai `last_check_status`: ok, unreachable, auth_failed, tls_untrusted, host_not_allowed. Permission: `mikrotik_router.update`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikRouterEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: "Forbidden (permission, tenant, atau entitlement `mikrotik.enabled` tidak terpenuhi)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "MIKROTIK_ROUTER_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: "MIKROTIK_HOST_NOT_ALLOWED | MIKROTIK_TLS_REQUIRED | MIKROTIK_TLS_UNTRUSTED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: "MIKROTIK_AUTH_FAILED | MIKROTIK_UNREACHABLE"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/mikrotik/routers/{id}/setup/preview:
+    post:
+      summary: Preview isolir setup
+      operationId: previewMikrotikSetup
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Membaca router (read-only) dan mengembalikan rencana tindakan beserta `hash`. Tidak menulis apa pun ke router. Permission: `mikrotik_router.setup`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MikrotikSetupRequest'}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikSetupPlanEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: "Forbidden (permission, tenant, atau entitlement `mikrotik.enabled` tidak terpenuhi)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "MIKROTIK_ROUTER_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR | MIKROTIK_HOST_NOT_ALLOWED | MIKROTIK_TLS_REQUIRED | MIKROTIK_TLS_UNTRUSTED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: "MIKROTIK_AUTH_FAILED | MIKROTIK_UNREACHABLE | MIKROTIK_SETUP_FAILED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR | MIKROTIK_SETUP_STATE_NOT_SAVED (objek router sudah berubah tetapi status isolir gagal disimpan, atau status tidak bisa dicatat sebelum perubahan sehingga router tidak disentuh; ulangi operasi yang sama, idempoten)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: "MIKROTIK_SETUP_CONFLICT (objek bernama sama sudah ada tanpa comment `zyad-managed`; penyiapan menolak dan tidak mengadopsi)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/mikrotik/routers/{id}/setup/apply:
+    post:
+      summary: Apply isolir setup
+      operationId: applyMikrotikSetup
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Menerapkan rencana yang sudah di-preview. `plan_hash` wajib dan harus sama dengan hasil preview untuk input dan state router saat ini; bila beda, tidak ada yang ditulis. `isolir_ready` baru true setelah seluruh langkah berhasil (fail-closed). Redirect hanya direncanakan bila `redirect_url` diisi (default mati) dan masih ditandai belum terbukti di runbook. Permission: `mikrotik_router.setup`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MikrotikApplySetupRequest'}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikRouterEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: "Forbidden (permission, tenant, atau entitlement `mikrotik.enabled` tidak terpenuhi)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "MIKROTIK_ROUTER_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR | MIKROTIK_HOST_NOT_ALLOWED | MIKROTIK_TLS_REQUIRED | MIKROTIK_TLS_UNTRUSTED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: "MIKROTIK_AUTH_FAILED | MIKROTIK_UNREACHABLE | MIKROTIK_SETUP_FAILED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR | MIKROTIK_SETUP_STATE_NOT_SAVED (objek router sudah berubah tetapi status isolir gagal disimpan, atau status tidak bisa dicatat sebelum perubahan sehingga router tidak disentuh; ulangi operasi yang sama, idempoten)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: "MIKROTIK_SETUP_PLAN_CHANGED (state router atau input berubah sejak preview) | MIKROTIK_SETUP_CONFLICT"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/mikrotik/routers/{id}/setup/cleanup:
+    post:
+      summary: Remove isolir setup objects
+      operationId: cleanupMikrotikSetup
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Menghapus hanya objek ber-comment `zyad-managed` dan mengosongkan `isolir_ready`. Aman diulang bila sebagian gagal. Permission: `mikrotik_router.setup`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikRouterEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '403':
+          description: "Forbidden (permission, tenant, atau entitlement `mikrotik.enabled` tidak terpenuhi)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "MIKROTIK_ROUTER_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '502':
+          description: "MIKROTIK_AUTH_FAILED | MIKROTIK_UNREACHABLE | MIKROTIK_SETUP_FAILED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR | MIKROTIK_SETUP_STATE_NOT_SAVED (objek router sudah berubah tetapi status isolir gagal disimpan, atau status tidak bisa dicatat sebelum perubahan sehingga router tidak disentuh; ulangi operasi yang sama, idempoten)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: "MIKROTIK_SETUP_CONFLICT"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
 components:
   parameters:
     OrganizationID:
@@ -15157,3 +15568,113 @@ components:
         success: {type: boolean}
         message: {type: string}
         data: {$ref: '#/components/schemas/ReceivablePublicInvoice'}
+    MikrotikRouter:
+      type: object
+      description: "Password tidak pernah dikembalikan; hanya `has_password`."
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        host: {type: string}
+        port: {type: integer}
+        api_type: {type: string, enum: [rest, binary], description: "Hasil deteksi saat check/register."}
+        use_tls: {type: boolean}
+        tls_fingerprint: {type: string, description: "SHA-256 leaf certificate (hex) bila di-pin."}
+        username: {type: string}
+        has_password: {type: boolean}
+        isolir_ready: {type: boolean}
+        isolir_ready_at: {type: string, format: date-time, nullable: true}
+        isolir_profile_name: {type: string}
+        isolir_redirect_url: {type: string}
+        last_check_at: {type: string, format: date-time, nullable: true}
+        last_check_status: {type: string, enum: [ok, unreachable, auth_failed, tls_untrusted, host_not_allowed]}
+        routeros_version: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    MikrotikRouterEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/MikrotikRouter'}
+    MikrotikRouterListEnvelope:
+      type: object
+      required: [success, message, data, meta]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: '#/components/schemas/MikrotikRouter'}}
+        meta: {$ref: '#/components/schemas/PaginationMeta'}
+    MikrotikCreateRouterRequest:
+      type: object
+      required: [name, host, port, username, password]
+      properties:
+        name: {type: string, maxLength: 100, description: "Unik per organization."}
+        host: {type: string, maxLength: 255}
+        port: {type: integer, minimum: 1, maximum: 65535}
+        username: {type: string, maxLength: 100}
+        password: {type: string, maxLength: 255}
+        use_tls: {type: boolean}
+        tls_fingerprint: {type: string, maxLength: 128}
+    MikrotikUpdateRouterRequest:
+      type: object
+      description: "Semua field opsional; yang tidak dikirim tidak berubah."
+      properties:
+        name: {type: string, maxLength: 100}
+        host: {type: string, maxLength: 255}
+        port: {type: integer, minimum: 1, maximum: 65535}
+        username: {type: string, maxLength: 100}
+        password: {type: string, maxLength: 255}
+        use_tls: {type: boolean}
+        tls_fingerprint: {type: string, maxLength: 128}
+    MikrotikSetupRequest:
+      type: object
+      description: "Placeholder penyiapan (lihat docs/runbook-mikrotik-isolir-setup.md). `redirect_url` kosong berarti objek redirect tidak direncanakan."
+      properties:
+        profile_name: {type: string, maxLength: 63}
+        pool_cidr: {type: string, maxLength: 64}
+        rate_limit: {type: string, maxLength: 32}
+        platform_host: {type: string, maxLength: 253}
+        tenant_isolir_host: {type: string, maxLength: 253}
+        doku_hosts: {type: array, maxItems: 20, items: {type: string, maxLength: 253}}
+        redirect_url: {type: string, maxLength: 255, description: "http(s) tanpa kredensial, query, atau fragment."}
+    MikrotikApplySetupRequest:
+      allOf:
+      - $ref: '#/components/schemas/MikrotikSetupRequest'
+      - type: object
+        required: [plan_hash]
+        properties:
+          plan_hash: {type: string, minLength: 64, maxLength: 64, description: "`data.hash` dari preview."}
+    MikrotikSetupAction:
+      type: object
+      properties:
+        kind: {type: string}
+        path: {type: string}
+        match: {type: object, additionalProperties: {type: string}}
+        attrs: {type: object, additionalProperties: {type: string}}
+        optional: {type: boolean}
+        note: {type: string}
+    MikrotikSetupPlan:
+      type: object
+      properties:
+        hash: {type: string, description: "SHA-256 hex dari rencana."}
+        actions: {type: array, items: {$ref: '#/components/schemas/MikrotikSetupAction'}}
+    MikrotikSetupPlanEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/MikrotikSetupPlan'}
+    MikrotikTLSUntrustedError:
+      type: object
+      description: "Respons 422 MIKROTIK_TLS_UNTRUSTED. `code` ada di level atas envelope error aktual; `data` hanya ada bila sertifikat sempat terbaca, agar UI dapat menawarkan pin."
+      properties:
+        success: {type: boolean, example: false}
+        code: {type: string, example: MIKROTIK_TLS_UNTRUSTED}
+        message: {type: string}
+        data:
+          type: object
+          properties:
+            fingerprint: {type: string}
+            pin_mismatch: {type: boolean}

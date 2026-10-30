@@ -1,0 +1,82 @@
+# Referensi Modul Mikrotik (Fase 1: fondasi router)
+
+Status: **WIP**. Spec: `docs/superpowers/specs/2026-10-29-mikrotik-pppoe-isolir-design.md`.
+Runbook penyiapan router (hasil uji lab): `docs/runbook-mikrotik-isolir-setup.md`.
+
+## Tujuan
+
+Tenant mendaftarkan router MikroTik miliknya, menguji koneksi, lalu menyiapkan objek isolir PPPoE di router
+lewat alur preview, apply, cleanup. Fase 1 hanya fondasi; belum ada isolir otomatis.
+
+## Endpoint
+
+Semua di bawah `/api/v1/app/mikrotik`, memakai envelope standar. Detail skema ada di `api/openapi.yaml` (tag `Mikrotik`).
+
+| Method | Path | Permission | Fungsi |
+|---|---|---|---|
+| GET | `/routers` | `mikrotik_router.read` | List router (paginasi) |
+| POST | `/routers` | `mikrotik_router.create` | Daftarkan router |
+| GET | `/routers/{id}` | `mikrotik_router.read` | Detail router |
+| PATCH | `/routers/{id}` | `mikrotik_router.update` | Update parsial |
+| DELETE | `/routers/{id}` | `mikrotik_router.delete` | Hapus pendaftaran (204) |
+| POST | `/routers/{id}/check` | `mikrotik_router.update` | Uji koneksi + deteksi versi |
+| POST | `/routers/{id}/setup/preview` | `mikrotik_router.setup` | Rencana tindakan + `hash` (read-only) |
+| POST | `/routers/{id}/setup/apply` | `mikrotik_router.setup` | Terapkan rencana (`plan_hash` wajib) |
+| POST | `/routers/{id}/setup/cleanup` | `mikrotik_router.setup` | Hapus objek `zyad-managed` |
+
+Respons router tidak pernah memuat password, hanya `has_password`. Tabel: `mikrotik_routers` (migration `000168`),
+permission di migration `000169`.
+
+## Entitlement dan tenant
+
+Seluruh grup route butuh entitlement `mikrotik.enabled` (default mati; diaktifkan manual per organization) dan
+organization aktif bertipe customer atau platform.
+
+## Aturan keamanan
+
+- **Guard SSRF**: host di-resolve dan hanya boleh publik, atau berada di CIDR privat yang diizinkan lewat env
+  `MIKROTIK_ALLOWED_PRIVATE_CIDRS` (daftar dipisah koma; kosong berarti semua privat ditolak). Pelanggaran: `MIKROTIK_HOST_NOT_ALLOWED`.
+- **TLS wajib untuk host publik** (`MIKROTIK_TLS_REQUIRED`). Sertifikat tidak tepercaya ditolak dengan
+  `MIKROTIK_TLS_UNTRUSTED` yang membawa `fingerprint` dan `pin_mismatch` agar UI dapat menawarkan **pin fingerprint**
+  (`tls_fingerprint`, SHA-256 leaf).
+- **Password terenkripsi** di database dan tidak pernah dikembalikan; error tak dikenal tidak dibocorkan ke klien.
+- **Redirect HTTP ditolak** oleh klien REST (tidak mengikuti redirect), untuk mencegah pengalihan ke host lain.
+- **Batas respons**: 8 MiB per panggilan (REST dan binary), 1 MiB per word binary API.
+
+## Semantik setup
+
+- `preview` membaca router dan menghasilkan daftar tindakan plus `hash`; tidak menulis apa pun.
+- `apply` menerima input yang sama plus `plan_hash`. Bila state router atau input berubah sejak preview:
+  `MIKROTIK_SETUP_PLAN_CHANGED`, tidak ada yang ditulis.
+- Semua objek bernama `zyad-*` dan ber-`comment=zyad-managed`. Objek bernama sama tanpa tanda itu **ditolak**
+  (`MIKROTIK_SETUP_CONFLICT`), tidak pernah diadopsi atau diubah.
+- **Fail-closed**: `isolir_ready` dikosongkan sebelum menulis dan baru true setelah semua langkah sukses. Kegagalan langkah
+  menghasilkan `MIKROTIK_SETUP_FAILED`; bila objek berubah tetapi status gagal tersimpan: `MIKROTIK_SETUP_STATE_NOT_SAVED`
+  (ulangi operasi yang sama, idempoten).
+- `cleanup` hanya menghapus objek `zyad-managed` dan aman diulang.
+- Redirect **mati secara default**; hanya direncanakan bila `redirect_url` diisi.
+- Router yang belum disiapkan tetap terdaftar (`isolir_ready=false`).
+
+## Kode error
+
+`MIKROTIK_ROUTER_NOT_FOUND` (404), `MIKROTIK_ROUTER_NAME_TAKEN` (409), `VALIDATION_ERROR` (422),
+`MIKROTIK_HOST_NOT_ALLOWED` (422), `MIKROTIK_TLS_REQUIRED` (422), `MIKROTIK_TLS_UNTRUSTED` (422),
+`MIKROTIK_AUTH_FAILED` (502), `MIKROTIK_UNREACHABLE` (502), `MIKROTIK_SETUP_PLAN_CHANGED` (409),
+`MIKROTIK_SETUP_CONFLICT` (409), `MIKROTIK_SETUP_FAILED` (502), `MIKROTIK_SETUP_STATE_NOT_SAVED` (500), `INTERNAL_ERROR` (500).
+
+## Tidak termasuk Fase 1
+
+Impor PPP secret, penanda produk untuk isolir, mesin isolir otomatis dari invoice overdue, halaman isolir publik,
+dan wizard frontend. Lihat spec di atas (fase 2 sampai 4).
+
+## Belum terbukti
+
+Seluruh uji nyata hanya pada satu CHR RouterOS 7.8 lewat binary API (lab). Belum terbukti:
+
+- RouterOS v6 (klien binary tersedia, tidak ada router v6 untuk uji).
+- Transport REST secara fungsional (di lab `www-ssl` mati) dan binary API TLS (8729).
+- Redirect HTTP (butuh `/ip proxy`; HTTPS tidak bisa dialihkan).
+- Interaksi dengan fasttrack dan sesi PPPoE nyata (DNS ke router, pemberian alamat dari pool isolir, secret dengan `remote-address` sendiri).
+- Akurasi allowlist FQDN saat IP CDN berganti.
+
+Rincian per butir dan labelnya ada di runbook.
