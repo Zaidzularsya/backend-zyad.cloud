@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"testing"
 
+	coreerrors "zyad.cloud/internal/core/errors"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/catalog/domain"
 	"zyad.cloud/internal/modules/catalog/repository"
@@ -19,7 +21,17 @@ type fakeProducts struct {
 	existing *domain.Product
 	byID     map[string]domain.Product
 	listed   []domain.Product
+	// foreignCats: id kategori yang tidak ada di org pemanggil (milik org lain / terhapus).
+	foreignCats map[string]bool
+	catChecks   []string
 }
+
+func (f *fakeProducts) CategoryInScope(_ context.Context, _ coretenant.Scope, id string) (bool, error) {
+	f.catChecks = append(f.catChecks, id)
+	return !f.foreignCats[id], nil
+}
+
+var tenantMax = 10
 
 type fakeRegistry struct{ defs map[string]domain.FeatureDef }
 
@@ -29,6 +41,8 @@ func newFakeRegistry() *fakeRegistry {
 		"users": {Key: "users", Name: "Jumlah user", ValueType: "integer", Unit: "user", IsActive: true},
 		"wa":    {Key: "wa", Name: "WhatsApp", ValueType: "boolean", IsActive: true},
 		"old":   {Key: "old", Name: "Lama", ValueType: "boolean", IsActive: false},
+		"tcrm":  {Key: "tcrm", Name: "CRM tenant", ValueType: "boolean", IsActive: true, TenantOfferable: true},
+		"tusr":  {Key: "tusr", Name: "User tenant", ValueType: "integer", IsActive: true, TenantOfferable: true, TenantMax: &tenantMax},
 	}}
 }
 
@@ -134,11 +148,11 @@ func TestUpdateProductValidatesOnlyProvidedFields(t *testing.T) {
 	repo := &fakeProducts{}
 	svc := NewProductService(repo, newFakeRegistry())
 	bad := "abc"
-	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{BasePrice: &bad}, false); !errors.Is(err, ErrInvalidProduct) {
+	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{BasePrice: &bad}, false, false); !errors.Is(err, ErrInvalidProduct) {
 		t.Fatalf("err = %v", err)
 	}
 	active := false
-	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{IsActive: &active}, false); err != nil {
+	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{IsActive: &active}, false, false); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -154,11 +168,11 @@ func TestCreateProductPricingDefaultsAndValidation(t *testing.T) {
 		t.Fatalf("recurring tanpa frekuensi err=%v", err)
 	}
 	bad := pricing.Attributes{ChargeType: pricing.OneTime, Frequency: pricing.Monthly}
-	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Pricing: &bad}, false); !errors.Is(err, ErrInvalidProduct) {
+	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Pricing: &bad}, false, false); !errors.Is(err, ErrInvalidProduct) {
 		t.Fatalf("update err=%v", err)
 	}
 	good := pricing.Attributes{ChargeType: pricing.Recurring, Frequency: pricing.Monthly}
-	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Pricing: &good}, false); err != nil {
+	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Pricing: &good}, false, false); err != nil {
 		t.Fatal(err)
 	}
 	if got := *repo.updated[len(repo.updated)-1].Pricing; got.PaymentTiming != pricing.Prepaid {
@@ -172,14 +186,10 @@ func TestCreateProductPlatformOnly(t *testing.T) {
 	base := ProductInput{Name: "A", Unit: "pcs", BasePrice: "1", CategoryID: "c1"}
 
 	in := base
-	in.Listing = repository.ListingParams{IsPublic: true, ListingCode: "a"}
-	if _, err := svc.Create(context.Background(), scope(t), in, "u"); !errors.Is(err, ErrPlatformOnly) {
-		t.Fatalf("listing non-platform err = %v", err)
-	}
-	in = base
 	in.Features = []repository.FeatureValue{{FeatureKey: "crm", Value: json.RawMessage(`true`)}}
-	if _, err := svc.Create(context.Background(), scope(t), in, "u"); !errors.Is(err, ErrPlatformOnly) {
-		t.Fatalf("features non-platform err = %v", err)
+	var ce *coreerrors.AppError
+	if _, err := svc.Create(context.Background(), scope(t), in, "u"); !errors.As(err, &ce) || ce.Code != "FORBIDDEN" {
+		t.Fatalf("features non-platform tanpa permission err = %v", err)
 	}
 	if _, err := svc.Create(context.Background(), scope(t), base, "u"); err != nil {
 		t.Fatalf("tanpa field baru harus sukses: %v", err)
@@ -189,7 +199,7 @@ func TestCreateProductPlatformOnly(t *testing.T) {
 	}
 	// Update: blok listing/fitur pada non-platform ditolak.
 	feats := []repository.FeatureValue{}
-	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Features: &feats}, false); !errors.Is(err, ErrPlatformOnly) {
+	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Features: &feats}, false, false); !errors.As(err, &ce) || ce.Code != "FORBIDDEN" {
 		t.Fatalf("update non-platform err = %v", err)
 	}
 }
@@ -213,11 +223,14 @@ func TestCreateProductListingRules(t *testing.T) {
 	if _, err := svc.Create(context.Background(), scope(t), mk("c1", "freelancer"), "u"); err != nil {
 		t.Fatalf("listing valid: %v", err)
 	}
+	if len(repo.catChecks) != 0 {
+		t.Fatalf("platform tidak memakai cek kategori tambahan: %v", repo.catChecks)
+	}
 	// Update: kategori dikosongkan pada produk yang publik ditolak.
 	cat := "c1"
 	repo.existing = &domain.Product{ID: "p1", CategoryID: &cat, IsPublic: true, ListingCode: "freelancer"}
 	empty := ""
-	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{CategoryID: &empty}, true); !errors.Is(err, ErrInvalidListing) {
+	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{CategoryID: &empty}, true, false); !errors.Is(err, ErrInvalidListing) {
 		t.Fatalf("hapus kategori produk publik err = %v", err)
 	}
 }
@@ -251,12 +264,12 @@ func TestCreateProductFeatureRules(t *testing.T) {
 	}
 	// Key dinonaktifkan setelah dipakai: menyimpan ulang dengan key itu ditolak.
 	feats := []repository.FeatureValue{{FeatureKey: "old", Value: yes}}
-	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Features: &feats}, true); !errors.Is(err, ErrInvalidFeature) {
+	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Features: &feats}, true, false); !errors.Is(err, ErrInvalidFeature) {
 		t.Fatalf("update dengan key nonaktif err = %v", err)
 	}
 	// Update tanpa menyentuh fitur tetap boleh.
 	name := "Baru"
-	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Name: &name}, true); err != nil {
+	if _, err := svc.Update(context.Background(), scope(t), "p1", repository.UpdateProductParams{Name: &name}, true, false); err != nil {
 		t.Fatalf("update tanpa fitur: %v", err)
 	}
 }
@@ -319,4 +332,278 @@ func TestProductReadsFillLabels(t *testing.T) {
 	check("List", list[0].Features)
 	m, _ := svc.FindByIDs(context.Background(), scope(t), []string{"p1"})
 	check("FindByIDs", m["p1"].Features)
+}
+
+func TestCreate_Tenant_Features(t *testing.T) {
+	yes := json.RawMessage(`true`)
+	f := func(key string, v json.RawMessage) repository.FeatureValue {
+		return repository.FeatureValue{FeatureKey: key, Value: v}
+	}
+	many := make([]repository.FeatureValue, 31)
+	for i := range many {
+		many[i] = f("tcrm", yes)
+	}
+	cases := []struct {
+		name     string
+		canMng   bool
+		platform bool
+		feats    []repository.FeatureValue
+		want     error
+		wantCode string
+	}{
+		{"non-offerable", true, false, []repository.FeatureValue{f("crm", yes)}, ErrFeatureNotOfferable, ""},
+		{"di atas max", true, false, []repository.FeatureValue{f("tusr", json.RawMessage(`11`))}, ErrFeatureAboveMax, ""},
+		{"integer nol", true, false, []repository.FeatureValue{f("tusr", json.RawMessage(`0`))}, ErrInvalidFeature, ""},
+		{"boolean offerable", true, false, []repository.FeatureValue{f("tcrm", yes), f("tusr", json.RawMessage(`10`))}, nil, ""},
+		{"tanpa permission", false, false, []repository.FeatureValue{f("tcrm", yes)}, nil, "FORBIDDEN"},
+		{"31 fitur", true, false, many, ErrInvalidFeature, ""},
+		{"key duplikat", true, false, []repository.FeatureValue{f("tcrm", yes), f("tcrm", yes)}, ErrInvalidFeature, ""},
+		{"platform tidak dibatasi", false, true, []repository.FeatureValue{f("crm", yes), f("users", json.RawMessage(`999`))}, nil, ""},
+	}
+	for _, c := range cases {
+		repo := &fakeProducts{}
+		svc := NewProductService(repo, newFakeRegistry())
+		in := ProductInput{Name: "A", Unit: "pcs", BasePrice: "1", Platform: c.platform, CanManageEntitlements: c.canMng, Features: c.feats}
+		_, err := svc.Create(context.Background(), scope(t), in, "u")
+		switch {
+		case c.wantCode != "":
+			var ce *coreerrors.AppError
+			if !errors.As(err, &ce) || ce.Code != c.wantCode || ce.Status != http.StatusForbidden {
+				t.Errorf("%s: err = %v", c.name, err)
+			}
+		case !errors.Is(err, c.want) || (c.want == nil && err != nil):
+			t.Errorf("%s: err = %v, want %v", c.name, err, c.want)
+		}
+		if err != nil && len(repo.created) != 0 {
+			t.Errorf("%s: repo tidak boleh dipanggil", c.name)
+		}
+	}
+}
+
+// Org tenant boleh mempublikasikan produknya sendiri (aturan listing yang sama dengan
+// platform, ditambah kategori wajib milik org pemanggil).
+func TestCreate_Tenant_PublicListing(t *testing.T) {
+	ctx := context.Background()
+	base := ProductInput{Name: "WiFi 20 Mbps", Unit: "bulan", BasePrice: "150000", CategoryID: "c1"}
+
+	repo := &fakeProducts{}
+	svc := NewProductService(repo, newFakeRegistry())
+	in := base
+	in.Listing = repository.ListingParams{IsPublic: true, ListingCode: " wifi-20 ", ListingOrder: 2}
+	if _, err := svc.Create(ctx, scope(t), in, "u"); err != nil {
+		t.Fatalf("tenant listing valid: %v", err)
+	}
+	if got := repo.created[0].Listing; got != (repository.ListingParams{IsPublic: true, ListingCode: "wifi-20", ListingOrder: 2}) {
+		t.Fatalf("listing diteruskan = %+v", got)
+	}
+	if len(repo.catChecks) != 1 || repo.catChecks[0] != "c1" {
+		t.Fatalf("kategori tidak diperiksa: %v", repo.catChecks)
+	}
+
+	for name, c := range map[string]ProductInput{
+		"publik tanpa kategori": {Name: "A", Unit: "pcs", BasePrice: "1", Listing: repository.ListingParams{IsPublic: true, ListingCode: "a"}},
+		"publik tanpa kode":     {Name: "A", Unit: "pcs", BasePrice: "1", CategoryID: "c1", Listing: repository.ListingParams{IsPublic: true}},
+		"kode tidak valid":      {Name: "A", Unit: "pcs", BasePrice: "1", CategoryID: "c1", Listing: repository.ListingParams{ListingCode: "Bad Code"}},
+	} {
+		repo := &fakeProducts{}
+		if _, err := NewProductService(repo, newFakeRegistry()).Create(ctx, scope(t), c, "u"); !errors.Is(err, ErrInvalidListing) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+		if len(repo.created) != 0 {
+			t.Errorf("%s: repo tidak boleh dipanggil", name)
+		}
+	}
+
+	// Kategori milik org lain (atau terhapus) ditolak sebelum menulis.
+	repo = &fakeProducts{foreignCats: map[string]bool{"c-other": true}}
+	in = base
+	in.CategoryID = "c-other"
+	in.Listing = repository.ListingParams{IsPublic: true, ListingCode: "wifi-20"}
+	if _, err := NewProductService(repo, newFakeRegistry()).Create(ctx, scope(t), in, "u"); !errors.Is(err, repository.ErrCategoryNotFound) {
+		t.Fatalf("kategori org lain err = %v", err)
+	}
+	if len(repo.created) != 0 {
+		t.Fatal("repo tidak boleh dipanggil untuk kategori org lain")
+	}
+
+	// Fitur tetap butuh manage_entitlements walau listing kini boleh.
+	in = base
+	in.Listing = repository.ListingParams{IsPublic: true, ListingCode: "wifi-20"}
+	in.Features = []repository.FeatureValue{{FeatureKey: "tcrm", Value: json.RawMessage(`true`)}}
+	var ce *coreerrors.AppError
+	if _, err := NewProductService(&fakeProducts{}, newFakeRegistry()).Create(ctx, scope(t), in, "u"); !errors.As(err, &ce) || ce.Code != "FORBIDDEN" {
+		t.Fatalf("fitur tanpa permission err = %v", err)
+	}
+}
+
+func TestUpdate_Tenant_PublicListing(t *testing.T) {
+	ctx := context.Background()
+	cat := "c1"
+	repo := &fakeProducts{existing: &domain.Product{ID: "p1", CategoryID: &cat}}
+	svc := NewProductService(repo, newFakeRegistry())
+	l := repository.ListingParams{IsPublic: true, ListingCode: "wifi-20"}
+	if _, err := svc.Update(ctx, scope(t), "p1", repository.UpdateProductParams{Listing: &l}, false, false); err != nil {
+		t.Fatalf("tenant publish via update: %v", err)
+	}
+	if got := repo.updated[0].Listing; got == nil || !got.IsPublic || got.ListingCode != "wifi-20" {
+		t.Fatalf("listing = %+v", got)
+	}
+	if len(repo.catChecks) != 1 || repo.catChecks[0] != "c1" {
+		t.Fatalf("kategori efektif tidak diperiksa: %v", repo.catChecks)
+	}
+
+	// Produk tanpa kategori tidak boleh dipublikasikan.
+	repo = &fakeProducts{existing: &domain.Product{ID: "p1"}}
+	if _, err := NewProductService(repo, newFakeRegistry()).Update(ctx, scope(t), "p1", repository.UpdateProductParams{Listing: &l}, false, false); !errors.Is(err, ErrInvalidListing) {
+		t.Fatalf("tanpa kategori err = %v", err)
+	}
+
+	// Pindah ke kategori org lain pada produk publik ditolak.
+	repo = &fakeProducts{existing: &domain.Product{ID: "p1", CategoryID: &cat, IsPublic: true, ListingCode: "wifi-20"}, foreignCats: map[string]bool{"c-other": true}}
+	other := "c-other"
+	if _, err := NewProductService(repo, newFakeRegistry()).Update(ctx, scope(t), "p1", repository.UpdateProductParams{CategoryID: &other}, false, false); !errors.Is(err, repository.ErrCategoryNotFound) {
+		t.Fatalf("kategori org lain err = %v", err)
+	}
+	if len(repo.updated) != 0 {
+		t.Fatal("repo tidak boleh dipanggil")
+	}
+
+	// Menonaktifkan publikasi tidak butuh kategori.
+	repo = &fakeProducts{existing: &domain.Product{ID: "p1"}}
+	off := repository.ListingParams{}
+	if _, err := NewProductService(repo, newFakeRegistry()).Update(ctx, scope(t), "p1", repository.UpdateProductParams{Listing: &off}, false, false); err != nil {
+		t.Fatalf("unpublish: %v", err)
+	}
+}
+
+func TestUpdate_Tenant_Features(t *testing.T) {
+	svc := NewProductService(&fakeProducts{}, newFakeRegistry())
+	ctx := context.Background()
+	ok := []repository.FeatureValue{{FeatureKey: "tcrm", Value: json.RawMessage(`true`)}}
+	bad := []repository.FeatureValue{{FeatureKey: "crm", Value: json.RawMessage(`true`)}}
+	name := "Baru"
+	// tanpa fitur: tidak butuh permission
+	if _, err := svc.Update(ctx, scope(t), "p1", repository.UpdateProductParams{Name: &name}, false, false); err != nil {
+		t.Fatalf("update tanpa fitur: %v", err)
+	}
+	// kirim fitur tanpa permission -> 403
+	var ce *coreerrors.AppError
+	if _, err := svc.Update(ctx, scope(t), "p1", repository.UpdateProductParams{Features: &ok}, false, false); !errors.As(err, &ce) || ce.Code != "FORBIDDEN" {
+		t.Fatalf("tanpa permission err = %v", err)
+	}
+	// dengan permission, valid dan tidak valid
+	if _, err := svc.Update(ctx, scope(t), "p1", repository.UpdateProductParams{Features: &ok}, false, true); err != nil {
+		t.Fatalf("valid: %v", err)
+	}
+	if _, err := svc.Update(ctx, scope(t), "p1", repository.UpdateProductParams{Features: &bad}, false, true); !errors.Is(err, ErrFeatureNotOfferable) {
+		t.Fatalf("non-offerable err = %v", err)
+	}
+}
+
+func tenantCtx(t *testing.T, orgType coretenant.OrganizationType) context.Context {
+	t.Helper()
+	tc, err := coretenant.NewVerifiedContext(coretenant.VerifiedContextInput{
+		OrganizationID: "11111111-1111-1111-1111-111111111111", OrganizationSlug: "org-a",
+		OrganizationType: orgType, OrganizationStatus: coretenant.OrganizationStatusActive,
+		MembershipID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", MembershipStatus: "active", MembershipVersion: 1,
+		ResolutionSource: coretenant.ResolutionSourceSession, DataPlacement: coretenant.DataPlacementShared,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return coretenant.WithContext(context.Background(), tc)
+}
+
+type countingRegistry struct {
+	*fakeRegistry
+	calls int
+}
+
+func (c *countingRegistry) FindByKeys(ctx context.Context, keys []string) (map[string]domain.FeatureDef, error) {
+	c.calls++
+	return c.fakeRegistry.FindByKeys(ctx, keys)
+}
+
+func TestProductNeedsUpdateOnReads(t *testing.T) {
+	mk := func(id, key, val string) domain.Product {
+		return domain.Product{ID: id, Features: []domain.ProductFeature{{FeatureKey: key, Value: json.RawMessage(val)}}}
+	}
+	build := func() (*fakeProducts, *countingRegistry) {
+		reg := &countingRegistry{fakeRegistry: newFakeRegistry()}
+		// tusr max=10: 5 muat, 50 melebihi; tcrm offerable; wa tidak offerable.
+		all := []domain.Product{mk("ok", "tusr", "5"), mk("over", "tusr", "50"), mk("revoked", "wa", "true"), mk("okbool", "tcrm", "true")}
+		byID := map[string]domain.Product{}
+		for _, p := range all {
+			byID[p.ID] = p
+		}
+		over := all[1]
+		return &fakeProducts{existing: &over, byID: byID, listed: all}, reg
+	}
+	want := map[string]bool{"ok": false, "over": true, "revoked": true, "okbool": false}
+
+	t.Run("tenant list: satu FindByKeys", func(t *testing.T) {
+		repo, reg := build()
+		list, _, err := NewProductService(repo, reg).List(tenantCtx(t, coretenant.OrganizationTypeCustomer), scope(t), repository.ProductListFilter{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range list {
+			if p.NeedsUpdate != want[p.ID] {
+				t.Errorf("%s NeedsUpdate=%v, want %v", p.ID, p.NeedsUpdate, want[p.ID])
+			}
+		}
+		if reg.calls != 1 {
+			t.Errorf("FindByKeys calls = %d, want 1", reg.calls)
+		}
+	})
+	t.Run("tenant get", func(t *testing.T) {
+		repo, reg := build()
+		p, err := NewProductService(repo, reg).Get(tenantCtx(t, coretenant.OrganizationTypeCustomer), scope(t), "over")
+		if err != nil || !p.NeedsUpdate {
+			t.Fatalf("p=%+v err=%v", p, err)
+		}
+	})
+	t.Run("platform selalu false", func(t *testing.T) {
+		repo, reg := build()
+		list, _, _ := NewProductService(repo, reg).List(tenantCtx(t, coretenant.OrganizationTypePlatform), scope(t), repository.ProductListFilter{})
+		for _, p := range list {
+			if p.NeedsUpdate {
+				t.Errorf("%s platform NeedsUpdate=true", p.ID)
+			}
+		}
+	})
+}
+
+// Kontrak yang sudah terjual tidak disentuh: service produk hanya punya repo produk
+// + registry fitur (tidak ada dependensi writer entitlement), dan jalur baca tidak
+// memanggil tulis apa pun pada repo produk.
+func TestProductReadsNeverWrite(t *testing.T) {
+	over := domain.Product{ID: "over", Features: []domain.ProductFeature{{FeatureKey: "tusr", Value: json.RawMessage(`50`)}}}
+	repo := &fakeProducts{existing: &over, byID: map[string]domain.Product{"over": over}, listed: []domain.Product{over}}
+	svc := NewProductService(repo, newFakeRegistry())
+	ctx := tenantCtx(t, coretenant.OrganizationTypeCustomer)
+	_, _ = svc.Get(ctx, scope(t), "over")
+	_, _, _ = svc.List(ctx, scope(t), repository.ProductListFilter{})
+	_, _ = svc.FindByIDs(ctx, scope(t), []string{"over"})
+	if len(repo.created) != 0 || len(repo.updated) != 0 {
+		t.Fatalf("jalur baca menulis: created=%d updated=%d", len(repo.created), len(repo.updated))
+	}
+}
+
+func TestProductsNeedingUpdate_IgnoresCtx(t *testing.T) {
+	reg := &countingRegistry{fakeRegistry: newFakeRegistry()}
+	over := domain.Product{ID: "over", Features: []domain.ProductFeature{{FeatureKey: "tusr", Value: json.RawMessage(`50`)}}}
+	ok := domain.Product{ID: "ok", Features: []domain.ProductFeature{{FeatureKey: "tusr", Value: json.RawMessage(`5`)}}}
+	svc := NewProductService(&fakeProducts{}, reg)
+	// ctx polos tanpa tenant context: Get/List fail-open, helper tidak.
+	got, err := svc.ProductsNeedingUpdate(context.Background(), []domain.Product{over, ok})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got["over"] || got["ok"] || len(got) != 1 {
+		t.Fatalf("got %v", got)
+	}
+	if reg.calls != 1 {
+		t.Errorf("FindByKeys calls = %d, want 1", reg.calls)
+	}
 }

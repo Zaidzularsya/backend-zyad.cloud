@@ -84,6 +84,28 @@ func TestEntitlementServiceEvaluateFeatureFailsClosed(t *testing.T) {
 	}
 }
 
+// Fitur boolean yang di-grant `false` disimpan sebagai baris aktif
+// {"value": false, "enabled": false}; itu berarti tidak berhak, bukan berhak.
+func TestEntitlementServiceEvaluateFeatureTreatsDisabledBooleanAsNotEntitled(t *testing.T) {
+	now := time.Date(2026, 6, 15, 2, 0, 0, 0, time.UTC)
+	service := NewEntitlementService(
+		activeEntitlementStore(now, map[string]any{"value": false, "enabled": false}),
+	)
+	service.now = func() time.Time { return now }
+
+	evaluation, err := service.EvaluateFeature(
+		context.Background(),
+		entitlementTestOrganizationID,
+		"landing.max_pages",
+	)
+	if err != nil {
+		t.Fatalf("EvaluateFeature() error = %v", err)
+	}
+	if evaluation.Enabled {
+		t.Fatal("boolean entitlement with enabled=false must not be entitled")
+	}
+}
+
 func TestEntitlementServiceRequireFeatureMapsMissingEntitlement(t *testing.T) {
 	service := NewEntitlementService(&fakeEntitlementStore{findErr: pgx.ErrNoRows})
 	_, err := service.RequireFeature(

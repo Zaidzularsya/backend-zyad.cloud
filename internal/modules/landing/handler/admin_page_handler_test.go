@@ -239,6 +239,8 @@ type fakePageService struct {
 	receivedList   repository.PageListFilter
 	receivedUpdate repository.UpdatePageParams
 	updatePage     domain.LandingPage
+	listPages      []domain.LandingPage
+	getPage        domain.LandingPage
 }
 
 func (s *fakePageService) Create(
@@ -255,7 +257,7 @@ func (s *fakePageService) Get(
 	coretenant.Scope,
 	string,
 ) (domain.LandingPage, error) {
-	return domain.LandingPage{}, nil
+	return s.getPage, nil
 }
 
 func (s *fakePageService) List(
@@ -264,7 +266,7 @@ func (s *fakePageService) List(
 	filter repository.PageListFilter,
 ) ([]domain.LandingPage, int64, error) {
 	s.receivedList = filter
-	return nil, 0, nil
+	return s.listPages, int64(len(s.listPages)), nil
 }
 
 func (s *fakePageService) Update(

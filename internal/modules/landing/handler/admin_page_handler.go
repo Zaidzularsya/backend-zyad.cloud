@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -22,6 +24,32 @@ type AdminPageHandler struct {
 	visibilitySvc service.VisibilityService
 	revisionSvc   service.RevisionService
 	publishSvc    service.PublishService
+	activations   service.ActivationReader
+}
+
+// WithActivations adds activation_state/open_activation to page list and
+// detail responses. Without it, the state is derived from the page alone.
+func (h *AdminPageHandler) WithActivations(reader service.ActivationReader) *AdminPageHandler {
+	h.activations = reader
+	return h
+}
+
+// openActivations loads the open activation of each page; failures degrade to
+// "no open activation" rather than failing the page listing.
+func (h *AdminPageHandler) openActivations(c *gin.Context, scope coretenant.Scope, pages []domain.LandingPage) map[string]domain.LandingPageActivation {
+	if h.activations == nil || len(pages) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(pages))
+	for _, p := range pages {
+		ids = append(ids, p.ID)
+	}
+	open, err := h.activations.OpenActivationsByPages(c.Request.Context(), scope, ids)
+	if err != nil {
+		slog.Warn("landing: load open activations failed", "organization_id", scope.OrganizationID(), "error", err)
+		return nil
+	}
+	return open
 }
 
 func NewAdminPageHandler(
@@ -105,9 +133,15 @@ func (h *AdminPageHandler) ListPages(c *gin.Context) {
 		return
 	}
 
+	open := h.openActivations(c, scope, pages)
+	now := time.Now().UTC()
 	var dtos []dto.PageResponse
 	for _, p := range pages {
-		dtos = append(dtos, pageResponseFromDomain(p))
+		var act *domain.LandingPageActivation
+		if a, ok := open[p.ID]; ok {
+			act = &a
+		}
+		dtos = append(dtos, pageResponseWithActivation(p, act, now))
 	}
 
 	totalPages := 0
@@ -225,7 +259,11 @@ func (h *AdminPageHandler) GetPage(c *gin.Context) {
 		return
 	}
 
-	corehttp.OK(c, "Page retrieved successfully", pageResponseFromDomain(page))
+	var act *domain.LandingPageActivation
+	if a, ok := h.openActivations(c, scope, []domain.LandingPage{page})[page.ID]; ok {
+		act = &a
+	}
+	corehttp.OK(c, "Page retrieved successfully", pageResponseWithActivation(page, act, time.Now().UTC()))
 }
 
 func pageSettingsFromDomain(settings domain.PageSettings) dto.PageSettingsResponse {
@@ -262,7 +300,30 @@ func pageSettingsToDomain(req dto.PageSettingsRequest) domain.PageSettings {
 	}
 }
 
+// pageResponseFromDomain maps a page without loading its open activation
+// (create/update/duplicate responses); activation_state is then derived from
+// the page alone and never reports "preview".
 func pageResponseFromDomain(page domain.LandingPage) dto.PageResponse {
+	return pageResponseWithActivation(page, nil, time.Now().UTC())
+}
+
+func pageResponseWithActivation(page domain.LandingPage, open *domain.LandingPageActivation, now time.Time) dto.PageResponse {
+	resp := basePageResponse(page)
+	resp.ActivationState = domain.ActivationState(page, open, now)
+	resp.ActiveUntil = page.ActiveUntil
+	if open != nil && open.Status == domain.ActivationStatusOpen {
+		resp.OpenActivation = &dto.OpenActivationResponse{
+			ID:                 open.ID,
+			BuyerName:          open.BuyerName,
+			Price:              open.Price,
+			InvoiceDueAt:       open.InvoiceDueAt,
+			PreviewURLTemplate: service.ActivationPreviewURLTemplate,
+		}
+	}
+	return resp
+}
+
+func basePageResponse(page domain.LandingPage) dto.PageResponse {
 	builder := string(page.Builder)
 	if builder == "" {
 		builder = string(domain.PageBuilderSections)

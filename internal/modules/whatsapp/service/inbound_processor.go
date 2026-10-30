@@ -400,10 +400,15 @@ func (p *InboundProcessor) conversationFor(ctx context.Context, scope coretenant
 				Phone:       "+" + params.PhoneNormalized,
 				OwnerUserID: session.CreatedBy,
 			})
-			if err != nil {
+			switch {
+			case errors.Is(err, ErrAutoLeadSkipped):
+				// Quota full: keep the conversation, just without a lead.
+				p.log.WarnContext(ctx, "whatsapp auto-create lead skipped: lead quota unavailable", "organization_id", scope.OrganizationID())
+			case err != nil:
 				return domain.Conversation{}, fmt.Errorf("auto-create lead: %w", err)
+			default:
+				found = true
 			}
-			found = true
 		}
 		if found {
 			params.RelatedEntityType = match.EntityType

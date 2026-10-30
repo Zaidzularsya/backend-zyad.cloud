@@ -11,6 +11,7 @@ import (
 
 	"zyad.cloud/internal/modules/crm/domain"
 	"zyad.cloud/internal/modules/crm/repository"
+	"zyad.cloud/internal/platform/database"
 	"zyad.cloud/internal/platform/database/testutil"
 )
 
@@ -221,5 +222,89 @@ func TestConvertLeadNewCompanyLinkedToWorkspace(t *testing.T) {
 	found, err := repository.NewCompanyRepository(db).FindByTenantOrganization(ctx, tenants.A.Scope, tenants.B.OrganizationID)
 	if err != nil || found.ID != res.Company.ID {
 		t.Fatalf("find: %+v err=%v", found, err)
+	}
+}
+
+func TestFindWorkspaceLinkAnyOrg(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx := context.Background()
+	tenants := testutil.NewTenantPair(t)
+	setupCRMOrganizations(t, db, tenants)
+	companies := repository.NewCompanyRepository(db)
+	workspace := tenants.B.OrganizationID
+
+	if _, found, err := companies.FindWorkspaceLinkAnyOrg(ctx, workspace); err != nil || found {
+		t.Fatalf("before link found=%v err=%v", found, err)
+	}
+	a, _ := companies.Create(ctx, tenants.A.Scope, repository.CreateCompanyParams{Name: "Studio Rina"})
+	if _, err := companies.SetTenantOrganization(ctx, tenants.A.Scope, a.ID, workspace, ""); err != nil {
+		t.Fatal(err)
+	}
+	if id, found, err := companies.FindWorkspaceLinkAnyOrg(ctx, workspace); err != nil || !found || id != a.ID {
+		t.Fatalf("linked id=%q found=%v err=%v", id, found, err)
+	}
+	// Konteks lookup (migration 000167) hanya membuka SELECT baris yang tertaut ke workspace itu:
+	// company lain di org A dan company org B yang tertaut ke workspace lain tetap tertutup, dan
+	// UPDATE tidak ikut terbuka.
+	unrelated, _ := companies.Create(ctx, tenants.A.Scope, repository.CreateCompanyParams{Name: "Unrelated"})
+	other, _ := companies.Create(ctx, tenants.B.Scope, repository.CreateCompanyParams{Name: "Other link"})
+	if _, err := companies.SetTenantOrganization(ctx, tenants.B.Scope, other.ID, tenants.A.OrganizationID, ""); err != nil {
+		t.Fatal(err)
+	}
+	assertWorkspaceLookupVisibility(t, db, workspace, []string{a.ID}, unrelated.ID, other.ID)
+	// company soft-deleted tidak dihitung
+	if err := companies.Delete(ctx, tenants.A.Scope, a.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := companies.FindWorkspaceLinkAnyOrg(ctx, workspace); err != nil || found {
+		t.Fatalf("after soft delete found=%v err=%v", found, err)
+	}
+}
+
+// assertWorkspaceLookupVisibility memeriksa policy crm_companies_workspace_link_lookup langsung di DB
+// (role scratch/test tunduk FORCE RLS seperti role runtime produksi).
+func assertWorkspaceLookupVisibility(t *testing.T, db *database.Pool, workspace string, want []string, hidden ...string) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.crm_workspace_link_lookup', $1, true)", workspace); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text FROM crm_companies ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	visible := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		visible[id] = true
+	}
+	rows.Close()
+	if len(visible) != len(want) {
+		t.Fatalf("lookup context sees %d rows, want %d: %v", len(visible), len(want), visible)
+	}
+	for _, id := range want {
+		if !visible[id] {
+			t.Fatalf("lookup context must see %s", id)
+		}
+	}
+	for _, id := range hidden {
+		if visible[id] {
+			t.Fatalf("lookup context must not see %s", id)
+		}
+	}
+	tag, err := tx.Exec(ctx, `UPDATE crm_companies SET name = name || ' x' WHERE id = ANY($1::uuid[])`, want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tag.RowsAffected() != 0 {
+		t.Fatalf("lookup context must not allow UPDATE, affected %d", tag.RowsAffected())
 	}
 }

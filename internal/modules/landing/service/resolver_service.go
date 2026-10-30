@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"zyad.cloud/internal/core/tenant"
@@ -15,7 +16,26 @@ import (
 
 var (
 	ErrPageNotPublished = errors.New("landing page is not published")
+	// ErrActivationTokenNotFound means no activation of the host organization
+	// has this preview token. It wraps ErrPageNotFound so callers that only
+	// care about "not found" (404) need no extra case.
+	ErrActivationTokenNotFound = fmt.Errorf("activation preview token not found: %w", ErrPageNotFound)
 )
+
+// ResolverOption configures optional resolver dependencies.
+type ResolverOption func(*resolverService)
+
+// WithResolverActivations enables activation preview links
+// (GET /public/landing/preview/:token).
+func WithResolverActivations(repo repository.ActivationRepository) ResolverOption {
+	return func(s *resolverService) { s.activationRepo = repo }
+}
+
+// WithResolverClock overrides the clock used for active_until / invoice_due_at
+// comparisons (tests). The default is time.Now in UTC.
+func WithResolverClock(now func() time.Time) ResolverOption {
+	return func(s *resolverService) { s.now = now }
+}
 
 type resolverService struct {
 	db             *database.Pool
@@ -28,6 +48,8 @@ type resolverService struct {
 	reusableRepo   repository.ReusableRepository
 	documentRepo   repository.DocumentRepository
 	publishService PublishService
+	activationRepo repository.ActivationRepository
+	now            func() time.Time
 }
 
 func NewResolverService(
@@ -41,8 +63,9 @@ func NewResolverService(
 	reusableRepo repository.ReusableRepository,
 	documentRepo repository.DocumentRepository,
 	publishService PublishService,
+	opts ...ResolverOption,
 ) ResolverService {
-	return &resolverService{
+	s := &resolverService{
 		db:             db,
 		resolverRepo:   resolverRepo,
 		versionRepo:    versionRepo,
@@ -53,7 +76,12 @@ func NewResolverService(
 		reusableRepo:   reusableRepo,
 		documentRepo:   documentRepo,
 		publishService: publishService,
+		now:            func() time.Time { return time.Now().UTC() },
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 func (s *resolverService) ResolveBySlug(ctx context.Context, scope tenant.Scope, slug string, previewToken string) (ResolvedPage, error) {
@@ -108,7 +136,51 @@ func (s *resolverService) ResolveByDomain(ctx context.Context, scope tenant.Scop
 	return s.resolvePageData(ctx, scope, page, previewToken)
 }
 
+// ResolveActivationPreview serves the single page an activation preview token
+// was issued for, while the activation is open and its invoice not yet due.
+// The page is chosen by the token only; the token is looked up by its sha256
+// within the host organization, so a token never opens another page or a page
+// of another tenant. The working copy is served (IsDraft), also for a renewal
+// of an expired page.
+func (s *resolverService) ResolveActivationPreview(ctx context.Context, scope tenant.Scope, token string) (ResolvedPage, error) {
+	if s.activationRepo == nil || token == "" {
+		return ResolvedPage{}, ErrActivationTokenNotFound
+	}
+	activation, err := s.activationRepo.FindByTokenHash(ctx, scope, domain.HashActivationPreviewToken(token))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ResolvedPage{}, ErrActivationTokenNotFound
+		}
+		return ResolvedPage{}, err
+	}
+	if activation.OrganizationID != scope.OrganizationID() {
+		return ResolvedPage{}, ErrActivationTokenNotFound
+	}
+	if !activation.PreviewableAt(s.now()) {
+		return ResolvedPage{}, ErrPageNotFound
+	}
+
+	page, err := s.pageRepo.FindByID(ctx, scope, activation.PageID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ResolvedPage{}, ErrPageNotFound
+		}
+		return ResolvedPage{}, err
+	}
+	// FindByID also returns platform templates; only the tenant's own page counts.
+	if page.ID != activation.PageID || page.OrganizationID != scope.OrganizationID() || page.IsTemplate {
+		return ResolvedPage{}, ErrPageNotFound
+	}
+	return s.resolveDraftPage(ctx, scope, page), nil
+}
+
 func (s *resolverService) resolvePageData(ctx context.Context, scope tenant.Scope, page domain.LandingPage, previewToken string) (ResolvedPage, error) {
+	// A sold page whose publish period is over is hidden like a missing page
+	// (not deleted). Pages never activated (active_until NULL) are unaffected.
+	if domain.PageActivationExpired(page, s.now()) {
+		return ResolvedPage{}, ErrPageNotFound
+	}
+
 	isDraftPreview := false
 
 	if page.Status != domain.PageStatusPublished {
@@ -129,24 +201,7 @@ func (s *resolverService) resolvePageData(ctx context.Context, scope tenant.Scop
 	}
 
 	if isDraftPreview {
-		// Fetch active working data
-		sections := s.resolveSections(ctx, scope, page.ID)
-		forms := s.resolveForms(ctx, scope, page.ID)
-		branding, _ := s.resolverRepo.ResolveBranding(ctx, scope, page.ID)
-		if branding.ID == "" {
-			branding, _ = s.brandingRepo.GetDefault(ctx, scope)
-		}
-
-		return ResolvedPage{
-			Page:         page,
-			Sections:     sections,
-			Forms:        forms,
-			Branding:     branding,
-			Menus:        s.resolveMenus(ctx, scope),
-			CTAs:         s.resolveCTAs(ctx, scope),
-			PricingPlans: s.resolvePricingPlans(ctx, scope),
-			IsDraft:      true,
-		}, nil
+		return s.resolveDraftPage(ctx, scope, page), nil
 	}
 
 	// Fetch Published Snapshot
@@ -198,6 +253,30 @@ func (s *resolverService) resolvePageData(ctx context.Context, scope tenant.Scop
 		PricingPlans: s.resolvePricingPlans(ctx, scope),
 		IsDraft:      false,
 	}, nil
+}
+
+// resolveDraftPage serves the page's working copy (draft preview).
+func (s *resolverService) resolveDraftPage(ctx context.Context, scope tenant.Scope, page domain.LandingPage) ResolvedPage {
+	if page.Builder == domain.PageBuilderGrapesJS {
+		return s.resolveGrapesPage(ctx, scope, page, true)
+	}
+	sections := s.resolveSections(ctx, scope, page.ID)
+	forms := s.resolveForms(ctx, scope, page.ID)
+	branding, _ := s.resolverRepo.ResolveBranding(ctx, scope, page.ID)
+	if branding.ID == "" {
+		branding, _ = s.brandingRepo.GetDefault(ctx, scope)
+	}
+
+	return ResolvedPage{
+		Page:         page,
+		Sections:     sections,
+		Forms:        forms,
+		Branding:     branding,
+		Menus:        s.resolveMenus(ctx, scope),
+		CTAs:         s.resolveCTAs(ctx, scope),
+		PricingPlans: s.resolvePricingPlans(ctx, scope),
+		IsDraft:      true,
+	}
 }
 
 // resolveGrapesPage serves a GrapesJS page as sanitized HTML+CSS. Menus and

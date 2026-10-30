@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"sync"
 	"time"
 )
@@ -62,6 +63,9 @@ type AppConfig struct {
 	Port           int
 	OrganizationID string
 	Env            string
+	// ReceivableManualCreation membuka pembuatan invoice/pelanggan manual lewat HTTP.
+	// Default mati: pelanggan hanya lewat kontak CRM.
+	ReceivableManualCreation bool
 }
 
 type DatabaseConfig struct {
@@ -182,6 +186,13 @@ type MikrotikConfig struct {
 	Host     string
 	Username string
 	Password string
+	// AllowedPrivateCIDRs lists private ranges (e.g. a WireGuard tunnel) that
+	// tenant routers may use as host. Parsed from MIKROTIK_ALLOWED_PRIVATE_CIDRS.
+	AllowedPrivateCIDRs []netip.Prefix
+	// SetupAllowREST enables setup apply/cleanup for routers on the REST
+	// transport, which has no real-router evidence yet (default false).
+	// Parsed from MIKROTIK_SETUP_ALLOW_REST.
+	SetupAllowREST bool
 }
 
 // DokuConfig holds DOKU Checkout API credentials. ClientID + SecretKey drive

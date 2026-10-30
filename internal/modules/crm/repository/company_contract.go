@@ -66,6 +66,9 @@ type CompanyRepository interface {
 	// SetTenantOrganization menautkan company ke workspace (tenantOrgID kosong = melepas tautan); ErrWorkspaceAlreadyLinked
 	// bila workspace itu sudah tertaut ke company lain di org yang sama.
 	SetTenantOrganization(ctx context.Context, scope coretenant.Scope, companyID, tenantOrgID, updatedBy string) (domain.Company, error)
+	// FindWorkspaceLinkAnyOrg mencari company mana pun (di org CRM mana pun, tidak termasuk yang soft-deleted)
+	// yang tertaut ke workspace; found=false bila tidak ada. Sengaja lintas-org: dipakai guard tautan sistem.
+	FindWorkspaceLinkAnyOrg(ctx context.Context, workspaceOrgID string) (companyID string, found bool, err error)
 }
 
 var ErrWorkspaceAlreadyLinked = errors.New("workspace already linked to another company")

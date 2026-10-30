@@ -41,6 +41,15 @@ func (r *Registry) InvoicePaid(ctx context.Context, scope coretenant.Scope, inv 
 	}
 }
 
+// InvoicePaidReplay memanggil hanya listener yang mengimplementasikan ReplayableListener.
+func (r *Registry) InvoicePaidReplay(ctx context.Context, scope coretenant.Scope, inv InvoiceRef) {
+	for _, l := range r.snapshot() {
+		if rl, ok := l.(ReplayableListener); ok {
+			safely("invoice paid replay", func() { rl.InvoicePaidReplay(ctx, scope, inv) })
+		}
+	}
+}
+
 func (r *Registry) ContractCreated(ctx context.Context, scope coretenant.Scope, c ContractRef) {
 	for _, l := range r.snapshot() {
 		safely("contract created", func() { l.ContractCreated(ctx, scope, c) })

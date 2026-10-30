@@ -7,17 +7,19 @@ import (
 
 func featureResponse(feature model.Feature) dto.FeatureResponse {
 	return dto.FeatureResponse{
-		ID:            feature.ID,
-		FeatureKey:    feature.Key,
-		Module:        feature.Module,
-		Name:          feature.Name,
-		Description:   feature.Description,
-		ValueType:     string(feature.ValueType),
-		Unit:          feature.Unit,
-		ResetStrategy: string(feature.ResetStrategy),
-		IsActive:      feature.IsActive,
-		CreatedAt:     formatTime(feature.CreatedAt),
-		UpdatedAt:     formatTime(feature.UpdatedAt),
+		ID:              feature.ID,
+		FeatureKey:      feature.Key,
+		Module:          feature.Module,
+		Name:            feature.Name,
+		Description:     feature.Description,
+		ValueType:       string(feature.ValueType),
+		Unit:            feature.Unit,
+		ResetStrategy:   string(feature.ResetStrategy),
+		IsActive:        feature.IsActive,
+		TenantOfferable: feature.TenantOfferable,
+		TenantMax:       feature.TenantMax,
+		CreatedAt:       formatTime(feature.CreatedAt),
+		UpdatedAt:       formatTime(feature.UpdatedAt),
 	}
 }
 

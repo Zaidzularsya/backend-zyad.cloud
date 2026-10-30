@@ -54,8 +54,12 @@ type Feature struct {
 	Unit          string
 	ResetStrategy ResetStrategy
 	IsActive      bool
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// TenantOfferable: tenant boleh menjual fitur ini di produk mereka; TenantMax adalah
+	// batas atas yang boleh dijual (wajib untuk tipe integer, nil untuk tipe lain).
+	TenantOfferable bool
+	TenantMax       *int
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 type PlanEntitlement struct {

@@ -72,7 +72,7 @@ func (r *pageRepository) Create(ctx context.Context, scope coretenant.Scope, par
 			id, organization_id, name, title, slug, page_type, status,
 			visibility, password_hash, seo, settings, locale, timezone, is_homepage, is_template,
 			published_version, publish_at, unpublish_at, published_at,
-			created_by, updated_by, created_at, updated_at, deleted_at, builder
+			created_by, updated_by, created_at, updated_at, deleted_at, builder, active_until
 	`
 
 	var page domain.LandingPage
@@ -106,7 +106,7 @@ func (r *pageRepository) Create(ctx context.Context, scope coretenant.Scope, par
 			&page.Type, &page.Status, &page.Visibility, &passwordHash, &page.SEO, &page.Settings,
 			&page.Locale, &page.Timezone, &page.IsHomepage, &page.IsTemplate,
 			&page.PublishedVersion, &page.PublishAt, &page.UnpublishAt, &page.PublishedAt,
-			&createdBy, &updatedBy, &page.CreatedAt, &page.UpdatedAt, &page.DeletedAt, &page.Builder,
+			&createdBy, &updatedBy, &page.CreatedAt, &page.UpdatedAt, &page.DeletedAt, &page.Builder, &page.ActiveUntil,
 		)
 	})
 
@@ -137,7 +137,7 @@ func (r *pageRepository) FindByID(ctx context.Context, scope coretenant.Scope, i
 			id, organization_id, name, title, slug, page_type, status,
 			visibility, password_hash, seo, settings, locale, timezone, is_homepage, is_template,
 			published_version, publish_at, unpublish_at, published_at,
-			created_by, updated_by, created_at, updated_at, deleted_at, builder
+			created_by, updated_by, created_at, updated_at, deleted_at, builder, active_until
 		FROM landing_pages
 		WHERE id = $1
 			AND deleted_at IS NULL
@@ -165,7 +165,7 @@ func (r *pageRepository) FindByID(ctx context.Context, scope coretenant.Scope, i
 			&page.Type, &page.Status, &page.Visibility, &passwordHash, &page.SEO, &page.Settings,
 			&page.Locale, &page.Timezone, &page.IsHomepage, &page.IsTemplate,
 			&page.PublishedVersion, &page.PublishAt, &page.UnpublishAt, &page.PublishedAt,
-			&createdBy, &updatedBy, &page.CreatedAt, &page.UpdatedAt, &page.DeletedAt, &page.Builder,
+			&createdBy, &updatedBy, &page.CreatedAt, &page.UpdatedAt, &page.DeletedAt, &page.Builder, &page.ActiveUntil,
 		)
 	})
 
@@ -196,7 +196,7 @@ func (r *pageRepository) FindBySlug(ctx context.Context, scope coretenant.Scope,
 			id, organization_id, name, title, slug, page_type, status,
 			visibility, password_hash, seo, settings, locale, timezone, is_homepage, is_template,
 			published_version, publish_at, unpublish_at, published_at,
-			created_by, updated_by, created_at, updated_at, deleted_at, builder
+			created_by, updated_by, created_at, updated_at, deleted_at, builder, active_until
 		FROM landing_pages
 		WHERE slug = $1
 			AND organization_id = $2
@@ -213,7 +213,7 @@ func (r *pageRepository) FindBySlug(ctx context.Context, scope coretenant.Scope,
 			&page.Type, &page.Status, &page.Visibility, &passwordHash, &page.SEO, &page.Settings,
 			&page.Locale, &page.Timezone, &page.IsHomepage, &page.IsTemplate,
 			&page.PublishedVersion, &page.PublishAt, &page.UnpublishAt, &page.PublishedAt,
-			&createdBy, &updatedBy, &page.CreatedAt, &page.UpdatedAt, &page.DeletedAt, &page.Builder,
+			&createdBy, &updatedBy, &page.CreatedAt, &page.UpdatedAt, &page.DeletedAt, &page.Builder, &page.ActiveUntil,
 		)
 	})
 
@@ -295,7 +295,7 @@ func (r *pageRepository) List(ctx context.Context, scope coretenant.Scope, filte
 				id, organization_id, name, title, slug, page_type, status,
 				visibility, password_hash, seo, settings, locale, timezone, is_homepage, is_template,
 				published_version, publish_at, unpublish_at, published_at,
-				created_by, updated_by, created_at, updated_at, deleted_at, builder
+				created_by, updated_by, created_at, updated_at, deleted_at, builder, active_until
 			FROM landing_pages
 			WHERE ` + orgPredicate + `
 		`
@@ -332,7 +332,7 @@ func (r *pageRepository) List(ctx context.Context, scope coretenant.Scope, filte
 				&page.Type, &page.Status, &page.Visibility, &passwordHash, &page.SEO, &page.Settings,
 				&page.Locale, &page.Timezone, &page.IsHomepage, &page.IsTemplate,
 				&page.PublishedVersion, &page.PublishAt, &page.UnpublishAt, &page.PublishedAt,
-				&createdBy, &updatedBy, &page.CreatedAt, &page.UpdatedAt, &page.DeletedAt, &page.Builder,
+				&createdBy, &updatedBy, &page.CreatedAt, &page.UpdatedAt, &page.DeletedAt, &page.Builder, &page.ActiveUntil,
 			)
 			if err != nil {
 				return err
@@ -452,7 +452,7 @@ func (r *pageRepository) Update(ctx context.Context, scope coretenant.Scope, id 
 		id, organization_id, name, title, slug, page_type, status,
 		visibility, password_hash, seo, settings, locale, timezone, is_homepage, is_template,
 		published_version, publish_at, unpublish_at, published_at,
-		created_by, updated_by, created_at, updated_at, deleted_at, builder
+		created_by, updated_by, created_at, updated_at, deleted_at, builder, active_until
 	`
 
 	var page domain.LandingPage
@@ -465,7 +465,7 @@ func (r *pageRepository) Update(ctx context.Context, scope coretenant.Scope, id 
 			&page.Type, &page.Status, &page.Visibility, &passwordHash, &page.SEO, &page.Settings,
 			&page.Locale, &page.Timezone, &page.IsHomepage, &page.IsTemplate,
 			&page.PublishedVersion, &page.PublishAt, &page.UnpublishAt, &page.PublishedAt,
-			&createdBy, &updatedBy, &page.CreatedAt, &page.UpdatedAt, &page.DeletedAt, &page.Builder,
+			&createdBy, &updatedBy, &page.CreatedAt, &page.UpdatedAt, &page.DeletedAt, &page.Builder, &page.ActiveUntil,
 		)
 	})
 

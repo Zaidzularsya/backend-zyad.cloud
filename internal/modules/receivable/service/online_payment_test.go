@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -244,5 +245,209 @@ func TestSyncStatusThrottled(t *testing.T) {
 	h2.doku.status = doku.TransactionStatus{Status: "SUCCESS", Amount: "833000", OriginalRequestID: "req-1"}
 	if st, err := h2.svc.SyncStatus(ctx, "tok"); err != nil || st != domain.InvoicePaid || len(h2.listener.paid) != 1 {
 		t.Fatalf("st=%s err=%v paid=%d", st, err, len(h2.listener.paid))
+	}
+}
+
+type recordedSettlement struct {
+	orgID, invoiceID, reference, amount string
+	paidAt                              time.Time
+}
+
+type fakeRecorder struct {
+	calls []recordedSettlement
+	err   error
+}
+
+func (f *fakeRecorder) RecordPayment(_ context.Context, orgID, invoiceID, reference, amount string, paidAt time.Time) error {
+	f.calls = append(f.calls, recordedSettlement{orgID, invoiceID, reference, amount, paidAt})
+	return f.err
+}
+
+type platformScopes struct{}
+
+func (platformScopes) ResolveWorkerOrganization(context.Context, string, string) (coretenant.Context, error) {
+	return coretenant.NewVerifiedContext(coretenant.VerifiedContextInput{
+		OrganizationID: "11111111-1111-1111-1111-111111111111", OrganizationSlug: "zyad",
+		OrganizationType: coretenant.OrganizationTypePlatform, OrganizationStatus: coretenant.OrganizationStatusActive,
+		ResolutionSource: coretenant.ResolutionSourceWorker, DataPlacement: coretenant.DataPlacementShared,
+	})
+}
+
+func newLedgerHarness(t *testing.T) (*onlineHarness, *fakeRecorder) {
+	t.Helper()
+	h := newOnlineHarness(t)
+	rec := &fakeRecorder{}
+	h.svc.WithSettlementRecorder(rec)
+	if _, _, err := h.svc.Checkout(ctx, "tok"); err != nil {
+		t.Fatal(err)
+	}
+	return h, rec
+}
+
+func TestNotificationCreditsSettlementLedger(t *testing.T) {
+	t.Run("sukses mencatat satu entri untuk org invoice", func(t *testing.T) {
+		h, rec := newLedgerHarness(t)
+		paidAt := nowWIB.Add(-time.Hour)
+		n := DokuNotification{InvoiceNumber: "RCV-inv-1", Status: "SUCCESS", Amount: "833000", ProviderReference: "req-1", PaidAt: &paidAt}
+		if ok, err := h.svc.HandleNotification(ctx, n); !ok || err != nil {
+			t.Fatalf("ok=%v err=%v", ok, err)
+		}
+		want := recordedSettlement{"11111111-1111-1111-1111-111111111111", "inv-1", "req-1", h.store.payments[0].Amount, paidAt.UTC()}
+		if len(rec.calls) != 1 || rec.calls[0].orgID != want.orgID || rec.calls[0].invoiceID != want.invoiceID ||
+			rec.calls[0].reference != want.reference || rec.calls[0].amount != "833000.00" || !rec.calls[0].paidAt.Equal(paidAt) {
+			t.Fatalf("calls=%+v want=%+v", rec.calls, want)
+		}
+	})
+	t.Run("notifikasi ganda tetap satu entri ledger", func(t *testing.T) {
+		h, _ := newLedgerHarness(t)
+		repo := &fakeSettlementRepo{}
+		h.svc.WithSettlementRecorder(NewSettlementRecorder(repo))
+		for i := 0; i < 2; i++ {
+			if ok, err := h.notify("SUCCESS"); !ok || err != nil {
+				t.Fatalf("call %d: ok=%v err=%v", i, ok, err)
+			}
+		}
+		if len(repo.rows) != 1 || repo.rows[0].Amount != "833000.00" || repo.rows[0].ProviderReference != "req-1" {
+			t.Fatalf("rows=%+v", repo.rows)
+		}
+	})
+	t.Run("jumlah mengikuti pembayaran tercatat (dibatasi sisa)", func(t *testing.T) {
+		h := newOnlineHarness(t)
+		rec := &fakeRecorder{}
+		h.svc.WithSettlementRecorder(rec)
+		inv := h.store.invoices["inv-1"]
+		inv.GrandTotal, inv.AmountPaid = "150000.50", "0.00"
+		h.store.invoices["inv-1"] = inv
+		_, _, _ = h.svc.Checkout(ctx, "tok")
+		n := DokuNotification{InvoiceNumber: "RCV-inv-1", Status: "SUCCESS", Amount: "150001", ProviderReference: "req-2"}
+		if ok, err := h.svc.HandleNotification(ctx, n); !ok || err != nil {
+			t.Fatalf("ok=%v err=%v", ok, err)
+		}
+		if len(rec.calls) != 1 || rec.calls[0].amount != "150000.50" {
+			t.Fatalf("calls=%+v", rec.calls)
+		}
+	})
+	t.Run("org platform tidak dikreditkan", func(t *testing.T) {
+		h, rec := newLedgerHarness(t)
+		h.svc.scopes = platformScopes{}
+		if ok, err := h.notify("SUCCESS"); !ok || err != nil {
+			t.Fatalf("ok=%v err=%v", ok, err)
+		}
+		if len(h.store.payments) != 1 || len(rec.calls) != 0 {
+			t.Fatalf("payments=%d calls=%d", len(h.store.payments), len(rec.calls))
+		}
+	})
+	t.Run("status non-sukses tidak dikreditkan", func(t *testing.T) {
+		h, rec := newLedgerHarness(t)
+		for _, st := range []string{"FAILED", "PENDING", "EXPIRED"} {
+			if _, err := h.notify(st); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if len(rec.calls) != 0 {
+			t.Fatalf("calls=%+v", rec.calls)
+		}
+	})
+	t.Run("invoice non-payable (perlu refund) tidak dikreditkan", func(t *testing.T) {
+		h, rec := newLedgerHarness(t)
+		inv := h.store.invoices["inv-1"]
+		inv.Status = domain.InvoiceVoid
+		h.store.invoices["inv-1"] = inv
+		if ok, err := h.notify("SUCCESS"); !ok || err != nil {
+			t.Fatalf("ok=%v err=%v", ok, err)
+		}
+		if len(rec.calls) != 0 {
+			t.Fatalf("calls=%+v", rec.calls)
+		}
+	})
+	t.Run("galat recorder tidak menggagalkan notifikasi dan dicatat ERROR", func(t *testing.T) {
+		h, rec := newLedgerHarness(t)
+		rec.err = errors.New("ledger down")
+		if ok, err := h.notify("SUCCESS"); !ok || err != nil {
+			t.Fatalf("ok=%v err=%v", ok, err)
+		}
+		if len(h.store.payments) != 1 || h.store.invoices["inv-1"].Status != domain.InvoicePaid || h.checkout.rows[0].Status != "paid" {
+			t.Fatalf("payment must stay recorded: payments=%d inv=%+v", len(h.store.payments), h.store.invoices["inv-1"])
+		}
+		logs := h.logs.String()
+		if !strings.Contains(logs, "level=ERROR") || !strings.Contains(logs, "settlement") || !strings.Contains(logs, "invoice_id=inv-1") ||
+			!strings.Contains(logs, "provider_reference=req-1") {
+			t.Fatalf("logs=%s", logs)
+		}
+		// Recovery: notifikasi dikirim ulang setelah ledger pulih -> entri tercatat.
+		rec.err = nil
+		if ok, err := h.notify("SUCCESS"); !ok || err != nil || len(rec.calls) != 2 || rec.calls[1].amount != "833000.00" {
+			t.Fatalf("retry ok=%v err=%v calls=%+v", ok, err, rec.calls)
+		}
+	})
+	t.Run("referensi provider kosong memakai kunci deterministik", func(t *testing.T) {
+		h, rec := newLedgerHarness(t)
+		n := DokuNotification{InvoiceNumber: "RCV-inv-1", Status: "SUCCESS", Amount: "833000"}
+		for i := 0; i < 2; i++ {
+			if ok, err := h.svc.HandleNotification(ctx, n); !ok || err != nil {
+				t.Fatalf("ok=%v err=%v", ok, err)
+			}
+		}
+		key := "RCV-inv-1:" + h.store.payments[0].ID
+		if len(rec.calls) != 2 || rec.calls[0].reference != key || rec.calls[1].reference != key {
+			t.Fatalf("calls=%+v want key %s", rec.calls, key)
+		}
+	})
+	t.Run("pembayaran manual tidak pernah mengkredit ledger", func(t *testing.T) {
+		// Satu invoice dibayar sebagian manual lalu sisanya lewat DOKU, dengan recorder terpasang:
+		// hanya porsi DOKU yang dikreditkan.
+		h, rec := newLedgerHarness(t)
+		if _, _, err := h.svc.payments.RecordManual(ctx, scope, "inv-1", ManualPaymentInput{Amount: "100000.00", PaidAt: nowWIB}, "user-1"); err != nil {
+			t.Fatal(err)
+		}
+		if len(rec.calls) != 0 {
+			t.Fatalf("manual payment credited ledger: %+v", rec.calls)
+		}
+		n := DokuNotification{InvoiceNumber: "RCV-inv-1", Status: "SUCCESS", Amount: "733000", ProviderReference: "req-7"}
+		if ok, err := h.svc.HandleNotification(ctx, n); !ok || err != nil {
+			t.Fatalf("ok=%v err=%v", ok, err)
+		}
+		if len(h.store.payments) != 2 || len(rec.calls) != 1 || rec.calls[0].amount != "733000.00" || rec.calls[0].reference != "req-7" {
+			t.Fatalf("payments=%d calls=%+v", len(h.store.payments), rec.calls)
+		}
+	})
+}
+
+func TestPaymentServiceHasNoSettlementDependency(t *testing.T) {
+	// Struktural: jalur pembayaran manual (paymentService) tidak bisa mencapai ledger.
+	recorder := reflect.TypeOf((*SettlementRecorder)(nil)).Elem()
+	for _, typ := range []reflect.Type{reflect.TypeOf(PaymentDeps{}), reflect.TypeOf(paymentService{})} {
+		for i := 0; i < typ.NumField(); i++ {
+			if f := typ.Field(i).Type; f == recorder || (f.Kind() == reflect.Interface && f.Implements(recorder)) {
+				t.Fatalf("%s.%s can reach SettlementRecorder", typ.Name(), typ.Field(i).Name)
+			}
+		}
+	}
+}
+
+func TestNotificationSkipsLedgerForNonIDR(t *testing.T) {
+	for _, tc := range []struct {
+		currency string
+		credited bool
+	}{{"IDR", true}, {"idr", true}, {"", true}, {"USD", false}} {
+		t.Run("currency="+tc.currency, func(t *testing.T) {
+			h, rec := newLedgerHarness(t)
+			inv := h.store.invoices["inv-1"]
+			inv.Currency = tc.currency
+			h.store.invoices["inv-1"] = inv
+			if ok, err := h.notify("SUCCESS"); !ok || err != nil {
+				t.Fatalf("ok=%v err=%v", ok, err)
+			}
+			if len(h.store.payments) != 1 || (len(rec.calls) == 1) != tc.credited {
+				t.Fatalf("payments=%d calls=%+v credited=%v", len(h.store.payments), rec.calls, tc.credited)
+			}
+			logs := h.logs.String()
+			skipped := strings.Contains(logs, "level=ERROR") && strings.Contains(logs, "non-IDR") &&
+				strings.Contains(logs, "currency=USD") && strings.Contains(logs, "invoice_id=inv-1") &&
+				strings.Contains(logs, "provider_reference=req-1") && strings.Contains(logs, "organization_id=")
+			if skipped == tc.credited {
+				t.Fatalf("logs=%s", logs)
+			}
+		})
 	}
 }

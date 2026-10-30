@@ -138,6 +138,36 @@ func (s *publishService) Publish(ctx context.Context, scope tenant.Scope, pageID
 		return domain.LandingPageVersion{}, ErrValidationFailed
 	}
 
+	version, err := s.createSnapshotVersion(ctx, scope, pageID, changeNote, publishedBy)
+	if err != nil {
+		return domain.LandingPageVersion{}, err
+	}
+
+	// 5. Update page status to published
+	status := domain.PageStatusPublished
+	_, err = s.pageRepo.Update(ctx, scope, pageID, repository.UpdatePageParams{
+		Status:    &status,
+		UpdatedBy: publishedBy,
+	})
+	if err != nil {
+		return domain.LandingPageVersion{}, err
+	}
+
+	return version, nil
+}
+
+// SnapshotCurrent stores a fresh version snapshot of the page's current
+// content without validation and without touching the page row. Used when a
+// page is published by a payment, so the live snapshot matches what the buyer
+// previewed instead of an older version.
+func (s *publishService) SnapshotCurrent(ctx context.Context, scope tenant.Scope, pageID string, changeNote string) (domain.LandingPageVersion, error) {
+	if !scope.IsValid() {
+		return domain.LandingPageVersion{}, tenant.ErrInvalidScope
+	}
+	return s.createSnapshotVersion(ctx, scope, pageID, changeNote, "")
+}
+
+func (s *publishService) createSnapshotVersion(ctx context.Context, scope tenant.Scope, pageID string, changeNote string, publishedBy string) (domain.LandingPageVersion, error) {
 	// 1. Fetch full snapshot of the page
 	page, err := s.pageRepo.FindByID(ctx, scope, pageID)
 	if err != nil {
@@ -184,17 +214,6 @@ func (s *publishService) Publish(ctx context.Context, scope tenant.Scope, pageID
 	if err != nil {
 		return domain.LandingPageVersion{}, err
 	}
-
-	// 5. Update page status to published
-	status := domain.PageStatusPublished
-	_, err = s.pageRepo.Update(ctx, scope, pageID, repository.UpdatePageParams{
-		Status:    &status,
-		UpdatedBy: publishedBy,
-	})
-	if err != nil {
-		return domain.LandingPageVersion{}, err
-	}
-
 	return version, nil
 }
 

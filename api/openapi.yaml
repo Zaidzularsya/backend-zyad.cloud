@@ -1030,6 +1030,44 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/organization/entitlements/summary:
+    get:
+      summary: Summarize entitlements and quota usage of the current organization
+      description: >
+        Readable by every authenticated, active member of the current
+        organization; no permission is required. Available to customer and
+        platform organizations; the platform organization receives every
+        feature as `unlimited`. For the quota keys introduced with the Free
+        plan (crm.max_leads, crm.max_companies, crm.max_deals,
+        crm.max_pipelines, crm.max_quotations_per_month,
+        crm.max_sales_orders_per_month, receivable.max_invoices_per_month,
+        domain.max_domains) an organization without an entitlement for the key
+        is reported as `unlimited`. The organization is always the one from the
+        authenticated tenant context; no organization parameter is accepted.
+      operationId: getCurrentOrganizationEntitlementSummary
+      tags:
+        - Organizations
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Organization entitlement summary retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrganizationEntitlementSummaryEnvelope"
+        "401":
+          description: Authentication is missing or invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Caller is not an active member of an active customer or platform organization
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/organization/usage:
     get:
       summary: Get current organization usage for a feature metric period
@@ -1862,6 +1900,9 @@ paths:
           schema:
             type: boolean
           description: Filter landing pages that are reusable templates.
+      description: >-
+        Setiap item memuat field aktivasi halaman (`activation_state`, `active_until`,
+        `open_activation`), lihat `LandingPageActivationFields`.
       responses:
         "200":
           description: Landing pages retrieved successfully
@@ -1869,6 +1910,14 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/LandingPageActivationFields"
     post:
       summary: Create landing page
       operationId: createLandingPage
@@ -1915,6 +1964,9 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/LandingPageActivationFields"
     patch:
       summary: Update landing page
       operationId: updateLandingPage
@@ -1945,6 +1997,10 @@ paths:
         - Landing Pages
       security:
         - BearerAuth: []
+      description: >-
+        A page that was sold to a client cannot be deleted while it is paid and still published, or
+        while its activation invoice is awaiting payment and not yet due: 409
+        `PAGE_HAS_ACTIVE_ACTIVATION`. Expired pages, overdue invoices and ordinary pages can be deleted.
       responses:
         "200":
           description: Landing page deleted successfully
@@ -1952,6 +2008,11 @@ paths:
             application/json:
               schema:
                 type: object
+        "409":
+          description: The page was sold and is still live or awaiting payment (PAGE_HAS_ACTIVE_ACTIVATION)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
   /api/v1/admin/landing-pages/{id}/access:
     put:
       summary: Update landing page access
@@ -1976,6 +2037,215 @@ paths:
       responses:
         "200":
           description: Landing page access updated successfully
+  /api/v1/app/landing/pages/{id}/activation-invoice:
+    post:
+      summary: Create the activation invoice of a landing page (reseller)
+      operationId: createLandingActivationInvoice
+      tags:
+        - Landing Pages
+      security:
+        - BearerAuth: []
+      description: >-
+        Requires permission `landing.page.update` and entitlements `landing.enabled` and
+        `landing.page_activation` (403 `FEATURE_NOT_ENABLED`). The page must belong to the active
+        organization (404 `PAGE_NOT_FOUND` otherwise, also for templates) and be a non-archived
+        GrapesJS page (422 `ACTIVATION_PAGE_NOT_ELIGIBLE`). At most one open activation per page:
+        an open activation whose invoice is not yet due gives 409 `ACTIVATION_OPEN`; an open one
+        that is already due is voided in the same transaction and replaced (its invoice is not
+        touched; a late payment stays acceptable). Creates a receivable account for the buyer and
+        issues a manual invoice in the reseller organization (one line `Halaman undangan <slug>`,
+        due on the calendar day of `invoice_due_at`, default send channels of the organization).
+        If invoicing fails, the activation (and any invoice already created) is voided and the
+        request can be retried. `preview_url` carries the raw preview token and is returned only
+        in this response; it uses the organization's active primary host, or a relative path when
+        the organization has no active host.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LandingActivationInvoiceRequest"
+      responses:
+        "201":
+          description: Activation and invoice created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, message, data]
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  data:
+                    $ref: "#/components/schemas/LandingActivationInvoiceResult"
+        "403":
+          description: Missing permission or entitlement (FEATURE_NOT_ENABLED)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Page not found in the active organization (PAGE_NOT_FOUND)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "409":
+          description: Open, not yet due activation exists (ACTIVATION_OPEN), or invoice quota exceeded (QUOTA_EXCEEDED)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "422":
+          description: >-
+            Invalid input (VALIDATION_ERROR), page not eligible (ACTIVATION_PAGE_NOT_ELIGIBLE), or the
+            organization has no active domain/subdomain so the preview link could not be built
+            (ACTIVATION_NO_PUBLIC_HOST); no invoice is created in that case
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "502":
+          description: Invoice could not be created (ACTIVATION_INVOICE_FAILED); retry is safe
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+  /api/v1/app/landing/activations:
+    get:
+      summary: List the reseller's page activation invoices
+      operationId: listLandingActivations
+      tags:
+        - Landing Pages
+      security:
+        - BearerAuth: []
+      description: >-
+        Requires permission `landing.page.update`. Newest first. `state` is `awaiting_payment` (open, invoice
+        not yet due), `expired` (open, past due: the preview link is closed but the invoice can still be paid),
+        `paid` or `void`. `payment_url` is the public payment link (empty for void). The preview link is never
+        listed because only its hash is stored; use renew to get a new one. `Cache-Control: private, no-store`.
+      parameters:
+        - {name: status, in: query, schema: {type: string, enum: [open, paid, void]}}
+        - {name: page, in: query, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: per_page, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        "200":
+          description: Activation invoices
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id: {type: string, format: uuid}
+                            page_id: {type: string, format: uuid}
+                            page_title: {type: string}
+                            page_slug: {type: string}
+                            page_status: {type: string}
+                            page_active_until: {type: string, format: date-time, nullable: true}
+                            invoice_id: {type: string, format: uuid, nullable: true}
+                            buyer_name: {type: string}
+                            buyer_contact: {type: string}
+                            buyer_email: {type: string, nullable: true}
+                            price: {type: string}
+                            duration_value: {type: integer}
+                            duration_unit: {type: string}
+                            invoice_due_at: {type: string, format: date-time}
+                            status: {type: string, enum: [open, paid, void]}
+                            state: {type: string, enum: [awaiting_payment, expired, paid, void]}
+                            paid_at: {type: string, format: date-time, nullable: true}
+                            created_at: {type: string, format: date-time}
+                            payment_url: {type: string}
+                      meta:
+                        type: object
+                        properties:
+                          total: {type: integer}
+                          page: {type: integer}
+                          per_page: {type: integer}
+                          total_pages: {type: integer}
+        "403":
+          description: Missing `landing.page.update`
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "422":
+          description: Invalid status filter (VALIDATION_ERROR)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+  /api/v1/app/landing/activations/{id}/renew:
+    post:
+      summary: Give an open activation a new preview link and a fresh preview window
+      operationId: renewLandingActivation
+      tags:
+        - Landing Pages
+      security:
+        - BearerAuth: []
+      description: >-
+        Requires permission `landing.page.update` and entitlements `landing.enabled` and
+        `landing.page_activation`. Only for an OPEN activation (including one past its due time). The preview
+        token is rotated: the old preview link stops working and the new raw-token `preview_url` is returned
+        only in this response, valid for `invoice_due_hours` (1-720) or `invoice_due_days` (1-30), default 24
+        hours. The payment link does not change. The body may be empty. If the organization has no active
+        domain the call fails (422 `ACTIVATION_NO_PUBLIC_HOST`) before the old token is replaced.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                invoice_due_hours: {type: integer, minimum: 1, maximum: 720}
+                invoice_due_days: {type: integer, minimum: 1, maximum: 30}
+      responses:
+        "200":
+          description: New links
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  data:
+                    type: object
+                    properties:
+                      activation: {type: object}
+                      preview_url: {type: string}
+                      payment_url: {type: string}
+        "403":
+          description: Missing permission or entitlement (FEATURE_NOT_ENABLED)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Unknown activation or of another organization (ACTIVATION_NOT_FOUND)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "409":
+          description: Already paid, voided or without an invoice yet (ACTIVATION_NOT_OPEN)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "422":
+          description: Invalid due window (VALIDATION_ERROR) or no public host (ACTIVATION_NO_PUBLIC_HOST)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
   /api/v1/admin/landing-pages/{id}/duplicate:
     post:
       summary: Duplicate landing page
@@ -3545,7 +3815,9 @@ paths:
         "200":
           description: Public landing page resolved successfully
         "404":
-          description: PUBLIC_PAGE_NOT_FOUND (tidak ada, belum published, atau host tidak terdaftar)
+          description: >-
+            PUBLIC_PAGE_NOT_FOUND (tidak ada, belum published, masa aktif `active_until` sudah lewat,
+            atau host tidak terdaftar)
   /api/v1/public/landing/render:
     get:
       summary: Server-render a published GrapesJS landing page as HTML (SEO)
@@ -3571,7 +3843,7 @@ paths:
               schema:
                 type: string
         "404":
-          description: Page not found or not a GrapesJS page
+          description: Page not found, not published, its `active_until` has passed, or not a GrapesJS page
   /api/v1/public/landing/render/{slug}:
     get:
       summary: Server-render a published GrapesJS landing page as HTML (SEO)
@@ -3592,10 +3864,20 @@ paths:
               schema:
                 type: string
         "404":
-          description: Page not found or not a GrapesJS page
+          description: Page not found, not published, its `active_until` has passed, or not a GrapesJS page
   /api/v1/public/landing/preview/{token}:
     get:
       summary: Preview public landing page
+      description: >-
+        Organisasi tetap diturunkan dari host (middleware publik yang sama dengan /public/landing/*).
+        (1) Token aktivasi halaman (reseller): halaman dipilih dari token saja (dicari lewat sha256,
+        hanya di organisasi host), ditayangkan (working copy, `IsDraft=true`) selama aktivasi `open`
+        dan `invoice_due_at` belum lewat. Token yang jatuh tempo, `paid`, `void`, tidak dikenal, atau
+        milik tenant lain menghasilkan 404. Bila `slug` diisi dan bukan slug halaman token, 404.
+        (2) Selain itu, token draft-preview bertanda tangan lama hanya berlaku bersama `slug`;
+        tanpa `slug` token yang tidak dikenal menghasilkan 404 (tidak jatuh ke halaman host).
+        Respons selalu `X-Robots-Tag: noindex, nofollow` dan `Cache-Control: no-store`.
+        Tidak ada rate limit khusus (sama dengan /resolve).
       operationId: previewPublicLandingPage
       tags:
         - Public Landing
@@ -3607,11 +3889,19 @@ paths:
             type: string
         - name: slug
           in: query
+          description: Wajib untuk token draft-preview lama; opsional untuk token aktivasi.
           schema:
             type: string
       responses:
         "200":
           description: Public landing preview resolved successfully
+          headers:
+            X-Robots-Tag:
+              schema:
+                type: string
+                example: noindex, nofollow
+        "404":
+          description: PUBLIC_PAGE_NOT_FOUND (token tidak dikenal, kedaluwarsa, sudah lunas/void, atau tenant lain)
   /api/v1/public/landing/access/{publicPageId}:
     post:
       summary: Request public landing page access
@@ -3777,6 +4067,184 @@ paths:
                                         tax_percent: {type: string}
                                         price_with_tax: {type: string}
                                         checkout_enabled: {type: boolean}
+  /api/v1/public/tenant-catalog:
+    get:
+      summary: List public products of the tenant that owns the request host
+      description: >-
+        Same card structure as `/public/catalog/listings`, but for the tenant organization resolved
+        from the request host (same host resolution as `/public/landing/*`; an organization id is never
+        accepted from the client). Unknown host returns 404; a host that resolves to the platform
+        organization also returns 404 (use `/public/catalog/listings`). Products that no longer fit the
+        tenant catalog rules (`needs_update`) are omitted. `checkout_enabled` is true only when the product
+        is checkout-capable (recurring, prepaid, priced; features are NOT required for tenant products,
+        unlike platform listings) AND the tenant has the
+        `receivable.enabled` and `receivable.online_payment` entitlements. No authentication;
+        `Cache-Control: public, max-age=60` with `Vary: Host, X-Forwarded-Host` (response depends on the host).
+      operationId: listPublicTenantCatalog
+      tags:
+        - Public Product Catalog
+      responses:
+        "200":
+          description: Public listings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      categories:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id: {type: string, format: uuid}
+                            name: {type: string}
+                            position: {type: integer}
+                            listings:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  code: {type: string}
+                                  name: {type: string}
+                                  description: {type: string}
+                                  order: {type: integer}
+                                  benefits:
+                                    type: array
+                                    items:
+                                      type: object
+                                      properties:
+                                        label: {type: string}
+                                  variants:
+                                    type: array
+                                    items:
+                                      type: object
+                                      properties:
+                                        product_id: {type: string, format: uuid}
+                                        sku: {type: string}
+                                        charge_type: {type: string}
+                                        billing_frequency: {type: string}
+                                        payment_timing: {type: string}
+                                        currency: {type: string}
+                                        base_price: {type: string}
+                                        tax_percent: {type: string}
+                                        price_with_tax: {type: string}
+                                        checkout_enabled: {type: boolean}
+        "404":
+          description: Unknown host, or host belongs to the platform organization
+  /api/v1/public/tenant-checkout:
+    post:
+      summary: Self-serve checkout of a tenant product with Google sign-up
+      description: >-
+        Public, unauthenticated checkout on the tenant's own domain. The tenant is the organization
+        resolved from the request host (same host resolution as `/public/tenant-catalog`); any
+        `organization_id` in the body or query is ignored. Order: the tenant must have
+        `receivable.enabled` and `receivable.online_payment`; the product must belong to the tenant, be
+        public, active and checkout-capable (recurring, prepaid, priced; a tenant product without features is
+        valid) and must not need
+        updating against the current catalog rules; then the Google ID token is verified (unverified email
+        is rejected) and the user is found or created with the same rules as `/auth/google`. The buyer gets
+        one workspace per tenant (reused for later purchases from the same tenant; never a personal or
+        other-tenant workspace). The CRM chain company → lead → deal → quotation → sales order → invoice
+        runs in the tenant's CRM and the company is linked to the buyer's workspace. Idempotent: repeating
+        the call returns the same invoice link without duplicating records; a concurrent identical call
+        gets 409 `SELF_SERVE_IN_PROGRESS` and may retry. No session or token is issued: the buyer pays via
+        `invoice_url`, then signs in with Google through the normal login to reach the workspace.
+        Rate limited per client IP (10 per 10 minutes) and per tenant (100 per hour).
+      operationId: tenantCheckout
+      tags:
+        - Public Product Catalog
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [google_credential, product_id]
+              properties:
+                google_credential:
+                  type: string
+                  description: Google Identity Services ID token (JWT)
+                product_id:
+                  type: string
+                  format: uuid
+      responses:
+        "201":
+          description: Invoice link ready
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                example: no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      invoice_url:
+                        type: string
+                        format: uri
+        "401":
+          description: AUTH_GOOGLE_TOKEN_INVALID, AUTH_GOOGLE_AUDIENCE_INVALID, or AUTH_GOOGLE_EMAIL_UNVERIFIED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: AUTH_GOOGLE_DISABLED, AUTH_REGISTRATION_DISABLED, or the Google user is not active
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Unknown host, host belongs to the platform organization (TENANT_CHECKOUT_NOT_FOUND), or product not found in this tenant (TENANT_PRODUCT_NOT_FOUND)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: SELF_SERVE_IN_PROGRESS (another checkout for this buyer is running), SELF_SERVE_ALREADY_SUBSCRIBED (the buyer already has an active contract for this same product), AUTH_GOOGLE_EMAIL_CONFLICT, or WORKSPACE_ALREADY_LINKED (the buyer workspace is already linked to a company of another CRM organization; checked before the CRM chain runs)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: VALIDATION_ERROR (missing field), TENANT_CHECKOUT_DISABLED (tenant lacks receivable.enabled / receivable.online_payment), or TENANT_PRODUCT_UNAVAILABLE (not public/active/checkout-capable, or needs updating)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: RATE_LIMITED
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: SELF_SERVE_STEP_FAILED; `data.step` is one of company, lead, deal, quotation, sales_order, invoice. Safe to retry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: SELF_SERVE_NOT_CONFIGURED (tenant has no active owner or no usable pipeline)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/platform/product/features:
     get:
       summary: List billing features
@@ -3967,6 +4435,69 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/app/self-serve/bills:
+    get:
+      summary: Tagihan yang diterima workspace dari penjualnya
+      description: |
+        Invoice (sales order dan kontrak, tanpa draft, maks. 12 terbaru) dari company yang tertaut ke
+        workspace pemanggil, dibaca di org PENJUAL: org platform atau tenant yang menjual paket ke
+        workspace ini. Pembeli diambil dari konteks tenant dan penjual ditemukan server-side lewat tautan
+        company (tidak pernah dari parameter), sehingga hanya tagihan workspace itu yang terbaca.
+        Workspace tanpa tautan mendapat `seller: null` dan `invoices: []`. Read-only, tanpa status
+        langganan atau hitung mundur suspend (lihat `/app/self-serve/subscription` untuk itu).
+        Hanya organisasi customer aktif dengan permission organization.billing.read.
+        `Cache-Control: private, no-store`.
+      operationId: selfServeBills
+      tags:
+        - Billing
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Tagihan workspace
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      seller:
+                        type: object
+                        nullable: true
+                        properties:
+                          name:
+                            type: string
+                      invoices:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            number:
+                              type: string
+                            status:
+                              type: string
+                            total:
+                              type: string
+                            period_label:
+                              type: string
+                            due_date:
+                              type: string
+                              description: YYYY-MM-DD, kosong bila tidak ada
+                            url:
+                              type: string
+                              description: Link publik untuk melihat/membayar invoice; kosong untuk invoice void
+        "403":
+          description: Tanpa permission organization.billing.read
+        "502":
+          description: Tagihan belum bisa dimuat
+        "503":
+          description: Pembelian mandiri belum dikonfigurasi
   /api/v1/app/self-serve/subscription:
     get:
       summary: Ringkasan langganan workspace (status, paket, fitur, invoice)
@@ -6632,6 +7163,42 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/catalog/listings:
+    get:
+      summary: List public product cards of the signed-in organization
+      operationId: listOwnCatalogListings
+      tags:
+      - Catalog
+      security:
+      - BearerAuth: []
+      description: >-
+        Permission: `catalog_product.read`. Same card structure as `/public/tenant-catalog`, but for the
+        organization of the signed-in session (never an id from the client), so the landing editor, which
+        runs on the platform host, can preview and configure the "Pricing Katalog" block. A tenant
+        organization gets its own public products (`needs_update` products omitted); the platform
+        organization gets the same cards as `/public/catalog/listings`. `Cache-Control: private, no-store`.
+      responses:
+        "200":
+          description: Listings of the active organization
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      categories:
+                        type: array
+                        description: Same item schema as `/public/tenant-catalog`.
+                        items:
+                          type: object
+        "403":
+          description: Missing `catalog_product.read`
   /api/v1/app/catalog/products:
     get:
       summary: List tenant catalog products
@@ -6919,13 +7486,13 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
   /api/v1/app/catalog/features:
     get:
-      summary: List active product features (platform catalog)
+      summary: List active product features
       operationId: listCatalogFeatures
       tags:
       - Catalog
       security:
       - BearerAuth: []
-      description: 'Active entries of the feature registry, for the product form. Permission: `catalog_product.update`. Only platform organizations; others get 403 PLATFORM_ONLY.'
+      description: 'Active entries of the feature registry, for the product form. Permission: `catalog_product.update`. Platform organizations get every active feature. Other organizations additionally need `catalog_product.manage_entitlements` (403 FORBIDDEN otherwise) and get only `tenant_offerable` features, each integer feature with its `tenant_max`.'
       responses:
         '200':
           description: Success
@@ -6949,7 +7516,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
-          description: Forbidden (permission or PLATFORM_ONLY)
+          description: Forbidden (missing permission)
           content:
             application/json:
               schema:
@@ -8697,7 +9264,7 @@ paths:
       operationId: getPublicInvoice
       tags:
       - Receivable
-      description: "Public endpoint (no bearer token, no tenant host): the tenant is derived from the link row. Rate limited to 30 requests/minute per IP. Unknown, expired or non-invoice tokens all return the same `404 LINK_INVALID`. `state`: `open` (issued/overdue), `paid`, `void` (a voided invoice stays viewable as cancelled even though its link is revoked). `can_pay` is true only for `open` invoices of organizations with `receivable.online_payment` (platform organization); see `POST .../checkout`."
+      description: "Public endpoint (no bearer token, no tenant host): the tenant is derived from the link row. Rate limited to 30 requests/minute per IP. Unknown, expired or non-invoice tokens all return the same `404 LINK_INVALID`. `state`: `open` (issued/overdue), `paid`, `void` (a voided invoice stays viewable as cancelled even though its link is revoked). `can_pay` is true only for `open` invoices of organizations with `receivable.online_payment`, or for landing page activation invoices of organizations with `landing.page_activation` (resellers; no `receivable.online_payment` needed); see `POST .../checkout`."
       parameters:
       - name: token
         in: path
@@ -8753,7 +9320,7 @@ paths:
       operationId: createPublicInvoiceCheckout
       tags:
       - Receivable
-      description: "Public endpoint (rate limited like the invoice view). Only organizations with `receivable.online_payment` (the platform organization) may pay online; others get `403 ONLINE_PAYMENT_UNAVAILABLE` and no DOKU session is created. The amount is the remaining balance rounded up to whole rupiah. Clicking again while the session is pending and unexpired returns the same `payment_url`. DOKU notifications settle the invoice via the shared `POST /api/v1/webhooks/doku` webhook (invoice numbers prefixed `RCV-`)."
+      description: "Public endpoint (rate limited like the invoice view). Only organizations with `receivable.online_payment` may pay online, plus landing page activation invoices (an invoice linked from `landing_page_activations`) of organizations with `landing.page_activation`; others get `403 ONLINE_PAYMENT_UNAVAILABLE` and no DOKU session is created. The amount is the remaining balance rounded up to whole rupiah. Clicking again while the session is pending and unexpired returns the same `payment_url`. DOKU notifications settle the invoice via the shared `POST /api/v1/webhooks/doku` webhook (invoice numbers prefixed `RCV-`)."
       parameters:
       - name: token
         in: path
@@ -9259,6 +9826,171 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/platform/settlements:
+    get:
+      summary: Settlement balances per organization
+      operationId: listPlatformSettlements
+      tags: [Settlement]
+      security:
+      - BearerAuth: []
+      description: 'Organizations with at least one ledger entry, ordered by name. balance = paid_in - settled + adjusted. Platform organization context and permission `settlement.manage` required.'
+      parameters:
+      - {name: search, in: query, schema: {type: string}, description: Organization name}
+      - {name: page, in: query, schema: {type: integer}}
+      - {name: per_page, in: query, schema: {type: integer, maximum: 100}}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  data: {type: array, items: {$ref: '#/components/schemas/SettlementOrgBalance'}}
+                  meta: {type: object}
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Not platform org or missing permission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/platform/settlements/{orgId}/entries:
+    get:
+      summary: Ledger entries of an organization
+      operationId: listPlatformSettlementEntries
+      tags: [Settlement]
+      security:
+      - BearerAuth: []
+      description: 'Most recent first. Platform organization context and permission `settlement.manage` required.'
+      parameters:
+      - {name: orgId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: page, in: query, schema: {type: integer}}
+      - {name: per_page, in: query, schema: {type: integer, maximum: 100}}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  data: {type: array, items: {$ref: '#/components/schemas/SettlementEntry'}}
+                  meta: {type: object}
+        '403':
+          description: Not platform org or missing permission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Record a manual settlement or adjustment
+      operationId: createPlatformSettlementEntry
+      tags: [Settlement]
+      security:
+      - BearerAuth: []
+      description: 'kind=settlement: amount > 0 and must not exceed the current balance (422 SETTLEMENT_EXCEEDS_BALANCE). kind=adjustment: non-zero amount (negative allowed), note required, must not drive the balance below zero (422 ADJUSTMENT_BELOW_ZERO). The balance check and insert run under a per-organization advisory lock in one transaction. The beneficiary must be an existing customer organization (404 / 422 BENEFICIARY_NOT_CUSTOMER). Amounts are decimal strings with at most 2 digits. Platform organization context and permission `settlement.manage` required.'
+      parameters:
+      - {name: orgId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettlementEntryRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  data: {$ref: '#/components/schemas/SettlementEntry'}
+        '403':
+          description: Not platform org or missing permission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Organization not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation / business rule error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/settlement/balance:
+    get:
+      summary: Own organization settlement balance
+      operationId: getOwnSettlementBalance
+      tags: [Settlement]
+      security:
+      - BearerAuth: []
+      description: 'Read-only. organization_id comes only from the tenant context (never a parameter). Customer organizations only; permission `settlement.read` (organization owner).'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  data: {$ref: '#/components/schemas/SettlementBalance'}
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/settlement/entries:
+    get:
+      summary: Own organization ledger entries
+      operationId: listOwnSettlementEntries
+      tags: [Settlement]
+      security:
+      - BearerAuth: []
+      description: 'Read-only, most recent first. organization_id comes only from the tenant context. Customer organizations only; permission `settlement.read`.'
+      parameters:
+      - {name: page, in: query, schema: {type: integer}}
+      - {name: per_page, in: query, schema: {type: integer, maximum: 100}}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  data: {type: array, items: {$ref: '#/components/schemas/SettlementEntry'}}
+                  meta: {type: object}
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/v1/app/receivable/contracts:
     get:
       summary: List contracts
@@ -9430,6 +10162,476 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/mikrotik/routers:
+    get:
+      summary: List Mikrotik routers
+      operationId: listMikrotikRouters
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Daftar router milik organization aktif, berpaginasi (default page=1, per_page=20). Respons tidak pernah memuat password, hanya `has_password`. Permission: `mikrotik_router.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: page
+        in: query
+        schema: {type: integer}
+      - name: per_page
+        in: query
+        description: "Default 20, maksimal 200 (nilai lebih besar dipotong ke 200; `meta.per_page` memuat ukuran halaman efektif)."
+        schema: {type: integer, maximum: 200}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikRouterListEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+    post:
+      summary: Register a Mikrotik router
+      operationId: createMikrotikRouter
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Mendaftarkan router. Untuk RouterOS v6 isi `port` dengan port API (8728, atau 8729 dengan TLS) karena deteksi mencoba kedua transport pada port yang sama. Host divalidasi (guard SSRF: host publik atau CIDR privat yang diizinkan `MIKROTIK_ALLOWED_PRIVATE_CIDRS`); host publik wajib `use_tls=true`. Password disimpan terenkripsi dan tidak pernah dikembalikan. Permission: `mikrotik_router.create`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MikrotikCreateRouterRequest'}
+      responses:
+        '429':
+          description: "RATE_LIMITED (maksimal 20 panggilan per menit per organization untuk route yang menghubungi router: POST /routers, PATCH, /check, /setup/*)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '201':
+          description: "Created"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikRouterEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR | MIKROTIK_HOST_NOT_ALLOWED | MIKROTIK_TLS_REQUIRED | MIKROTIK_TLS_UNTRUSTED (yang terakhir memuat data fingerprint dan pin_mismatch, lihat MikrotikTLSUntrustedError)"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - {$ref: '#/components/schemas/MikrotikErrorResponse'}
+                - {$ref: '#/components/schemas/MikrotikTLSUntrustedError'}
+        '409':
+          description: "MIKROTIK_ROUTER_NAME_TAKEN"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '502':
+          description: "MIKROTIK_AUTH_FAILED | MIKROTIK_UNREACHABLE"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/routers/{id}:
+    get:
+      summary: Get a Mikrotik router
+      operationId: getMikrotikRouter
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Detail router tanpa password. Permission: `mikrotik_router.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikRouterEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "MIKROTIK_ROUTER_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+    patch:
+      summary: Update a Mikrotik router
+      operationId: updateMikrotikRouter
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Update parsial: field yang tidak dikirim tetap. `password` hanya diganti bila dikirim. Bila host, port, use_tls, tls_fingerprint, username, atau password berubah, router di-probe ulang dan `api_type`/`routeros_version` dideteksi ulang sebelum disimpan (gagal: 502 MIKROTIK_AUTH_FAILED atau MIKROTIK_UNREACHABLE, atau 422 untuk host/TLS). Bila nilai host, port, api_type, use_tls, atau tls_fingerprint benar-benar berubah, `isolir_ready` direset ke false (siapkan ulang lewat setup). Permission: `mikrotik_router.update`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MikrotikUpdateRouterRequest'}
+      responses:
+        '429':
+          description: "RATE_LIMITED (maksimal 20 panggilan per menit per organization untuk route yang menghubungi router: POST /routers, PATCH, /check, /setup/*)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikRouterEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "MIKROTIK_ROUTER_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR | MIKROTIK_HOST_NOT_ALLOWED | MIKROTIK_TLS_REQUIRED | MIKROTIK_TLS_UNTRUSTED (yang terakhir memuat data fingerprint dan pin_mismatch, lihat MikrotikTLSUntrustedError)"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - {$ref: '#/components/schemas/MikrotikErrorResponse'}
+                - {$ref: '#/components/schemas/MikrotikTLSUntrustedError'}
+        '409':
+          description: "MIKROTIK_ROUTER_NAME_TAKEN"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '502':
+          description: "MIKROTIK_AUTH_FAILED | MIKROTIK_UNREACHABLE (probe ulang setelah perubahan koneksi)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+    delete:
+      summary: Delete a Mikrotik router
+      operationId: deleteMikrotikRouter
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Menghapus pendaftaran router di aplikasi. Tidak membersihkan objek `zyad-*` di router; jalankan cleanup lebih dulu bila perlu. Permission: `mikrotik_router.delete`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '204':
+          description: "Deleted"
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "MIKROTIK_ROUTER_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/routers/{id}/check:
+    post:
+      summary: Check router connectivity
+      operationId: checkMikrotikRouter
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Menguji koneksi dan mendeteksi versi RouterOS. Hasil (`last_check_status`, `routeros_version`, `api_type`) disimpan juga saat uji gagal; kegagalan dilaporkan sebagai error. Nilai `last_check_status`: ok, unreachable, auth_failed, tls_untrusted, host_not_allowed. Permission: `mikrotik_router.update`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '429':
+          description: "RATE_LIMITED (maksimal 20 panggilan per menit per organization untuk route yang menghubungi router: POST /routers, PATCH, /check, /setup/*)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikRouterEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "MIKROTIK_ROUTER_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '422':
+          description: "MIKROTIK_HOST_NOT_ALLOWED | MIKROTIK_TLS_REQUIRED | MIKROTIK_TLS_UNTRUSTED"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - {$ref: '#/components/schemas/MikrotikErrorResponse'}
+                - {$ref: '#/components/schemas/MikrotikTLSUntrustedError'}
+        '502':
+          description: "MIKROTIK_AUTH_FAILED | MIKROTIK_UNREACHABLE"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/routers/{id}/setup/preview:
+    post:
+      summary: Preview isolir setup
+      operationId: previewMikrotikSetup
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Membaca router (read-only) dan mengembalikan rencana tindakan beserta `hash`. Tidak menulis apa pun ke router. Permission: `mikrotik_router.setup`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MikrotikSetupRequest'}
+      responses:
+        '429':
+          description: "RATE_LIMITED (maksimal 20 panggilan per menit per organization untuk route yang menghubungi router: POST /routers, PATCH, /check, /setup/*)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikSetupPlanEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "MIKROTIK_ROUTER_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR | MIKROTIK_HOST_NOT_ALLOWED | MIKROTIK_TLS_REQUIRED | MIKROTIK_TLS_UNTRUSTED"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - {$ref: '#/components/schemas/MikrotikErrorResponse'}
+                - {$ref: '#/components/schemas/MikrotikTLSUntrustedError'}
+        '502':
+          description: "MIKROTIK_AUTH_FAILED | MIKROTIK_UNREACHABLE | MIKROTIK_SETUP_FAILED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '409':
+          description: "MIKROTIK_SETUP_CONFLICT (objek bernama sama sudah ada tanpa comment `zyad-managed`; penyiapan menolak dan tidak mengadopsi)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/routers/{id}/setup/apply:
+    post:
+      summary: Apply isolir setup
+      operationId: applyMikrotikSetup
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Menerapkan rencana yang sudah di-preview. `plan_hash` wajib dan harus sama dengan hasil preview untuk input dan state router saat ini; bila beda, tidak ada yang ditulis. `isolir_ready` baru true setelah seluruh langkah berhasil (fail-closed). Redirect hanya direncanakan bila `redirect_url` diisi (default mati) dan masih ditandai belum terbukti di runbook. Permission: `mikrotik_router.setup`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MikrotikApplySetupRequest'}
+      responses:
+        '429':
+          description: "RATE_LIMITED (maksimal 20 panggilan per menit per organization untuk route yang menghubungi router: POST /routers, PATCH, /check, /setup/*)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikRouterEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "MIKROTIK_ROUTER_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR | MIKROTIK_HOST_NOT_ALLOWED | MIKROTIK_TLS_REQUIRED | MIKROTIK_TLS_UNTRUSTED | MIKROTIK_SETUP_REST_UNVERIFIED (router ber-`api_type=rest` dan `MIKROTIK_SETUP_ALLOW_REST` mati; tidak ada yang ditulis, pakai binary API port 8728/8729)"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - {$ref: '#/components/schemas/MikrotikErrorResponse'}
+                - {$ref: '#/components/schemas/MikrotikTLSUntrustedError'}
+        '502':
+          description: "MIKROTIK_AUTH_FAILED | MIKROTIK_UNREACHABLE | MIKROTIK_SETUP_FAILED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR | MIKROTIK_SETUP_STATE_NOT_SAVED (objek router SUDAH berubah tetapi status isolir gagal disimpan; ulangi operasi yang sama, idempoten) | MIKROTIK_SETUP_MARK_FAILED (status isolir tidak bisa dikosongkan sebelum perubahan sehingga router TIDAK disentuh; aman diulang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '409':
+          description: "MIKROTIK_SETUP_PLAN_CHANGED (state router atau input berubah sejak preview) | MIKROTIK_SETUP_CONFLICT | MIKROTIK_SETUP_IN_PROGRESS (apply atau cleanup lain sedang berjalan untuk router ini; tidak ada yang dibaca atau ditulis, coba lagi setelah selesai)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/routers/{id}/setup/cleanup:
+    post:
+      summary: Remove isolir setup objects
+      operationId: cleanupMikrotikSetup
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Menghapus hanya objek ber-comment `zyad-managed` dan mengosongkan `isolir_ready`. Aman diulang bila sebagian gagal. Permission: `mikrotik_router.setup`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '429':
+          description: "RATE_LIMITED (maksimal 20 panggilan per menit per organization untuk route yang menghubungi router: POST /routers, PATCH, /check, /setup/*)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikRouterEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "MIKROTIK_ROUTER_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '422':
+          description: "MIKROTIK_HOST_NOT_ALLOWED | MIKROTIK_TLS_REQUIRED | MIKROTIK_TLS_UNTRUSTED | MIKROTIK_SETUP_REST_UNVERIFIED (router ber-`api_type=rest` dan `MIKROTIK_SETUP_ALLOW_REST` mati; tidak ada yang ditulis, pakai binary API port 8728/8729)"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - {$ref: '#/components/schemas/MikrotikErrorResponse'}
+                - {$ref: '#/components/schemas/MikrotikTLSUntrustedError'}
+        '502':
+          description: "MIKROTIK_AUTH_FAILED | MIKROTIK_UNREACHABLE | MIKROTIK_SETUP_FAILED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR | MIKROTIK_SETUP_STATE_NOT_SAVED (objek router SUDAH berubah tetapi status isolir gagal disimpan; ulangi operasi yang sama, idempoten) | MIKROTIK_SETUP_MARK_FAILED (status isolir tidak bisa dikosongkan sebelum perubahan sehingga router TIDAK disentuh; aman diulang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '409':
+          description: "MIKROTIK_SETUP_CONFLICT | MIKROTIK_SETUP_IN_PROGRESS (apply atau cleanup lain sedang berjalan untuk router ini; tidak ada yang dibaca atau ditulis, coba lagi setelah selesai)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
 components:
   parameters:
     OrganizationID:
@@ -9501,6 +10703,100 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    LandingPageActivationFields:
+      type: object
+      description: >-
+        Field aktivasi halaman yang ditambahkan ke respons halaman admin (field halaman lain tetap).
+        `activation_state`: `publish` bila status published dan `active_until` di masa depan; selain itu
+        `preview` bila ada aktivasi `open` yang `invoice_due_at`-nya belum lewat; selain itu `expired`
+        bila `active_until` terisi dan sudah lewat; selain itu `none` (termasuk halaman biasa tanpa aktivasi).
+        `open_activation` hanya diisi di list/detail. Respons create/update/duplicate tidak memuat
+        aktivasi sehingga tidak pernah `preview`.
+      properties:
+        id:
+          type: string
+          format: uuid
+        activation_state:
+          type: string
+          enum: [none, preview, publish, expired]
+        active_until:
+          type: string
+          format: date-time
+          nullable: true
+          description: Akhir masa tayang berbayar (UTC). Null untuk halaman yang tidak pernah diaktivasi.
+        open_activation:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/LandingPageOpenActivation"
+    LandingActivationInvoiceRequest:
+      type: object
+      required: [buyer_name, buyer_contact, price, duration_value, duration_unit]
+      description: Set at most one of invoice_due_hours / invoice_due_days; neither means 1 hour.
+      properties:
+        buyer_name: {type: string, minLength: 1, maxLength: 200}
+        buyer_contact: {type: string, minLength: 1, maxLength: 50, description: Phone/WhatsApp, also the receivable account phone.}
+        buyer_email: {type: string, format: email, maxLength: 255, description: Optional; empty is stored as null.}
+        price:
+          type: string
+          pattern: '^[0-9]{1,16}(\.[0-9]{1,2})?$'
+          description: Decimal string, must be > 0 (a JSON number is rejected).
+          example: "150000"
+        duration_value:
+          type: integer
+          minimum: 1
+          description: "Maximum two years: day <= 730, week <= 104, month <= 24."
+        duration_unit: {type: string, enum: [day, week, month]}
+        invoice_due_hours: {type: integer, minimum: 1, maximum: 720}
+        invoice_due_days: {type: integer, minimum: 1, maximum: 30}
+    LandingActivation:
+      type: object
+      description: The preview token hash is never exposed.
+      properties:
+        id: {type: string, format: uuid}
+        page_id: {type: string, format: uuid}
+        invoice_id: {type: string, format: uuid, nullable: true}
+        buyer_name: {type: string}
+        buyer_contact: {type: string}
+        buyer_email: {type: string, nullable: true}
+        price: {type: string, example: "150000.00"}
+        duration_value: {type: integer}
+        duration_unit: {type: string, enum: [day, week, month]}
+        invoice_due_at: {type: string, format: date-time}
+        status: {type: string, enum: [open, paid, void]}
+        paid_at: {type: string, format: date-time, nullable: true}
+        created_at: {type: string, format: date-time}
+    LandingActivationInvoiceResult:
+      type: object
+      required: [activation, preview_url, payment_url]
+      properties:
+        activation: {$ref: "#/components/schemas/LandingActivation"}
+        preview_url:
+          type: string
+          description: Buyer-facing preview page (frontend route `/preview/<token>` on the tenant host, which loads `GET /api/v1/public/landing/preview/{token}`). Contains the raw preview token; shown only once.
+          example: https://reseller.zyad.cloud/preview/AbC...
+        payment_url:
+          type: string
+          description: Public invoice link (`<FRONTEND_URL>/i/<token>`).
+    LandingPageOpenActivation:
+      type: object
+      description: Token preview mentah tidak pernah dikembalikan di sini (hanya sekali saat dibuat).
+      properties:
+        id:
+          type: string
+          format: uuid
+        buyer_name:
+          type: string
+        price:
+          type: string
+          description: Desimal sebagai string, mis. "150000.00".
+          example: "150000.00"
+        invoice_due_at:
+          type: string
+          format: date-time
+        preview_url_template:
+          type: string
+          description: Frontend preview page path; the page fetches `GET /api/v1/public/landing/preview/{token}`.
+          example: /preview/{token}
     CrmSalesOrder:
       type: object
       properties:
@@ -9560,6 +10856,40 @@ components:
               kind: {type: string, enum: [prepaid_one_time, prepaid_recurring, postpaid_recurring, postpaid_one_time]}
               met: {type: boolean}
               label: {type: string}
+    SettlementBalance:
+      type: object
+      properties:
+        paid_in: {type: string, example: '150000.75'}
+        settled: {type: string, example: '50000.00'}
+        adjusted: {type: string, example: '0.00'}
+        balance: {type: string, example: '100000.75', description: paid_in - settled + adjusted}
+    SettlementOrgBalance:
+      allOf:
+      - $ref: '#/components/schemas/SettlementBalance'
+      - type: object
+        properties:
+          organization_id: {type: string, format: uuid}
+          organization_name: {type: string}
+    SettlementEntry:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        organization_id: {type: string, format: uuid}
+        kind: {type: string, enum: [payment, settlement, adjustment]}
+        amount: {type: string, description: Decimal string; negative only for adjustment}
+        invoice_id: {type: string, format: uuid}
+        provider_reference: {type: string}
+        note: {type: string}
+        occurred_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+    SettlementEntryRequest:
+      type: object
+      required: [kind, amount]
+      properties:
+        kind: {type: string, enum: [settlement, adjustment]}
+        amount: {type: string, example: '-0.25'}
+        note: {type: string, maxLength: 500, description: Required for adjustment}
+        occurred_at: {type: string, format: date-time, description: Defaults to now (UTC)}
     ReceivableContract:
       type: object
       properties:
@@ -10591,6 +11921,52 @@ components:
             $ref: "#/components/schemas/EffectiveOrganizationFeature"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
+    OrganizationEntitlementSummaryEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/EntitlementSummaryItem"
+    EntitlementSummaryItem:
+      type: object
+      required: [feature_key, module, name, unit, state, limit, used, remaining, reset_strategy, at_limit]
+      properties:
+        feature_key:
+          type: string
+        module:
+          type: string
+        name:
+          type: string
+        unit:
+          type: string
+        state:
+          type: string
+          enum: [unlimited, quota, hidden]
+        limit:
+          type: integer
+          format: int64
+          nullable: true
+          description: Quota limit; only set when state is quota.
+        used:
+          type: integer
+          format: int64
+          nullable: true
+          description: Current usage; null when state is not quota, the feature has no usage meter, or the meter failed (the item is degraded instead of failing the summary).
+        remaining:
+          type: integer
+          format: int64
+          nullable: true
+          description: Limit minus used (not below zero); null when used is unknown.
+        reset_strategy:
+          $ref: "#/components/schemas/ProductFeatureResetStrategy"
+        at_limit:
+          type: boolean
     OrganizationUsageEnvelope:
       type: object
       required: [success, message, data]
@@ -10751,6 +12127,13 @@ components:
           $ref: "#/components/schemas/ProductFeatureResetStrategy"
         is_active:
           type: boolean
+        tenant_offerable:
+          type: boolean
+          description: Whether tenants may offer this feature in their own products.
+        tenant_max:
+          type: integer
+          nullable: true
+          description: Maximum value a tenant may sell. Required for integer features when tenant_offerable is true; always null for other types.
         created_at:
           type: string
           format: date-time
@@ -11154,6 +12537,14 @@ components:
           $ref: "#/components/schemas/ProductFeatureResetStrategy"
         is_active:
           type: boolean
+        tenant_offerable:
+          type: boolean
+          default: false
+        tenant_max:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: Required when value_type is integer and tenant_offerable is true; ignored (stored as null) for other types.
     UpdateProductFeatureRequest:
       type: object
       minProperties: 1
@@ -11172,6 +12563,13 @@ components:
           $ref: "#/components/schemas/ProductFeatureResetStrategy"
         is_active:
           type: boolean
+        tenant_offerable:
+          type: boolean
+        tenant_max:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: Merged with the stored value; validated against the resulting value_type and tenant_offerable.
     ProductPlanEntitlementValueRequest:
       type: object
       required:
@@ -12409,6 +13807,9 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CatalogProductFeature'
+        needs_update:
+          type: boolean
+          description: Derived on read, never stored. True for a non-platform product when a feature is inactive, no longer `tenant_offerable`, or above `tenant_max`; always false for the platform catalog. Existing contracts are not affected. Such products are excluded from public listing/checkout.
         created_at:
           type: string
           format: date-time
@@ -12443,6 +13844,14 @@ components:
           enum: [boolean, integer, decimal, string]
         unit:
           type: string
+        reset_strategy:
+          type: string
+          enum: [never, monthly, yearly, custom]
+          description: Read-only registry metadata; `never` means a total (non-resetting) limit.
+        tenant_max:
+          type: integer
+          nullable: true
+          description: Upper bound a tenant may set for an integer feature. Only present in the list returned to non-platform organizations.
     CatalogProductFeatureInput:
       type: object
       required: [feature_key, value]
@@ -12502,16 +13911,17 @@ components:
           default: true
         is_public:
           type: boolean
-          description: Platform catalog only; other organizations get 422 VALIDATION_ERROR.
+          description: Any organization may publish its own products (platform -> `/public/catalog`, tenant -> `/public/tenant-catalog` on the tenant host). Non-platform organizations must use an active category of their own catalog (422 CATEGORY_NOT_FOUND otherwise). No extra permission is needed; `features` keep their own permission rule.
         listing_code:
           type: string
           pattern: '^[a-z0-9][a-z0-9-]{0,49}$'
-          description: Required when `is_public`; unique per (listing_code, billing_frequency) among public products (409 PRODUCT_LISTING_EXISTS). Public products also require a category.
+          description: Required when `is_public`; unique per (organization, listing_code, billing_frequency) among public products (409 PRODUCT_LISTING_EXISTS). Public products also require a category.
         listing_order:
           type: integer
         features:
           type: array
           maxItems: 30
+          description: 'Platform catalog is unrestricted by tenant caps. Non-platform organizations may send `features` only with permission `catalog_product.manage_entitlements` (otherwise 403 FORBIDDEN), limited to features marked `tenant_offerable` in the registry: boolean `true`/`false`, integer `1..tenant_max`; decimal/string features are rejected. Violations are 422 VALIDATION_ERROR (feature not offerable, value above `tenant_max`, invalid value).'
           items:
             $ref: '#/components/schemas/CatalogProductFeatureInput'
     CatalogProductUpdateRequest:
@@ -12549,7 +13959,7 @@ components:
           type: boolean
         is_public:
           type: boolean
-          description: Listing block (`is_public`, `listing_code`, `listing_order`) is sent whole or not at all; a partial block is 422. Platform catalog only.
+          description: Listing block (`is_public`, `listing_code`, `listing_order`) is sent whole or not at all; a partial block is 422. Allowed for every organization; when the effective product is public, a non-platform organization's effective category must be an active category of its own catalog (422 CATEGORY_NOT_FOUND).
         listing_code:
           type: string
         listing_order:
@@ -12558,7 +13968,7 @@ components:
           type: array
           maxItems: 30
           nullable: true
-          description: Omit/null leaves features unchanged; `[]` removes all. Platform catalog only.
+          description: 'Omit/null leaves features unchanged (no extra permission needed); `[]` removes all. Non-platform organizations may send `features` only with permission `catalog_product.manage_entitlements` (otherwise 403 FORBIDDEN), limited to features marked `tenant_offerable` in the registry: boolean `true`/`false`, integer `1..tenant_max`; decimal/string features are rejected. Violations are 422 VALIDATION_ERROR (feature not offerable, value above `tenant_max`, invalid value).'
           items:
             $ref: '#/components/schemas/CatalogProductFeatureInput'
     CatalogCategory:
@@ -14217,3 +15627,123 @@ components:
         success: {type: boolean}
         message: {type: string}
         data: {$ref: '#/components/schemas/ReceivablePublicInvoice'}
+    MikrotikRouter:
+      type: object
+      description: "Password tidak pernah dikembalikan; hanya `has_password`."
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        host: {type: string}
+        port: {type: integer}
+        api_type: {type: string, enum: [rest, binary], description: "Hasil deteksi saat check/register."}
+        use_tls: {type: boolean}
+        tls_fingerprint: {type: string, description: "SHA-256 leaf certificate (hex) bila di-pin."}
+        username: {type: string}
+        has_password: {type: boolean}
+        isolir_ready: {type: boolean}
+        isolir_ready_at: {type: string, format: date-time, nullable: true}
+        isolir_profile_name: {type: string}
+        isolir_redirect_url: {type: string}
+        last_check_at: {type: string, format: date-time, nullable: true}
+        last_check_status: {type: string, enum: [ok, unreachable, auth_failed, tls_untrusted, host_not_allowed]}
+        routeros_version: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    MikrotikRouterEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/MikrotikRouter'}
+    MikrotikRouterListEnvelope:
+      type: object
+      required: [success, message, data, meta]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: '#/components/schemas/MikrotikRouter'}}
+        meta: {$ref: '#/components/schemas/PaginationMeta'}
+    MikrotikCreateRouterRequest:
+      type: object
+      required: [name, host, port, username, password]
+      properties:
+        name: {type: string, maxLength: 100, description: "Unik per organization."}
+        host: {type: string, maxLength: 255}
+        port: {type: integer, minimum: 1, maximum: 65535, description: "Port service router. Untuk RouterOS v6 (tanpa REST) isi port API: 8728, atau 8729 untuk API-SSL; deteksi transport mencoba REST dan binary pada port yang SAMA, jadi port HTTP (80/443) tidak akan menemukan API binary."}
+        username: {type: string, maxLength: 100}
+        password: {type: string, maxLength: 255}
+        use_tls: {type: boolean}
+        tls_fingerprint: {type: string, maxLength: 128}
+    MikrotikUpdateRouterRequest:
+      type: object
+      description: "Semua field opsional; yang tidak dikirim tidak berubah."
+      properties:
+        name: {type: string, maxLength: 100}
+        host: {type: string, maxLength: 255}
+        port: {type: integer, minimum: 1, maximum: 65535}
+        username: {type: string, maxLength: 100}
+        password: {type: string, maxLength: 255}
+        use_tls: {type: boolean}
+        tls_fingerprint: {type: string, maxLength: 128}
+    MikrotikSetupRequest:
+      type: object
+      required: [platform_host, pool_cidr]
+      description: "Placeholder penyiapan (lihat docs/runbook-mikrotik-isolir-setup.md). Validasi dilakukan service; pelanggaran memberi 422 VALIDATION_ERROR. `redirect_url` kosong (default) berarti objek redirect tidak direncanakan."
+      properties:
+        profile_name: {type: string, maxLength: 63, default: zyad-isolir, example: zyad-isolir, description: "Opsional. Harus diawali `zyad-`, pola `^zyad-[A-Za-z0-9][A-Za-z0-9._-]{0,57}$`."}
+        pool_cidr: {type: string, maxLength: 64, example: 10.255.254.0/24, description: "Wajib. Jaringan IPv4 privat (10/8, 172.16/12, 192.168/16), prefix /16 sampai /29, bit host nol."}
+        rate_limit: {type: string, maxLength: 32, example: 512k/512k, description: "Opsional. Pola `^[0-9]+[kKmMgG]?(/[0-9]+[kKmMgG]?)?$`."}
+        platform_host: {type: string, maxLength: 253, example: zyad.cloud, description: "Wajib. Literal IPv4 atau FQDN saja (tanpa IPv6, zona, skema, atau port)."}
+        tenant_isolir_host: {type: string, maxLength: 253, description: "Opsional. Aturan sama dengan platform_host."}
+        doku_hosts: {type: array, maxItems: 20, items: {type: string, maxLength: 253}, description: "Opsional. Tiap entri literal IPv4 atau FQDN; duplikat diabaikan."}
+        redirect_url: {type: string, maxLength: 255, description: "Opsional, mati secara default. http(s) tanpa kredensial, query, fragment, atau spasi."}
+    MikrotikApplySetupRequest:
+      allOf:
+      - $ref: '#/components/schemas/MikrotikSetupRequest'
+      - type: object
+        required: [plan_hash]
+        properties:
+          plan_hash: {type: string, minLength: 64, maxLength: 64, description: "`data.hash` dari preview."}
+    MikrotikSetupAction:
+      type: object
+      properties:
+        kind: {type: string}
+        path: {type: string}
+        match: {type: object, additionalProperties: {type: string}}
+        attrs: {type: object, additionalProperties: {type: string}}
+        optional: {type: boolean}
+        note: {type: string}
+    MikrotikSetupPlan:
+      type: object
+      properties:
+        hash: {type: string, description: "SHA-256 hex dari rencana."}
+        actions: {type: array, items: {$ref: '#/components/schemas/MikrotikSetupAction'}}
+    MikrotikSetupPlanEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/MikrotikSetupPlan'}
+    MikrotikTLSUntrustedError:
+      type: object
+      description: "Respons 422 MIKROTIK_TLS_UNTRUSTED. `code` ada di level atas envelope error aktual; `data` hanya ada bila sertifikat sempat terbaca, agar UI dapat menawarkan pin."
+      properties:
+        success: {type: boolean, example: false}
+        code: {type: string, example: MIKROTIK_TLS_UNTRUSTED}
+        message: {type: string}
+        data:
+          type: object
+          properties:
+            fingerprint: {type: string}
+            pin_mismatch: {type: boolean}
+    MikrotikErrorResponse:
+      type: object
+      description: "Envelope error aktual: `code` berada di level atas (bukan nested di `error`)."
+      required: [success, message]
+      properties:
+        success: {type: boolean, example: false}
+        code: {type: string}
+        message: {type: string}
+        data: {type: object, description: "Detail terstruktur opsional."}

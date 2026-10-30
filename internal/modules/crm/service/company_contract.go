@@ -19,6 +19,11 @@ type CompanyService interface {
 	// SetWorkspaceLink menautkan company ke workspace pelanggan (tenantOrgID nil = melepas) lalu menyinkronkan
 	// akses workspace lama dan baru. Hanya org platform yang boleh memanggilnya; izin diperiksa di handler.
 	SetWorkspaceLink(ctx context.Context, scope coretenant.Scope, companyID string, tenantOrgID *string, actorUserID string) (domain.Company, error)
+	// LinkWorkspaceBySystem menautkan company ke workspace pelanggan tanpa pemeriksaan permission (untuk alur
+	// sistem seperti checkout tenant). Idempoten bila sudah tertaut ke workspace yang sama; menolak workspace
+	// milik company lain, company yang sudah tertaut ke workspace lain, workspace tenant itu sendiri, dan
+	// workspace non-pelanggan (platform).
+	LinkWorkspaceBySystem(ctx context.Context, scope coretenant.Scope, companyID, workspaceOrgID string) error
 	// Workspace meringkas workspace tertaut untuk respons; nil bila tidak ada.
 	Workspace(ctx context.Context, tenantOrgID string) *WorkspaceInfo
 }

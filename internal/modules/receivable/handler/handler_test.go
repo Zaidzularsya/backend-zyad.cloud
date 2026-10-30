@@ -183,7 +183,10 @@ type fixture struct {
 	accounts *fakeAccountSvc
 }
 
-func newFixture(t *testing.T, perms ...string) *fixture {
+// newFixture membuka pembuatan manual (default produksi: mati) supaya tes lain tetap menguji handler-nya.
+func newFixture(t *testing.T, perms ...string) *fixture { return newFixtureManual(t, true, perms...) }
+
+func newFixtureManual(t *testing.T, manual bool, perms ...string) *fixture {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	tc, err := coretenant.NewVerifiedContext(coretenant.VerifiedContextInput{
@@ -207,8 +210,8 @@ func newFixture(t *testing.T, perms ...string) *fixture {
 	})
 	checker := grant(perms...)
 	group := r.Group("/app/receivable")
-	NewAccountHandler(f.accounts).RegisterRoutes(group, checker)
-	NewInvoiceHandler(f.invoices, f.sends).RegisterRoutes(group, checker)
+	NewAccountHandler(f.accounts).WithManualCreation(manual).RegisterRoutes(group, checker)
+	NewInvoiceHandler(f.invoices, f.sends).WithManualCreation(manual).RegisterRoutes(group, checker)
 	NewPaymentHandler(f.payments).RegisterRoutes(group, checker)
 	NewSettingsHandler(service.NewSettingsService(&memSettingsRepo{s: domain.Settings{InvoiceLeadDays: 7, PaymentTermsDays: 7, DefaultChannels: []string{"email"}}}, noMembers{})).
 		RegisterRoutes(group, checker)
@@ -385,6 +388,37 @@ func TestCreateInvoiceMapsRequestAsManualInvoice(t *testing.T) {
 	if l.Attrs != (pricing.Attributes{ChargeType: pricing.Recurring, Frequency: pricing.Monthly, PaymentTiming: pricing.Prepaid}) || l.TaxPercent != "11" ||
 		l.PeriodEnd == nil || l.PeriodEnd.Format("2006-01-02") != "2026-10-31" || l.Unit != "bulan" {
 		t.Fatalf("line = %+v", l)
+	}
+}
+
+func TestManualCreationDisabledRejectsCreateButKeepsDraftWorkflow(t *testing.T) {
+	f := newFixtureManual(t, false, allReceivablePerms...)
+	invoiceBody := `{"account_id":"` + accID + `","items":[{"description":"x","unit_price":"1"}]}`
+	for _, tc := range []struct{ path, body string }{
+		{"/invoices", invoiceBody},
+		{"/accounts", `{"name":"Budi"}`},
+	} {
+		w := call(f.r, http.MethodPost, base(tc.path), tc.body)
+		if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "MANUAL_CREATION_DISABLED") {
+			t.Fatalf("POST %s = %d %s", tc.path, w.Code, w.Body)
+		}
+	}
+	if f.invoices.created.AccountID != "" {
+		t.Fatalf("rejected create must not reach the service: %+v", f.invoices.created)
+	}
+	// Draft yang sudah ada tetap bisa diubah dan diterbitkan.
+	if w := call(f.r, http.MethodPut, base("/invoices/"+invID), invoiceBody); w.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d %s", w.Code, w.Body)
+	}
+	if w := call(f.r, http.MethodPost, base("/invoices/"+invID+"/issue"), ""); w.Code != http.StatusOK {
+		t.Fatalf("issue status = %d %s", w.Code, w.Body)
+	}
+}
+
+func TestManualCreationDisabledStillChecksPermissionFirst(t *testing.T) {
+	f := newFixtureManual(t, false) // tanpa izin
+	if w := call(f.r, http.MethodPost, base("/invoices"), `{}`); w.Code != http.StatusForbidden || strings.Contains(w.Body.String(), "MANUAL_CREATION_DISABLED") {
+		t.Fatalf("status = %d %s", w.Code, w.Body)
 	}
 }
 

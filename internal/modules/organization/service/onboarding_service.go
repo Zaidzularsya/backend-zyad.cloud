@@ -22,6 +22,7 @@ var workspaceSlugCleaner = regexp.MustCompile(`[^a-z0-9]+`)
 
 type OnboardingStore interface {
 	CreateWorkspace(context.Context, repository.CreateWorkspaceParams) (repository.MembershipOrganization, error)
+	CreateOwnedWorkspace(context.Context, repository.CreateWorkspaceParams) (repository.MembershipOrganization, error)
 }
 
 // DefaultAccessProvisioner gives a freshly created workspace its free-tier
@@ -63,40 +64,11 @@ func (s *OnboardingService) CreateWorkspace(
 	if !validUUID(userID) || !validUUID(sessionID) {
 		return dto.CreateWorkspaceResponse{}, validationError("user_id and session_id must be valid UUIDs")
 	}
-	if s.store == nil {
-		return dto.CreateWorkspaceResponse{}, coreerrors.New(
-			"WORKSPACE_ONBOARDING_STORE_REQUIRED",
-			"workspace onboarding store is required",
-			http.StatusInternalServerError,
-		)
+	params, err := s.workspaceParams(userID, sessionID, request, metadata)
+	if err != nil {
+		return dto.CreateWorkspaceResponse{}, err
 	}
-
-	name := strings.TrimSpace(request.Name)
-	if name == "" {
-		return dto.CreateWorkspaceResponse{}, validationError("workspace name is required")
-	}
-	slug := normalizeWorkspaceSlug(request.Slug)
-	if slug == "" {
-		slug = normalizeWorkspaceSlug(name)
-	}
-	if !workspaceSlugPattern.MatchString(slug) {
-		return dto.CreateWorkspaceResponse{}, validationError("workspace slug must be a valid DNS label")
-	}
-
-	result, err := s.store.CreateWorkspace(ctx, repository.CreateWorkspaceParams{
-		UserID:        strings.TrimSpace(userID),
-		SessionID:     strings.TrimSpace(sessionID),
-		Slug:          slug,
-		Name:          name,
-		Timezone:      strings.TrimSpace(request.Timezone),
-		Locale:        strings.TrimSpace(request.Locale),
-		Region:        strings.TrimSpace(request.Region),
-		Metadata:      request.Metadata,
-		RequestID:     strings.TrimSpace(metadata.RequestID),
-		IPAddress:     strings.TrimSpace(metadata.IPAddress),
-		UserAgent:     strings.TrimSpace(metadata.UserAgent),
-		CorrelationAt: s.now().UTC(),
-	})
+	result, err := s.store.CreateWorkspace(ctx, params)
 	if err != nil {
 		return dto.CreateWorkspaceResponse{}, mapOnboardingError(err)
 	}
@@ -114,6 +86,69 @@ func (s *OnboardingService) CreateWorkspace(
 	}
 	return dto.CreateWorkspaceResponse{
 		CurrentOrganization: userOrganizationResponse(result, result.Organization.ID),
+	}, nil
+}
+
+// CreateOwnedWorkspace membuat workspace customer dengan user sebagai owner tanpa sesi login, untuk
+// checkout publik pelanggan tenant. Sengaja TIDAK memprovisikan akses default (paket Free): akses
+// workspace pelanggan tenant hanya berasal dari contract tenant (TenantAccess.SyncContract).
+func (s *OnboardingService) CreateOwnedWorkspace(
+	ctx context.Context,
+	userID string,
+	request dto.CreateWorkspaceRequest,
+	metadata OnboardingMetadata,
+) (string, error) {
+	if !validUUID(userID) {
+		return "", validationError("user_id must be a valid UUID")
+	}
+	params, err := s.workspaceParams(userID, "", request, metadata)
+	if err != nil {
+		return "", err
+	}
+	result, err := s.store.CreateOwnedWorkspace(ctx, params)
+	if err != nil {
+		return "", mapOnboardingError(err)
+	}
+	return result.Organization.ID, nil
+}
+
+func (s *OnboardingService) workspaceParams(
+	userID string,
+	sessionID string,
+	request dto.CreateWorkspaceRequest,
+	metadata OnboardingMetadata,
+) (repository.CreateWorkspaceParams, error) {
+	if s.store == nil {
+		return repository.CreateWorkspaceParams{}, coreerrors.New(
+			"WORKSPACE_ONBOARDING_STORE_REQUIRED",
+			"workspace onboarding store is required",
+			http.StatusInternalServerError,
+		)
+	}
+	name := strings.TrimSpace(request.Name)
+	if name == "" {
+		return repository.CreateWorkspaceParams{}, validationError("workspace name is required")
+	}
+	slug := normalizeWorkspaceSlug(request.Slug)
+	if slug == "" {
+		slug = normalizeWorkspaceSlug(name)
+	}
+	if !workspaceSlugPattern.MatchString(slug) {
+		return repository.CreateWorkspaceParams{}, validationError("workspace slug must be a valid DNS label")
+	}
+	return repository.CreateWorkspaceParams{
+		UserID:        strings.TrimSpace(userID),
+		SessionID:     strings.TrimSpace(sessionID),
+		Slug:          slug,
+		Name:          name,
+		Timezone:      strings.TrimSpace(request.Timezone),
+		Locale:        strings.TrimSpace(request.Locale),
+		Region:        strings.TrimSpace(request.Region),
+		Metadata:      request.Metadata,
+		RequestID:     strings.TrimSpace(metadata.RequestID),
+		IPAddress:     strings.TrimSpace(metadata.IPAddress),
+		UserAgent:     strings.TrimSpace(metadata.UserAgent),
+		CorrelationAt: s.now().UTC(),
 	}, nil
 }
 

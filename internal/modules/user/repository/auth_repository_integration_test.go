@@ -423,3 +423,133 @@ func TestAuthRepositoryEmailVerificationIntegration(t *testing.T) {
 		t.Fatalf("expected valid email_verified_at and token used_at, got %v and %v", emailVerifiedAt.Valid, tokenUsedAt.Valid)
 	}
 }
+
+// /auth/me harus memakai org efektif yang sama dengan resolver request: bila
+// sessions.active_organization_id kosong dan user punya tepat satu membership aktif,
+// permission role org tetap dikembalikan (FE memakainya untuk can()).
+func TestAuthRepositoryActiveOrganizationPermissionSlugsFallbackIntegration(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	repo := NewAuthRepository(db)
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+
+	var userID, permissionID, roleID string
+	if err := db.QueryRow(ctx, `
+		INSERT INTO users (name, email, status)
+		VALUES ('Active Org Fallback', $1, 'active')
+		RETURNING id
+	`, fmt.Sprintf("active-org-fallback-%d@example.test", suffix)).Scan(&userID); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	slug := fmt.Sprintf("fallback.perm.%d", suffix)
+	if err := db.QueryRow(ctx, `
+		INSERT INTO permissions (permission_name, name, slug, module, action)
+		VALUES ($1, $1, $1, 'fallback', 'perm')
+		RETURNING id
+	`, slug).Scan(&permissionID); err != nil {
+		t.Fatalf("create permission: %v", err)
+	}
+	if err := db.QueryRow(ctx, `
+		INSERT INTO roles (role_name, slug) VALUES ($1, $1) RETURNING id
+	`, fmt.Sprintf("fallback-role-%d", suffix)).Scan(&roleID); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if _, err := db.Exec(ctx, `
+		INSERT INTO role_permissions (role_id, permission_id, scope) VALUES ($1, $2, 'organization')
+	`, roleID, permissionID); err != nil {
+		t.Fatalf("assign role permission: %v", err)
+	}
+
+	var orgIDs []string
+	newOrg := func(label, status string) string {
+		var id string
+		if err := db.QueryRow(ctx, `
+			INSERT INTO organizations (type, slug, name, status, data_placement)
+			VALUES ('customer', $1, $2, $3, 'shared')
+			RETURNING id
+		`, fmt.Sprintf("fallback-%s-%d", label, suffix), "Fallback "+label, status).Scan(&id); err != nil {
+			t.Fatalf("create organization %s: %v", label, err)
+		}
+		orgIDs = append(orgIDs, id)
+		return id
+	}
+	orgA := newOrg("a", "active")
+	orgB := newOrg("b", "active")
+	t.Cleanup(func() {
+		c := context.Background()
+		_, _ = db.Exec(c, `DELETE FROM sessions WHERE user_id = $1`, userID)
+		_, _ = db.Exec(c, `DELETE FROM user_roles WHERE user_id = $1`, userID)
+		_, _ = db.Exec(c, `DELETE FROM organization_memberships WHERE user_id = $1`, userID)
+		_, _ = db.Exec(c, `DELETE FROM roles WHERE id = $1`, roleID)
+		_, _ = db.Exec(c, `DELETE FROM permissions WHERE id = $1`, permissionID)
+		for _, id := range orgIDs {
+			_, _ = db.Exec(c, `DELETE FROM organizations WHERE id = $1`, id)
+		}
+		_, _ = db.Exec(c, `DELETE FROM users WHERE id = $1`, userID)
+	})
+
+	if _, err := db.Exec(ctx, `
+		INSERT INTO organization_memberships (organization_id, user_id, status, is_owner)
+		VALUES ($1, $2, 'active', true)
+	`, orgA, userID); err != nil {
+		t.Fatalf("create membership: %v", err)
+	}
+	if _, err := db.Exec(ctx, `
+		INSERT INTO user_roles (user_id, role_id, organization_id) VALUES ($1, $2, $3)
+	`, userID, roleID, orgA); err != nil {
+		t.Fatalf("assign user role: %v", err)
+	}
+	var sessionID string
+	if err := db.QueryRow(ctx, `
+		INSERT INTO sessions (user_id, refresh_token_hash, expires_at)
+		VALUES ($1, $2, $3) RETURNING id
+	`, userID, fmt.Sprintf("fallback-session-%d", suffix), time.Now().UTC().Add(time.Hour)).Scan(&sessionID); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	t.Run("single active membership falls back", func(t *testing.T) {
+		got, err := repo.activeOrganizationPermissionSlugs(ctx, userID, sessionID)
+		if err != nil {
+			t.Fatalf("activeOrganizationPermissionSlugs() error = %v", err)
+		}
+		if len(got) != 1 || got[0] != slug {
+			t.Fatalf("got %#v, want [%s]", got, slug)
+		}
+	})
+
+	t.Run("multiple active memberships stay empty", func(t *testing.T) {
+		if _, err := db.Exec(ctx, `
+			INSERT INTO organization_memberships (organization_id, user_id, status)
+			VALUES ($1, $2, 'active')
+		`, orgB, userID); err != nil {
+			t.Fatalf("create second membership: %v", err)
+		}
+		got, err := repo.activeOrganizationPermissionSlugs(ctx, userID, sessionID)
+		if err != nil {
+			t.Fatalf("activeOrganizationPermissionSlugs() error = %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("got %#v, want empty (ambiguous org)", got)
+		}
+	})
+
+	t.Run("explicit session org wins", func(t *testing.T) {
+		if _, err := db.Exec(ctx, `
+			UPDATE sessions s
+			SET active_organization_id = m.organization_id,
+				active_membership_id = m.id,
+				active_membership_version = m.version
+			FROM organization_memberships m
+			WHERE s.id = $1 AND m.user_id = s.user_id AND m.organization_id = $2
+		`, sessionID, orgA); err != nil {
+			t.Fatalf("set active org: %v", err)
+		}
+		got, err := repo.activeOrganizationPermissionSlugs(ctx, userID, sessionID)
+		if err != nil {
+			t.Fatalf("activeOrganizationPermissionSlugs() error = %v", err)
+		}
+		if len(got) != 1 || got[0] != slug {
+			t.Fatalf("got %#v, want [%s]", got, slug)
+		}
+	})
+}

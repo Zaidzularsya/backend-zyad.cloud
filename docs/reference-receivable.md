@@ -44,7 +44,7 @@ Indeks yang menjaga invariant:
 | `(method, reference) WHERE reference IS NOT NULL AND method <> 'manual'` | Webhook provider yang sama tidak dicatat dua kali. **Referensi manual sengaja tidak unik** (catatan bebas, mis. nomor transfer; unik global akan bocor/bentrok antar tenant) |
 
 Feature & entitlement: `receivable.enabled` (starter ke atas; organisasi platform bypass),
-`receivable.online_payment` (semua paket false; hanya organisasi platform lewat bypass, dipakai S6).
+`receivable.online_payment` (paket Free mendapatkannya sejak 23 Okt 2026, aktif di produksi setelah `accessmigrate free-plan --apply`; organisasi platform tetap lewat bypass, dipakai S6).
 
 Permission: `invoice.read|create|update|send|mark_paid` dipakai ulang (modul permission pindah ke `receivable`),
 baru `invoice.void` dan `receivable.settings`.
@@ -133,7 +133,7 @@ S -> N : receivable.invoice_send_failed\nke PIC, atau pemegang invoice.send
 
 ### Pembayaran online DOKU (S6)
 
-Hanya org **platform** (bypass `SubscriptionGuardService` untuk `receivable.online_payment`); tenant lain tidak melihat tombol Bayar.
+Org **platform** (bypass `SubscriptionGuardService`) dan org dengan entitlement `receivable.online_payment` (termasuk paket Free setelah `free-plan --apply`); org lain tidak melihat tombol Bayar.
 
 - `POST /public/invoices/:token/checkout` → `{payment_url, expires_at}`. Jumlah = **sisa** tagihan, pecahan dibulatkan ke atas ke rupiah.
   Nomor DOKU `RCV-<uuid invoice>`. Sesi `pending` yang belum kedaluwarsa (60 menit) dipakai ulang → URL sama.

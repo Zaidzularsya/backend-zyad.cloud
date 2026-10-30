@@ -12,11 +12,13 @@ require (
 	github.com/emersion/go-message v0.18.2
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-playground/validator/v10 v10.20.0
+	github.com/go-routeros/routeros/v3 v3.0.1
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/redis/go-redis/v9 v9.13.0
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/crypto v0.53.0
+	golang.org/x/net v0.56.0
 	google.golang.org/api v0.286.0
 )
 
@@ -73,7 +75,6 @@ require (
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
 	golang.org/x/arch v0.8.0 // indirect
-	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect

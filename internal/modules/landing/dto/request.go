@@ -464,3 +464,25 @@ func ValidateRedirectURL(raw string) error {
 }
 
 var errInvalidRedirectURL = errors.New("redirect_url must be empty, a path starting with /, or an http(s) URL")
+
+// CreateActivationInvoiceRequest is the reseller's "Create invoice" form
+// (POST /app/landing/pages/:id/activation-invoice). price is decimal text;
+// at most one of invoice_due_hours / invoice_due_days (default 1 hour).
+// Business validation lives in the activation service.
+type CreateActivationInvoiceRequest struct {
+	BuyerName       string `json:"buyer_name"`
+	BuyerContact    string `json:"buyer_contact"`
+	BuyerEmail      string `json:"buyer_email"`
+	Price           string `json:"price"`
+	DurationValue   int    `json:"duration_value"`
+	DurationUnit    string `json:"duration_unit"`
+	InvoiceDueHours *int   `json:"invoice_due_hours"`
+	InvoiceDueDays  *int   `json:"invoice_due_days"`
+}
+
+// RenewActivationRequest (POST /app/landing/activations/:id/renew): how long the renewed preview window
+// lasts. At most one of the two; neither means 24 hours. The body may be empty.
+type RenewActivationRequest struct {
+	InvoiceDueHours *int `json:"invoice_due_hours"`
+	InvoiceDueDays  *int `json:"invoice_due_days"`
+}

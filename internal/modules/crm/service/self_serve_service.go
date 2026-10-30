@@ -26,15 +26,15 @@ const (
 
 type selfServeService struct {
 	deps SelfServeDeps
-	cfg  SelfServeConfig
+	cfgs SelfServeConfigResolver
 	now  func() time.Time
 }
 
-func NewSelfServeService(deps SelfServeDeps, cfg SelfServeConfig, now func() time.Time) SelfServeService {
+func NewSelfServeService(deps SelfServeDeps, cfgs SelfServeConfigResolver, now func() time.Time) SelfServeService {
 	if now == nil {
 		now = time.Now
 	}
-	return &selfServeService{deps: deps, cfg: cfg, now: now}
+	return &selfServeService{deps: deps, cfgs: cfgs, now: now}
 }
 
 func stepErr(step string, err error) error {
@@ -46,7 +46,8 @@ func stepErr(step string, err error) error {
 
 // chain adalah konteks satu pemanggilan Checkout.
 type chain struct {
-	platform coretenant.Scope
+	platform coretenant.Scope // scope CRM tempat rantai berjalan (platform, atau tenant untuk checkout tenant)
+	cfg      SelfServeConfig  // hasil resolver untuk scope ini
 	req      SelfServeCheckoutRequest
 	product  *catalogdomain.Product // nil bila tidak ada di katalog
 	stage0   string                 // "Checkout dimulai"
@@ -54,6 +55,11 @@ type chain struct {
 }
 
 func (s *selfServeService) Checkout(ctx context.Context, platform coretenant.Scope, req SelfServeCheckoutRequest) (SelfServeCheckoutResult, error) {
+	cfg, err := s.cfgs.Resolve(ctx, platform)
+	if err != nil {
+		slog.ErrorContext(ctx, "self-serve is not configured", "organization_id", platform.OrganizationID(), "error", err)
+		return SelfServeCheckoutResult{}, ErrSelfServeNotConfigured
+	}
 	unlock, ok, err := s.deps.Locker.TryLock(ctx, "self_serve:"+req.TenantOrganizationID)
 	if err != nil {
 		return SelfServeCheckoutResult{}, err
@@ -63,7 +69,7 @@ func (s *selfServeService) Checkout(ctx context.Context, platform coretenant.Sco
 	}
 	defer unlock()
 
-	c := &chain{platform: platform, req: req}
+	c := &chain{platform: platform, cfg: cfg, req: req}
 	products, err := s.deps.Products.FindByIDs(ctx, platform, []string{req.ProductID})
 	if err != nil {
 		return SelfServeCheckoutResult{}, err
@@ -102,7 +108,7 @@ func (s *selfServeService) Checkout(ctx context.Context, platform coretenant.Sco
 
 // resolveStages mengambil stage pertama dan kedua pipeline lewat posisi (nama bisa diganti admin).
 func (s *selfServeService) resolveStages(ctx context.Context, c *chain) error {
-	p, err := s.deps.Pipelines.FindByID(ctx, c.platform, s.cfg.PipelineID)
+	p, err := s.deps.Pipelines.FindByID(ctx, c.platform, c.cfg.PipelineID)
 	if err != nil {
 		return err
 	}
@@ -123,27 +129,44 @@ func (s *selfServeService) resolveStages(ctx context.Context, c *chain) error {
 // resumeOrReplaceDeal memeriksa deal open company di pipeline Self-Serve. Mengembalikan deal yang
 // dilanjutkan (dan quote-nya bila ada), atau nil bila rantai baru harus dibuat (pilihan diganti).
 func (s *selfServeService) resumeOrReplaceDeal(ctx context.Context, c *chain, company domain.Company) (*domain.Deal, *domain.Quotation, error) {
-	deals, err := s.deps.Deals.ListOpenByCompanyAndPipeline(ctx, c.platform, company.ID, s.cfg.PipelineID)
+	deals, err := s.deps.Deals.ListOpenByCompanyAndPipeline(ctx, c.platform, company.ID, c.cfg.PipelineID)
 	if err != nil {
 		return nil, nil, stepErr(SelfServeStepDeal, err)
 	}
 	if len(deals) == 0 {
 		return nil, nil, nil
 	}
-	deal := deals[0]
-	quote, err := s.deps.Quotations.FindSelfServeByDeal(ctx, c.platform, deal.ID)
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		quote = domain.Quotation{}
-	case err != nil:
-		return nil, nil, stepErr(SelfServeStepQuotation, err)
+	var deal domain.Deal
+	var quote domain.Quotation
+	if c.cfg.TenantScope {
+		// Pipeline tenant juga dipakai staf: hanya deal yang sudah punya quote self-serve
+		// milik rantai ini; deal staf tidak pernah diambil alih (judul/nilai/quote).
+		found := false
+		for _, d := range deals {
+			q, err := s.findSelfServeQuote(ctx, c, d.ID)
+			if err != nil {
+				return nil, nil, err
+			}
+			if q.ID != "" {
+				deal, quote, found = d, q, true
+				break
+			}
+		}
+		if !found {
+			return nil, nil, nil
+		}
+	} else {
+		deal = deals[0]
+		if quote, err = s.findSelfServeQuote(ctx, c, deal.ID); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	if quote.ID != "" && quoteProductID(quote) == c.req.ProductID {
 		return &deal, &quote, nil // pilihan sama: lanjutkan
 	}
 	// Produk baru harus valid SEBELUM ada yang dibatalkan.
-	if err := validateSelfServeProduct(c.product); err != nil {
+	if err := validateSelfServeProduct(c.product, !c.cfg.TenantScope); err != nil {
 		return nil, nil, err
 	}
 	if quote.ID == "" {
@@ -165,17 +188,29 @@ func (s *selfServeService) resumeOrReplaceDeal(ctx context.Context, c *chain, co
 		if so.QuotationID != quote.ID {
 			continue
 		}
-		if _, err := s.deps.Orders.CancelUnpaid(ctx, c.platform, so.ID, reason, s.cfg.BotUserID); err != nil {
+		if _, err := s.deps.Orders.CancelUnpaid(ctx, c.platform, so.ID, reason, c.cfg.BotUserID); err != nil {
 			if errors.Is(err, ErrSalesOrderPaid) {
 				return nil, nil, ErrSelfServeAlreadySubscribed
 			}
 			return nil, nil, stepErr(SelfServeStepSalesOrder, err)
 		}
 	}
-	if _, err := s.deps.Deals.CloseLost(ctx, c.platform, deal.ID, reason, s.cfg.BotUserID); err != nil {
+	if _, err := s.deps.Deals.CloseLost(ctx, c.platform, deal.ID, reason, c.cfg.BotUserID); err != nil {
 		return nil, nil, stepErr(SelfServeStepDeal, err)
 	}
 	return nil, nil, nil
+}
+
+// findSelfServeQuote: quote self-serve deal itu, atau Quotation kosong bila belum ada.
+func (s *selfServeService) findSelfServeQuote(ctx context.Context, c *chain, dealID string) (domain.Quotation, error) {
+	quote, err := s.deps.Quotations.FindSelfServeByDeal(ctx, c.platform, dealID)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return domain.Quotation{}, nil
+	case err != nil:
+		return domain.Quotation{}, stepErr(SelfServeStepQuotation, err)
+	}
+	return quote, nil
 }
 
 // alignDeal menyelaraskan judul/nilai deal yang belum punya quote dengan produk yang diminta.
@@ -185,7 +220,7 @@ func (s *selfServeService) alignDeal(ctx context.Context, c *chain, deal domain.
 	if deal.Title == title && deal.Value == value {
 		return deal, nil
 	}
-	updated, err := s.deps.Deals.Update(ctx, c.platform, deal.ID, repository.UpdateDealParams{Title: &title, Value: &value, UpdatedBy: s.cfg.BotUserID})
+	updated, err := s.deps.Deals.Update(ctx, c.platform, deal.ID, repository.UpdateDealParams{Title: &title, Value: &value, UpdatedBy: c.cfg.BotUserID})
 	if err != nil {
 		return domain.Deal{}, stepErr(SelfServeStepDeal, err)
 	}
@@ -194,11 +229,11 @@ func (s *selfServeService) alignDeal(ctx context.Context, c *chain, deal domain.
 
 // startChain membuat lead → company/contact → deal untuk pembeli yang belum punya deal open.
 func (s *selfServeService) startChain(ctx context.Context, c *chain, company domain.Company) (*domain.Deal, error) {
-	if err := validateSelfServeProduct(c.product); err != nil {
+	if err := validateSelfServeProduct(c.product, !c.cfg.TenantScope); err != nil {
 		return nil, err
 	}
 	if company.ID != "" {
-		subscribed, err := s.deps.Subscriptions.HasActiveFeatureContract(ctx, c.platform, company.ID)
+		subscribed, err := s.alreadySubscribed(ctx, c, company.ID)
 		if err != nil {
 			return nil, stepErr(SelfServeStepCompany, err)
 		}
@@ -233,22 +268,22 @@ func (s *selfServeService) startChain(ctx context.Context, c *chain, company dom
 
 	lead, err := s.deps.Leads.Create(ctx, c.platform, repository.CreateLeadParams{
 		ContactName: buyerName, CompanyName: workspace, Email: buyerEmail, Phone: buyerPhone,
-		Source: selfServeLeadSource, OwnerUserID: s.cfg.DealOwnerUserID, CreatedBy: s.cfg.BotUserID, SkipPlaybook: true,
+		Source: selfServeLeadSource, OwnerUserID: c.cfg.DealOwnerUserID, CreatedBy: c.cfg.BotUserID, SkipPlaybook: true,
 	})
 	if err != nil {
 		return nil, stepErr(SelfServeStepLead, err)
 	}
 	result, err := s.deps.Leads.Convert(ctx, c.platform, lead.ID, ConvertLeadParams{
-		Company: companyInput, Contact: contactInput, OwnerUserID: s.cfg.DealOwnerUserID, ConvertedBy: s.cfg.BotUserID,
+		Company: companyInput, Contact: contactInput, OwnerUserID: c.cfg.DealOwnerUserID, ConvertedBy: c.cfg.BotUserID,
 		Deal: &ConvertDealInput{
-			PipelineID: s.cfg.PipelineID, StageID: c.stage0, Title: dealTitle(workspace, *c.product),
+			PipelineID: c.cfg.PipelineID, StageID: c.stage0, Title: dealTitle(workspace, *c.product),
 			Value: c.product.BasePrice, ExpectedCloseDate: businesstime.DayOf(s.now()).Format("2006-01-02"),
-			OwnerUserID: s.cfg.DealOwnerUserID,
+			OwnerUserID: c.cfg.DealOwnerUserID,
 		},
 	})
 	if err != nil {
 		// Lead yatim tidak boleh menumpuk di CRM; best effort.
-		if delErr := s.deps.Leads.Delete(ctx, c.platform, lead.ID, s.cfg.BotUserID); delErr != nil {
+		if delErr := s.deps.Leads.Delete(ctx, c.platform, lead.ID, c.cfg.BotUserID); delErr != nil {
 			slog.WarnContext(ctx, "self-serve: cleanup lead failed", "lead_id", lead.ID, "error", delErr)
 		}
 		return nil, stepErr(SelfServeStepDeal, err)
@@ -278,7 +313,7 @@ func (s *selfServeService) findCompanyContact(ctx context.Context, scope coreten
 
 // finish menyelesaikan quote → SO → invoice dan mengembalikan link pembayaran.
 func (s *selfServeService) finish(ctx context.Context, c *chain, deal domain.Deal, quote *domain.Quotation) (SelfServeCheckoutResult, error) {
-	bot := s.cfg.BotUserID
+	bot := c.cfg.BotUserID
 	if quote == nil {
 		found, err := s.deps.Quotations.FindSelfServeByDeal(ctx, c.platform, deal.ID)
 		switch {
@@ -342,7 +377,7 @@ func (s *selfServeService) createQuote(ctx context.Context, c *chain, deal domai
 	return s.deps.Quotations.Create(ctx, c.platform, CreateQuotationInput{
 		DealID: deal.ID, ValidUntil: &validUntil, Notes: selfServeQuoteNote, Channel: domain.QuotationChannelSelfServe,
 		Items:     []QuotationLineInput{{ProductID: c.req.ProductID, Quantity: "1"}},
-		CreatedBy: s.cfg.BotUserID,
+		CreatedBy: c.cfg.BotUserID,
 	})
 }
 
@@ -361,7 +396,7 @@ func (s *selfServeService) findOrder(ctx context.Context, c *chain, dealID strin
 
 // confirmOrder membawa SO ke confirmed + invoice awal terbit, sesuai status SO saat ini.
 func (s *selfServeService) confirmOrder(ctx context.Context, c *chain, so domain.SalesOrder) (domain.SalesOrder, error) {
-	bot := s.cfg.BotUserID
+	bot := c.cfg.BotUserID
 	switch so.Status {
 	case domain.SalesOrderDraft:
 		name, email, phone, err := s.deps.Buyers.Buyer(ctx, c.req.BuyerUserID)
@@ -401,10 +436,22 @@ func dealTitle(workspace string, p catalogdomain.Product) string {
 	return fmt.Sprintf("%s · %s (%s)", workspace, p.Name, p.Pricing.Frequency.Label())
 }
 
-// validateSelfServeProduct menerapkan R1: publik, aktif, langganan prabayar, berharga, dan berfitur.
-func validateSelfServeProduct(p *catalogdomain.Product) error {
+// alreadySubscribed: platform → company punya contract aktif berfitur (satu paket Zyad per workspace);
+// tenant → company sudah punya contract aktif untuk produk yang sama (produk tanpa fitur tidak pernah
+// terdeteksi oleh pemeriksaan berfitur, dan pelanggan tenant boleh punya beberapa produk berbeda).
+func (s *selfServeService) alreadySubscribed(ctx context.Context, c *chain, companyID string) (bool, error) {
+	if c.cfg.TenantScope {
+		return s.deps.Subscriptions.HasActiveContractForProduct(ctx, c.platform, companyID, c.req.ProductID)
+	}
+	return s.deps.Subscriptions.HasActiveFeatureContract(ctx, c.platform, companyID)
+}
+
+// validateSelfServeProduct menerapkan R1: publik, aktif, langganan prabayar, berharga, dan (bila
+// requireFeatures, yaitu scope platform) berfitur. Produk tenant boleh tanpa fitur (spec §4.2).
+func validateSelfServeProduct(p *catalogdomain.Product, requireFeatures bool) error {
 	if p == nil || p.DeletedAt != nil || !p.IsActive || !p.IsPublic ||
-		p.Pricing.ChargeType != pricing.Recurring || p.Pricing.PaymentTiming != pricing.Prepaid || len(p.Features) == 0 {
+		p.Pricing.ChargeType != pricing.Recurring || p.Pricing.PaymentTiming != pricing.Prepaid ||
+		(requireFeatures && len(p.Features) == 0) {
 		return ErrSelfServeProductUnavailable
 	}
 	price, ok := new(big.Rat).SetString(p.BasePrice)

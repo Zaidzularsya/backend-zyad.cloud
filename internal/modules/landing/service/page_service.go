@@ -23,6 +23,25 @@ type pageService struct {
 	sectionRepo  repository.SectionRepository
 	brandingRepo repository.BrandingRepository
 	quotaGuard   LandingPageQuotaGuard
+	activations  ActivationOpenFinder
+}
+
+// ActivationOpenFinder reads a page's open (unpaid) activation. repository.ActivationRepository
+// satisfies it.
+type ActivationOpenFinder interface {
+	FindOpenByPage(ctx context.Context, scope coretenant.Scope, pageID string) (domain.LandingPageActivation, error)
+}
+
+// WithLandingPageActivationGuard stops a page that was sold to a client (paid and still live, or with
+// an invoice awaiting payment) from being deleted. Optional: without it Delete keeps its old behavior.
+func WithLandingPageActivationGuard(finder ActivationOpenFinder) PageServiceOption {
+	return func(service *pageService) {
+		service.activations = finder
+	}
+}
+
+var errPageHasActiveActivation = func(message string) error {
+	return coreerrors.New("PAGE_HAS_ACTIVE_ACTIVATION", message, http.StatusConflict)
 }
 
 type LandingPageQuotaGuard interface {
@@ -196,8 +215,40 @@ func errHomepageTargetArchived() error {
 }
 
 func (s *pageService) Delete(ctx context.Context, scope coretenant.Scope, id string) error {
+	if err := s.requireNotSold(ctx, scope, id); err != nil {
+		return err
+	}
 	if err := s.pageRepo.Delete(ctx, scope, id); err != nil {
 		return mapPagePersistenceError(err)
+	}
+	return nil
+}
+
+// requireNotSold refuses to delete a page the reseller sold: either it is paid and still published, or
+// its invoice is still awaiting payment (a payment would otherwise land on a deleted page). An expired
+// page, or one whose invoice is overdue, can be deleted. A failed lookup refuses too: better a blocked
+// delete than a sold page lost.
+func (s *pageService) requireNotSold(ctx context.Context, scope coretenant.Scope, id string) error {
+	if s.activations == nil {
+		return nil
+	}
+	page, err := s.pageRepo.FindByID(ctx, scope, id)
+	if err != nil {
+		return mapPagePersistenceError(err)
+	}
+	var open *domain.LandingPageActivation
+	activation, err := s.activations.FindOpenByPage(ctx, scope, id)
+	switch {
+	case err == nil:
+		open = &activation
+	case !errors.Is(err, pgx.ErrNoRows):
+		return err
+	}
+	switch domain.ActivationState(page, open, time.Now().UTC()) {
+	case domain.ActivationStatePublish:
+		return errPageHasActiveActivation("Halaman ini sudah dibayar dan masih tayang. Tunggu masa aktifnya habis sebelum menghapus.")
+	case domain.ActivationStatePreview:
+		return errPageHasActiveActivation("Halaman ini masih punya invoice yang menunggu pembayaran. Tunggu jatuh tempo invoice sebelum menghapus.")
 	}
 	return nil
 }
@@ -206,6 +257,12 @@ func (s *pageService) Duplicate(ctx context.Context, scope coretenant.Scope, par
 	// 1. Get original page
 	originalPage, err := s.pageRepo.FindByID(ctx, scope, params.PageID)
 	if err != nil {
+		return domain.LandingPage{}, err
+	}
+
+	// The copy is a new member page (IsTemplate=false), so it counts against
+	// landing.max_pages exactly like Create and InstantiateFromTemplate.
+	if err := s.requireCreateQuota(ctx, scope); err != nil {
 		return domain.LandingPage{}, err
 	}
 

@@ -58,7 +58,11 @@ type OnlinePayment struct {
 	links     LinkResolver
 	scopes    PublicScopeResolver
 	gate      FeatureGate
-	now       func() time.Time
+	// activations: optional; landing activation invoices may be paid online via landing.page_activation.
+	activations ActivationInvoiceChecker
+	// settlements: optional; nil = ledger penyelesaian tidak dicatat (lihat WithSettlementRecorder).
+	settlements SettlementRecorder
+	now         func() time.Time
 
 	mu       sync.Mutex
 	lastSync map[string]time.Time
@@ -109,7 +113,7 @@ func (p *OnlinePayment) Checkout(ctx context.Context, token string) (string, tim
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	if p.gate == nil || p.gate.RequireFeature(ctx, d.scope.OrganizationID(), onlinePaymentFeature) != nil {
+	if !onlinePaymentAllowed(ctx, p.gate, p.activations, d.scope, d.inv.ID) {
 		return "", time.Time{}, ErrOnlinePaymentUnavailable
 	}
 	if !payable(d.inv) {
@@ -212,7 +216,7 @@ func (p *OnlinePayment) HandleNotification(ctx context.Context, n DokuNotificati
 		reference = n.InvoiceNumber + "-" + paidAt.UTC().Format("20060102")
 	}
 
-	_, err = p.payments.RecordProvider(ctx, scope, checkout.InvoiceID, repository.PaymentParams{
+	_, payment, err := p.payments.RecordProvider(ctx, scope, checkout.InvoiceID, repository.PaymentParams{
 		Amount: amount, Method: "doku", Reference: reference, PaidAt: paidAt, ProviderPayload: n.Payload,
 	})
 	switch {
@@ -226,7 +230,38 @@ func (p *OnlinePayment) HandleNotification(ctx context.Context, n DokuNotificati
 	if err := p.checkouts.SetStatus(ctx, checkout.ID, checkoutStatusPaid); err != nil {
 		slog.WarnContext(ctx, "receivable: set checkout status failed", "checkout_id", checkout.ID, "error", err)
 	}
+	p.creditSettlement(ctx, tenantCtx, n, inv.Currency, payment)
 	return true, nil
+}
+
+// WithSettlementRecorder mengaktifkan pencatatan ledger penyelesaian untuk pembayaran DOKU.
+func (p *OnlinePayment) WithSettlementRecorder(r SettlementRecorder) *OnlinePayment {
+	p.settlements = r
+	return p
+}
+
+// creditSettlement mengkredit org pemilik invoice sebesar payment yang benar-benar tercatat.
+// Hanya org customer (tenant/reseller); org platform tidak berhak atas ledger. Galat hanya
+// di-log: payment sudah sah, dan menggagalkan webhook membuat DOKU mengirim ulang. Pemulihan:
+// kirim ulang notifikasi — RecordProvider idempoten dan entri ledger unik per referensi.
+func (p *OnlinePayment) creditSettlement(ctx context.Context, tenantCtx coretenant.Context, n DokuNotification, currency string, payment domain.Payment) {
+	if p.settlements == nil || tenantCtx.OrganizationType() != coretenant.OrganizationTypeCustomer {
+		return
+	}
+	reference := settlementPaymentReference(n, payment.ID)
+	// Ledger tidak punya kolom mata uang (IDR). Invoice non-IDR (bisa dibuat lewat API) tidak
+	// dikreditkan agar nominal asing tidak tercampur; perlu penanganan manual.
+	if c := strings.TrimSpace(currency); c != "" && !strings.EqualFold(c, "IDR") {
+		slog.ErrorContext(ctx, "receivable: settlement ledger skipped for non-IDR invoice",
+			"organization_id", tenantCtx.OrganizationID(), "invoice_id", payment.InvoiceID, "payment_id", payment.ID,
+			"currency", c, "provider_reference", reference, "amount", payment.Amount)
+		return
+	}
+	if err := p.settlements.RecordPayment(ctx, tenantCtx.OrganizationID(), payment.InvoiceID, reference, payment.Amount, payment.PaidAt); err != nil {
+		slog.ErrorContext(ctx, "receivable: settlement ledger entry failed",
+			"organization_id", tenantCtx.OrganizationID(), "invoice_id", payment.InvoiceID, "payment_id", payment.ID,
+			"doku_invoice_number", n.InvoiceNumber, "provider_reference", reference, "amount", payment.Amount, "error", err)
+	}
 }
 
 // SyncStatus menanyakan status ke DOKU saat customer kembali sebelum webhook masuk.
