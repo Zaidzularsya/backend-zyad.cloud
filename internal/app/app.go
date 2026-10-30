@@ -730,6 +730,7 @@ func New(ctx context.Context) (*App, error) {
 		ReceivableAccountHandler:         receivableModule.AccountHandler,
 		MikrotikRouterHandler:            mikrotikRouterHandler,
 		MikrotikSetupHandler:             mikrotikSetupHandler,
+		MikrotikRateCounter:              redisClient,
 		ReceivableInvoiceHandler:         receivableModule.InvoiceHandler,
 		ReceivablePaymentHandler:         receivableModule.PaymentHandler,
 		ReceivableSettingsHandler:        receivableModule.SettingsHandler,

@@ -39,12 +39,12 @@ func TestLongRoutesExtendWriteDeadline(t *testing.T) {
 		getFn:      func(string) (domain.Router, error) { return sampleRouter(), nil },
 	}
 	engine := newTestRouter(t)
-	NewRouterHandler(routerSvc).RegisterRoutes(engine.Group("/app/mikrotik"), nil)
+	NewRouterHandler(routerSvc).RegisterRoutes(engine.Group("/app/mikrotik"), nil, nil)
 	NewSetupHandler(&fakeSetupService{
 		previewFn: func(service.SetupInput) (domain.SetupPlan, error) { return domain.SetupPlan{}, nil },
 		applyFn:   func(service.SetupInput, string) (domain.Router, error) { return sampleRouter(), nil },
 		cleanupFn: func() (domain.Router, error) { return sampleRouter(), nil },
-	}).RegisterRoutes(engine.Group("/app/mikrotik"), nil)
+	}).RegisterRoutes(engine.Group("/app/mikrotik"), nil, nil)
 
 	setupBody := `{"pool_cidr":"10.255.254.0/24","platform_host":"zyad.online"}`
 	cases := []struct {

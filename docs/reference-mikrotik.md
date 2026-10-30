@@ -50,6 +50,10 @@ organization aktif bertipe customer atau platform.
 - **Password terenkripsi** di database dan tidak pernah dikembalikan; error tak dikenal tidak dibocorkan ke klien.
 - **Redirect HTTP ditolak** oleh klien REST (tidak mengikuti redirect), untuk mencegah pengalihan ke host lain.
 - **Batas respons**: 8 MiB per panggilan (REST dan binary), 1 MiB per word binary API.
+- **Rate limit**: route yang login ke router tenant (`POST /routers`, `PATCH /routers/{id}`, `/check`, `/setup/*`)
+  dibatasi 20 permintaan per menit per organization (Redis, fixed window). Lewat batas: 429 `RATE_LIMITED`. Urutan
+  gerbang: tenant + entitlement, rate limit, lalu permission. Redis tidak tersedia: fail open (permintaan tetap
+  dilayani, kegagalan dicatat). List, detail, dan delete tidak dibatasi.
 
 ## Semantik setup
 
@@ -90,7 +94,7 @@ organization aktif bertipe customer atau platform.
 `MIKROTIK_ROUTER_NOT_FOUND` (404), `MIKROTIK_ROUTER_NAME_TAKEN` (409), `VALIDATION_ERROR` (422),
 `MIKROTIK_HOST_NOT_ALLOWED` (422), `MIKROTIK_TLS_REQUIRED` (422), `MIKROTIK_TLS_UNTRUSTED` (422),
 `MIKROTIK_AUTH_FAILED` (502), `MIKROTIK_UNREACHABLE` (502), `MIKROTIK_SETUP_PLAN_CHANGED` (409),
-`MIKROTIK_SETUP_CONFLICT` (409), `MIKROTIK_SETUP_IN_PROGRESS` (409), `MIKROTIK_SETUP_FAILED` (502), `MIKROTIK_SETUP_STATE_NOT_SAVED` (500), `INTERNAL_ERROR` (500).
+`MIKROTIK_SETUP_CONFLICT` (409), `MIKROTIK_SETUP_IN_PROGRESS` (409), `MIKROTIK_SETUP_FAILED` (502), `MIKROTIK_SETUP_STATE_NOT_SAVED` (500), `RATE_LIMITED` (429), `INTERNAL_ERROR` (500).
 
 ## Tidak termasuk Fase 1
 

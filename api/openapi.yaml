@@ -10213,6 +10213,11 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/MikrotikCreateRouterRequest'}
       responses:
+        '429':
+          description: "RATE_LIMITED (maksimal 20 panggilan per menit per organization untuk route yang menghubungi router: POST /routers, PATCH, /check, /setup/*)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '201':
           description: "Created"
           content:
@@ -10300,6 +10305,11 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/MikrotikUpdateRouterRequest'}
       responses:
+        '429':
+          description: "RATE_LIMITED (maksimal 20 panggilan per menit per organization untuk route yang menghubungi router: POST /routers, PATCH, /check, /setup/*)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '200':
           description: "Success"
           content:
@@ -10384,6 +10394,11 @@ paths:
         required: true
         schema: {type: string, format: uuid}
       responses:
+        '429':
+          description: "RATE_LIMITED (maksimal 20 panggilan per menit per organization untuk route yang menghubungi router: POST /routers, PATCH, /check, /setup/*)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '200':
           description: "Success"
           content:
@@ -10437,6 +10452,11 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/MikrotikSetupRequest'}
       responses:
+        '429':
+          description: "RATE_LIMITED (maksimal 20 panggilan per menit per organization untuk route yang menghubungi router: POST /routers, PATCH, /check, /setup/*)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '200':
           description: "Success"
           content:
@@ -10500,6 +10520,11 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/MikrotikApplySetupRequest'}
       responses:
+        '429':
+          description: "RATE_LIMITED (maksimal 20 panggilan per menit per organization untuk route yang menghubungi router: POST /routers, PATCH, /check, /setup/*)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '200':
           description: "Success"
           content:
@@ -10558,6 +10583,11 @@ paths:
         required: true
         schema: {type: string, format: uuid}
       responses:
+        '429':
+          description: "RATE_LIMITED (maksimal 20 panggilan per menit per organization untuk route yang menghubungi router: POST /routers, PATCH, /check, /setup/*)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '200':
           description: "Success"
           content:

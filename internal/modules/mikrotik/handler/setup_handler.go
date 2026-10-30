@@ -27,9 +27,10 @@ type SetupHandler struct {
 func NewSetupHandler(svc SetupService) *SetupHandler { return &SetupHandler{svc: svc} }
 
 // RegisterRoutes mounts the setup routes under /routers/:id/setup. All of them
-// require mikrotik_router.setup.
-func (h *SetupHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker) {
-	group := router.Group("/routers/:id/setup", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.setup"))
+// require mikrotik_router.setup; probeLimit (may be nil) runs before that
+// permission check because every setup call logs in to the tenant's router.
+func (h *SetupHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker, probeLimit gin.HandlerFunc) {
+	group := router.Group("/routers/:id/setup", orPass(probeLimit), permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.setup"))
 	group.POST("/preview", h.Preview)
 	group.POST("/apply", h.Apply)
 	group.POST("/cleanup", h.Cleanup)

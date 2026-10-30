@@ -45,7 +45,7 @@ func (f *fakeSetupService) Cleanup(context.Context, coretenant.Scope, string, st
 
 func setupRouterFor(t *testing.T, svc SetupService) *gin.Engine {
 	r := newTestRouter(t)
-	NewSetupHandler(svc).RegisterRoutes(r.Group("/app/mikrotik"), nil)
+	NewSetupHandler(svc).RegisterRoutes(r.Group("/app/mikrotik"), nil, nil)
 	return r
 }
 
@@ -167,7 +167,7 @@ func realSetupEngine(t *testing.T, client *pmk.FakeClient) *gin.Engine {
 	rs := service.NewRouterService(repo, fixedFactory{client}, secret, []netip.Prefix{netip.MustParsePrefix("10.8.0.0/24")})
 	r := newTestRouter(t)
 	r.Use(func(c *gin.Context) { permissionmiddleware.SetUserID(c, "user-1") })
-	NewSetupHandler(service.NewSetupService(rs, repo, noopLocker{})).RegisterRoutes(r.Group("/app/mikrotik"), nil)
+	NewSetupHandler(service.NewSetupService(rs, repo, noopLocker{})).RegisterRoutes(r.Group("/app/mikrotik"), nil, nil)
 	return r
 }
 
@@ -236,7 +236,7 @@ func TestSetupRoutesRequireSetupPermission(t *testing.T) {
 		{http.MethodPost, "/app/mikrotik/routers/:id/setup/cleanup"},
 	}
 	engine := newTestRouter(t)
-	NewSetupHandler(&fakeSetupService{}).RegisterRoutes(engine.Group("/app/mikrotik"), nil)
+	NewSetupHandler(&fakeSetupService{}).RegisterRoutes(engine.Group("/app/mikrotik"), nil, nil)
 	registered := map[string]bool{}
 	for _, ri := range engine.Routes() {
 		registered[ri.Method+" "+ri.Path] = true
@@ -251,7 +251,7 @@ func TestSetupRoutesRequireSetupPermission(t *testing.T) {
 		checker := &recordingChecker{}
 		r := newTestRouter(t)
 		r.Use(func(c *gin.Context) { permissionmiddleware.SetUserID(c, "user-1") })
-		NewSetupHandler(&fakeSetupService{}).RegisterRoutes(r.Group("/app/mikrotik"), checker)
+		NewSetupHandler(&fakeSetupService{}).RegisterRoutes(r.Group("/app/mikrotik"), checker, nil)
 		w := performJSON(r, rt.method, strings.ReplaceAll(rt.path, ":id", setupRouterID), `{}`)
 		if w.Code != http.StatusForbidden {
 			t.Errorf("%s: status = %d, want 403", rt.path, w.Code)

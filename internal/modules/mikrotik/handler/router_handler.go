@@ -38,16 +38,27 @@ func NewRouterHandler(svc RouterService) *RouterHandler {
 }
 
 // RegisterRoutes registers router routes under the given parent group, which
-// carries the tenant and mikrotik.enabled entitlement guards.
-func (h *RouterHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker) {
+// carries the tenant and mikrotik.enabled entitlement guards. probeLimit (may
+// be nil) runs before the permission check on every route that logs in to the
+// tenant's router (create, update, check); list/get/delete are not limited.
+func (h *RouterHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker, probeLimit gin.HandlerFunc) {
 	group := router.Group("/routers")
+	limit := orPass(probeLimit)
 
 	group.GET("", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.read"), h.List)
-	group.POST("", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.create"), h.Create)
+	group.POST("", limit, permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.create"), h.Create)
 	group.GET("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.read"), h.Get)
-	group.PATCH("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.update"), h.Update)
+	group.PATCH("/:id", limit, permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.update"), h.Update)
 	group.DELETE("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.delete"), h.Delete)
-	group.POST("/:id/check", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.update"), h.Check)
+	group.POST("/:id/check", limit, permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.update"), h.Check)
+}
+
+// orPass returns mw, or a no-op middleware when mw is nil.
+func orPass(mw gin.HandlerFunc) gin.HandlerFunc {
+	if mw == nil {
+		return func(c *gin.Context) { c.Next() }
+	}
+	return mw
 }
 
 func scopeOrFail(c *gin.Context) (coretenant.Scope, bool) {

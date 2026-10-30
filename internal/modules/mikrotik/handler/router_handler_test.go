@@ -56,7 +56,7 @@ func sampleRouter() domain.Router {
 
 func routerFor(t *testing.T, svc RouterService) *gin.Engine {
 	r := newTestRouter(t)
-	NewRouterHandler(svc).RegisterRoutes(r.Group("/app/mikrotik"), nil)
+	NewRouterHandler(svc).RegisterRoutes(r.Group("/app/mikrotik"), nil, nil)
 	return r
 }
 
@@ -238,7 +238,7 @@ func TestRoutesRequirePermissions(t *testing.T) {
 	}
 
 	engine := newTestRouter(t)
-	NewRouterHandler(&fakeService{}).RegisterRoutes(engine.Group("/app/mikrotik"), nil)
+	NewRouterHandler(&fakeService{}).RegisterRoutes(engine.Group("/app/mikrotik"), nil, nil)
 	registered := map[string]bool{}
 	for _, ri := range engine.Routes() {
 		registered[ri.Method+" "+ri.Path] = true
@@ -258,7 +258,7 @@ func TestRoutesRequirePermissions(t *testing.T) {
 		checker := &recordingChecker{}
 		r := newTestRouter(t)
 		r.Use(func(c *gin.Context) { permissionmiddleware.SetUserID(c, "user-1") })
-		NewRouterHandler(&fakeService{}).RegisterRoutes(r.Group("/app/mikrotik"), checker)
+		NewRouterHandler(&fakeService{}).RegisterRoutes(r.Group("/app/mikrotik"), checker, nil)
 		path := strings.ReplaceAll(rt.path, ":id", "33333333-3333-3333-3333-333333333333")
 		w := performJSON(r, rt.method, path, `{}`)
 		if w.Code != http.StatusForbidden {
