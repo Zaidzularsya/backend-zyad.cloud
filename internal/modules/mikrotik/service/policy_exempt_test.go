@@ -12,8 +12,10 @@ import (
 )
 
 type fakePolicyRepo struct {
-	rows  map[string]domain.CustomerPolicy
-	calls int
+	rows     map[string]domain.CustomerPolicy
+	calls    int
+	triggers map[string]domain.ProductTrigger
+	trCalls  int
 }
 
 func (f *fakePolicyRepo) UpsertCustomerPolicy(_ context.Context, scope coretenant.Scope, accountID string, exempt bool, reason, by string) (domain.CustomerPolicy, error) {
@@ -46,7 +48,7 @@ func newPolicyEnv(t *testing.T) *policyEnv {
 	t.Helper()
 	e := &policyEnv{repo: &fakePolicyRepo{}, rrepo: &fakeRepo{}, scope: testScope(t)}
 	accounts := fakeAccounts{known: map[string]AccountRef{"acct-1": {ID: "acct-1", Name: "Alice"}}}
-	e.svc = NewPolicyService(e.repo, accounts, e.rrepo, func(_ context.Context, _ coretenant.Scope, id string) { e.changed = append(e.changed, id) })
+	e.svc = NewPolicyService(PolicyDeps{Repo: e.repo, Accounts: accounts, Audit: e.rrepo, OnChange: func(_ context.Context, _ coretenant.Scope, id string) { e.changed = append(e.changed, id) }})
 	return e
 }
 
@@ -141,7 +143,7 @@ func TestSetExempt_CallsOnChange(t *testing.T) {
 		t.Fatalf("changed = %v", e.changed)
 	}
 	// nil onChange is a no-op.
-	svc := NewPolicyService(e.repo, fakeAccounts{known: map[string]AccountRef{"acct-1": {ID: "acct-1"}}}, e.rrepo, nil)
+	svc := NewPolicyService(PolicyDeps{Repo: e.repo, Accounts: fakeAccounts{known: map[string]AccountRef{"acct-1": {ID: "acct-1"}}}, Audit: e.rrepo})
 	if _, err := svc.SetExempt(context.Background(), e.scope, "acct-1", false, "", testActor); err != nil {
 		t.Fatal(err)
 	}
