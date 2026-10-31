@@ -53,3 +53,13 @@ type TaskView struct {
 	AccountID   string
 	AccountName string
 }
+
+// Enqueue cooldowns after a failed task: while the latest failed task of the
+// same secret and action finished less than this long ago, Enqueue* refuses to
+// queue a new one. Without it the reconciler would re-create a task that fails
+// for the same permanent reason (and alerts the tenant) on every tick. A manual
+// Retry of the failed task is not affected.
+const (
+	IsolateFailCooldown = time.Hour
+	RestoreFailCooldown = 15 * time.Minute
+)

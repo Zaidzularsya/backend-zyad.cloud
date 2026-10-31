@@ -34,13 +34,18 @@ type TaskRepository interface {
 	// EnqueueIsolate queues an isolate for an eligible secret (paired, present,
 	// original profile known, normal state, router isolir_ready and not deleted)
 	// and cancels a pending restore for it. enqueued=false (no error) means the
-	// secret is not eligible OR an active task (e.g. a running opposite action)
-	// already exists; callers must re-evaluate after the active task finishes.
+	// secret is not eligible, an active task (e.g. a running opposite action)
+	// already exists (callers must re-evaluate after it finishes), OR the
+	// secret is in the enqueue cooldown: an isolate task of it failed less than
+	// domain.IsolateFailCooldown ago. The cooldown keeps the reconciler from
+	// re-creating (and re-alerting) a permanently failing task every tick; a
+	// manual Retry of the failed task is not affected.
 	EnqueueIsolate(ctx context.Context, scope coretenant.Scope, secretID, event string) (bool, error)
 	// EnqueueRestore queues a restore for an isolated secret and cancels a
 	// pending isolate. It does not require the router to be isolir_ready.
-	// enqueued=false has the same ambiguity as EnqueueIsolate: not eligible or an
-	// active task (e.g. a running isolate, which is left untouched) exists.
+	// enqueued=false has the same ambiguity as EnqueueIsolate: not eligible, an
+	// active task (e.g. a running isolate, which is left untouched) exists, or
+	// in cooldown (a restore failed less than domain.RestoreFailCooldown ago).
 	EnqueueRestore(ctx context.Context, scope coretenant.Scope, secretID, event string) (bool, error)
 	// ClaimBatch leases up to limit due tasks (pending and due, or running with
 	// an expired lease), restores first. Safe under concurrent callers. Reclaiming
@@ -100,7 +105,14 @@ const (
 	restoreEligible = `s.organization_id = $1 AND s.id = $2 AND s.isolation_state = 'isolated'`
 )
 
-func (r *taskRepository) enqueue(ctx context.Context, scope coretenant.Scope, secretID, event, action string, priority int, eligible, cancelAction string) (bool, error) {
+// notInFailCooldown ($3 = action, $6 = cooldown seconds) refuses a new task
+// while the latest failed task of the same secret and action is recent. It
+// applies only to the INSERT: the opposite pending task is still cancelled.
+const notInFailCooldown = `NOT EXISTS (SELECT 1 FROM mikrotik_isolation_tasks f
+		WHERE f.organization_id = s.organization_id AND f.secret_id = s.id AND f.action = $3::text
+		  AND f.status = 'failed' AND f.finished_at > now() - $6 * interval '1 second')`
+
+func (r *taskRepository) enqueue(ctx context.Context, scope coretenant.Scope, secretID, event, action string, priority int, eligible, cancelAction string, cooldown time.Duration) (bool, error) {
 	var enqueued bool
 	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `
@@ -113,12 +125,12 @@ func (r *taskRepository) enqueue(ctx context.Context, scope coretenant.Scope, se
 		}
 		tag, err := tx.Exec(ctx, `
 			INSERT INTO mikrotik_isolation_tasks (organization_id, secret_id, action, priority, created_by_event)
-			SELECT s.organization_id, s.id, $3, $4, $5
+			SELECT s.organization_id, s.id, $3::text, $4, $5
 			FROM mikrotik_ppp_secrets s
-			WHERE `+eligible+`
+			WHERE `+eligible+` AND `+notInFailCooldown+`
 			FOR UPDATE OF s
 			ON CONFLICT DO NOTHING`,
-			scope.OrganizationID(), secretID, action, priority, event)
+			scope.OrganizationID(), secretID, action, priority, event, int64(cooldown/time.Second))
 		if err != nil {
 			return err
 		}
@@ -129,11 +141,11 @@ func (r *taskRepository) enqueue(ctx context.Context, scope coretenant.Scope, se
 }
 
 func (r *taskRepository) EnqueueIsolate(ctx context.Context, scope coretenant.Scope, secretID, event string) (bool, error) {
-	return r.enqueue(ctx, scope, secretID, event, domain.ActionIsolate, domain.PriorityIsolate, isolateEligible, domain.ActionRestore)
+	return r.enqueue(ctx, scope, secretID, event, domain.ActionIsolate, domain.PriorityIsolate, isolateEligible, domain.ActionRestore, domain.IsolateFailCooldown)
 }
 
 func (r *taskRepository) EnqueueRestore(ctx context.Context, scope coretenant.Scope, secretID, event string) (bool, error) {
-	return r.enqueue(ctx, scope, secretID, event, domain.ActionRestore, domain.PriorityRestore, restoreEligible, domain.ActionIsolate)
+	return r.enqueue(ctx, scope, secretID, event, domain.ActionRestore, domain.PriorityRestore, restoreEligible, domain.ActionIsolate, domain.RestoreFailCooldown)
 }
 
 func (r *taskRepository) ClaimBatch(ctx context.Context, scope coretenant.Scope, limit int, now time.Time, lease time.Duration) ([]domain.IsolationTask, error) {
