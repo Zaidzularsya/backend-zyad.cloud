@@ -100,9 +100,13 @@ func TestIsolate_NoKnownOriginal_RestoreTargetInvalid(t *testing.T) {
 		t.Fatal(err) // router profile is the source
 	}
 	x.secret.Name = "alice"
+	before := x.e.client.WriteCalls()
 	_, err := x.ex.Isolate(context.Background(), x.e.scope, x.secret) // now on isolir, nothing recorded
 	if !errors.Is(err, mikrotik.ErrRestoreTargetInvalid) {
 		t.Fatalf("err = %v", err)
+	}
+	if x.e.client.WriteCalls() != before {
+		t.Fatal("must not write")
 	}
 }
 
@@ -127,12 +131,32 @@ func TestIsolate_RouterNotReady_Permanent(t *testing.T) {
 	}
 }
 
+// noopSetClient acknowledges Set without writing, modelling a router that
+// accepts the command but does not apply the change.
+type noopSetClient struct{ *pmk.FakeClient }
+
+func (noopSetClient) Set(context.Context, string, string, pmk.Row) error { return nil }
+
+type noopSetFactory struct {
+	*fakeFactory
+	c pmk.RouterClient
+}
+
+func (f noopSetFactory) New(string, pmk.Endpoint) (pmk.RouterClient, error) { return f.c, nil }
+
 func TestIsolate_ConfirmMismatch_Transient(t *testing.T) {
-	// A router that still reports the old profile on re-read must yield a
-	// transient error, so the DB is not flipped.
-	err := confirmProfile(context.Background(), staleClient(), "alice", isolirProfile, nil)
+	x := newExecEnv(t, true)
+	// Rebuild the RouterService factory so the executor dials the wrapper.
+	x.e.routers.factory = noopSetFactory{fakeFactory: &fakeFactory{client: x.e.client}, c: noopSetClient{x.e.client}}
+	orig, err := x.ex.Isolate(context.Background(), x.e.scope, x.secret)
 	if !errors.Is(err, mikrotik.ErrUnreachable) || Classify(err).Kind != FailTransient {
 		t.Fatalf("err = %v", err)
+	}
+	if orig != "" {
+		t.Fatalf("original = %q, want empty on failure", orig)
+	}
+	if x.profile("alice") != "paket-10m" {
+		t.Fatal("router profile should be untouched")
 	}
 }
 
@@ -145,7 +169,11 @@ func staleClient() pmk.RouterClient {
 func TestRestore_ProfileMissingOnRouter_Permanent(t *testing.T) {
 	x := newExecEnv(t, true)
 	x.secret.OriginalProfile = "gone"
+	before := x.e.client.WriteCalls()
 	err := x.ex.Restore(context.Background(), x.e.scope, x.secret)
+	if x.e.client.WriteCalls() != before || x.active("alice") != 1 {
+		t.Fatal("must not set or drop sessions")
+	}
 	if !errors.Is(err, mikrotik.ErrRestoreProfileMissing) || Classify(err).Kind != FailPermanent {
 		t.Fatalf("err = %v", err)
 	}
@@ -155,8 +183,12 @@ func TestRestore_RefusesIsolirProfileAsTarget(t *testing.T) {
 	x := newExecEnv(t, true)
 	for _, p := range []string{isolirProfile, ""} {
 		x.secret.OriginalProfile = p
+		before := x.e.client.WriteCalls()
 		if err := x.ex.Restore(context.Background(), x.e.scope, x.secret); !errors.Is(err, mikrotik.ErrRestoreTargetInvalid) {
 			t.Fatalf("target %q: err = %v", p, err)
+		}
+		if x.e.client.WriteCalls() != before || x.active("alice") != 1 {
+			t.Fatalf("target %q: must not write", p)
 		}
 	}
 }

@@ -17,6 +17,7 @@ func TestNextAttempt_BackoffTables(t *testing.T) {
 		delay    time.Duration
 		done     bool
 	}{
+		{ActionRestore, 0, 30 * time.Second, false}, {ActionIsolate, -1, time.Minute, false},
 		{ActionRestore, 1, 30 * time.Second, false}, {ActionRestore, 2, time.Minute, false},
 		{ActionRestore, 3, 2 * time.Minute, false}, {ActionRestore, 4, 5 * time.Minute, false},
 		{ActionRestore, 5, 15 * time.Minute, false}, {ActionRestore, 6, 15 * time.Minute, false},
