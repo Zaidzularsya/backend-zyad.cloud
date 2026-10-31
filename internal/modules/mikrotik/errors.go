@@ -108,6 +108,8 @@ var (
 	ErrAccountNotFound = errors.New("account not found")
 	// ErrProductNotFound: the product does not exist in this organization.
 	ErrProductNotFound = errors.New("product not found")
+	// ErrSecretNotFound: the PPP secret does not exist in this organization.
+	ErrSecretNotFound = errors.New("ppp secret not found")
 	// ErrSecretNotPairable: the PPP secret cannot be paired to a customer yet.
 	ErrSecretNotPairable = errors.New("ppp secret cannot be paired")
 )
