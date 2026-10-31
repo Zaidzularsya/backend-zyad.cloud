@@ -101,3 +101,13 @@ type InvalidInputError struct {
 func (e *InvalidInputError) Error() string { return e.Message }
 
 func (e *InvalidInputError) Is(target error) bool { return target == ErrInvalidInput }
+
+// Fase 2: pemetaan PPP secret ke pelanggan.
+var (
+	// ErrAccountNotFound: the receivable account does not exist in this organization.
+	ErrAccountNotFound = errors.New("account not found")
+	// ErrProductNotFound: the product does not exist in this organization.
+	ErrProductNotFound = errors.New("product not found")
+	// ErrSecretNotPairable: the PPP secret cannot be paired to a customer yet.
+	ErrSecretNotPairable = errors.New("ppp secret cannot be paired")
+)
