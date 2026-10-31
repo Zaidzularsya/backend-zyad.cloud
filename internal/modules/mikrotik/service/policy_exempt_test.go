@@ -108,7 +108,7 @@ func TestSetExempt_WritesAudit(t *testing.T) {
 		t.Fatalf("audits = %d", len(e.rrepo.audits))
 	}
 	a := e.rrepo.audits[0]
-	if a.Event != "customer_exempt_set" || a.ActorUserID != testActor || a.TargetID != "acct-1" {
+	if a.Event != "customer_policy.exempt_set" || a.ActorUserID != testActor || a.TargetID != "acct-1" {
 		t.Fatalf("audit = %+v", a)
 	}
 	m := a.Metadata

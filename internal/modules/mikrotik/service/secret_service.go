@@ -87,10 +87,10 @@ func (s *SecretService) Import(ctx context.Context, scope coretenant.Scope, rout
 
 	// The import is already committed; a failed audit row must not turn it into an error.
 	if err := s.audit.InsertAudit(ctx, scope, repository.AuditEntry{
-		Event: "mikrotik.secrets_imported", ActorUserID: actorUserID, TargetID: routerID,
+		Event: "secret.imported", ActorUserID: actorUserID, TargetID: routerID,
 		Metadata: map[string]any{"target": "secret", "created": res.Created, "updated": res.Updated, "missing": res.Missing},
 	}); err != nil {
-		slog.Warn("mikrotik: audit insert failed", "router_id", routerID, "event", "mikrotik.secrets_imported", "error", scrub(err.Error(), secrets...))
+		slog.Warn("mikrotik: audit insert failed", "router_id", routerID, "event", "secret.imported", "error", scrub(err.Error(), secrets...))
 	}
 	return res, nil
 }
@@ -171,7 +171,7 @@ func (s *SecretService) commitPair(ctx context.Context, scope coretenant.Scope, 
 	if err := s.repo.Pair(ctx, scope, secret.ID, accountID, actor); err != nil {
 		return domain.PPPSecret{}, err
 	}
-	s.auditSecret(ctx, scope, "secret_paired", secret, accountID, actor)
+	s.auditSecret(ctx, scope, "secret.paired", secret, accountID, actor)
 	return s.repo.FindByID(ctx, scope, secret.ID)
 }
 
@@ -189,7 +189,7 @@ func (s *SecretService) Unpair(ctx context.Context, scope coretenant.Scope, secr
 	if secret.AccountID != nil {
 		accountID = *secret.AccountID
 	}
-	s.auditSecret(ctx, scope, "secret_unpaired", secret, accountID, actor)
+	s.auditSecret(ctx, scope, "secret.unpaired", secret, accountID, actor)
 	return nil
 }
 
@@ -228,7 +228,7 @@ func (s *SecretService) SetOriginalProfile(ctx context.Context, scope coretenant
 	if err := s.repo.SetOriginalProfile(ctx, scope, secretID, profile); err != nil {
 		return err
 	}
-	s.auditSecret(ctx, scope, "secret_original_profile_set", secret, "", actor)
+	s.auditSecret(ctx, scope, "secret.original_profile_set", secret, "", actor)
 	return nil
 }
 

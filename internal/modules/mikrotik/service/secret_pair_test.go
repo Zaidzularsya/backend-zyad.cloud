@@ -79,7 +79,7 @@ func TestPair_Success(t *testing.T) {
 		t.Fatalf("secret = %+v", got)
 	}
 	ev, meta := e.lastAudit(t)
-	if ev != "secret_paired" || meta["target"] != "secret" || meta["secret_id"] != id || meta["account_id"] != "acct-1" {
+	if ev != "secret.paired" || meta["target"] != "secret" || meta["secret_id"] != id || meta["account_id"] != "acct-1" {
 		t.Fatalf("audit = %s %+v", ev, meta)
 	}
 }
@@ -168,7 +168,7 @@ func TestPairNewCustomer_CreatesContactAndAccount(t *testing.T) {
 	if got.AccountID == nil || *got.AccountID != "acct-new" {
 		t.Fatalf("secret = %+v", got)
 	}
-	if ev, meta := e.lastAudit(t); ev != "secret_paired" || meta["account_id"] != "acct-new" {
+	if ev, meta := e.lastAudit(t); ev != "secret.paired" || meta["account_id"] != "acct-new" {
 		t.Fatalf("audit = %s %+v", ev, meta)
 	}
 }
@@ -212,7 +212,7 @@ func TestUnpair_Success(t *testing.T) {
 	if e.srepo.byID(id).AccountID != nil {
 		t.Fatal("still paired")
 	}
-	if ev, meta := e.lastAudit(t); ev != "secret_unpaired" || meta["secret_id"] != id || meta["account_id"] != "acct-1" {
+	if ev, meta := e.lastAudit(t); ev != "secret.unpaired" || meta["secret_id"] != id || meta["account_id"] != "acct-1" {
 		t.Fatalf("audit = %s %+v", ev, meta)
 	}
 }
@@ -255,7 +255,7 @@ func TestSetOriginalProfile_RejectsIsolirProfileAndUnknownProfile(t *testing.T) 
 	if got.OriginalProfile != "paket-10m" || got.NeedsOriginalProfile {
 		t.Fatalf("secret = %+v", got)
 	}
-	if ev, meta := e.lastAudit(t); ev != "secret_original_profile_set" || meta["secret_id"] != id {
+	if ev, meta := e.lastAudit(t); ev != "secret.original_profile_set" || meta["secret_id"] != id {
 		t.Fatalf("audit = %s %+v", ev, meta)
 	}
 	// Now pairable.

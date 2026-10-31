@@ -200,7 +200,7 @@ func TestImport_CreatesSecrets(t *testing.T) {
 		t.Fatalf("audits = %+v", e.rrepo.audits)
 	}
 	last := e.rrepo.audits[len(e.rrepo.audits)-1]
-	if last.Event != "mikrotik.secrets_imported" || last.TargetID != e.router.ID || last.Metadata["target"] != "secret" || last.ActorUserID != testActor {
+	if last.Event != "secret.imported" || last.TargetID != e.router.ID || last.Metadata["target"] != "secret" || last.ActorUserID != testActor {
 		t.Fatalf("audit = %+v", last)
 	}
 	for k, v := range last.Metadata {

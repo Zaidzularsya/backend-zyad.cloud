@@ -45,10 +45,10 @@ func (s *PolicyService) SetExempt(ctx context.Context, scope coretenant.Scope, a
 	}
 	// The write is committed; a failed audit row must not fail it.
 	if err := s.audit.InsertAudit(ctx, scope, repository.AuditEntry{
-		Event: "customer_exempt_set", ActorUserID: actor, TargetID: accountID,
+		Event: "customer_policy.exempt_set", ActorUserID: actor, TargetID: accountID,
 		Metadata: map[string]any{"target": "customer_policy", "account_id": accountID, "exempt": exempt, "reason": reason},
 	}); err != nil {
-		slog.Warn("mikrotik: audit insert failed", "account_id", accountID, "event", "customer_exempt_set", "error", scrub(err.Error()))
+		slog.Warn("mikrotik: audit insert failed", "account_id", accountID, "event", "customer_policy.exempt_set", "error", scrub(err.Error()))
 	}
 	if s.onChange != nil {
 		s.onChange(ctx, scope, accountID)
