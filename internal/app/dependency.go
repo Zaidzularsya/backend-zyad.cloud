@@ -95,6 +95,8 @@ type Dependencies struct {
 	ReceivableAccountHandler         *receivablehandler.AccountHandler
 	MikrotikRouterHandler            *mikrotikhandler.RouterHandler
 	MikrotikSetupHandler             *mikrotikhandler.SetupHandler
+	MikrotikSecretHandler            *mikrotikhandler.SecretHandler
+	MikrotikPolicyHandler            *mikrotikhandler.PolicyHandler
 	// MikrotikRateCounter backs the per-organization limit on router-contacting
 	// mikrotik routes; nil disables it (fail open).
 	MikrotikRateCounter              middleware.RateCounter

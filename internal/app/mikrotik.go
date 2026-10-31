@@ -66,4 +66,10 @@ func registerMikrotikRoutes(protected *gin.RouterGroup, deps Dependencies) {
 	if deps.MikrotikSetupHandler != nil {
 		deps.MikrotikSetupHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
 	}
+	if deps.MikrotikSecretHandler != nil {
+		deps.MikrotikSecretHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
+	}
+	if deps.MikrotikPolicyHandler != nil {
+		deps.MikrotikPolicyHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
+	}
 }

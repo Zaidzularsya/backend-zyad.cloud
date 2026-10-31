@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/mikrotik"
@@ -242,4 +243,27 @@ func (s *SecretService) auditSecret(ctx context.Context, scope coretenant.Scope,
 	if err := s.audit.InsertAudit(ctx, scope, repository.AuditEntry{Event: event, ActorUserID: actor, TargetID: secret.ID, Metadata: meta}); err != nil {
 		slog.Warn("mikrotik: audit insert failed", "secret_id", secret.ID, "event", event, "error", scrub(err.Error()))
 	}
+}
+
+// List returns the cached secrets of the organization, one page at a time.
+func (s *SecretService) List(ctx context.Context, scope coretenant.Scope, filter repository.SecretFilter, limit, offset int) ([]domain.PPPSecret, int64, error) {
+	return s.repo.List(ctx, scope, filter, limit, offset)
+}
+
+const (
+	minAccountSearchRunes = 2
+	maxAccountSearchLimit = 20
+)
+
+// SearchAccounts feeds the customer picker. The limit is clamped to 1..20 so a
+// caller cannot ask the directory for an unbounded page.
+func (s *SecretService) SearchAccounts(ctx context.Context, scope coretenant.Scope, q string, limit int) ([]AccountRef, error) {
+	q = strings.TrimSpace(q)
+	if utf8.RuneCountInString(q) < minAccountSearchRunes {
+		return nil, invalid("search query must be at least 2 characters")
+	}
+	if limit < 1 || limit > maxAccountSearchLimit {
+		limit = maxAccountSearchLimit
+	}
+	return s.accounts.Search(ctx, scope, q, limit)
 }

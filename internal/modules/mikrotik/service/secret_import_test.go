@@ -24,6 +24,9 @@ type fakeSecretRepo struct {
 	seq  int
 
 	pairCalls int
+
+	listFilter            repository.SecretFilter
+	listLimit, listOffset int
 }
 
 func newFakeSecretRepo() *fakeSecretRepo {
@@ -71,7 +74,8 @@ func (f *fakeSecretRepo) FindByID(_ context.Context, scope coretenant.Scope, id 
 	return domain.PPPSecret{}, mikrotik.ErrSecretNotFound
 }
 
-func (f *fakeSecretRepo) List(context.Context, coretenant.Scope, repository.SecretFilter, int, int) ([]domain.PPPSecret, int64, error) {
+func (f *fakeSecretRepo) List(_ context.Context, _ coretenant.Scope, filter repository.SecretFilter, limit, offset int) ([]domain.PPPSecret, int64, error) {
+	f.listFilter, f.listLimit, f.listOffset = filter, limit, offset
 	return nil, 0, nil
 }
 
