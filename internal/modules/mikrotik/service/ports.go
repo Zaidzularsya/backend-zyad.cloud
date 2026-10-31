@@ -5,6 +5,7 @@ import (
 	"time"
 
 	coretenant "zyad.cloud/internal/core/tenant"
+	"zyad.cloud/internal/modules/mikrotik/domain"
 )
 
 // AccountRef is the minimal customer account view the mikrotik module needs.
@@ -65,3 +66,31 @@ type OverdueSource interface {
 	// mikrotik.ErrAccountNotFound when the invoice is not owned by the organization.
 	AccountOfInvoice(ctx context.Context, scope coretenant.Scope, invoiceID string) (string, error)
 }
+
+// RouterReader loads one router of the organization; satisfied by *RouterService.
+type RouterReader interface {
+	// Get returns mikrotik.ErrRouterNotFound when absent (or deleted).
+	Get(ctx context.Context, scope coretenant.Scope, id string) (domain.Router, error)
+}
+
+// RouterLocker serialises router work across workers and instances; satisfied
+// by *repository.AdvisoryLocker. ok=false means another holder has the key.
+type RouterLocker interface {
+	TryLock(ctx context.Context, key string) (func(), bool, error)
+}
+
+// CustomerNotifier tells the customer about an isolate/restore. Failures are
+// only logged by the caller: they never undo or fail the router change.
+type CustomerNotifier interface {
+	NotifyIsolated(ctx context.Context, scope coretenant.Scope, accountID string, invoices []TriggerInvoice) error
+	NotifyRestored(ctx context.Context, scope coretenant.Scope, accountID string) error
+}
+
+// TenantAlerter tells the tenant that an isolation task keeps failing.
+type TenantAlerter interface {
+	NotifyTaskFailed(ctx context.Context, scope coretenant.Scope, e TaskFailureEvent) error
+}
+
+// TaskFailureEvent is the tenant-facing description of a failing task. Reason
+// is TaskFailure.Message (fixed, credential-free text).
+type TaskFailureEvent struct{ TaskID, RouterName, SecretName, Action, Reason string }

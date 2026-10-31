@@ -428,7 +428,14 @@ func (f *fakeSecretRepo) MarkAbsent(_ context.Context, _ coretenant.Scope, id st
 }
 
 func (f *fakeSecretRepo) ListByAccount(_ context.Context, _ coretenant.Scope, accountID string) ([]domain.PPPSecret, error) {
-	return nil, nil
+	var out []domain.PPPSecret
+	for _, r := range f.rows {
+		if r.AccountID != nil && *r.AccountID == accountID {
+			out = append(out, *r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
 }
 
 func (f *fakeSecretRepo) AccountsWithIsolatedSecrets(_ context.Context, _ coretenant.Scope) ([]string, error) {
