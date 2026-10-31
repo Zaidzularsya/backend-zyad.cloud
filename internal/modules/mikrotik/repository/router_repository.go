@@ -72,6 +72,9 @@ type RouterRepository interface {
 	// MarkSetup stores the isolir setup result; isolir_ready_at is set only when ready is true.
 	MarkSetup(ctx context.Context, scope coretenant.Scope, id string, ready bool, profile, redirectURL string) error
 	SoftDelete(ctx context.Context, scope coretenant.Scope, id string, by string) error
+	// HasReadyRouter reports whether the organization has at least one
+	// non-deleted router with isolir_ready = true.
+	HasReadyRouter(ctx context.Context, scope coretenant.Scope) (bool, error)
 	InsertAudit(ctx context.Context, scope coretenant.Scope, entry AuditEntry) error
 }
 
@@ -307,6 +310,16 @@ func (r *routerRepository) SoftDelete(ctx context.Context, scope coretenant.Scop
 		SET deleted_at = now(), updated_at = now(), updated_by = COALESCE($1, updated_by)
 		WHERE id = $2 AND organization_id = $3 AND deleted_at IS NULL`,
 		nullableString(by), id, scope.OrganizationID())
+}
+
+func (r *routerRepository) HasReadyRouter(ctx context.Context, scope coretenant.Scope) (bool, error) {
+	var ok bool
+	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT EXISTS (
+			SELECT 1 FROM mikrotik_routers
+			WHERE organization_id = $1 AND isolir_ready AND deleted_at IS NULL)`, scope.OrganizationID()).Scan(&ok)
+	})
+	return ok, err
 }
 
 // execOne runs a single-row UPDATE in a scoped transaction and returns ErrRouterNotFound when no row matched.

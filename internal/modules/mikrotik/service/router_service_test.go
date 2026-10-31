@@ -157,6 +157,15 @@ func (f *fakeRepo) SoftDelete(_ context.Context, _ coretenant.Scope, id, _ strin
 	return nil
 }
 
+func (f *fakeRepo) HasReadyRouter(_ context.Context, scope coretenant.Scope) (bool, error) {
+	for _, r := range f.routers {
+		if r.OrganizationID == scope.OrganizationID() && r.IsolirReady {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (f *fakeRepo) InsertAudit(_ context.Context, _ coretenant.Scope, e repository.AuditEntry) error {
 	if f.auditErr != nil {
 		return f.auditErr

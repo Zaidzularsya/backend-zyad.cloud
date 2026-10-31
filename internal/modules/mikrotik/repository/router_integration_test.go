@@ -238,3 +238,37 @@ func TestInsertAuditPersistsWithOrganization(t *testing.T) {
 		t.Fatalf("unexpected audit row: %s %s %s actorNull=%v", module, targetType, metaOrg, actorNull)
 	}
 }
+
+func TestHasReadyRouter(t *testing.T) {
+	e := setupRouter(t)
+	ready := func(scope coretenant.Scope) bool {
+		t.Helper()
+		ok, err := e.repo.HasReadyRouter(e.ctx, scope)
+		if err != nil {
+			t.Fatalf("has ready router: %v", err)
+		}
+		return ok
+	}
+	if ready(e.tenants.A.Scope) {
+		t.Fatal("no routers: want false")
+	}
+	a := e.create(t, e.tenants.A.Scope, "Core Router")
+	if ready(e.tenants.A.Scope) {
+		t.Fatal("router not ready: want false")
+	}
+	if err := e.repo.MarkSetup(e.ctx, e.tenants.A.Scope, a.ID, true, "isolir", ""); err != nil {
+		t.Fatalf("mark setup: %v", err)
+	}
+	if !ready(e.tenants.A.Scope) {
+		t.Fatal("ready router: want true")
+	}
+	if ready(e.tenants.B.Scope) {
+		t.Fatal("other organization's ready router must not count")
+	}
+	if err := e.repo.SoftDelete(e.ctx, e.tenants.A.Scope, a.ID, ""); err != nil {
+		t.Fatalf("soft delete: %v", err)
+	}
+	if ready(e.tenants.A.Scope) {
+		t.Fatal("deleted router must not count")
+	}
+}
