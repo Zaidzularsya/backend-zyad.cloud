@@ -396,3 +396,41 @@ func TestImport_SkipsOverlongNameOrProfile(t *testing.T) {
 		t.Fatal("overlong rows must not be stored")
 	}
 }
+
+func (f *fakeSecretRepo) MarkIsolated(_ context.Context, _ coretenant.Scope, id, originalProfile string) (bool, error) {
+	r := f.byID(id)
+	if r == nil || r.AccountID == nil || r.IsolationState != domain.IsolationNormal {
+		return false, nil
+	}
+	r.IsolationState = domain.IsolationIsolated
+	if originalProfile != "" {
+		r.OriginalProfile = originalProfile
+	}
+	return true, nil
+}
+
+func (f *fakeSecretRepo) MarkNormal(_ context.Context, _ coretenant.Scope, id string) (bool, error) {
+	r := f.byID(id)
+	if r == nil || r.IsolationState != domain.IsolationIsolated {
+		return false, nil
+	}
+	r.IsolationState = domain.IsolationNormal
+	return true, nil
+}
+
+func (f *fakeSecretRepo) MarkAbsent(_ context.Context, _ coretenant.Scope, id string) error {
+	r := f.byID(id)
+	if r == nil {
+		return mikrotik.ErrSecretNotFound
+	}
+	r.Present = false
+	return nil
+}
+
+func (f *fakeSecretRepo) ListByAccount(_ context.Context, _ coretenant.Scope, accountID string) ([]domain.PPPSecret, error) {
+	return nil, nil
+}
+
+func (f *fakeSecretRepo) AccountsWithIsolatedSecrets(_ context.Context, _ coretenant.Scope) ([]string, error) {
+	return nil, nil
+}

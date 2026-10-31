@@ -62,6 +62,19 @@ type SecretRepository interface {
 	// Unpair clears the link (keeping original_profile). ErrSecretIsolated when
 	// isolation_state is not normal; ErrSecretNotFound when absent.
 	Unpair(ctx context.Context, scope coretenant.Scope, secretID string) error
+	// MarkIsolated flips a paired, normal secret to isolated in one conditional
+	// UPDATE and reports whether a row changed. originalProfile is stored only
+	// when non-empty.
+	MarkIsolated(ctx context.Context, scope coretenant.Scope, id, originalProfile string) (bool, error)
+	// MarkNormal flips an isolated secret back to normal; false when it was not isolated.
+	MarkNormal(ctx context.Context, scope coretenant.Scope, id string) (bool, error)
+	// MarkAbsent sets present=false (the secret was not found on the router).
+	// ErrSecretNotFound when absent in the organization.
+	MarkAbsent(ctx context.Context, scope coretenant.Scope, id string) error
+	ListByAccount(ctx context.Context, scope coretenant.Scope, accountID string) ([]domain.PPPSecret, error)
+	// AccountsWithIsolatedSecrets returns the distinct paired accounts that own
+	// at least one isolated secret.
+	AccountsWithIsolatedSecrets(ctx context.Context, scope coretenant.Scope) ([]string, error)
 }
 
 type secretRepository struct {
@@ -348,4 +361,97 @@ func (r *secretRepository) Unpair(ctx context.Context, scope coretenant.Scope, s
 		}
 		return mikrotik.ErrSecretIsolated
 	})
+}
+
+func (r *secretRepository) MarkIsolated(ctx context.Context, scope coretenant.Scope, id, originalProfile string) (bool, error) {
+	return r.execChanged(ctx, scope, `
+		UPDATE mikrotik_ppp_secrets
+		SET isolation_state = 'isolated',
+		    original_profile = COALESCE(NULLIF($3::text, ''), original_profile),
+		    updated_at = now()
+		WHERE id = $1 AND organization_id = $2 AND account_id IS NOT NULL AND isolation_state = 'normal'`,
+		id, scope.OrganizationID(), originalProfile)
+}
+
+func (r *secretRepository) MarkNormal(ctx context.Context, scope coretenant.Scope, id string) (bool, error) {
+	return r.execChanged(ctx, scope, `
+		UPDATE mikrotik_ppp_secrets
+		SET isolation_state = 'normal', updated_at = now()
+		WHERE id = $1 AND organization_id = $2 AND isolation_state = 'isolated'`,
+		id, scope.OrganizationID())
+}
+
+func (r *secretRepository) MarkAbsent(ctx context.Context, scope coretenant.Scope, id string) error {
+	changed, err := r.execChanged(ctx, scope, `
+		UPDATE mikrotik_ppp_secrets SET present = false, updated_at = now()
+		WHERE id = $1 AND organization_id = $2`, id, scope.OrganizationID())
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return mikrotik.ErrSecretNotFound
+	}
+	return nil
+}
+
+func (r *secretRepository) execChanged(ctx context.Context, scope coretenant.Scope, sql string, args ...interface{}) (bool, error) {
+	var changed bool
+	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, sql, args...)
+		if err != nil {
+			return err
+		}
+		changed = tag.RowsAffected() > 0
+		return nil
+	})
+	return changed, err
+}
+
+func (r *secretRepository) ListByAccount(ctx context.Context, scope coretenant.Scope, accountID string) ([]domain.PPPSecret, error) {
+	items := []domain.PPPSecret{}
+	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT `+secretColumns+` FROM mikrotik_ppp_secrets
+			WHERE organization_id = $1 AND account_id = $2 ORDER BY lower(name), id`, scope.OrganizationID(), accountID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			item, scanErr := scanSecret(rows)
+			if scanErr != nil {
+				return scanErr
+			}
+			items = append(items, item)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (r *secretRepository) AccountsWithIsolatedSecrets(ctx context.Context, scope coretenant.Scope) ([]string, error) {
+	ids := []string{}
+	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT DISTINCT account_id FROM mikrotik_ppp_secrets
+			WHERE organization_id = $1 AND isolation_state = 'isolated' AND account_id IS NOT NULL
+			ORDER BY account_id`, scope.OrganizationID())
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			ids = append(ids, id)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
 }

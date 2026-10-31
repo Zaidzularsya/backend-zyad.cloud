@@ -117,3 +117,11 @@ var (
 	// ErrSecretIsolated: the PPP secret is currently isolated and cannot be unpaired.
 	ErrSecretIsolated = errors.New("ppp secret is isolated")
 )
+
+// Fase 3: mesin isolir.
+var (
+	// ErrTaskNotFound: the isolation task does not exist in this organization.
+	ErrTaskNotFound = errors.New("isolation task not found")
+	// ErrTaskNotRetryable: only a failed isolation task can be retried.
+	ErrTaskNotRetryable = errors.New("isolation task is not in a retryable state")
+)
