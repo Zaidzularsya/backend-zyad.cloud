@@ -397,8 +397,29 @@ persetujuan eksplisit).
   yang sudah bayar tetapi belum dibuka.
 - `GET /api/v1/app/mikrotik/tasks?status=failed` (opsional `router_id`): lihat `last_error_code` dan `last_error`.
 - Tugas `failed` tidak diulang otomatis oleh processor; reconciler (tiap 2 menit) membuat tugas baru bila akun masih
-  perlu aksi. Setelah penyebab diperbaiki, `POST /tasks/{id}/retry` mengulang langsung (reset `attempts`).
+  perlu aksi, tetapi **baru setelah masa jeda**: selama tugas `failed` terakhir untuk secret dan aksi yang sama selesai
+  kurang dari **1 jam** (isolate) atau **15 menit** (restore) yang lalu, tidak ada tugas baru untuk aksi itu (aksi
+  lawannya tidak terhalang). Ini mencegah kegagalan permanen dibuat ulang dan dikirim alert tiap tick. Setelah penyebab
+  diperbaiki, `POST /tasks/{id}/retry` mengulang langsung (reset `attempts`) tanpa menunggu masa jeda.
 - Pemilik organisasi juga menerima notifikasi `mikrotik.isolation_task_failed` (email).
+
+### 14.3a Hal yang perlu diketahui operator
+
+- **Hanya organisasi berstatus aktif yang diproses** worker. Pelanggan terisolir milik organisasi yang disuspend **tidak
+  dibuka otomatis** oleh worker selama organisasi itu tidak aktif; pulihkan manual (14.6) bila perlu.
+- **Entitlement `mikrotik.enabled` dicabut**: seluruh grup UI/API `/app/mikrotik` (termasuk dashboard tugas, retry, dan
+  pengecualian pelanggan) tidak bisa diakses lagi, tetapi worker tetap berjalan restore-only dan **membuka isolir secara
+  otomatis** ketika pelanggan lunas. Tidak ada yang diisolir dalam mode itu.
+- **Router tidak bisa dihapus** (`DELETE /routers/{id}` -> 409 `MIKROTIK_ROUTER_HAS_ISOLATED_SECRETS`) selama masih ada
+  secret terisolir atau tugas `pending`/`running` di router itu. Buka isolir pelanggan dan tunggu tugas selesai dulu.
+- **Unpair ditolak** (409 `MIKROTIK_SECRET_HAS_ACTIVE_TASK`) selama secret punya tugas `pending`/`running`; coba lagi
+  setelah tugas selesai. Unpair secret terisolir tetap ditolak (409 `MIKROTIK_SECRET_ISOLATED`).
+- Mengubah host/kredensial router (`PATCH /routers/{id}`) agar menunjuk ke **perangkat fisik lain** saat masih ada
+  pelanggan terisolir **tidak dicegah**: restore akan dijalankan ke perangkat baru (biasanya gagal `secret_missing`) dan
+  pelanggan tetap terisolir di perangkat lama. Pulihkan dulu, baru pindahkan router. Hal yang sama berlaku untuk setup
+  ulang/cleanup isolir (nama profile isolir dikosongkan saat `isolir_ready` dicabut).
+- **Batas yang diketahui:** satu tenant dengan router lambat/tak terjangkau dapat menunda tenant lain dalam satu tick
+  worker (belum ada anggaran waktu per tick per tenant).
 
 ### 14.4 Tindakan per kode kegagalan
 
@@ -420,8 +441,10 @@ persetujuan eksplisit).
 
 Uji kontrak Executor ke router nyata. Ia membuat secret uji **disabled** `zyad-labtest-user` di profile `default`
 (dibersihkan di `t.Cleanup`), lalu `Isolate` -> `Isolate` lagi (idempoten) -> `Restore`, dan mengecek filter
-`/ppp/active` per nama mengembalikan 0 baris. Subtest `binary` gagal keras; `rest` di-skip bila port REST tidak bisa dipakai.
-Profile isolir harus sudah ada di router (dari setup Fase 1).
+`/ppp/active` per nama mengembalikan 0 baris. Subtest `binary` gagal keras; `rest` hanya di-skip bila request pertama
+gagal terhubung atau mendapat 404 (REST tidak tersedia), kegagalan berikutnya gagal keras. Dengan `MIKROTIK_LAB_WRITE=1`,
+prasyarat yang hilang (profile isolir, profile `default`, atau secret uji sisa dari run sebelumnya) membuat tes **gagal**,
+bukan di-skip. Profile isolir harus sudah ada di router (dari setup Fase 1).
 
 ```
 cd backend

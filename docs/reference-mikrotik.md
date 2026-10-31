@@ -164,6 +164,7 @@ Event ditulis setelah mutasi commit; kegagalan menulis audit hanya di-log dan ti
 
 `MIKROTIK_SECRET_NOT_FOUND` (404), `MIKROTIK_ACCOUNT_NOT_FOUND` (404), `MIKROTIK_PRODUCT_NOT_FOUND` (404),
 `MIKROTIK_SECRET_ALREADY_PAIRED` (409), `MIKROTIK_SECRET_ISOLATED` (409), `MIKROTIK_SECRET_NOT_PAIRABLE` (409),
+`MIKROTIK_SECRET_HAS_ACTIVE_TASK` (409, Fase 3), `MIKROTIK_ROUTER_HAS_ISOLATED_SECRETS` (409, Fase 3, hapus router),
 `QUOTA_EXCEEDED` (409, dari kuota CRM saat `pair-new-customer`).
 
 ### Batas yang diketahui
@@ -225,6 +226,18 @@ tahu saat habis). Satu tugas memberi tahu tenant paling banyak sekali. `secret_m
 Setelah `failed`, tugas tidak dibuat ulang oleh processor; reconciler berikutnya mengevaluasi akun lagi dan membuat tugas
 baru, atau operator memakai `POST /tasks/{id}/retry`.
 
+**Masa jeda enqueue setelah gagal** (`domain.IsolateFailCooldown` 1 jam, `domain.RestoreFailCooldown` 15 menit):
+`EnqueueIsolate`/`EnqueueRestore` tidak membuat tugas baru selama tugas `failed` terakhir untuk secret **dan aksi yang
+sama** selesai kurang dari masa jeda itu (aksi lawan tidak terhalang). Tanpa ini reconciler membuat ulang tugas yang gagal
+permanen setiap tick dan tenant menerima alert tiap kali. `POST /tasks/{id}/retry` tidak terkena masa jeda.
+
+**Isolate parsial.** Bila `isolate` sudah memasang profile isolir di router lalu langkah berikutnya gagal (atau worker mati
+di antara `Set` dan penandaan DB), DB masih `normal`. Sebelum membatalkan tugas `isolate` yang sudah pernah diambil
+(`superseded` atau `entitlement_disabled`), processor membaca profile secret di router (read-only, di bawah kunci router);
+bila profile isolir, DB diselaraskan ke `isolated` (audit `partial=true`) dan evaluasi lanjutan menjadwalkan `restore`.
+Bila pembacaan gagal sementara, tugas dikembalikan ke `pending` dan tidak dibatalkan. Karena `ClaimBatch` selalu mengisi
+`started_at`, pembacaan ini terjadi untuk setiap pembatalan `isolate` yang diproses worker (satu `print`, tanpa tulis).
+
 ### Mode
 
 | Mode | Efek |
@@ -249,7 +262,23 @@ Mode dibaca dari env pada saat start (API dan worker): ubah lalu restart keduany
 Organisasi tanpa entitlement (atau bila pengecekan entitlement error) diproses **restore-only**: reconciler hanya
 mengevaluasi akun dengan secret terisolir dan tidak pernah membuat tugas `isolate`; tugas `isolate` yang terlanjur ada
 dibatalkan (`entitlement_disabled`) tanpa menyentuh router; `restore` tetap berjalan, tidak bergantung `isolir_ready`.
-Mode `dry_run` hanya mencatat log di jalur ini juga.
+Mode `dry_run` hanya mencatat log di jalur ini juga. Karena route `/app/mikrotik` dijaga entitlement yang sama, seluruh
+grup UI/API (dashboard tugas, retry, pengecualian pelanggan) tidak dapat diakses selama entitlement mati, sementara
+restore tetap berjalan otomatis.
+
+Hanya **organisasi aktif** yang dikunjungi worker: pelanggan terisolir milik organisasi yang disuspend tidak dibuka
+otomatis sampai organisasi aktif lagi.
+
+### Penjaga hapus router dan unpair
+
+- `DELETE /routers/{id}` ditolak 409 `MIKROTIK_ROUTER_HAS_ISOLATED_SECRETS` selama router punya secret `isolated` atau
+  secret dengan tugas `pending`/`running` (dicek di UPDATE yang sama dengan soft delete).
+- `POST /secrets/{id}/unpair` ditolak 409 `MIKROTIK_SECRET_HAS_ACTIVE_TASK` selama secret punya tugas `pending`/`running`
+  (melengkapi aturan lama: secret terisolir tidak bisa di-unpair, 409 `MIKROTIK_SECRET_ISOLATED`).
+- `PATCH /routers/{id}` yang mengubah host/kredensial **tidak** dijaga: mengarahkan router ke perangkat lain saat masih ada
+  pelanggan terisolir membuat restore berjalan ke perangkat yang salah. Setup ulang/cleanup isolir mengosongkan
+  `isolir_profile_name`, sehingga deteksi isolate parsial tidak bisa berjalan untuk router itu. Keduanya hanya
+  didokumentasikan.
 
 ### Audit
 
@@ -284,6 +313,8 @@ notifikasi kegagalan sampai itu diputuskan.
 - Pembuatan ulang secret dengan nama sama di router (setelah dihapus) tidak diwarisi pairing-nya; tetap catatan terbuka.
 - Organisasi tanpa entitlement tetap dikunjungi job tiap 2 menit bila punya secret terisolir (restore-only); secara umum
   job menelusuri semua organisasi aktif sehingga ada noise antrean/log untuk organisasi yang tidak berhak.
+- Satu tenant yang lambat (router tak terjangkau, timeout) dapat menunda tenant lain dalam satu tick worker; anggaran
+  waktu per tick per tenant belum diimplementasikan.
 
 ## Tidak termasuk Fase 1
 
