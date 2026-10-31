@@ -291,3 +291,42 @@ func TestIsolate_SetFails_NotWrapped(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// vanishingClient models a real RouterOS client: Remove of a session that
+// disappeared meanwhile fails with a generic error, never pmk.ErrNotFound.
+type vanishingClient struct {
+	*pmk.FakeClient
+	vanish bool // true: the session is gone; false: it is still there
+}
+
+func (c *vanishingClient) Remove(ctx context.Context, path, id string) error {
+	if c.vanish {
+		_ = c.FakeClient.Remove(ctx, path, id)
+	}
+	return errors.New("no such item (4)")
+}
+
+func TestDropActiveSessions_RemoveFailsButSessionGone_Success(t *testing.T) {
+	c := &vanishingClient{FakeClient: pmk.NewFakeClient(), vanish: true}
+	c.Seed("/ppp/active", pmk.Row{"name": "alice"}, pmk.Row{"name": "bob"})
+	if err := dropActiveSessions(context.Background(), c, "alice", nil); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDropActiveSessions_RemoveFailsSessionStillThere_Error(t *testing.T) {
+	c := &vanishingClient{FakeClient: pmk.NewFakeClient()}
+	c.Seed("/ppp/active", pmk.Row{"name": "alice"})
+	if err := dropActiveSessions(context.Background(), c, "alice", nil); err == nil {
+		t.Fatal("want error when the session is still active")
+	}
+}
+
+func TestDropActiveSessions_RemoveFailsThenRecheckFails_Error(t *testing.T) {
+	c := &vanishingClient{FakeClient: pmk.NewFakeClient(), vanish: true}
+	c.Seed("/ppp/active", pmk.Row{"name": "alice"})
+	c.WriteHook = func(op, _ string, _ pmk.Row) error { c.Err = pmk.ErrUnreachable; return nil }
+	if err := dropActiveSessions(context.Background(), c, "alice", nil); !errors.Is(err, mikrotik.ErrUnreachable) {
+		t.Fatalf("err = %v, want the re-check failure", err)
+	}
+}

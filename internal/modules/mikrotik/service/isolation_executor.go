@@ -122,6 +122,18 @@ func (e *Executor) Restore(ctx context.Context, scope coretenant.Scope, secret d
 	return confirmProfile(ctx, client, secret.Name, target, secrets)
 }
 
+// CurrentProfile reads the secret's profile on the router. Read-only: it uses
+// the same dial and error translation as Isolate/Restore but never writes.
+// ErrSecretMissingOnRouter when the secret is not on the router.
+func (e *Executor) CurrentProfile(ctx context.Context, scope coretenant.Scope, secret domain.PPPSecret) (string, error) {
+	_, client, secrets, err := e.routers.openClient(ctx, scope, secret.RouterID)
+	if err != nil {
+		return "", err
+	}
+	_, profile, err := findSecret(ctx, client, secret.Name, secrets)
+	return profile, err
+}
+
 func findSecret(ctx context.Context, client pmk.RouterClient, name string, secrets []string) (id, profile string, err error) {
 	rows, err := client.Print(ctx, secretPath, pmk.Row{"name": name})
 	if err != nil {
@@ -145,12 +157,37 @@ func dropActiveSessions(ctx context.Context, client pmk.RouterClient, name strin
 		if r["name"] != name {
 			continue
 		}
+		id := r[rowIDKey]
+		err := client.Remove(ctx, pppActivePath, id)
 		// A session that vanished on its own is the desired outcome.
-		if err := client.Remove(ctx, pppActivePath, r[rowIDKey]); err != nil && !errors.Is(err, pmk.ErrNotFound) {
+		if err == nil || errors.Is(err, pmk.ErrNotFound) {
+			continue
+		}
+		// Real RouterOS clients report a vanished item with a generic error, so
+		// re-read before treating the failure as real.
+		gone, checkErr := sessionGone(ctx, client, name, id)
+		if checkErr != nil {
+			return translateClientError(checkErr, secrets...)
+		}
+		if !gone {
 			return translateClientError(err, secrets...)
 		}
 	}
 	return nil
+}
+
+// sessionGone reports whether the active session id of name is no longer listed.
+func sessionGone(ctx context.Context, client pmk.RouterClient, name, id string) (bool, error) {
+	rows, err := client.Print(ctx, pppActivePath, pmk.Row{"name": name})
+	if err != nil {
+		return false, err
+	}
+	for _, r := range rows {
+		if r["name"] == name && r[rowIDKey] == id {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // confirmProfile re-reads the secret; a mismatch is transient so the task

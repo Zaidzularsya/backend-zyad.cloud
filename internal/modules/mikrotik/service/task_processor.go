@@ -36,6 +36,8 @@ const (
 type TaskExecutor interface {
 	Isolate(ctx context.Context, scope coretenant.Scope, secret domain.PPPSecret) (string, error)
 	Restore(ctx context.Context, scope coretenant.Scope, secret domain.PPPSecret) error
+	// CurrentProfile reads (never writes) the secret's profile on the router.
+	CurrentProfile(ctx context.Context, scope coretenant.Scope, secret domain.PPPSecret) (string, error)
 }
 
 type TaskProcessorDeps struct {
@@ -148,7 +150,8 @@ func (p *TaskProcessor) process(ctx context.Context, scope coretenant.Scope, tas
 	if err != nil {
 		return p.release(ctx, scope, task, "load secret", err)
 	}
-	if p.restoreOnly && task.Action == ActionIsolate {
+	restoreOnlyIsolate := p.restoreOnly && task.Action == ActionIsolate
+	if restoreOnlyIsolate && !taskMayHaveRun(task) {
 		accountID := ""
 		if secret.AccountID != nil {
 			accountID = *secret.AccountID
@@ -179,6 +182,14 @@ func (p *TaskProcessor) process(ctx context.Context, scope coretenant.Scope, tas
 		return p.release(ctx, scope, task, "load router", err)
 	}
 
+	accountID := ""
+	if secret.AccountID != nil {
+		accountID = *secret.AccountID
+	}
+	if restoreOnlyIsolate {
+		return p.cancelIsolate(ctx, scope, task, secret, router, routerMissing, accountID, cancelEntitlementDisabled)
+	}
+
 	want, dec, err := p.wantedAction(ctx, scope, secret)
 	if err != nil {
 		return p.release(ctx, scope, task, "re-evaluate", err)
@@ -188,11 +199,10 @@ func (p *TaskProcessor) process(ctx context.Context, scope coretenant.Scope, tas
 	if want == ActionIsolate && (routerMissing || !router.IsolirReady) {
 		want = ""
 	}
-	accountID := ""
-	if secret.AccountID != nil {
-		accountID = *secret.AccountID
-	}
 	if want != task.Action {
+		if task.Action == ActionIsolate {
+			return p.cancelIsolate(ctx, scope, task, secret, router, routerMissing, accountID, cancelSuperseded)
+		}
 		return p.cancel(ctx, scope, task, secret.RouterID, accountID, cancelSuperseded)
 	}
 
@@ -319,6 +329,60 @@ func (p *TaskProcessor) alignPartialIsolate(ctx context.Context, scope coretenan
 			slog.Error("mikrotik: follow-up evaluation failed", "account_id", *secret.AccountID, "error", err)
 		}
 	}
+}
+
+// taskMayHaveRun reports whether an earlier attempt (or a worker that crashed
+// mid-task) may already have put the isolir profile on the router. ClaimBatch
+// sets StartedAt on every claim, so in practice every claimed task qualifies:
+// a reclaimed crashed task is indistinguishable from a fresh one.
+func taskMayHaveRun(task domain.IsolationTask) bool {
+	return task.Attempts > 0 || task.StartedAt != nil
+}
+
+// cancelIsolate cancels an isolate task that is no longer wanted. The caller
+// holds the router lock. If the task may already have run, the router is read
+// first: an earlier attempt that applied the isolir profile and then failed
+// transiently (or a crash between Set and MarkIsolated) leaves the router
+// isolated while the DB says normal, and nothing would ever restore it. The DB
+// is aligned to the router so the follow-up evaluation in cancel enqueues the
+// restore. A transient read failure releases the task instead of cancelling.
+func (p *TaskProcessor) cancelIsolate(ctx context.Context, scope coretenant.Scope, task domain.IsolationTask, secret domain.PPPSecret,
+	router domain.Router, routerMissing bool, accountID, reason string) outcome {
+	if !taskMayHaveRun(task) || routerMissing || router.IsolirProfileName == "" || secret.IsolationState != domain.IsolationNormal {
+		return p.cancel(ctx, scope, task, secret.RouterID, accountID, reason)
+	}
+	current, err := p.d.Executor.CurrentProfile(ctx, scope, secret)
+	switch {
+	case err == nil:
+	case errors.Is(err, mikrotik.ErrSecretMissingOnRouter):
+		// Nothing on the router to align.
+		return p.cancel(ctx, scope, task, secret.RouterID, accountID, reason)
+	case Classify(err).Kind == FailTransient:
+		return p.release(ctx, scope, task, "read router profile before cancel", err)
+	default:
+		// Permanent (auth, TLS, ...): retrying the read cannot help. Cancel as
+		// before; a human has to fix the router access first.
+		slog.Warn("mikrotik: cannot read router profile before cancelling isolate",
+			"task_id", task.ID, "secret_id", secret.ID, "code", Classify(err).Code)
+		return p.cancel(ctx, scope, task, secret.RouterID, accountID, reason)
+	}
+	if current != router.IsolirProfileName {
+		return p.cancel(ctx, scope, task, secret.RouterID, accountID, reason)
+	}
+	// "" keeps the stored original profile (isolate eligibility requires one).
+	changed, err := p.d.Secrets.MarkIsolated(ctx, scope, secret.ID, "")
+	if err != nil {
+		return p.release(ctx, scope, task, "mark partially isolated secret", err)
+	}
+	if changed {
+		p.audit(ctx, scope, "isolation.isolated", secret.RouterID, task, task.Attempts, "partial", true)
+	} else {
+		// Only an unpaired secret is refused here, and unpair is refused while a
+		// task is active; log loudly if it ever happens.
+		slog.Error("mikrotik: router is on the isolir profile but the secret could not be marked isolated",
+			"task_id", task.ID, "secret_id", secret.ID)
+	}
+	return p.cancel(ctx, scope, task, secret.RouterID, accountID, reason)
 }
 
 // cancel ends a task without touching the router and re-evaluates the account

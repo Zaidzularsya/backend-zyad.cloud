@@ -915,3 +915,171 @@ func TestProcess_IsolatePartialTransient_DoesNotMarkIsolatedYet(t *testing.T) {
 		t.Fatalf("secret = %+v", s)
 	}
 }
+
+// setRouterProfile changes a secret's profile directly on the fake router.
+func setRouterProfile(t *testing.T, c *pmk.FakeClient, name, profile string) {
+	t.Helper()
+	for _, r := range c.Rows("/ppp/secret") {
+		if r["name"] == name {
+			if err := c.Set(context.Background(), "/ppp/secret", r[".id"], pmk.Row{"profile": profile}); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+	}
+	t.Fatalf("secret %s not on router", name)
+}
+
+// assertRestoredAfterPartial runs the restore that the cancelled isolate left
+// behind and checks the router ends on the original profile.
+func assertRestoredAfterPartial(t *testing.T, e *procEnv) {
+	t.Helper()
+	s := e.srepo.byID("s-1")
+	if s.IsolationState != domain.IsolationIsolated || s.OriginalProfile != "paket-10m" {
+		t.Fatalf("DB must mirror the router before the restore: %+v", s)
+	}
+	au := e.audits("isolation.isolated")
+	if len(au) != 1 || au[0].Metadata["partial"] != true {
+		t.Fatalf("partial isolated audit = %+v", au)
+	}
+	ts := e.tasks.forSecret("s-1")
+	if len(ts) != 2 || ts[0].Status != domain.TaskCancelled || ts[0].LastError != "superseded" ||
+		ts[1].Action != domain.ActionRestore || ts[1].Status != domain.TaskPending {
+		t.Fatalf("tasks = %+v", ts)
+	}
+	if res := e.run(t); res != (ProcessResult{Done: 1}) {
+		t.Fatalf("restore run = %+v", res)
+	}
+	if got := routerProfile(e.clientA, "alice"); got != "paket-10m" {
+		t.Fatalf("router profile after restore = %q", got)
+	}
+	if e.srepo.byID("s-1").IsolationState != domain.IsolationNormal {
+		t.Fatal("secret must be normal after the restore")
+	}
+}
+
+func TestProcess_PartialTransientThenPaid_RestoreEnqueuedAndRouterRestored(t *testing.T) {
+	e := newProcEnv(t)
+	e.addSecret("s-1", e.routerA, "alice", domain.IsolationNormal, "paket-10m")
+	e.src.invoices = oneInvoice
+	e.enqueue(t)
+	failSessionRemoval(e.clientA, pmk.ErrUnreachable)
+	if res := e.run(t); res != (ProcessResult{Retried: 1}) {
+		t.Fatalf("result = %+v", res)
+	}
+	if routerProfile(e.clientA, "alice") != isolirProfile {
+		t.Fatal("precondition: router already on the isolir profile")
+	}
+	e.clientA.WriteHook = nil
+	e.src.invoices = nil // paid
+	e.now = e.now.Add(time.Hour)
+
+	if res := e.run(t); res != (ProcessResult{Cancelled: 1}) {
+		t.Fatalf("result = %+v", res)
+	}
+	assertRestoredAfterPartial(t, e)
+}
+
+func TestProcess_CrashBetweenSetAndMark_ThenPaid_RestoreEnqueued(t *testing.T) {
+	e := newProcEnv(t)
+	e.addSecret("s-1", e.routerA, "alice", domain.IsolationNormal, "paket-10m")
+	e.src.invoices = oneInvoice
+	e.enqueue(t)
+	// A worker claims the task, sets the isolir profile and dies before
+	// MarkIsolated: StartedAt set, Attempts 0, task still running.
+	claimed, err := e.tasks.ClaimBatch(context.Background(), e.scope, 10, e.now, taskLease)
+	if err != nil || len(claimed) != 1 || claimed[0].Attempts != 0 || claimed[0].StartedAt == nil {
+		t.Fatalf("claim = %+v err = %v", claimed, err)
+	}
+	setRouterProfile(t, e.clientA, "alice", isolirProfile)
+	e.src.invoices = nil // paid
+	e.now = e.now.Add(taskLease + time.Minute)
+
+	if res := e.run(t); res != (ProcessResult{Cancelled: 1}) {
+		t.Fatalf("result = %+v", res)
+	}
+	assertRestoredAfterPartial(t, e)
+}
+
+func TestProcess_SupersededAfterAttemptWithoutRouterChange_PlainCancel(t *testing.T) {
+	e := newProcEnv(t)
+	e.addSecret("s-1", e.routerA, "alice", domain.IsolationNormal, "paket-10m")
+	e.src.invoices = oneInvoice
+	e.enqueue(t)
+	e.clientA.WriteHook = func(op, _ string, _ pmk.Row) error {
+		if op == "set" {
+			return pmk.ErrUnreachable
+		}
+		return nil
+	}
+	if res := e.run(t); res != (ProcessResult{Retried: 1}) {
+		t.Fatalf("result = %+v", res)
+	}
+	e.clientA.WriteHook = nil
+	e.src.invoices = nil
+	e.now = e.now.Add(time.Hour)
+	writes := e.clientA.WriteCalls()
+
+	if res := e.run(t); res != (ProcessResult{Cancelled: 1}) {
+		t.Fatalf("result = %+v", res)
+	}
+	if e.clientA.WriteCalls() != writes || routerProfile(e.clientA, "alice") != "paket-10m" {
+		t.Fatal("router must not be written")
+	}
+	if e.srepo.byID("s-1").IsolationState != domain.IsolationNormal || len(e.audits("isolation.isolated")) != 0 {
+		t.Fatal("no state change expected")
+	}
+	if ts := e.tasks.forSecret("s-1"); len(ts) != 1 || ts[0].Status != domain.TaskCancelled || ts[0].LastError != "superseded" {
+		t.Fatalf("tasks = %+v", ts)
+	}
+}
+
+func TestProcess_PartialThenPaid_RouterReadFails_ReleasesNotCancels(t *testing.T) {
+	e := newProcEnv(t)
+	e.addSecret("s-1", e.routerA, "alice", domain.IsolationNormal, "paket-10m")
+	e.src.invoices = oneInvoice
+	e.enqueue(t)
+	failSessionRemoval(e.clientA, pmk.ErrUnreachable)
+	e.run(t)
+	e.clientA.WriteHook = nil
+	e.src.invoices = nil
+	e.now = e.now.Add(time.Hour)
+	e.clientA.Err = pmk.ErrUnreachable
+
+	if res := e.run(t); res != (ProcessResult{Skipped: 1}) {
+		t.Fatalf("result = %+v", res)
+	}
+	if task := onlyTask(t, e, "s-1"); task.Status != domain.TaskPending || task.Attempts != 1 {
+		t.Fatalf("task must stay pending for a retry: %+v", task)
+	}
+	e.clientA.Err = nil
+	e.now = e.now.Add(time.Hour)
+	if res := e.run(t); res != (ProcessResult{Cancelled: 1}) {
+		t.Fatalf("result = %+v", res)
+	}
+	assertRestoredAfterPartial(t, e)
+}
+
+func TestProcess_RestoreOnly_PartialIsolate_AlignsAndRestores(t *testing.T) {
+	e := newProcEnv(t)
+	e.addSecret("s-1", e.routerA, "alice", domain.IsolationNormal, "paket-10m")
+	e.src.invoices = oneInvoice
+	e.enqueue(t)
+	failSessionRemoval(e.clientA, pmk.ErrUnreachable)
+	e.run(t)
+	e.clientA.WriteHook = nil
+	e.now = e.now.Add(time.Hour)
+
+	// Entitlement lost while still unpaid: the isolate is cancelled, the
+	// router state is mirrored, and restore-only never isolates again.
+	res, err := e.p.RunRestoreOnly(context.Background(), e.scope, 10)
+	if err != nil || res != (ProcessResult{Cancelled: 1}) {
+		t.Fatalf("result = %+v err = %v", res, err)
+	}
+	if s := e.srepo.byID("s-1"); s.IsolationState != domain.IsolationIsolated {
+		t.Fatalf("DB must mirror the router: %+v", s)
+	}
+	if ts := e.tasks.forSecret("s-1"); len(ts) != 1 || ts[0].LastError != "entitlement_disabled" {
+		t.Fatalf("tasks = %+v", ts)
+	}
+}
