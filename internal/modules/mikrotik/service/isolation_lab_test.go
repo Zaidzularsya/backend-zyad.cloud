@@ -4,9 +4,11 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net/netip"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -61,13 +63,6 @@ func TestLab_IsolateRestoreRoundTrip(t *testing.T) {
 
 func labRoundTrip(t *testing.T, apiType, host, user, pass, isolirProfile string, allowed []netip.Prefix) {
 	rest := apiType == pmk.APITypeREST
-	fail := func(format string, args ...any) {
-		t.Helper()
-		if rest {
-			t.Skipf("rest transport not usable on this router: "+format, args...)
-		}
-		t.Fatalf(format, args...)
-	}
 
 	port := 0
 	portEnv := "MIKROTIK_LAB_PORT"
@@ -97,22 +92,30 @@ func labRoundTrip(t *testing.T, apiType, host, user, pass, isolirProfile string,
 
 	profiles, err := raw.Print(ctx, pppProfilePath, nil)
 	if err != nil {
-		fail("print /ppp/profile: %v", err)
+		// Only the REST transport may be absent on a lab router (www service
+		// off or no REST API): skip on a connection error or a 404 here, at
+		// the first request. Anything later is a real failure.
+		if rest && (errors.Is(err, pmk.ErrUnreachable) || strings.Contains(err.Error(), "returned 404")) {
+			t.Skipf("rest transport not usable on this router: %v", err)
+		}
+		t.Fatalf("print /ppp/profile: %v", err)
 	}
+	// MIKROTIK_LAB_WRITE=1 was requested: a missing prerequisite is a failure,
+	// not a silent skip.
 	have := map[string]bool{}
 	for _, p := range profiles {
 		have[p["name"]] = true
 	}
 	if !have[isolirProfile] {
-		t.Skipf("isolir profile %q not on the router (run the Fase 1 setup first, or set MIKROTIK_LAB_ISOLIR_PROFILE)", isolirProfile)
+		t.Fatalf("isolir profile %q not on the router (run the Fase 1 setup first, or set MIKROTIK_LAB_ISOLIR_PROFILE)", isolirProfile)
 	}
 	if !have[labNormalProfile] {
-		t.Skipf("profile %q not on the router", labNormalProfile)
+		t.Fatalf("profile %q not on the router", labNormalProfile)
 	}
 	if rows, err := raw.Print(ctx, secretPath, pmk.Row{"name": labTestSecretName}); err != nil {
-		fail("print /ppp/secret: %v", err)
+		t.Fatalf("print /ppp/secret: %v", err)
 	} else if len(rows) != 0 {
-		t.Skipf("test secret %s already exists on the router; refusing to touch it", labTestSecretName)
+		t.Fatalf("test secret %s already exists on the router (left over from an earlier run?); remove it manually, refusing to touch it", labTestSecretName)
 	}
 
 	// Disabled + random password: it can never authenticate.
@@ -120,7 +123,7 @@ func labRoundTrip(t *testing.T, apiType, host, user, pass, isolirProfile string,
 		"name": labTestSecretName, "password": "labtest-" + strconv.FormatInt(time.Now().UnixNano(), 36),
 		"profile": labNormalProfile, "disabled": "yes", "comment": "zyad-labtest",
 	}); err != nil {
-		fail("create test secret: %v", err)
+		t.Fatalf("create test secret: %v", err)
 	}
 	t.Cleanup(func() {
 		// Removes by name so cleanup works even when the add id is not reusable.
@@ -164,7 +167,7 @@ func labRoundTrip(t *testing.T, apiType, host, user, pass, isolirProfile string,
 
 	orig, err := ex.Isolate(ctx, scope, sec)
 	if err != nil {
-		fail("Isolate: %v", err)
+		t.Fatalf("Isolate: %v", err)
 	}
 	if orig != labNormalProfile {
 		t.Fatalf("Isolate returned original %q, want %q", orig, labNormalProfile)

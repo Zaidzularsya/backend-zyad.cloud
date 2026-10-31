@@ -139,7 +139,13 @@ func (e *Evaluator) apply(ctx context.Context, scope coretenant.Scope, accountID
 				ids = append(ids, a.SecretID+":"+a.Action)
 			}
 		}
-		slog.Info("mikrotik: dry-run decision",
+		// Info only when something would happen; a no-op decision is logged
+		// at Debug to keep the periodic reconcile quiet.
+		level := slog.LevelDebug
+		if len(ids) > 0 {
+			level = slog.LevelInfo
+		}
+		slog.Log(ctx, level, "mikrotik: dry-run decision",
 			"account_id", accountID, "desired", dec.Desired, "exempt", dec.Exempt,
 			"invoices", len(dec.Invoices), "secret_actions", ids, "event", event, "restore_only", restoreOnly)
 		return dec, nil
