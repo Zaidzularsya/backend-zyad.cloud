@@ -24,17 +24,27 @@ type TaskFilter struct {
 
 // TaskRepository is the outbox of isolate/restore tasks. All timestamps are
 // passed in by the caller (UTC) so the worker controls the clock.
+//
+// Lease ownership is NOT checked by Release/Complete/RetryLater/Fail: the
+// worker serialises work per router with an advisory lock, so only one worker
+// handles a claimed task at a time. Each of these four returns
+// mikrotik.ErrTaskNotFound when the task is no longer active (done, failed or
+// cancelled), e.g. it was cancelled while running.
 type TaskRepository interface {
 	// EnqueueIsolate queues an isolate for an eligible secret (paired, present,
 	// original profile known, normal state, router isolir_ready and not deleted)
-	// and cancels a pending restore for it. enqueued=false without error when
-	// the secret is not eligible or an active task already exists.
+	// and cancels a pending restore for it. enqueued=false (no error) means the
+	// secret is not eligible OR an active task (e.g. a running opposite action)
+	// already exists; callers must re-evaluate after the active task finishes.
 	EnqueueIsolate(ctx context.Context, scope coretenant.Scope, secretID, event string) (bool, error)
 	// EnqueueRestore queues a restore for an isolated secret and cancels a
 	// pending isolate. It does not require the router to be isolir_ready.
+	// enqueued=false has the same ambiguity as EnqueueIsolate: not eligible or an
+	// active task (e.g. a running isolate, which is left untouched) exists.
 	EnqueueRestore(ctx context.Context, scope coretenant.Scope, secretID, event string) (bool, error)
 	// ClaimBatch leases up to limit due tasks (pending and due, or running with
-	// an expired lease), restores first. Safe under concurrent callers.
+	// an expired lease), restores first. Safe under concurrent callers. Reclaiming
+	// an expired lease overwrites started_at and does not increase attempts.
 	ClaimBatch(ctx context.Context, scope coretenant.Scope, limit int, now time.Time, lease time.Duration) ([]domain.IsolationTask, error)
 	// Release returns a task to pending at next without counting an attempt.
 	Release(ctx context.Context, scope coretenant.Scope, id string, next time.Time) error
@@ -47,7 +57,8 @@ type TaskRepository interface {
 	MarkTenantNotified(ctx context.Context, scope coretenant.Scope, id string) error
 	MarkCustomerNotified(ctx context.Context, scope coretenant.Scope, id string) error
 	// Retry moves a failed task back to pending with attempts reset;
-	// ErrTaskNotRetryable for any other status.
+	// ErrTaskNotRetryable for any other status, ErrTaskActiveExists when the
+	// secret already has another pending/running task (the task stays failed).
 	Retry(ctx context.Context, scope coretenant.Scope, id string) (domain.IsolationTask, error)
 	FindByID(ctx context.Context, scope coretenant.Scope, id string) (domain.IsolationTask, error)
 	List(ctx context.Context, scope coretenant.Scope, f TaskFilter, limit, offset int) ([]domain.TaskView, int64, error)
@@ -274,6 +285,9 @@ func (r *taskRepository) Retry(ctx context.Context, scope coretenant.Scope, id s
 			    finished_at = NULL, last_error = '', last_error_code = ''
 			WHERE organization_id = $1 AND id = $2 AND status = 'failed'
 			RETURNING `+taskColumns, scope.OrganizationID(), id))
+		if isUniqueViolation(scanErr, "uq_mikrotik_isolation_tasks_active_secret") {
+			return mikrotik.ErrTaskActiveExists
+		}
 		if !errors.Is(scanErr, pgx.ErrNoRows) {
 			return scanErr
 		}

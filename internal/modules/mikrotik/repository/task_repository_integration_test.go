@@ -508,3 +508,119 @@ func TestTaskRepo_CancelListFiltersAndCounts(t *testing.T) {
 		t.Fatalf("cross-org counts: %v", other)
 	}
 }
+
+func TestRetry_ActiveTaskExistsMapsToDomainError(t *testing.T) {
+	f := newIsoFixture(t)
+	e, repo := f.e, taskRepo(f.e)
+	if ok, err := repo.EnqueueIsolate(e.ctx, f.scope, f.secretID, "x"); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	now := time.Now().UTC()
+	claimed, err := repo.ClaimBatch(e.ctx, f.scope, 1, now, time.Minute)
+	if err != nil || len(claimed) != 1 {
+		t.Fatal(err, claimed)
+	}
+	failedID := claimed[0].ID
+	if err := repo.Fail(e.ctx, f.scope, failedID, "auth", "denied"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := secretRepo(e).MarkIsolated(e.ctx, f.scope, f.secretID, ""); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if ok, err := repo.EnqueueRestore(e.ctx, f.scope, f.secretID, "paid"); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if _, err := repo.Retry(e.ctx, f.scope, failedID); !errors.Is(err, mikrotik.ErrTaskActiveExists) {
+		t.Fatalf("retry: %v", err)
+	}
+	got, err := repo.FindByID(e.ctx, f.scope, failedID)
+	if err != nil || got.Status != domain.TaskFailed {
+		t.Fatalf("must stay failed: %v %+v", err, got)
+	}
+}
+
+func TestEnqueueRestore_RunningIsolateUntouched(t *testing.T) {
+	f := newIsoFixture(t)
+	e, repo := f.e, taskRepo(f.e)
+	if ok, err := repo.EnqueueIsolate(e.ctx, f.scope, f.secretID, "x"); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	claimed, err := repo.ClaimBatch(e.ctx, f.scope, 1, time.Now().UTC(), time.Minute)
+	if err != nil || len(claimed) != 1 {
+		t.Fatal(err, claimed)
+	}
+	if ok, err := secretRepo(e).MarkIsolated(e.ctx, f.scope, f.secretID, ""); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if ok, err := repo.EnqueueRestore(e.ctx, f.scope, f.secretID, "paid"); err != nil || ok {
+		t.Fatalf("restore vs running isolate: %v %v", ok, err)
+	}
+	got, err := repo.FindByID(e.ctx, f.scope, claimed[0].ID)
+	if err != nil || got.Status != domain.TaskRunning || got.LockedUntil == nil {
+		t.Fatalf("running isolate touched: %v %+v", err, got)
+	}
+	if n := len(f.pending(t)); n != 1 {
+		t.Fatalf("tasks = %d", n)
+	}
+}
+
+func TestTaskRepo_LifecycleOnTerminalTaskIsNotFound(t *testing.T) {
+	f := newIsoFixture(t)
+	e, repo := f.e, taskRepo(f.e)
+	if ok, err := repo.EnqueueIsolate(e.ctx, f.scope, f.secretID, "x"); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	now := time.Now().UTC()
+	claimed, err := repo.ClaimBatch(e.ctx, f.scope, 1, now, time.Minute)
+	if err != nil || len(claimed) != 1 {
+		t.Fatal(err, claimed)
+	}
+	id := claimed[0].ID
+	if err := repo.Complete(e.ctx, f.scope, id); err != nil {
+		t.Fatal(err)
+	}
+	check := func(label string) {
+		t.Helper()
+		for name, err := range map[string]error{
+			"Complete":   repo.Complete(e.ctx, f.scope, id),
+			"Fail":       repo.Fail(e.ctx, f.scope, id, "c", "m"),
+			"Release":    repo.Release(e.ctx, f.scope, id, now),
+			"RetryLater": repo.RetryLater(e.ctx, f.scope, id, now, "c", "m"),
+		} {
+			if !errors.Is(err, mikrotik.ErrTaskNotFound) {
+				t.Fatalf("%s %s: %v", label, name, err)
+			}
+		}
+		if got, _ := repo.FindByID(e.ctx, f.scope, id); got.Status != label {
+			t.Fatalf("%s status changed to %s", label, got.Status)
+		}
+	}
+	check(domain.TaskDone)
+	// Cancel on a finished task is a no-op, twice.
+	for i := 0; i < 2; i++ {
+		if err := repo.Cancel(e.ctx, f.scope, id, "late"); err != nil {
+			t.Fatalf("cancel finished #%d: %v", i, err)
+		}
+	}
+	if got, _ := repo.FindByID(e.ctx, f.scope, id); got.Status != domain.TaskDone || got.LastError != "" {
+		t.Fatalf("finished task modified: %+v", got)
+	}
+
+	// Cancel a running task, then Complete is refused.
+	if err := secretRepo(e).MarkAbsent(e.ctx, f.scope, f.secretID); err != nil {
+		t.Fatal(err)
+	}
+	s2 := pairedSecret(t, e, f.scope, f.routerID, "bob")
+	if ok, err := repo.EnqueueIsolate(e.ctx, f.scope, s2, "x"); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	claimed, err = repo.ClaimBatch(e.ctx, f.scope, 1, now.Add(time.Second), time.Minute)
+	if err != nil || len(claimed) != 1 {
+		t.Fatal(err, claimed)
+	}
+	id = claimed[0].ID
+	if err := repo.Cancel(e.ctx, f.scope, id, "operator"); err != nil {
+		t.Fatal(err)
+	}
+	check(domain.TaskCancelled)
+}

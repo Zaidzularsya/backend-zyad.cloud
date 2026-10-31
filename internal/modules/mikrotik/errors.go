@@ -124,4 +124,6 @@ var (
 	ErrTaskNotFound = errors.New("isolation task not found")
 	// ErrTaskNotRetryable: only a failed isolation task can be retried.
 	ErrTaskNotRetryable = errors.New("isolation task is not in a retryable state")
+	// ErrTaskActiveExists: another pending/running task already exists for the secret.
+	ErrTaskActiveExists = errors.New("an active task already exists for this secret")
 )
