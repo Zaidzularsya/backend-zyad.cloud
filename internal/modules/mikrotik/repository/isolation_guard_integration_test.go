@@ -105,3 +105,30 @@ func TestUnpair_IsolatedStillReportsIsolated(t *testing.T) {
 		t.Fatalf("isolated with task: err = %v", err)
 	}
 }
+
+// A superseded isolate that failed with router_unverifiable is terminal: it
+// must not keep blocking router delete or unpair.
+func TestProcess_SupersededIsolate_Failed_UnblocksRouterDeleteAndUnpair(t *testing.T) {
+	f := newIsoFixture(t)
+	repo, secrets := taskRepo(f.e), secretRepo(f.e)
+	if ok, err := repo.EnqueueIsolate(f.e.ctx, f.scope, f.secretID, "x"); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	claimed, err := repo.ClaimBatch(f.e.ctx, f.scope, 1, time.Now().UTC().Add(time.Second), time.Minute)
+	if err != nil || len(claimed) != 1 {
+		t.Fatal(err, claimed)
+	}
+	if err := secrets.Unpair(f.e.ctx, f.scope, f.secretID); !errors.Is(err, mikrotik.ErrSecretHasActiveTask) {
+		t.Fatalf("running: unpair err = %v", err)
+	}
+	if err := repo.Fail(f.e.ctx, f.scope, claimed[0].ID, "router_unverifiable",
+		"Router tidak dapat diperiksa; periksa profile pelanggan secara manual."); err != nil {
+		t.Fatal(err)
+	}
+	if err := secrets.Unpair(f.e.ctx, f.scope, f.secretID); err != nil {
+		t.Fatalf("unpair after fail: %v", err)
+	}
+	if err := f.e.repo.SoftDelete(f.e.ctx, f.scope, f.routerID, ""); err != nil {
+		t.Fatalf("delete after fail: %v", err)
+	}
+}

@@ -16639,7 +16639,7 @@ components:
         priority: {type: integer, description: "100 = restore, 10 = isolate; restore didahulukan."}
         attempts: {type: integer, description: "Jumlah percobaan gagal yang sudah dihitung."}
         next_attempt_at: {type: string, format: date-time}
-        last_error_code: {type: string, description: "Kode tetap, mis. auth_failed, tls_untrusted, host_not_allowed, secret_missing, profile_missing, restore_target_invalid, router_not_found, router_not_ready, unreachable, unknown. Tidak diubah saat tugas dibatalkan (bisa masih berisi kode percobaan sebelumnya)."}
+        last_error_code: {type: string, description: "Kode tetap, mis. auth_failed, tls_untrusted, host_not_allowed, secret_missing, profile_missing, restore_target_invalid, router_not_found, router_not_ready, router_unverifiable, unreachable, unknown. Tidak diubah saat tugas dibatalkan (bisa masih berisi kode percobaan sebelumnya)."}
         last_error: {type: string, description: "Teks tetap yang aman ditampilkan (tanpa teks mentah router/kredensial); pada tugas `cancelled` berisi alasan: superseded, state changed, entitlement_disabled."}
         router: {$ref: '#/components/schemas/MikrotikTaskRef'}
         secret: {$ref: '#/components/schemas/MikrotikTaskRef'}

@@ -235,8 +235,13 @@ permanen setiap tick dan tenant menerima alert tiap kali. `POST /tasks/{id}/retr
 di antara `Set` dan penandaan DB), DB masih `normal`. Sebelum membatalkan tugas `isolate` yang sudah pernah diambil
 (`superseded` atau `entitlement_disabled`), processor membaca profile secret di router (read-only, di bawah kunci router);
 bila profile isolir, DB diselaraskan ke `isolated` (audit `partial=true`) dan evaluasi lanjutan menjadwalkan `restore`.
-Bila pembacaan gagal sementara, tugas dikembalikan ke `pending` dan tidak dibatalkan. Karena `ClaimBatch` selalu mengisi
-`started_at`, pembacaan ini terjadi untuk setiap pembatalan `isolate` yang diproses worker (satu `print`, tanpa tulis).
+Pembacaan yang gagal **tidak pernah** membatalkan tugas diam-diam: kegagalan sementara dihitung sebagai percobaan dan
+dicoba ulang dengan backoff `isolate` (alert tenant mengikuti ambang biasa); kegagalan permanen (mis. `auth_failed`,
+`host_not_allowed`, router terhapus) atau anggaran habis (8 percobaan) membuat tugas `failed` dengan kode
+`router_unverifiable` ("Router tidak dapat diperiksa; periksa profile pelanggan secara manual."), audit `task.failed`, alert
+tenant sekali, tanpa evaluasi lanjutan. Tugas `failed` tidak menghalangi hapus router/unpair dan bisa di-retry operator;
+masa jeda enqueue mencegah tugas yang sama dibuat ulang terus. Karena `ClaimBatch` selalu mengisi `started_at`,
+pembacaan ini terjadi untuk setiap pembatalan `isolate` yang diproses worker (satu `print`, tanpa tulis).
 
 ### Mode
 

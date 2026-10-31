@@ -433,6 +433,7 @@ persetujuan eksplisit).
 | `restore_target_invalid` | `original_profile` kosong atau sama dengan profile isolir | Tetapkan profile asli lewat `PUT /secrets/{id}/original-profile`, lalu retry. |
 | `router_not_found` | Router sudah dihapus | Untuk restore: daftarkan router lagi atau pulihkan manual (14.6). Isolate tidak relevan lagi. |
 | `router_not_ready` | `isolir_ready` hilang | Jalankan ulang setup router (`setup/preview` + `apply`), lalu retry. |
+| `router_unverifiable` | Tugas `isolate` sudah tidak diperlukan (pelanggan lunas atau entitlement dicabut), tetapi router tidak dapat dibaca untuk memastikan profile isolir tidak tertinggal (router mati/dicabut, kredensial ditolak, router dihapus). Tidak ada perubahan di DB maupun router. | Periksa profile secret di router secara manual (`/ppp secret print where name=X`). Bila masih profile isolir, kembalikan ke `original_profile` (14.6) atau perbaiki akses router lalu `POST /tasks/{id}/retry` (processor akan membaca ulang dan menjadwalkan restore bila perlu). Tugas `failed` tidak lagi menghalangi hapus router atau unpair. |
 | `unreachable` | Router tidak terjangkau (sementara) | Cek jaringan/WireGuard, port API, firewall router. Diulang otomatis dengan backoff; retry manual bila sudah habis. |
 
 `unknown` berarti kegagalan tak terduga yang sudah diulang otomatis; periksa log worker (`mikrotik: isolation task attempt failed`).

@@ -345,7 +345,7 @@ func taskMayHaveRun(task domain.IsolationTask) bool {
 // transiently (or a crash between Set and MarkIsolated) leaves the router
 // isolated while the DB says normal, and nothing would ever restore it. The DB
 // is aligned to the router so the follow-up evaluation in cancel enqueues the
-// restore. A transient read failure releases the task instead of cancelling.
+// restore. A failed read never cancels: see unverifiable.
 func (p *TaskProcessor) cancelIsolate(ctx context.Context, scope coretenant.Scope, task domain.IsolationTask, secret domain.PPPSecret,
 	router domain.Router, routerMissing bool, accountID, reason string) outcome {
 	if !taskMayHaveRun(task) || routerMissing || router.IsolirProfileName == "" || secret.IsolationState != domain.IsolationNormal {
@@ -357,14 +357,8 @@ func (p *TaskProcessor) cancelIsolate(ctx context.Context, scope coretenant.Scop
 	case errors.Is(err, mikrotik.ErrSecretMissingOnRouter):
 		// Nothing on the router to align.
 		return p.cancel(ctx, scope, task, secret.RouterID, accountID, reason)
-	case Classify(err).Kind == FailTransient:
-		return p.release(ctx, scope, task, "read router profile before cancel", err)
 	default:
-		// Permanent (auth, TLS, ...): retrying the read cannot help. Cancel as
-		// before; a human has to fix the router access first.
-		slog.Warn("mikrotik: cannot read router profile before cancelling isolate",
-			"task_id", task.ID, "secret_id", secret.ID, "code", Classify(err).Code)
-		return p.cancel(ctx, scope, task, secret.RouterID, accountID, reason)
+		return p.unverifiable(ctx, scope, task, secret, router.Name, err)
 	}
 	if current != router.IsolirProfileName {
 		return p.cancel(ctx, scope, task, secret.RouterID, accountID, reason)
@@ -383,6 +377,48 @@ func (p *TaskProcessor) cancelIsolate(ctx context.Context, scope coretenant.Scop
 			"task_id", task.ID, "secret_id", secret.ID)
 	}
 	return p.cancel(ctx, scope, task, secret.RouterID, accountID, reason)
+}
+
+// Terminal failure of an isolate task that is no longer wanted but whose router
+// could not be read to rule out a stranded isolir profile.
+const (
+	codeRouterUnverifiable = "router_unverifiable"
+	msgRouterUnverifiable  = "Router tidak dapat diperiksa; periksa profile pelanggan secara manual."
+)
+
+// unverifiable handles a failed router read in cancelIsolate. The task is never
+// cancelled silently (the router may still hold the isolir profile) and never
+// released without counting (a dead router would loop forever). A transient
+// failure is retried with the isolate backoff; a permanent one, or an exhausted
+// budget, fails the task with router_unverifiable, audits and alerts the tenant
+// once. No follow-up evaluation runs: it could only re-enqueue the same task.
+// The failed task no longer blocks router delete/unpair and can be retried by
+// the operator.
+func (p *TaskProcessor) unverifiable(ctx context.Context, scope coretenant.Scope, task domain.IsolationTask, secret domain.PPPSecret, routerName string, cause error) outcome {
+	f := Classify(cause)
+	attempts := task.Attempts + 1
+	slog.Warn("mikrotik: cannot read router profile before cancelling isolate",
+		"task_id", task.ID, "secret_id", secret.ID, "attempts", attempts, "code", f.Code, "error", cause)
+	event := TaskFailureEvent{TaskID: task.ID, RouterName: routerName, SecretName: secret.Name, Action: task.Action, Reason: msgRouterUnverifiable}
+
+	next, exhausted := NextAttempt(ActionIsolate, attempts, p.d.Now().UTC())
+	if f.Kind == FailPermanent || exhausted {
+		if err := p.d.Tasks.Fail(ctx, scope, task.ID, codeRouterUnverifiable, msgRouterUnverifiable); err != nil {
+			p.logLifecycleErr("fail", task, err)
+			return outcomeFailed
+		}
+		p.audit(ctx, scope, "task.failed", secret.RouterID, task, attempts)
+		p.alertTenant(ctx, scope, task, event)
+		return outcomeFailed
+	}
+	if err := p.d.Tasks.RetryLater(ctx, scope, task.ID, next, f.Code, f.Message); err != nil {
+		p.logLifecycleErr("retry later", task, err)
+		return outcomeRetried
+	}
+	if ShouldNotifyTenant(ActionIsolate, attempts) {
+		p.alertTenant(ctx, scope, task, event)
+	}
+	return outcomeRetried
 }
 
 // cancel ends a task without touching the router and re-evaluates the account

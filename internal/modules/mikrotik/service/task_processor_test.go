@@ -1034,7 +1034,7 @@ func TestProcess_SupersededAfterAttemptWithoutRouterChange_PlainCancel(t *testin
 	}
 }
 
-func TestProcess_PartialThenPaid_RouterReadFails_ReleasesNotCancels(t *testing.T) {
+func TestProcess_PartialThenPaid_RouterReadFails_RetriesNotCancels(t *testing.T) {
 	e := newProcEnv(t)
 	e.addSecret("s-1", e.routerA, "alice", domain.IsolationNormal, "paket-10m")
 	e.src.invoices = oneInvoice
@@ -1046,11 +1046,11 @@ func TestProcess_PartialThenPaid_RouterReadFails_ReleasesNotCancels(t *testing.T
 	e.now = e.now.Add(time.Hour)
 	e.clientA.Err = pmk.ErrUnreachable
 
-	if res := e.run(t); res != (ProcessResult{Skipped: 1}) {
+	if res := e.run(t); res != (ProcessResult{Retried: 1}) {
 		t.Fatalf("result = %+v", res)
 	}
-	if task := onlyTask(t, e, "s-1"); task.Status != domain.TaskPending || task.Attempts != 1 {
-		t.Fatalf("task must stay pending for a retry: %+v", task)
+	if task := onlyTask(t, e, "s-1"); task.Status != domain.TaskPending || task.Attempts != 2 {
+		t.Fatalf("task must stay pending for a counted retry: %+v", task)
 	}
 	e.clientA.Err = nil
 	e.now = e.now.Add(time.Hour)
@@ -1082,4 +1082,139 @@ func TestProcess_RestoreOnly_PartialIsolate_AlignsAndRestores(t *testing.T) {
 	if ts := e.tasks.forSecret("s-1"); len(ts) != 1 || ts[0].LastError != "entitlement_disabled" {
 		t.Fatalf("tasks = %+v", ts)
 	}
+}
+
+// supersededIsolateNeverRun leaves a claimed-then-crashed isolate task (StartedAt
+// set, Attempts 0) for an account that has since paid.
+func supersededIsolateNeverRun(t *testing.T, e *procEnv) domain.IsolationTask {
+	t.Helper()
+	e.addSecret("s-1", e.routerA, "alice", domain.IsolationNormal, "paket-10m")
+	e.src.invoices = oneInvoice
+	e.enqueue(t)
+	if _, err := e.tasks.ClaimBatch(context.Background(), e.scope, 10, e.now, taskLease); err != nil {
+		t.Fatal(err)
+	}
+	e.src.invoices = nil // paid
+	e.now = e.now.Add(taskLease + time.Minute)
+	return onlyTask(t, e, "s-1")
+}
+
+func TestProcess_SupersededIsolate_RouterReadFailsTransiently_CountsAttemptAndBacksOff(t *testing.T) {
+	e := newProcEnv(t)
+	supersededIsolateNeverRun(t, e)
+	e.clientA.Err = pmk.ErrUnreachable
+
+	if res := e.run(t); res != (ProcessResult{Retried: 1}) {
+		t.Fatalf("result = %+v", res)
+	}
+	task := onlyTask(t, e, "s-1")
+	want, _ := NextAttempt(ActionIsolate, 1, e.now)
+	if task.Status != domain.TaskPending || task.Attempts != 1 || !task.NextAttemptAt.Equal(want) {
+		t.Fatalf("task = %+v, want pending attempts=1 next=%v", task, want)
+	}
+	if len(e.audits("task.cancelled")) != 0 || len(e.alert.events) != 0 {
+		t.Fatal("no cancel and no alert on the first read failure")
+	}
+}
+
+// runUntilTerminal runs the processor with an advancing clock until the task
+// is no longer active and returns the number of runs.
+func runUntilTerminal(t *testing.T, e *procEnv, run func() ProcessResult) int {
+	t.Helper()
+	for i := 1; i <= 50; i++ {
+		run()
+		if task := onlyTask(t, e, "s-1"); task.Status != domain.TaskPending && task.Status != domain.TaskRunning {
+			return i
+		}
+		e.now = e.now.Add(2 * time.Hour)
+	}
+	t.Fatal("task never reached a terminal state")
+	return 0
+}
+
+func assertUnverifiableFailure(t *testing.T, e *procEnv) {
+	t.Helper()
+	task := onlyTask(t, e, "s-1")
+	if task.Status != domain.TaskFailed || task.LastErrorCode != "router_unverifiable" ||
+		task.LastError != "Router tidak dapat diperiksa; periksa profile pelanggan secara manual." {
+		t.Fatalf("task = %+v", task)
+	}
+	if len(e.alert.events) != 1 || len(e.audits("task.failed")) != 1 || len(e.audits("task.cancelled")) != 0 {
+		t.Fatalf("alerts = %d, task.failed = %d, task.cancelled = %d",
+			len(e.alert.events), len(e.audits("task.failed")), len(e.audits("task.cancelled")))
+	}
+	if e.alert.events[0].Reason != task.LastError || e.clientA.WriteCalls() != 0 {
+		t.Fatalf("alert = %+v writes = %d", e.alert.events[0], e.clientA.WriteCalls())
+	}
+	if e.srepo.byID("s-1").IsolationState != domain.IsolationNormal {
+		t.Fatal("state must not change without a router read")
+	}
+}
+
+func TestProcess_SupersededIsolate_RouterReadFailsUntilExhausted_FailsAndAlertsOnce(t *testing.T) {
+	e := newProcEnv(t)
+	supersededIsolateNeverRun(t, e)
+	e.clientA.Err = pmk.ErrUnreachable
+
+	n := runUntilTerminal(t, e, func() ProcessResult { return e.run(t) })
+	if n != isolateMaxAttempts {
+		t.Fatalf("runs until terminal = %d, want %d", n, isolateMaxAttempts)
+	}
+	assertUnverifiableFailure(t, e)
+	// Terminal: nothing is claimed any more and nothing re-enqueued the isolate.
+	e.now = e.now.Add(2 * time.Hour)
+	if res := e.run(t); res != (ProcessResult{}) {
+		t.Fatalf("after fail = %+v", res)
+	}
+}
+
+func TestProcess_SupersededIsolate_RouterReadPermanent_FailsImmediately(t *testing.T) {
+	e := newProcEnv(t)
+	supersededIsolateNeverRun(t, e)
+	e.clientA.Err = pmk.ErrAuthFailed
+
+	if res := e.run(t); res != (ProcessResult{Failed: 1}) {
+		t.Fatalf("result = %+v", res)
+	}
+	assertUnverifiableFailure(t, e)
+}
+
+func TestProcess_SupersededIsolate_RouterGone_FailsWithoutLoop(t *testing.T) {
+	e := newProcEnv(t)
+	supersededIsolateNeverRun(t, e)
+	// The router vanished between the processor's lookup and the read.
+	e.deps.Executor = notFoundReader{e.deps.Executor}
+	e.rebuild()
+
+	if res := e.run(t); res != (ProcessResult{Failed: 1}) {
+		t.Fatalf("result = %+v", res)
+	}
+	if task := onlyTask(t, e, "s-1"); task.Status != domain.TaskFailed || task.LastErrorCode != "router_unverifiable" {
+		t.Fatalf("task = %+v", task)
+	}
+}
+
+// notFoundReader reports the router as gone on the read-only profile check.
+type notFoundReader struct{ TaskExecutor }
+
+func (notFoundReader) CurrentProfile(context.Context, coretenant.Scope, domain.PPPSecret) (string, error) {
+	return "", mikrotik.ErrRouterNotFound
+}
+
+func TestProcess_RestoreOnly_SupersededIsolate_RouterUnreachable_FailsBounded(t *testing.T) {
+	e := newProcEnv(t)
+	supersededIsolateNeverRun(t, e)
+	e.clientA.Err = pmk.ErrUnreachable
+
+	n := runUntilTerminal(t, e, func() ProcessResult {
+		res, err := e.p.RunRestoreOnly(context.Background(), e.scope, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	})
+	if n != isolateMaxAttempts {
+		t.Fatalf("runs until terminal = %d, want %d", n, isolateMaxAttempts)
+	}
+	assertUnverifiableFailure(t, e)
 }
