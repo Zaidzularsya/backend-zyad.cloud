@@ -39,3 +39,17 @@ func TestRestoredMessage_Plain(t *testing.T) {
 		t.Fatalf("unexpected markup: %s", body)
 	}
 }
+
+func TestRestoredMessage_EscapesCustomerName(t *testing.T) {
+	text, body, _ := RestoredMessage("", "<i>x</i>")
+	if strings.Contains(body, "<i>") || !strings.Contains(body, "&lt;i&gt;") || !strings.Contains(text, "<i>x</i>") {
+		t.Fatalf("body=%s text=%s", body, text)
+	}
+}
+
+func TestIsolatedMessage_EscapesInvoiceNumber(t *testing.T) {
+	_, body, _ := IsolatedMessage("", "A", []TriggerInvoice{{ID: "i", Number: "<script>", DueDate: time.Now()}}, nil)
+	if strings.Contains(body, "<script>") || !strings.Contains(body, "&lt;script&gt;") {
+		t.Fatalf("not escaped: %s", body)
+	}
+}

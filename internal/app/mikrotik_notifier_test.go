@@ -46,12 +46,13 @@ func (f *fakeEmail) SendInvoiceEmail(_ context.Context, _ coretenant.Scope, in r
 }
 
 type fakeWA struct {
-	in []receivableservice.WhatsAppInput
+	in  []receivableservice.WhatsAppInput
+	err error
 }
 
 func (f *fakeWA) SendInvoiceWhatsApp(_ context.Context, _ coretenant.Scope, in receivableservice.WhatsAppInput) (string, string, error) {
 	f.in = append(f.in, in)
-	return "w1", "628", nil
+	return "w1", "628", f.err
 }
 
 type fakeNotifIssuer struct{}
@@ -180,8 +181,50 @@ func TestTenantAlerter_PublishesPerMemberWithPermission(t *testing.T) {
 			}
 		}
 		if e.Payload["tasks_url"] != "https://app.example/app/mikrotik/tasks" || e.Payload["reason"] != "gagal terhubung" ||
-			e.Payload["router_name"] != "R1" || e.Payload["secret_name"] != "pppoe-1" || e.Payload["action"] != "isolate" || e.Payload["app_name"] != "Zyad" {
+			e.Payload["router_name"] != "R1" || e.Payload["secret_name"] != "pppoe-1" || e.Payload["action"] != "isolir" || e.Payload["app_name"] != "Zyad" {
 			t.Fatalf("payload: %+v", e.Payload)
 		}
+	}
+}
+
+func TestTenantAlerter_ActionLabels(t *testing.T) {
+	for action, want := range map[string]string{"isolate": "isolir", "restore": "pulihkan", "other": "other"} {
+		pub := &fakePublisher{}
+		a := mikrotikTenantAlerter{members: &fakeAlertMembers{}, publisher: pub}
+		if err := a.NotifyTaskFailed(context.Background(), mkScope("org-1"), service.TaskFailureEvent{Action: action}); err != nil {
+			t.Fatal(err)
+		}
+		if got := pub.events[0].Payload["action"]; got != want {
+			t.Fatalf("%s: got %v want %s", action, got, want)
+		}
+	}
+}
+
+func TestCustomerNotifier_WhatsAppChannelErrorIsSkipNotFailure(t *testing.T) {
+	em, wa := &fakeEmail{}, &fakeWA{err: &receivableservice.ChannelError{Reason: "wa off"}}
+	n, _ := newTestNotifier("u1", receivabledomain.Account{Name: "Budi", Email: "b@x.id", SourceType: receivabledomain.SourceTypeCRMContact, SourceID: "c1"}, em, wa)
+	if err := n.NotifyIsolated(context.Background(), mkScope("org-1"), "acc-1", testInvoices); err != nil {
+		t.Fatalf("channel error must not fail: %v", err)
+	}
+	if len(em.in) != 1 || len(wa.in) != 1 {
+		t.Fatalf("email=%d wa=%d", len(em.in), len(wa.in))
+	}
+}
+
+type failingPayLinker struct{}
+
+func (failingPayLinker) Link(context.Context, coretenant.Scope, string, string) (string, time.Time, error) {
+	return "", time.Time{}, errors.New("no link")
+}
+
+func TestCustomerNotifier_PayLinkFailureStillSendsWithoutLink(t *testing.T) {
+	em, wa := &fakeEmail{}, &fakeWA{}
+	n, _ := newTestNotifier("u1", receivabledomain.Account{Name: "Budi", Email: "b@x.id"}, em, wa)
+	n.links = failingPayLinker{}
+	if err := n.NotifyIsolated(context.Background(), mkScope("org-1"), "acc-1", testInvoices); err != nil {
+		t.Fatal(err)
+	}
+	if len(em.in) != 1 || !strings.Contains(em.in[0].BodyHTML, "INV-1") || strings.Contains(em.in[0].BodyHTML, "https://") {
+		t.Fatalf("unexpected body: %+v", em.in)
 	}
 }

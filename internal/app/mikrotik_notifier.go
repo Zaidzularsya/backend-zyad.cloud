@@ -11,6 +11,7 @@ import (
 	notificationdomain "zyad.cloud/internal/core/notification/domain"
 	notificationpublisher "zyad.cloud/internal/core/notification/publisher"
 	coretenant "zyad.cloud/internal/core/tenant"
+	mikrotikdomain "zyad.cloud/internal/modules/mikrotik/domain"
 	"zyad.cloud/internal/modules/mikrotik/service"
 	receivabledomain "zyad.cloud/internal/modules/receivable/domain"
 	receivableservice "zyad.cloud/internal/modules/receivable/service"
@@ -96,6 +97,8 @@ func (n *mikrotikCustomerNotifier) notify(ctx context.Context, scope coretenant.
 	if n.issuer != nil {
 		if party, err := n.issuer.OrganizationProfile(ctx, scope); err == nil {
 			tenant = party.Name
+		} else {
+			slog.DebugContext(ctx, "mikrotik: organization profile unavailable, notifying without tenant name", "error", err)
 		}
 	}
 	text, body, subject := build(sender, tenant, acc)
@@ -151,7 +154,7 @@ func (a mikrotikTenantAlerter) NotifyTaskFailed(ctx context.Context, scope coret
 			Recipient: notificationdomain.NotificationRecipient{Type: "user", UserID: m.UserID, Name: m.Name, Email: m.Email},
 			Payload: map[string]any{
 				"app_name": a.appName, "user_name": m.Name, "router_name": singleLine(e.RouterName),
-				"secret_name": singleLine(e.SecretName), "action": e.Action, "reason": singleLine(e.Reason),
+				"secret_name": singleLine(e.SecretName), "action": actionLabel(e.Action), "reason": singleLine(e.Reason),
 				"tasks_url": strings.TrimRight(a.frontendURL, "/") + "/app/mikrotik/tasks",
 			},
 			Locale: a.locale,
@@ -161,4 +164,16 @@ func (a mikrotikTenantAlerter) NotifyTaskFailed(ctx context.Context, scope coret
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// actionLabel maps the internal task action to the label the notification
+// template expects ("Tugas {{action}} PPPoE ...").
+func actionLabel(action string) string {
+	switch action {
+	case mikrotikdomain.ActionIsolate:
+		return "isolir"
+	case mikrotikdomain.ActionRestore:
+		return "pulihkan"
+	}
+	return action
 }
