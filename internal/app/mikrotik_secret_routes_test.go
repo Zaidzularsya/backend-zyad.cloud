@@ -77,6 +77,10 @@ func (s *countingPolicyService) SetTrigger(context.Context, coretenant.Scope, st
 	s.calls++
 	return mikrotikdomain.ProductTrigger{}, nil
 }
+func (s *countingPolicyService) ListTriggersWithProducts(context.Context, coretenant.Scope) ([]mikrotikservice.TriggerItem, error) {
+	s.calls++
+	return nil, nil
+}
 func (s *countingPolicyService) UnmarkedProducts(context.Context, coretenant.Scope) ([]mikrotikservice.ProductInfo, error) {
 	s.calls++
 	return nil, nil
@@ -122,6 +126,7 @@ var secretRouteCases = []secretRouteCase{
 	{http.MethodGet, "/customers/" + rtAccount + "/policy", ``, "mikrotik_policy.read", false},
 	{http.MethodPut, "/customers/" + rtAccount + "/policy", `{"exempt":false}`, "mikrotik_policy.update", false},
 	{http.MethodGet, "/products/unmarked", ``, "mikrotik_product_trigger.read", false},
+	{http.MethodGet, "/products/triggers", ``, "mikrotik_product_trigger.read", false},
 	{http.MethodGet, "/products/" + rtProduct + "/trigger/preview", ``, "mikrotik_product_trigger.read", false},
 	{http.MethodPut, "/products/" + rtProduct + "/trigger", `{"enabled":true}`, "mikrotik_product_trigger.update", false},
 }

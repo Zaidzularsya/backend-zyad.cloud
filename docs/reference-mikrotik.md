@@ -121,7 +121,7 @@ Semua endpoint di bawah `/api/v1/app/mikrotik`, tunduk pada entitlement `mikroti
 | `POST /secrets/{id}/unpair` | `mikrotik_secret.unpair` |
 | `GET /customers/{account_id}/policy` | `mikrotik_policy.read` |
 | `PUT /customers/{account_id}/policy` | `mikrotik_policy.update` |
-| `GET /products/unmarked`, `GET /products/{id}/trigger/preview` | `mikrotik_product_trigger.read` |
+| `GET /products/unmarked`, `GET /products/triggers`, `GET /products/{id}/trigger/preview` | `mikrotik_product_trigger.read` |
 | `PUT /products/{id}/trigger` | `mikrotik_product_trigger.update` |
 
 Permission dibuat oleh migration `000172`; tabel oleh `000171`. Hanya import dan `original-profile` menghubungi router,
@@ -151,6 +151,7 @@ sehingga hanya keduanya memakai rate limit probe (20 per menit per organization,
 - `PUT /products/{id}/trigger` menandai produk sebagai layanan PPPoE. `effective_from` adalah tanggal WIB (YYYY-MM-DD):
   menandai ulang produk yang sudah aktif mempertahankannya, mengaktifkan lagi setelah dinonaktifkan mengaturnya ke hari ini.
   `GET .../trigger/preview` menghitung dampak (kontrak aktif, pelanggan, invoice overdue) tanpa menulis.
+  `GET /products/triggers` mendaftar semua penandaan (dengan nama/SKU produk, maks 200 diperkaya). Respons PUT tidak memuat dampak; ambil dari endpoint preview.
   `GET /products/unmarked` mendaftar produk recurring dalam kontrak aktif yang belum ditandai.
 
 ### Audit

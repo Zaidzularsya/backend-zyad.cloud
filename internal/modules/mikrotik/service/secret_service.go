@@ -12,10 +12,14 @@ import (
 	"zyad.cloud/internal/modules/mikrotik"
 	"zyad.cloud/internal/modules/mikrotik/domain"
 	"zyad.cloud/internal/modules/mikrotik/repository"
+	pmk "zyad.cloud/internal/platform/mikrotik"
 )
 
 // MaxImportSecrets bounds one import so a hostile or huge router cannot exhaust memory.
 const MaxImportSecrets = 10000
+
+// maxSecretFieldRunes mirrors the varchar(100) name/profile columns.
+const maxSecretFieldRunes = 100
 
 const (
 	secretPath  = "/ppp/secret"
@@ -53,6 +57,9 @@ func (s *SecretService) Import(ctx context.Context, scope coretenant.Scope, rout
 	}
 	rows, err := client.Print(ctx, secretPath, nil)
 	if err != nil {
+		if errors.Is(err, pmk.ErrResponseTooLarge) {
+			return repository.ImportResult{}, invalid("router response too large to import (limit 10000 secrets)")
+		}
 		return repository.ImportResult{}, translateClientError(err, secrets...)
 	}
 	if len(rows) > MaxImportSecrets {
@@ -60,12 +67,17 @@ func (s *SecretService) Import(ctx context.Context, scope coretenant.Scope, rout
 	}
 
 	imported := make([]repository.ImportedSecret, 0, len(rows))
+	skipped := 0
 	for _, row := range rows {
 		name := strings.TrimSpace(row["name"])
 		if name == "" || !isPPPoEService(row["service"]) {
 			continue
 		}
 		profile := row["profile"]
+		if utf8.RuneCountInString(name) > maxSecretFieldRunes || utf8.RuneCountInString(profile) > maxSecretFieldRunes {
+			skipped++
+			continue
+		}
 		imported = append(imported, repository.ImportedSecret{
 			Name:                 name,
 			Profile:              profile,
@@ -85,11 +97,12 @@ func (s *SecretService) Import(ctx context.Context, scope coretenant.Scope, rout
 		return repository.ImportResult{}, storeError(err, secrets...)
 	}
 	res.Missing = missing
+	res.Skipped = skipped
 
 	// The import is already committed; a failed audit row must not turn it into an error.
 	if err := s.audit.InsertAudit(ctx, scope, repository.AuditEntry{
 		Event: "secret.imported", ActorUserID: actorUserID, TargetID: routerID,
-		Metadata: map[string]any{"target": "secret", "created": res.Created, "updated": res.Updated, "missing": res.Missing},
+		Metadata: map[string]any{"target": "secret", "created": res.Created, "updated": res.Updated, "missing": res.Missing, "skipped": res.Skipped},
 	}); err != nil {
 		slog.Warn("mikrotik: audit insert failed", "router_id", routerID, "event", "secret.imported", "error", scrub(err.Error(), secrets...))
 	}

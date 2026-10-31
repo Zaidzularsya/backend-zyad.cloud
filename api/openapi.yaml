@@ -10640,7 +10640,7 @@ paths:
       - Mikrotik
       security:
       - BearerAuth: []
-      description: "Login ke router, membaca `/ppp/secret`, lalu menyinkronkan cache lokal (`mikrotik_ppp_secrets`). Hanya secret ber-`service` kosong, `any`, atau `pppoe` yang diimpor. Impor ulang hanya memperbarui kolom milik router (profile, disabled, comment, last_seen_at) dan tidak menyentuh pairing, `original_profile`, atau `isolation_state`; `needs_original_profile` tidak pernah dihapus oleh impor. Secret yang hilang dari router ditandai `present=false`, tidak dihapus. Secret yang profile-nya sama dengan `isolir_profile_name` router ditandai `needs_original_profile=true` sampai `original_profile` ditetapkan. Batas 10000 secret per impor (lebih dari itu 422 VALIDATION_ERROR, tidak ada yang ditulis). Audit: `secret.imported`. Permission: `mikrotik_secret.import`. Rate limit probe: 20 panggilan per menit per organization. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      description: "Login ke router, membaca `/ppp/secret`, lalu menyinkronkan cache lokal (`mikrotik_ppp_secrets`). Hanya secret ber-`service` kosong, `any`, atau `pppoe` yang diimpor. Impor ulang hanya memperbarui kolom milik router (profile, disabled, comment, last_seen_at) dan tidak menyentuh pairing, `original_profile`, atau `isolation_state`; `needs_original_profile` tidak pernah dihapus oleh impor. Secret yang hilang dari router ditandai `present=false`, tidak dihapus. Secret yang profile-nya sama dengan `isolir_profile_name` router ditandai `needs_original_profile=true` sampai `original_profile` ditetapkan. Batas 10000 secret per impor (lebih dari itu, atau respons router lebih dari 8 MB, 422 VALIDATION_ERROR dan tidak ada yang ditulis). Baris dengan `name` atau `profile` lebih dari 100 karakter dilewati dan dihitung di `skipped`. Audit: `secret.imported`. Permission: `mikrotik_secret.import`. Rate limit probe: 20 panggilan per menit per organization. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
       parameters:
       - name: id
         in: path
@@ -11100,6 +11100,36 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/products/triggers:
+    get:
+      summary: List product PPPoE triggers
+      operationId: listMikrotikProductTriggers
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Semua penandaan produk (enabled maupun disabled) milik organization, diperkaya `product_name` dan `product_sku`. Pengayaan dibatasi 200 produk pertama; sisanya dikembalikan dengan nama/SKU kosong. Tanpa paginasi. Permission: `mikrotik_product_trigger.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikProductTriggerListEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
   /api/v1/app/mikrotik/products/{id}/trigger/preview:
     get:
       summary: Preview the impact of marking a product
@@ -11148,7 +11178,7 @@ paths:
       - Mikrotik
       security:
       - BearerAuth: []
-      description: "Menandai (`enabled=true`) atau membatalkan penandaan produk. Menandai produk yang sudah aktif mempertahankan `effective_from`; mengaktifkan kembali setelah dinonaktifkan mengatur ulang ke hari ini (WIB). Tidak ada efek langsung ke router. Audit: `product_trigger.set`. Permission: `mikrotik_product_trigger.update`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      description: "Menandai (`enabled=true`) atau membatalkan penandaan produk. Menandai produk yang sudah aktif mempertahankan `effective_from`; mengaktifkan kembali setelah dinonaktifkan mengatur ulang ke hari ini (WIB). Tidak ada efek langsung ke router. Dampak penggunaan (kontrak aktif, pelanggan, invoice overdue) diperoleh dari endpoint preview (`GET /products/{id}/trigger/preview`), bukan dari respons ini. Audit: `product_trigger.set`. Permission: `mikrotik_product_trigger.update`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
       parameters:
       - name: id
         in: path
@@ -16343,6 +16373,7 @@ components:
         created: {type: integer}
         updated: {type: integer}
         missing: {type: integer, description: "Jumlah secret yang baru ditandai present=false."}
+        skipped: {type: integer, description: "Jumlah baris router yang dilewati karena `name` atau `profile` lebih dari 100 karakter."}
     MikrotikImportResultEnvelope:
       type: object
       required: [success, message, data]
@@ -16359,7 +16390,7 @@ components:
       type: object
       required: [profile]
       properties:
-        profile: {type: string, maxLength: 255}
+        profile: {type: string, maxLength: 100}
     MikrotikAccount:
       type: object
       properties:
@@ -16420,6 +16451,21 @@ components:
         product_id: {type: string, format: uuid}
         enabled: {type: boolean}
         effective_from: {type: string, format: date, description: "Tanggal WIB (YYYY-MM-DD)."}
+    MikrotikProductTriggerItem:
+      type: object
+      properties:
+        product_id: {type: string, format: uuid}
+        product_name: {type: string, description: "Kosong bila produk tidak dapat di-resolve."}
+        product_sku: {type: string}
+        enabled: {type: boolean}
+        effective_from: {type: string, format: date}
+    MikrotikProductTriggerListEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: '#/components/schemas/MikrotikProductTriggerItem'}}
     MikrotikTriggerEnvelope:
       type: object
       required: [success, message, data]

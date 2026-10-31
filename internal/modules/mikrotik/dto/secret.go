@@ -22,7 +22,7 @@ type PairSecretRequest struct {
 }
 
 type SetOriginalProfileRequest struct {
-	Profile string `json:"profile" binding:"required,max=255"`
+	Profile string `json:"profile" binding:"required,max=100"`
 }
 
 type AccountSearchQuery struct {
@@ -68,10 +68,11 @@ type ImportResultResponse struct {
 	Created int `json:"created"`
 	Updated int `json:"updated"`
 	Missing int `json:"missing"`
+	Skipped int `json:"skipped"`
 }
 
 func ImportResultFromRepo(r repository.ImportResult) ImportResultResponse {
-	return ImportResultResponse{Created: r.Created, Updated: r.Updated, Missing: r.Missing}
+	return ImportResultResponse{Created: r.Created, Updated: r.Updated, Missing: r.Missing, Skipped: r.Skipped}
 }
 
 type AccountResponse struct {

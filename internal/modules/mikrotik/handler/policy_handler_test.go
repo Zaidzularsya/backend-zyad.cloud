@@ -53,6 +53,14 @@ func (f *fakePolicyService) UnmarkedProducts(context.Context, coretenant.Scope) 
 	return []service.ProductInfo{{ID: testProductID, Name: "Paket 10M", Recurring: true, Active: true}}, f.err
 }
 
+func (f *fakePolicyService) ListTriggersWithProducts(context.Context, coretenant.Scope) ([]service.TriggerItem, error) {
+	f.calls++
+	return []service.TriggerItem{{
+		Trigger: domain.ProductTrigger{ProductID: testProductID, Enabled: true, EffectiveFrom: time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC)},
+		Product: &service.ProductInfo{ID: testProductID, Name: "Paket 10M", SKU: "P10"},
+	}}, f.err
+}
+
 func policyRouter(t *testing.T, svc PolicyService) *gin.Engine {
 	r := newTestRouter(t)
 	NewPolicyHandler(svc).RegisterRoutes(r.Group("/app/mikrotik"), nil, nil)
@@ -65,6 +73,7 @@ func TestPolicyRoutes_Success(t *testing.T) {
 		{"get policy", http.MethodGet, base + "/customers/" + testAccountID + "/policy", ``},
 		{"set policy", http.MethodPut, base + "/customers/" + testAccountID + "/policy", `{"exempt":true,"reason":"pelanggan VIP"}`},
 		{"unmarked", http.MethodGet, base + "/products/unmarked", ``},
+		{"list triggers", http.MethodGet, base + "/products/triggers", ``},
 		{"preview", http.MethodGet, base + "/products/" + testProductID + "/trigger/preview", ``},
 		{"set trigger", http.MethodPut, base + "/products/" + testProductID + "/trigger", `{"enabled":true}`},
 	} {
@@ -122,6 +131,7 @@ func TestPolicyRoutes_ErrorMapping(t *testing.T) {
 				{http.MethodGet, base + "/customers/" + testAccountID + "/policy", ``},
 				{http.MethodPut, base + "/customers/" + testAccountID + "/policy", `{"exempt":false}`},
 				{http.MethodGet, base + "/products/unmarked", ``},
+				{http.MethodGet, base + "/products/triggers", ``},
 				{http.MethodGet, base + "/products/" + testProductID + "/trigger/preview", ``},
 				{http.MethodPut, base + "/products/" + testProductID + "/trigger", `{"enabled":false}`},
 			} {
@@ -186,10 +196,26 @@ func TestPolicyRoutesRequirePermissions(t *testing.T) {
 		{http.MethodGet, "/app/mikrotik/customers/:account_id/policy", "mikrotik_policy.read"},
 		{http.MethodPut, "/app/mikrotik/customers/:account_id/policy", "mikrotik_policy.update"},
 		{http.MethodGet, "/app/mikrotik/products/unmarked", "mikrotik_product_trigger.read"},
+		{http.MethodGet, "/app/mikrotik/products/triggers", "mikrotik_product_trigger.read"},
 		{http.MethodGet, "/app/mikrotik/products/:id/trigger/preview", "mikrotik_product_trigger.read"},
 		{http.MethodPut, "/app/mikrotik/products/:id/trigger", "mikrotik_product_trigger.update"},
 	}
 	assertRoutesRequirePermissions(t, routes, func(g *gin.RouterGroup, p *recordingChecker) {
 		NewPolicyHandler(&fakePolicyService{}).RegisterRoutes(g, p, nil)
 	})
+}
+
+func TestListTriggers_Shape(t *testing.T) {
+	w := performJSON(policyRouter(t, &fakePolicyService{}), http.MethodGet, "/app/mikrotik/products/triggers", ``)
+	var body struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || len(body.Data) != 1 {
+		t.Fatalf("body = %s, %v", w.Body, err)
+	}
+	d := body.Data[0]
+	if d["product_id"] != testProductID || d["product_name"] != "Paket 10M" || d["product_sku"] != "P10" || d["enabled"] != true || d["effective_from"] != "2026-10-31" {
+		t.Fatalf("item = %v", d)
+	}
+	assertNoCredentialKeys(t, w.Body.Bytes())
 }

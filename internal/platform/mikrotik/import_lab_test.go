@@ -28,7 +28,11 @@ func TestLab_ImportListsPPPSecretsAndProfiles(t *testing.T) {
 			ctx := context.Background()
 			secrets, err := c.Print(ctx, "/ppp/secret", nil)
 			if err != nil {
-				t.Skipf("%s transport cannot list /ppp/secret on this router: %v", apiType, err)
+				if apiType == APITypeREST {
+					// The lab may legitimately have www/www-ssl disabled or unreachable.
+					t.Skipf("rest transport cannot list /ppp/secret on this router: %v", err)
+				}
+				t.Fatalf("%s transport cannot list /ppp/secret: %v", apiType, err)
 			}
 			profiles, err := c.Print(ctx, "/ppp/profile", nil)
 			if err != nil {

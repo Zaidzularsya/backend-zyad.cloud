@@ -365,3 +365,34 @@ func TestImport_DeletedRouterNotFound(t *testing.T) {
 		t.Fatalf("err = %v, want ErrRouterNotFound", err)
 	}
 }
+
+func TestImport_ResponseTooLargeIs422(t *testing.T) {
+	e := newSecretEnv(t)
+	e.client.Err = pmk.ErrResponseTooLarge
+	_, err := e.svc.Import(context.Background(), e.scope, e.router.ID, testActor)
+	var inv *mikrotik.InvalidInputError
+	if !errors.As(err, &inv) || !strings.Contains(inv.Message, "too large") {
+		t.Fatalf("err = %v, want InvalidInputError (too large)", err)
+	}
+	if errors.Is(err, mikrotik.ErrUnreachable) {
+		t.Fatal("must not be reported as unreachable")
+	}
+}
+
+func TestImport_SkipsOverlongNameOrProfile(t *testing.T) {
+	e := newSecretEnv(t)
+	long := strings.Repeat("x", 101)
+	e.seed(
+		pmk.Row{"name": "alice", "service": "pppoe", "profile": "p"},
+		pmk.Row{"name": long, "service": "pppoe", "profile": "p"},
+		pmk.Row{"name": "bob", "service": "pppoe", "profile": long},
+		pmk.Row{"name": strings.Repeat("y", 100), "service": "pppoe", "profile": strings.Repeat("z", 100)},
+	)
+	res := e.doImport(t)
+	if res.Created != 2 || res.Skipped != 2 {
+		t.Fatalf("result = %+v, want created=2 skipped=2", res)
+	}
+	if e.srepo.byName(e.router.ID, "bob") != nil || e.srepo.byName(e.router.ID, long) != nil {
+		t.Fatal("overlong rows must not be stored")
+	}
+}

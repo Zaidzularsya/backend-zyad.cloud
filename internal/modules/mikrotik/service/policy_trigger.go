@@ -73,6 +73,37 @@ func (s *PolicyService) ListTriggers(ctx context.Context, scope coretenant.Scope
 	return s.repo.ListProductTriggers(ctx, scope)
 }
 
+// maxTriggerEnrich bounds the per-product lookups of ListTriggersWithProducts
+// (ProductCatalog has no batch Get). Triggers beyond it are returned with ids only.
+const maxTriggerEnrich = 200
+
+// TriggerItem is a product trigger with the product's display fields. Product
+// is nil when the product could not be resolved or the enrich cap was hit.
+type TriggerItem struct {
+	Trigger domain.ProductTrigger
+	Product *ProductInfo
+}
+
+// ListTriggersWithProducts returns the triggers of the organization enriched
+// with product name/sku, at most maxTriggerEnrich lookups.
+func (s *PolicyService) ListTriggersWithProducts(ctx context.Context, scope coretenant.Scope) ([]TriggerItem, error) {
+	triggers, err := s.repo.ListProductTriggers(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]TriggerItem, 0, len(triggers))
+	for i, t := range triggers {
+		item := TriggerItem{Trigger: t}
+		if i < maxTriggerEnrich {
+			if p, err := s.products.Get(ctx, scope, t.ProductID); err == nil {
+				item.Product = &p
+			}
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
 // UnmarkedProducts lists recurring products used by active contracts that are
 // not (or no longer) enabled as PPPoE services.
 func (s *PolicyService) UnmarkedProducts(ctx context.Context, scope coretenant.Scope) ([]ProductInfo, error) {

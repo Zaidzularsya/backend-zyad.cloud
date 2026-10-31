@@ -200,3 +200,15 @@ func TestUnmarkedProducts_ExcludesEnabled(t *testing.T) {
 		t.Fatalf("list = %+v, %v", list, err)
 	}
 }
+
+func TestListTriggersWithProducts(t *testing.T) {
+	e := newTriggerEnv(t)
+	ctx := context.Background()
+	if _, err := e.svc.SetTrigger(ctx, e.scope, "p-1", true, testActor); err != nil {
+		t.Fatal(err)
+	}
+	items, err := e.svc.ListTriggersWithProducts(ctx, e.scope)
+	if err != nil || len(items) != 1 || items[0].Product == nil || items[0].Product.ID != "p-1" || items[0].Product.Name == "" {
+		t.Fatalf("items = %+v, %v", items, err)
+	}
+}

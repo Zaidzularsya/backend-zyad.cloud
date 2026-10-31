@@ -21,6 +21,7 @@ type PolicyService interface {
 	PreviewTrigger(ctx context.Context, scope coretenant.Scope, productID string) (service.TriggerPreview, error)
 	SetTrigger(ctx context.Context, scope coretenant.Scope, productID string, enabled bool, actor string) (domain.ProductTrigger, error)
 	UnmarkedProducts(ctx context.Context, scope coretenant.Scope) ([]service.ProductInfo, error)
+	ListTriggersWithProducts(ctx context.Context, scope coretenant.Scope) ([]service.TriggerItem, error)
 }
 
 type PolicyHandler struct {
@@ -36,6 +37,7 @@ func (h *PolicyHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmidd
 	router.GET("/customers/:account_id/policy", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_policy.read"), h.GetPolicy)
 	router.PUT("/customers/:account_id/policy", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_policy.update"), h.SetPolicy)
 	router.GET("/products/unmarked", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_product_trigger.read"), h.Unmarked)
+	router.GET("/products/triggers", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_product_trigger.read"), h.ListTriggers)
 	router.GET("/products/:id/trigger/preview", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_product_trigger.read"), h.PreviewTrigger)
 	router.PUT("/products/:id/trigger", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_product_trigger.update"), h.SetTrigger)
 }
@@ -92,6 +94,19 @@ func (h *PolicyHandler) Unmarked(c *gin.Context) {
 		return
 	}
 	corehttp.OK(c, "success", dto.ProductListFromService(products))
+}
+
+func (h *PolicyHandler) ListTriggers(c *gin.Context) {
+	scope, ok := scopeOrFail(c)
+	if !ok {
+		return
+	}
+	items, err := h.svc.ListTriggersWithProducts(c.Request.Context(), scope)
+	if err != nil {
+		failRouter(c, err)
+		return
+	}
+	corehttp.OK(c, "success", dto.TriggerItemsFromService(items))
 }
 
 func (h *PolicyHandler) PreviewTrigger(c *gin.Context) {

@@ -209,6 +209,7 @@ func TestSecretBodies_RejectUnknownAndInvalid(t *testing.T) {
 		{"pair trailing data", http.MethodPost, base + "/pair", `{"account_id":"` + testAccountID + `"}{}`},
 		{"profile unknown field", http.MethodPut, base + "/original-profile", `{"profile":"p","x":1}`},
 		{"profile missing", http.MethodPut, base + "/original-profile", `{}`},
+		{"profile too long", http.MethodPut, base + "/original-profile", `{"profile":"` + strings.Repeat("x", 101) + `"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := &fakeSecretService{}

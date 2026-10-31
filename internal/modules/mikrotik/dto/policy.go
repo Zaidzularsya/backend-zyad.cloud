@@ -80,3 +80,25 @@ func TriggerPreviewFromService(p service.TriggerPreview) TriggerPreviewResponse 
 		EffectiveFrom: p.EffectiveFrom.Format(dateLayout), AlreadyEnabled: p.AlreadyEnabled,
 	}
 }
+
+// TriggerItemResponse is a product trigger plus the product's display fields.
+// ProductName and ProductSKU are empty when the product could not be resolved.
+type TriggerItemResponse struct {
+	ProductID     string `json:"product_id"`
+	ProductName   string `json:"product_name"`
+	ProductSKU    string `json:"product_sku"`
+	Enabled       bool   `json:"enabled"`
+	EffectiveFrom string `json:"effective_from"`
+}
+
+func TriggerItemsFromService(items []service.TriggerItem) []TriggerItemResponse {
+	out := make([]TriggerItemResponse, 0, len(items))
+	for _, it := range items {
+		r := TriggerItemResponse{ProductID: it.Trigger.ProductID, Enabled: it.Trigger.Enabled, EffectiveFrom: it.Trigger.EffectiveFrom.Format(dateLayout)}
+		if it.Product != nil {
+			r.ProductName, r.ProductSKU = it.Product.Name, it.Product.SKU
+		}
+		out = append(out, r)
+	}
+	return out
+}

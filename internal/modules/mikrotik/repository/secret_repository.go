@@ -30,7 +30,9 @@ type ImportedSecret struct {
 	NeedsOriginalProfile bool
 }
 
-type ImportResult struct{ Created, Updated, Missing int }
+// Skipped counts router rows the service did not import (name or profile
+// longer than the 100-char columns); the repository never sets it.
+type ImportResult struct{ Created, Updated, Missing, Skipped int }
 
 // SecretFilter narrows List. Paired nil means both paired and unpaired.
 type SecretFilter struct {
