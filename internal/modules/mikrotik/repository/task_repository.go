@@ -63,6 +63,9 @@ type TaskRepository interface {
 	FindByID(ctx context.Context, scope coretenant.Scope, id string) (domain.IsolationTask, error)
 	List(ctx context.Context, scope coretenant.Scope, f TaskFilter, limit, offset int) ([]domain.TaskView, int64, error)
 	CountByStatus(ctx context.Context, scope coretenant.Scope) (map[string]int, error)
+	// OldestPendingRestore returns the created_at of the longest-waiting
+	// pending restore, or nil when there is none.
+	OldestPendingRestore(ctx context.Context, scope coretenant.Scope) (*time.Time, error)
 }
 
 type taskRepository struct {
@@ -399,4 +402,14 @@ func (r *taskRepository) CountByStatus(ctx context.Context, scope coretenant.Sco
 		return rows.Err()
 	})
 	return counts, err
+}
+
+func (r *taskRepository) OldestPendingRestore(ctx context.Context, scope coretenant.Scope) (*time.Time, error) {
+	var oldest *time.Time
+	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT MIN(created_at) FROM mikrotik_isolation_tasks
+			WHERE organization_id = $1 AND action = 'restore' AND status = 'pending'`,
+			scope.OrganizationID()).Scan(&oldest)
+	})
+	return oldest, err
 }

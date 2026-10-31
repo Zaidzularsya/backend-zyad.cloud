@@ -624,3 +624,38 @@ func TestTaskRepo_LifecycleOnTerminalTaskIsNotFound(t *testing.T) {
 	}
 	check(domain.TaskCancelled)
 }
+
+func TestOldestPendingRestore(t *testing.T) {
+	f := newIsoFixture(t)
+	e, repo := f.e, taskRepo(f.e)
+	if got, err := repo.OldestPendingRestore(e.ctx, f.scope); err != nil || got != nil {
+		t.Fatalf("empty: %v %v", got, err)
+	}
+	// A pending isolate does not count.
+	if ok, err := repo.EnqueueIsolate(e.ctx, f.scope, f.secretID, "x"); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if got, _ := repo.OldestPendingRestore(e.ctx, f.scope); got != nil {
+		t.Fatalf("isolate counted: %v", got)
+	}
+	claimed, err := repo.ClaimBatch(e.ctx, f.scope, 1, time.Now().UTC(), time.Minute)
+	if err != nil || len(claimed) != 1 {
+		t.Fatal(err, claimed)
+	}
+	if err := repo.Complete(e.ctx, f.scope, claimed[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := secretRepo(e).MarkIsolated(e.ctx, f.scope, f.secretID, ""); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if ok, err := repo.EnqueueRestore(e.ctx, f.scope, f.secretID, "paid"); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	got, err := repo.OldestPendingRestore(e.ctx, f.scope)
+	if err != nil || got == nil || time.Since(*got) > time.Minute {
+		t.Fatalf("pending restore: %v %v", got, err)
+	}
+	if other, _ := repo.OldestPendingRestore(e.ctx, e.tenants.B.Scope); other != nil {
+		t.Fatalf("cross-org: %v", other)
+	}
+}

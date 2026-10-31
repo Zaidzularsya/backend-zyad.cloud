@@ -21,6 +21,7 @@ type mikrotikModule struct {
 	Setup  *mikrotikhandler.SetupHandler
 	Secret *mikrotikhandler.SecretHandler
 	Policy *mikrotikhandler.PolicyHandler
+	Task   *mikrotikhandler.TaskHandler
 }
 
 // mikrotikBuild carries the cross-module services the adapters wrap.
@@ -78,6 +79,7 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 		Setup:  mikrotikhandler.NewSetupHandler(setup),
 		Secret: mikrotikhandler.NewSecretHandler(secrets),
 		Policy: mikrotikhandler.NewPolicyHandler(policy),
+		Task:   mikrotikhandler.NewTaskHandler(mikrotikservice.NewTaskService(mikrotikrepo.NewTaskRepository(db), secretRepo, repo)),
 	}
 }
 
@@ -123,5 +125,8 @@ func registerMikrotikRoutes(protected *gin.RouterGroup, deps Dependencies) {
 	}
 	if deps.MikrotikPolicyHandler != nil {
 		deps.MikrotikPolicyHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
+	}
+	if deps.MikrotikTaskHandler != nil {
+		deps.MikrotikTaskHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
 	}
 }

@@ -737,6 +737,7 @@ func New(ctx context.Context) (*App, error) {
 		MikrotikSetupHandler:             mikrotikModule.Setup,
 		MikrotikSecretHandler:            mikrotikModule.Secret,
 		MikrotikPolicyHandler:            mikrotikModule.Policy,
+		MikrotikTaskHandler:              mikrotikModule.Task,
 		MikrotikRateCounter:              redisClient,
 		ReceivableInvoiceHandler:         receivableModule.InvoiceHandler,
 		ReceivablePaymentHandler:         receivableModule.PaymentHandler,
