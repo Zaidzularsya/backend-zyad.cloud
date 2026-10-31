@@ -2,15 +2,18 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
 	"zyad.cloud/internal/config"
+	coreerrors "zyad.cloud/internal/core/errors"
 	coretenant "zyad.cloud/internal/core/tenant"
 	crmrepo "zyad.cloud/internal/modules/crm/repository"
 	mailboxservice "zyad.cloud/internal/modules/mailbox/service"
 	mikrotikrepo "zyad.cloud/internal/modules/mikrotik/repository"
 	mikrotikservice "zyad.cloud/internal/modules/mikrotik/service"
+	"zyad.cloud/internal/modules/organization"
 	organizationrepo "zyad.cloud/internal/modules/organization/repository"
 	organizationservice "zyad.cloud/internal/modules/organization/service"
 	receivablerepo "zyad.cloud/internal/modules/receivable/repository"
@@ -29,7 +32,7 @@ const (
 	mikrotikIsolationOrgPage = 100
 	// mikrotikHookTimeout bounds an evaluation run from a request-path hook
 	// (invoice paid/voided, pairing, exemption).
-	mikrotikHookTimeout = 10 * time.Second
+	mikrotikHookTimeout = 5 * time.Second
 
 	mikrotikFeatureKey = "mikrotik.enabled"
 )
@@ -62,10 +65,12 @@ type isolationReadiness interface {
 
 type isolationReconciler interface {
 	RunOrganization(ctx context.Context, scope coretenant.Scope) (mikrotikservice.ReconcileResult, error)
+	RunOrganizationRestoreOnly(ctx context.Context, scope coretenant.Scope) (mikrotikservice.ReconcileResult, error)
 }
 
 type isolationProcessor interface {
 	RunOnce(ctx context.Context, scope coretenant.Scope, batch int) (mikrotikservice.ProcessResult, error)
+	RunRestoreOnly(ctx context.Context, scope coretenant.Scope, batch int) (mikrotikservice.ProcessResult, error)
 }
 
 type mikrotikIsolationRunnerDeps struct {
@@ -81,8 +86,9 @@ type mikrotikIsolationRunnerDeps struct {
 // IsolationRunResult summarizes one RunOnce. It carries counts only, never
 // customer data.
 type IsolationRunResult struct {
-	Organizations  int // organizations processed
-	Skipped        int // not entitled, or nothing to do
+	Organizations  int // organizations processed (full or restore-only)
+	RestoreOnly    int // of which processed restore-only (no mikrotik.enabled entitlement)
+	Skipped        int // nothing to do (no ready router / no isolated secrets)
 	Failed         int // organizations with a resolve/readiness/reconcile/process error
 	Accounts       int // accounts evaluated by the reconciler
 	AccountsFailed int
@@ -132,11 +138,16 @@ func (r *MikrotikIsolationRunner) RunOnce(ctx context.Context) (IsolationRunResu
 	}
 }
 
+// runOrganization processes one organization. Without the mikrotik.enabled
+// entitlement (or when the check itself errors) the organization runs in
+// restore-only mode: losing the entitlement must never isolate anyone, but
+// customers already isolated must still be restorable (e.g. after paying).
 func (r *MikrotikIsolationRunner) runOrganization(ctx context.Context, orgID string, res *IsolationRunResult) {
-	if err := r.d.Features.RequireFeature(ctx, orgID, mikrotikFeatureKey); err != nil {
-		res.Skipped++
-		return
+	entErr := r.d.Features.RequireFeature(ctx, orgID, mikrotikFeatureKey)
+	if entErr != nil && !isFeatureNotEnabled(entErr) {
+		slog.DebugContext(ctx, "mikrotik: entitlement check failed, running restore-only", "organization_id", orgID)
 	}
+	restoreOnly := entErr != nil
 	failed := false
 	fail := func(step string, err error) {
 		if !failed {
@@ -155,10 +166,12 @@ func (r *MikrotikIsolationRunner) runOrganization(ctx context.Context, orgID str
 		fail("scope", err)
 		return
 	}
-	ready, err := r.d.Readiness.HasReadyRouter(ctx, scope)
-	if err != nil {
-		fail("readiness", err)
-		return
+	ready := false
+	if !restoreOnly {
+		if ready, err = r.d.Readiness.HasReadyRouter(ctx, scope); err != nil {
+			fail("readiness", err)
+			return
+		}
 	}
 	if !ready {
 		// Restores never depend on isolir_ready: an organization whose routers
@@ -174,8 +187,13 @@ func (r *MikrotikIsolationRunner) runOrganization(ctx context.Context, orgID str
 		}
 	}
 	res.Organizations++
+	reconcile, process := r.d.Reconciler.RunOrganization, r.processRunOnce
+	if restoreOnly {
+		res.RestoreOnly++
+		reconcile, process = r.d.Reconciler.RunOrganizationRestoreOnly, r.processRestoreOnly
+	}
 
-	rec, recErr := r.d.Reconciler.RunOrganization(ctx, scope)
+	rec, recErr := reconcile(ctx, scope)
 	res.Accounts += rec.Accounts
 	res.AccountsFailed += rec.Failed
 	if recErr != nil {
@@ -188,7 +206,7 @@ func (r *MikrotikIsolationRunner) runOrganization(ctx context.Context, orgID str
 	if r.d.Mode != mikrotikservice.ModeOn || r.d.Processor == nil {
 		return
 	}
-	proc, err := r.d.Processor.RunOnce(ctx, scope, mikrotikIsolationBatch)
+	proc, err := process(ctx, scope)
 	res.Tasks.Done += proc.Done
 	res.Tasks.Retried += proc.Retried
 	res.Tasks.Failed += proc.Failed
@@ -197,6 +215,21 @@ func (r *MikrotikIsolationRunner) runOrganization(ctx context.Context, orgID str
 	if err != nil {
 		fail("process", err)
 	}
+}
+
+func (r *MikrotikIsolationRunner) processRunOnce(ctx context.Context, scope coretenant.Scope) (mikrotikservice.ProcessResult, error) {
+	return r.d.Processor.RunOnce(ctx, scope, mikrotikIsolationBatch)
+}
+
+func (r *MikrotikIsolationRunner) processRestoreOnly(ctx context.Context, scope coretenant.Scope) (mikrotikservice.ProcessResult, error) {
+	return r.d.Processor.RunRestoreOnly(ctx, scope, mikrotikIsolationBatch)
+}
+
+// isFeatureNotEnabled reports the plain "feature not enabled" denial of
+// EntitlementGuard, as opposed to an infrastructure error.
+func isFeatureNotEnabled(err error) bool {
+	var appErr *coreerrors.AppError
+	return errors.As(err, &appErr) && appErr.Code == organization.ErrCodeFeatureNotEnabled
 }
 
 // mikrotikReadiness adapts the router and secret repositories to isolationReadiness.

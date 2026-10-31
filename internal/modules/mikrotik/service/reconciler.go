@@ -56,6 +56,18 @@ func NewReconciler(source OverdueSource, secrets repository.SecretRepository, ev
 // per-account failure is logged and counted; only listing errors and ctx
 // cancellation end the run early (with the partial result).
 func (r *Reconciler) RunOrganization(ctx context.Context, scope coretenant.Scope) (ReconcileResult, error) {
+	return r.run(ctx, scope, false)
+}
+
+// RunOrganizationRestoreOnly is the pass for an organization without the
+// mikrotik.enabled entitlement: only accounts with isolated secrets are
+// evaluated, through Evaluator.ApplyRestoreOnly, so losing the entitlement can
+// restore customers but never isolate anyone.
+func (r *Reconciler) RunOrganizationRestoreOnly(ctx context.Context, scope coretenant.Scope) (ReconcileResult, error) {
+	return r.run(ctx, scope, true)
+}
+
+func (r *Reconciler) run(ctx context.Context, scope coretenant.Scope, restoreOnly bool) (ReconcileResult, error) {
 	var res ReconcileResult
 	if err := ctx.Err(); err != nil {
 		return res, err
@@ -70,7 +82,11 @@ func (r *Reconciler) RunOrganization(ctx context.Context, scope coretenant.Scope
 		}
 		seen[accountID] = struct{}{}
 		res.Accounts++
-		if _, err := r.eval.Apply(ctx, scope, accountID, eventReconcile); err != nil {
+		apply := r.eval.Apply
+		if restoreOnly {
+			apply = r.eval.ApplyRestoreOnly
+		}
+		if _, err := apply(ctx, scope, accountID, eventReconcile); err != nil {
 			res.Failed++
 			slog.WarnContext(ctx, "mikrotik: reconcile account failed", "account_id", accountID, "error", err)
 		}
@@ -85,6 +101,10 @@ func (r *Reconciler) RunOrganization(ctx context.Context, scope coretenant.Scope
 		if err := visit(id); err != nil {
 			return res, err
 		}
+	}
+
+	if restoreOnly {
+		return res, nil
 	}
 
 	today := businesstime.DayOf(r.now())

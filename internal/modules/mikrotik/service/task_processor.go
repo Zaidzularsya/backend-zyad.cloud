@@ -27,6 +27,9 @@ const (
 
 	cancelSuperseded   = "superseded"
 	cancelStateChanged = "state changed"
+	// cancelEntitlementDisabled: an isolate task claimed while the
+	// organization has no mikrotik.enabled entitlement (restore-only mode).
+	cancelEntitlementDisabled = "entitlement_disabled"
 )
 
 // TaskExecutor performs the router-side steps; satisfied by *Executor.
@@ -65,7 +68,11 @@ const (
 // TaskProcessor executes claimed isolate/restore tasks against routers.
 // Router safety rests on the per-router advisory lock (the task repository has
 // no lease-owner check) and on re-evaluating each task before touching the router.
-type TaskProcessor struct{ d TaskProcessorDeps }
+type TaskProcessor struct {
+	d TaskProcessorDeps
+	// restoreOnly is set only on the per-call copy made by RunRestoreOnly.
+	restoreOnly bool
+}
 
 func NewTaskProcessor(d TaskProcessorDeps) *TaskProcessor {
 	if d.Now == nil {
@@ -78,6 +85,19 @@ func NewTaskProcessor(d TaskProcessorDeps) *TaskProcessor {
 // failing (or panicking) task never stops the batch; an error is returned only
 // when claiming fails or ctx is cancelled.
 func (p *TaskProcessor) RunOnce(ctx context.Context, scope coretenant.Scope, batch int) (ProcessResult, error) {
+	return p.runOnce(ctx, scope, batch)
+}
+
+// RunRestoreOnly is RunOnce for an organization that lost the mikrotik.enabled
+// entitlement: restore tasks run normally, every claimed isolate task is
+// cancelled ("entitlement_disabled") without touching the router, and
+// follow-up evaluations never enqueue an isolate.
+func (p *TaskProcessor) RunRestoreOnly(ctx context.Context, scope coretenant.Scope, batch int) (ProcessResult, error) {
+	ro := &TaskProcessor{d: p.d, restoreOnly: true}
+	return ro.runOnce(ctx, scope, batch)
+}
+
+func (p *TaskProcessor) runOnce(ctx context.Context, scope coretenant.Scope, batch int) (ProcessResult, error) {
 	var res ProcessResult
 	if err := ctx.Err(); err != nil {
 		return res, err
@@ -127,6 +147,13 @@ func (p *TaskProcessor) process(ctx context.Context, scope coretenant.Scope, tas
 	}
 	if err != nil {
 		return p.release(ctx, scope, task, "load secret", err)
+	}
+	if p.restoreOnly && task.Action == ActionIsolate {
+		accountID := ""
+		if secret.AccountID != nil {
+			accountID = *secret.AccountID
+		}
+		return p.cancel(ctx, scope, task, secret.RouterID, accountID, cancelEntitlementDisabled)
 	}
 
 	unlock, ok, err := p.d.Locker.TryLock(ctx, "mikrotik:router:"+secret.RouterID)
@@ -326,7 +353,11 @@ func (p *TaskProcessor) followUp(ctx context.Context, scope coretenant.Scope, ac
 	if accountID == "" || p.d.Evaluator == nil {
 		return
 	}
-	if _, err := p.d.Evaluator.Apply(ctx, scope, accountID, eventTaskCompleted); err != nil {
+	apply := p.d.Evaluator.Apply
+	if p.restoreOnly {
+		apply = p.d.Evaluator.ApplyRestoreOnly
+	}
+	if _, err := apply(ctx, scope, accountID, eventTaskCompleted); err != nil {
 		slog.Error("mikrotik: follow-up evaluation failed", "account_id", accountID, "error", err)
 	}
 }

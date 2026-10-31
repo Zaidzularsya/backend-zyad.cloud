@@ -12,6 +12,7 @@ import (
 	"zyad.cloud/internal/config"
 	coretenant "zyad.cloud/internal/core/tenant"
 	mikrotikservice "zyad.cloud/internal/modules/mikrotik/service"
+	"zyad.cloud/internal/modules/organization"
 	receivableservice "zyad.cloud/internal/modules/receivable/service"
 )
 
@@ -39,14 +40,17 @@ func (s *isoScopes) ResolveWorkerOrganization(_ context.Context, orgID, identity
 	})
 }
 
-type isoFeatures struct{ denied map[string]bool }
+type isoFeatures struct{ denied, broken map[string]bool }
 
 func (f isoFeatures) RequireFeature(_ context.Context, orgID, key string) error {
 	if key != "mikrotik.enabled" {
 		return fmt.Errorf("unexpected feature %q", key)
 	}
 	if f.denied[orgID] {
-		return errors.New("feature not entitled")
+		return organization.FeatureNotEnabledError()
+	}
+	if f.broken[orgID] {
+		return errors.New("entitlement store unavailable")
 	}
 	return nil
 }
@@ -80,7 +84,12 @@ func (c *isoCalls) sorted() string {
 	return fmt.Sprint(out)
 }
 
-type isoReconciler struct{ calls isoCalls }
+type isoReconciler struct{ calls, restoreOnly isoCalls }
+
+func (r *isoReconciler) RunOrganizationRestoreOnly(_ context.Context, scope coretenant.Scope) (mikrotikservice.ReconcileResult, error) {
+	r.restoreOnly.add(scope.OrganizationID())
+	return mikrotikservice.ReconcileResult{Accounts: 1}, nil
+}
 
 func (r *isoReconciler) RunOrganization(_ context.Context, scope coretenant.Scope) (mikrotikservice.ReconcileResult, error) {
 	r.calls.add(scope.OrganizationID())
@@ -88,8 +97,13 @@ func (r *isoReconciler) RunOrganization(_ context.Context, scope coretenant.Scop
 }
 
 type isoProcessor struct {
-	calls  isoCalls
-	batchs []int
+	calls, restoreOnly isoCalls
+	batchs             []int
+}
+
+func (p *isoProcessor) RunRestoreOnly(_ context.Context, scope coretenant.Scope, batch int) (mikrotikservice.ProcessResult, error) {
+	p.restoreOnly.add(scope.OrganizationID())
+	return mikrotikservice.ProcessResult{Done: 1}, nil
 }
 
 func (p *isoProcessor) RunOnce(_ context.Context, scope coretenant.Scope, batch int) (mikrotikservice.ProcessResult, error) {
@@ -279,5 +293,67 @@ func TestListenerAdapter_ForwardsPaidReplayAndVoided(t *testing.T) {
 		if h.cancelled[i] || !h.deadline[i] {
 			t.Fatalf("event %d: cancelled=%v deadline=%v, want detached ctx with timeout", i, h.cancelled[i], h.deadline[i])
 		}
+	}
+}
+
+func TestRunner_NoEntitlementButIsolatedSecrets_RunsRestoreOnly(t *testing.T) {
+	e := newIsoEnv(mikrotikservice.ModeOn, []string{"org-a"},
+		isoFeatures{denied: map[string]bool{"org-a": true}},
+		isoReadiness{ready: map[string]bool{"org-a": true}, isolated: map[string]bool{"org-a": true}})
+	res, err := e.runner.RunOnce(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.rec.restoreOnly.sorted() != "[org-a]" || e.proc.restoreOnly.sorted() != "[org-a]" {
+		t.Fatalf("restore-only reconciler=%v processor=%v, want org-a", e.rec.restoreOnly.ids, e.proc.restoreOnly.ids)
+	}
+	if len(e.rec.calls.ids)+len(e.proc.calls.ids) != 0 {
+		t.Fatalf("normal paths ran: reconciler=%v processor=%v", e.rec.calls.ids, e.proc.calls.ids)
+	}
+	if res.Organizations != 1 || res.RestoreOnly != 1 || res.Tasks.Done != 1 {
+		t.Fatalf("result %+v", res)
+	}
+}
+
+func TestRunner_NoEntitlementNoIsolated_Skipped(t *testing.T) {
+	e := newIsoEnv(mikrotikservice.ModeOn, []string{"org-a"},
+		isoFeatures{denied: map[string]bool{"org-a": true}},
+		isoReadiness{ready: map[string]bool{"org-a": true}})
+	res, err := e.runner.RunOnce(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(e.rec.calls.ids) + len(e.rec.restoreOnly.ids) + len(e.proc.calls.ids) + len(e.proc.restoreOnly.ids); n != 0 {
+		t.Fatalf("%d runs, want none", n)
+	}
+	if res.Skipped != 1 || res.Organizations != 0 {
+		t.Fatalf("result %+v", res)
+	}
+}
+
+func TestRunner_EntitlementError_TreatedAsRestoreOnlyNotFullRun(t *testing.T) {
+	e := newIsoEnv(mikrotikservice.ModeOn, []string{"org-a"},
+		isoFeatures{broken: map[string]bool{"org-a": true}},
+		isoReadiness{ready: map[string]bool{"org-a": true}, isolated: map[string]bool{"org-a": true}})
+	if _, err := e.runner.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.rec.calls.ids)+len(e.proc.calls.ids) != 0 {
+		t.Fatalf("full run on entitlement error: reconciler=%v processor=%v", e.rec.calls.ids, e.proc.calls.ids)
+	}
+	if e.rec.restoreOnly.sorted() != "[org-a]" || e.proc.restoreOnly.sorted() != "[org-a]" {
+		t.Fatalf("restore-only reconciler=%v processor=%v", e.rec.restoreOnly.ids, e.proc.restoreOnly.ids)
+	}
+}
+
+func TestRunner_DryRun_RestoreOnlyDoesNotProcess(t *testing.T) {
+	e := newIsoEnv(mikrotikservice.ModeDryRun, []string{"org-a"},
+		isoFeatures{denied: map[string]bool{"org-a": true}},
+		isoReadiness{isolated: map[string]bool{"org-a": true}})
+	if _, err := e.runner.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if e.rec.restoreOnly.sorted() != "[org-a]" || len(e.proc.restoreOnly.ids)+len(e.proc.calls.ids) != 0 {
+		t.Fatalf("reconciler=%v processor=%v/%v", e.rec.restoreOnly.ids, e.proc.calls.ids, e.proc.restoreOnly.ids)
 	}
 }

@@ -105,6 +105,18 @@ func (e *Evaluator) Decide(ctx context.Context, scope coretenant.Scope, accountI
 // that needs an action. A failure on one secret does not stop the others.
 // enqueued=false from the repository (not eligible / active task) is not an error.
 func (e *Evaluator) Apply(ctx context.Context, scope coretenant.Scope, accountID, event string) (Decision, error) {
+	return e.apply(ctx, scope, accountID, event, false)
+}
+
+// ApplyRestoreOnly is Apply for an organization that lost the mikrotik.enabled
+// entitlement: it may enqueue restore tasks but never an isolate task (the
+// isolate actions are dropped from the returned decision). Modes behave as in
+// Apply: off is a no-op, dry_run only logs.
+func (e *Evaluator) ApplyRestoreOnly(ctx context.Context, scope coretenant.Scope, accountID, event string) (Decision, error) {
+	return e.apply(ctx, scope, accountID, event, true)
+}
+
+func (e *Evaluator) apply(ctx context.Context, scope coretenant.Scope, accountID, event string, restoreOnly bool) (Decision, error) {
 	mode := e.mode()
 	if mode == ModeOff {
 		return Decision{}, nil
@@ -112,6 +124,13 @@ func (e *Evaluator) Apply(ctx context.Context, scope coretenant.Scope, accountID
 	dec, err := e.Decide(ctx, scope, accountID)
 	if err != nil {
 		return Decision{}, err
+	}
+	if restoreOnly {
+		for i := range dec.Secrets {
+			if dec.Secrets[i].Action == actionIsolate {
+				dec.Secrets[i].Action = ""
+			}
+		}
 	}
 	if mode == ModeDryRun {
 		var ids []string
@@ -122,7 +141,7 @@ func (e *Evaluator) Apply(ctx context.Context, scope coretenant.Scope, accountID
 		}
 		slog.Info("mikrotik: dry-run decision",
 			"account_id", accountID, "desired", dec.Desired, "exempt", dec.Exempt,
-			"invoices", len(dec.Invoices), "secret_actions", ids, "event", event)
+			"invoices", len(dec.Invoices), "secret_actions", ids, "event", event, "restore_only", restoreOnly)
 		return dec, nil
 	}
 	var errs []error
