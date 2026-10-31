@@ -342,5 +342,23 @@ go test -tags mikrotiklab -run 'TestLabIsolirLeftovers' -v ./internal/platform/m
 Satu siklus lab preview + apply + preview + apply + cleanup makan ±70 dtk karena klien binary login ulang per
 panggilan. Handler mikrotik memperpanjang write deadline koneksi (apply/cleanup 4 menit, preview 90 dtk,
 registrasi/PATCH/check 45 dtk), tetapi reverse proxy punya batasnya sendiri: di DEV/prod set
-`proxy_read_timeout 300s;` untuk `location /api/v1/app/mikrotik/`. Tanpa itu klien bisa melihat 502 sementara
+`proxy_read_timeout 300s;` untuk `location /api/v1/app/mikrotik/`. Tanpa itu klien bisa melihat 504 sementara
 operasi di backend tetap selesai. Detail: `docs/reference-mikrotik.md` bagian "Timeout dan nginx".
+
+## 13. Impor PPP secret (Fase 2)
+
+Dijalankan setelah router terdaftar (bagian 1-3); setup isolir tidak wajib untuk impor.
+
+1. `POST /api/v1/app/mikrotik/routers/{id}/secrets/import` (permission `mikrotik_secret.import`). Aman diulang: impor ulang
+   hanya memperbarui profile/disabled/comment dan menandai `present=false` untuk secret yang sudah hilang di router;
+   pairing dan `original_profile` tidak berubah.
+2. Cek hasil lewat `GET /api/v1/app/mikrotik/secrets?router_id={id}&paired=false`.
+3. Secret ber-`needs_original_profile=true` (sedang di profile isolir) harus diberi profile asli lewat
+   `PUT /secrets/{id}/original-profile` sebelum bisa dipasangkan. Profile harus ada di router.
+4. Pasangkan ke pelanggan: `POST /secrets/{id}/pair` (akun yang ada) atau `/pair-new-customer` (buat kontak CRM baru;
+   bisa 409 `QUOTA_EXCEEDED` bila kuota kontak penuh).
+5. Tandai produk layanan PPPoE: `GET /products/unmarked`, lihat `GET /products/{id}/trigger/preview`, lalu
+   `PUT /products/{id}/trigger`. Fase 2 belum mengubah apa pun di router.
+
+Impor dan `original-profile` login ke router, dibatasi 20 panggilan per menit per organization. Referensi:
+`docs/reference-mikrotik.md` bagian "Pemetaan PPP secret".

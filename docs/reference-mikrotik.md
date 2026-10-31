@@ -99,7 +99,7 @@ organization aktif bertipe customer atau platform.
   Lookup DNS host router dibatasi 3 dtk dan kegagalannya dilaporkan sebagai `MIKROTIK_UNREACHABLE`. Satu panggilan
   binary API memakai satu deadline untuk dial + TLS + login + perintah.
 - **nginx (DEV/prod)**: set `proxy_read_timeout 300s;` (minimal) untuk `location /api/v1/app/mikrotik/`. Tanpa itu
-  klien bisa menerima 502 dari nginx padahal operasi di backend tetap selesai; klien lalu cenderung mengulang.
+  klien bisa menerima 504 (gateway timeout) dari nginx padahal operasi di backend tetap selesai; klien lalu cenderung mengulang.
 - Follow-up (belum dikerjakan): sesi binary per operasi (satu login untuk seluruh `apply`/`cleanup`) agar durasi turun.
 
 ## Kode error
@@ -109,9 +109,72 @@ organization aktif bertipe customer atau platform.
 `MIKROTIK_AUTH_FAILED` (502), `MIKROTIK_UNREACHABLE` (502), `MIKROTIK_SETUP_PLAN_CHANGED` (409),
 `MIKROTIK_SETUP_CONFLICT` (409), `MIKROTIK_SETUP_IN_PROGRESS` (409), `MIKROTIK_SETUP_FAILED` (502), `MIKROTIK_SETUP_STATE_NOT_SAVED` (500), `MIKROTIK_SETUP_MARK_FAILED` (500), `RATE_LIMITED` (429), `INTERNAL_ERROR` (500).
 
+## Pemetaan PPP secret (Fase 2)
+
+Semua endpoint di bawah `/api/v1/app/mikrotik`, tunduk pada entitlement `mikrotik.enabled`. Spesifikasi lengkap di `api/openapi.yaml`.
+
+| Endpoint | Permission |
+| --- | --- |
+| `POST /routers/{id}/secrets/import` | `mikrotik_secret.import` |
+| `GET /secrets`, `GET /accounts/search` | `mikrotik_secret.read` |
+| `POST /secrets/{id}/pair`, `/pair-new-customer`, `PUT /secrets/{id}/original-profile` | `mikrotik_secret.pair` |
+| `POST /secrets/{id}/unpair` | `mikrotik_secret.unpair` |
+| `GET /customers/{account_id}/policy` | `mikrotik_policy.read` |
+| `PUT /customers/{account_id}/policy` | `mikrotik_policy.update` |
+| `GET /products/unmarked`, `GET /products/{id}/trigger/preview` | `mikrotik_product_trigger.read` |
+| `PUT /products/{id}/trigger` | `mikrotik_product_trigger.update` |
+
+Permission dibuat oleh migration `000172`; tabel oleh `000171`. Hanya import dan `original-profile` menghubungi router,
+sehingga hanya keduanya memakai rate limit probe (20 per menit per organization, bersama counter route router lain).
+
+### Impor dan pairing
+
+- Impor membaca `/ppp/secret` dan menyimpan salinan di cache lokal (tanpa password PPP). Hanya secret dengan `service`
+  kosong, `any`, atau `pppoe` yang diimpor. Batas 10000 secret per impor (422 `VALIDATION_ERROR`, tidak ada yang ditulis).
+- Aturan impor ulang: hanya kolom milik router (profile, disabled, comment, last_seen_at) yang diperbarui. Pairing,
+  `original_profile`, dan `isolation_state` tidak pernah disentuh. `needs_original_profile` tidak pernah dihapus oleh
+  impor; hanya `PUT .../original-profile` yang menghapusnya.
+- `present=false`: secret yang tidak ada lagi di router ditandai, tidak dihapus. Secret `present=false` tidak bisa dipasangkan.
+- `needs_original_profile=true`: secret ditemukan di profile isolir router (`isolir_profile_name`) dan belum punya
+  `original_profile`. Pairing ditolak (409 `MIKROTIK_SECRET_NOT_PAIRABLE`) sampai `original_profile` ditetapkan; profile
+  itu harus ada di `/ppp/profile` router dan bukan profile isolir (422 bila tidak).
+- Satu secret hanya untuk satu pelanggan (409 `MIKROTIK_SECRET_ALREADY_PAIRED`); satu pelanggan boleh punya banyak secret.
+  Saat dipasangkan, `original_profile` kosong diisi dari profile saat ini.
+- Unpair mempertahankan `original_profile` dan ditolak (409 `MIKROTIK_SECRET_ISOLATED`) saat `isolation_state` bukan `normal`.
+- `pair-new-customer` membuat kontak CRM (source `mikrotik_import`, tag `pppoe`, lifecycle customer) + akun pelanggan, lalu
+  memasangkan. Pembuatan kontak mengikuti kuota CRM: kuota penuh memberi 409 `QUOTA_EXCEEDED`.
+
+### Pengecualian dan penanda produk
+
+- `PUT /customers/{account_id}/policy` menyimpan `exempt` + `reason` (wajib 1-500 karakter saat `exempt=true`). Pelanggan
+  tanpa baris kebijakan dibaca sebagai `exempt=false`. Pada Fase 2 hanya menyimpan data; belum ada efek ke router.
+- `PUT /products/{id}/trigger` menandai produk sebagai layanan PPPoE. `effective_from` adalah tanggal WIB (YYYY-MM-DD):
+  menandai ulang produk yang sudah aktif mempertahankannya, mengaktifkan lagi setelah dinonaktifkan mengaturnya ke hari ini.
+  `GET .../trigger/preview` menghitung dampak (kontrak aktif, pelanggan, invoice overdue) tanpa menulis.
+  `GET /products/unmarked` mendaftar produk recurring dalam kontrak aktif yang belum ditandai.
+
+### Audit
+
+Event ditulis setelah mutasi commit; kegagalan menulis audit hanya di-log dan tidak menggagalkan operasi:
+`secret.imported`, `secret.paired`, `secret.unpaired`, `secret.original_profile_set`, `customer_policy.exempt_set`,
+`product_trigger.set`.
+
+### Kode error tambahan
+
+`MIKROTIK_SECRET_NOT_FOUND` (404), `MIKROTIK_ACCOUNT_NOT_FOUND` (404), `MIKROTIK_PRODUCT_NOT_FOUND` (404),
+`MIKROTIK_SECRET_ALREADY_PAIRED` (409), `MIKROTIK_SECRET_ISOLATED` (409), `MIKROTIK_SECRET_NOT_PAIRABLE` (409),
+`QUOTA_EXCEEDED` (409, dari kuota CRM saat `pair-new-customer`).
+
+### Batas yang diketahui
+
+- Komentar secret tidak disalin ke kontak CRM (tabel kontak tidak punya kolom catatan); komentar tetap ada di cache secret.
+- Pembuatan kontak+akun lalu pairing pada `pair-new-customer` tidak atomik: bila pairing kalah balapan, kontak/akun baru
+  tertinggal tanpa pairing.
+- Fase 2 tidak mengubah profile secret di router dan tidak mengisolir; itu Fase 3.
+
 ## Tidak termasuk Fase 1
 
-Impor PPP secret, penanda produk untuk isolir, mesin isolir otomatis dari invoice overdue, halaman isolir publik,
+Mesin isolir otomatis dari invoice overdue, halaman isolir publik,
 dan wizard frontend. Lihat spec di atas (fase 2 sampai 4).
 
 ## Belum terbukti
