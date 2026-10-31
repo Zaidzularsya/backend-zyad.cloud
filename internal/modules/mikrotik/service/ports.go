@@ -43,3 +43,25 @@ type ProductUsage struct{ ActiveContracts, Accounts, OverdueInvoices int }
 type UsageReader interface {
 	ForProduct(ctx context.Context, scope coretenant.Scope, productID string, effectiveFrom time.Time) (ProductUsage, error)
 }
+
+// TriggerInvoice is an unpaid, past-due invoice that counts toward isolir.
+// Balance is a decimal string (grand_total - amount_paid).
+type TriggerInvoice struct {
+	ID, Number string
+	DueDate    time.Time
+	Balance    string
+}
+
+// OverdueSource reads the receivable data the isolation evaluator needs.
+type OverdueSource interface {
+	// TriggerInvoices: candidate invoices of the account (Global Constraints
+	// rules), ordered by due_date. today is a business-day date (UTC midnight);
+	// an invoice due today is not a candidate.
+	TriggerInvoices(ctx context.Context, scope coretenant.Scope, accountID string, today time.Time) ([]TriggerInvoice, error)
+	// AccountsWithTriggerInvoices: accounts with >=1 candidate, ordered by
+	// account id, keyset paging (afterAccountID "" = from the start).
+	AccountsWithTriggerInvoices(ctx context.Context, scope coretenant.Scope, today time.Time, afterAccountID string, limit int) ([]string, error)
+	// AccountOfInvoice returns the invoice's account_id;
+	// mikrotik.ErrAccountNotFound when the invoice is not owned by the organization.
+	AccountOfInvoice(ctx context.Context, scope coretenant.Scope, invoiceID string) (string, error)
+}
