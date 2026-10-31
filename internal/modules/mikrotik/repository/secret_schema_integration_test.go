@@ -86,7 +86,7 @@ func TestSecretSchema_DownMigrationDropsTables(t *testing.T) {
 		t.Fatalf("begin: %v", err)
 	}
 	defer tx.Rollback(e.ctx)
-	for _, f := range []string{"000172_mikrotik_secret_permissions", "000171_create_mikrotik_secret_mapping"} {
+	for _, f := range []string{"000174_mikrotik_isolation_permissions_notification", "000173_create_mikrotik_isolation_tasks", "000172_mikrotik_secret_permissions", "000171_create_mikrotik_secret_mapping"} {
 		sql, err := os.ReadFile("../../../../migrations/" + f + ".down.sql")
 		if err != nil {
 			t.Fatalf("read down migration: %v", err)
