@@ -127,3 +127,15 @@ var (
 	// ErrTaskActiveExists: another pending/running task already exists for the secret.
 	ErrTaskActiveExists = errors.New("an active task already exists for this secret")
 )
+
+// Fase 3: langkah router pada eksekutor isolir.
+var (
+	// ErrSecretMissingOnRouter: the PPP secret no longer exists on the router.
+	ErrSecretMissingOnRouter = errors.New("ppp secret is missing on the router")
+	// ErrRestoreProfileMissing: the profile to restore to does not exist on the router.
+	ErrRestoreProfileMissing = errors.New("restore profile does not exist on the router")
+	// ErrRestoreTargetInvalid: no usable original profile is known (empty or the isolir profile).
+	ErrRestoreTargetInvalid = errors.New("no valid original profile to restore to")
+	// ErrRouterNotIsolirReady: the router has no completed isolir setup.
+	ErrRouterNotIsolirReady = errors.New("router is not isolir ready")
+)
