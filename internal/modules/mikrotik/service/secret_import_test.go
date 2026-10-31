@@ -24,6 +24,7 @@ type fakeSecretRepo struct {
 	seq  int
 
 	pairCalls int
+	unpairErr error
 
 	listFilter            repository.SecretFilter
 	listLimit, listOffset int
@@ -124,6 +125,8 @@ func (f *fakeSecretRepo) Unpair(_ context.Context, _ coretenant.Scope, id string
 		return mikrotik.ErrSecretNotFound
 	case r.IsolationState != domain.IsolationNormal:
 		return mikrotik.ErrSecretIsolated
+	case f.unpairErr != nil:
+		return f.unpairErr
 	}
 	r.AccountID, r.PairedBy, r.PairedAt = nil, nil, nil
 	return nil

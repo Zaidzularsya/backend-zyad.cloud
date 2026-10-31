@@ -60,7 +60,9 @@ type SecretRepository interface {
 	// ErrSecretNotPairable, ErrAccountNotFound (FK backstop for a foreign account).
 	Pair(ctx context.Context, scope coretenant.Scope, secretID, accountID, by string) error
 	// Unpair clears the link (keeping original_profile). ErrSecretIsolated when
-	// isolation_state is not normal; ErrSecretNotFound when absent.
+	// isolation_state is not normal; ErrSecretHasActiveTask while the secret has
+	// a pending/running isolation task (a running isolate would otherwise leave
+	// an untracked isolated secret); ErrSecretNotFound when absent.
 	Unpair(ctx context.Context, scope coretenant.Scope, secretID string) error
 	// MarkIsolated flips a paired, normal secret to isolated in one conditional
 	// UPDATE and reports whether a row changed. originalProfile is stored only
@@ -343,7 +345,9 @@ func (r *secretRepository) Unpair(ctx context.Context, scope coretenant.Scope, s
 		tag, err := tx.Exec(ctx, `
 			UPDATE mikrotik_ppp_secrets
 			SET account_id = NULL, paired_by = NULL, paired_at = NULL, updated_at = now()
-			WHERE id = $1 AND organization_id = $2 AND isolation_state = 'normal'`,
+			WHERE id = $1 AND organization_id = $2 AND isolation_state = 'normal'
+			  AND NOT EXISTS (SELECT 1 FROM mikrotik_isolation_tasks t
+				WHERE t.organization_id = $2 AND t.secret_id = $1 AND t.status IN ('pending', 'running'))`,
 			secretID, scope.OrganizationID())
 		if err != nil {
 			return err
@@ -351,15 +355,19 @@ func (r *secretRepository) Unpair(ctx context.Context, scope coretenant.Scope, s
 		if tag.RowsAffected() > 0 {
 			return nil
 		}
-		var exists bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM mikrotik_ppp_secrets WHERE id = $1 AND organization_id = $2)`,
-			secretID, scope.OrganizationID()).Scan(&exists); err != nil {
-			return err
-		}
-		if !exists {
+		var state string
+		err = tx.QueryRow(ctx, `SELECT isolation_state FROM mikrotik_ppp_secrets WHERE id = $1 AND organization_id = $2`,
+			secretID, scope.OrganizationID()).Scan(&state)
+		if errors.Is(err, pgx.ErrNoRows) {
 			return mikrotik.ErrSecretNotFound
 		}
-		return mikrotik.ErrSecretIsolated
+		if err != nil {
+			return err
+		}
+		if state != domain.IsolationNormal {
+			return mikrotik.ErrSecretIsolated
+		}
+		return mikrotik.ErrSecretHasActiveTask
 	})
 }
 

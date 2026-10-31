@@ -126,6 +126,13 @@ var (
 	ErrTaskNotRetryable = errors.New("isolation task is not in a retryable state")
 	// ErrTaskActiveExists: another pending/running task already exists for the secret.
 	ErrTaskActiveExists = errors.New("an active task already exists for this secret")
+	// ErrRouterHasIsolatedSecrets: the router still has isolated secrets or
+	// secrets with a pending/running isolation task, so it cannot be deleted
+	// (nothing could restore those customers afterwards).
+	ErrRouterHasIsolatedSecrets = errors.New("router has isolated secrets or active isolation tasks")
+	// ErrSecretHasActiveTask: the PPP secret has a pending/running isolation
+	// task and cannot be unpaired until it finishes.
+	ErrSecretHasActiveTask = errors.New("ppp secret has an active isolation task")
 )
 
 // Fase 3: langkah router pada eksekutor isolir.

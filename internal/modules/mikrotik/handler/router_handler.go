@@ -209,6 +209,12 @@ func failRouter(c *gin.Context, err error) {
 		response.Error(c, http.StatusConflict, "MIKROTIK_SECRET_ALREADY_PAIRED", "ppp secret is already paired to a customer")
 	case errors.Is(err, mikrotik.ErrSecretIsolated):
 		response.Error(c, http.StatusConflict, "MIKROTIK_SECRET_ISOLATED", "ppp secret is isolated; restore its profile before unpairing")
+	case errors.Is(err, mikrotik.ErrSecretHasActiveTask):
+		response.Error(c, http.StatusConflict, "MIKROTIK_SECRET_HAS_ACTIVE_TASK",
+			"PPP secret tidak dapat dilepas karena masih ada tugas isolir/pemulihan yang menunggu atau sedang berjalan. Coba lagi setelah tugas selesai.")
+	case errors.Is(err, mikrotik.ErrRouterHasIsolatedSecrets):
+		response.Error(c, http.StatusConflict, "MIKROTIK_ROUTER_HAS_ISOLATED_SECRETS",
+			"Router tidak dapat dihapus karena masih ada pelanggan yang terisolir atau tugas isolir/pemulihan yang belum selesai. Pulihkan pelanggan dan tunggu tugas selesai terlebih dahulu.")
 	case errors.Is(err, mikrotik.ErrSecretNotPairable):
 		response.Error(c, http.StatusConflict, "MIKROTIK_SECRET_NOT_PAIRABLE", err.Error())
 	case errors.Is(err, mikrotik.ErrRouterNameTaken):

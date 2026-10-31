@@ -273,3 +273,19 @@ func TestSetOriginalProfile_RouterErrorScrubbed(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestUnpair_ActiveTaskRejected_NoAuditPairingKept(t *testing.T) {
+	e := newPairEnv(t)
+	id := e.importOne(t, "alice", "p")
+	if _, err := e.svc.Pair(context.Background(), e.scope, id, "acct-1", testActor); err != nil {
+		t.Fatal(err)
+	}
+	e.srepo.unpairErr = mikrotik.ErrSecretHasActiveTask
+	audits := len(e.rrepo.audits)
+	if err := e.svc.Unpair(context.Background(), e.scope, id, testActor); !errors.Is(err, mikrotik.ErrSecretHasActiveTask) {
+		t.Fatalf("err = %v", err)
+	}
+	if e.srepo.byID(id).AccountID == nil || len(e.rrepo.audits) != audits {
+		t.Fatal("pairing must be kept and nothing audited")
+	}
+}

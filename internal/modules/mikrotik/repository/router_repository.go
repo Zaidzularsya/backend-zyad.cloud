@@ -71,6 +71,8 @@ type RouterRepository interface {
 	RecordCheck(ctx context.Context, scope coretenant.Scope, id, status, version string) error
 	// MarkSetup stores the isolir setup result; isolir_ready_at is set only when ready is true.
 	MarkSetup(ctx context.Context, scope coretenant.Scope, id string, ready bool, profile, redirectURL string) error
+	// SoftDelete: ErrRouterHasIsolatedSecrets while the router has isolated
+	// secrets or secrets with a pending/running isolation task.
 	SoftDelete(ctx context.Context, scope coretenant.Scope, id string, by string) error
 	// HasReadyRouter reports whether the organization has at least one
 	// non-deleted router with isolir_ready = true.
@@ -304,12 +306,43 @@ func (r *routerRepository) MarkSetup(ctx context.Context, scope coretenant.Scope
 		ready, nullableString(profile), nullableString(redirectURL), id, scope.OrganizationID())
 }
 
+// routerHasNoIsolationActivity ($3 = organization) is true when no secret of
+// router r is isolated or has a pending/running isolation task.
+const routerHasNoIsolationActivity = `NOT EXISTS (
+		SELECT 1 FROM mikrotik_ppp_secrets s
+		WHERE s.organization_id = $3 AND s.router_id = r.id
+		  AND (s.isolation_state = 'isolated' OR EXISTS (
+			SELECT 1 FROM mikrotik_isolation_tasks t
+			WHERE t.organization_id = s.organization_id AND t.secret_id = s.id AND t.status IN ('pending', 'running'))))`
+
+// SoftDelete refuses (ErrRouterHasIsolatedSecrets) while the router has
+// isolated secrets or active isolation tasks: once deleted, nothing could
+// restore those customers. The guard is part of the same UPDATE.
 func (r *routerRepository) SoftDelete(ctx context.Context, scope coretenant.Scope, id string, by string) error {
-	return r.execOne(ctx, scope, `
-		UPDATE mikrotik_routers
-		SET deleted_at = now(), updated_at = now(), updated_by = COALESCE($1, updated_by)
-		WHERE id = $2 AND organization_id = $3 AND deleted_at IS NULL`,
-		nullableString(by), id, scope.OrganizationID())
+	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
+			UPDATE mikrotik_routers r
+			SET deleted_at = now(), updated_at = now(), updated_by = COALESCE($1, r.updated_by)
+			WHERE r.id = $2 AND r.organization_id = $3 AND r.deleted_at IS NULL
+			  AND `+routerHasNoIsolationActivity,
+			nullableString(by), id, scope.OrganizationID())
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() > 0 {
+			return nil
+		}
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM mikrotik_routers
+			WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL)`, id, scope.OrganizationID()).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return pgx.ErrNoRows
+		}
+		return mikrotik.ErrRouterHasIsolatedSecrets
+	})
+	return mapRouterError(err)
 }
 
 func (r *routerRepository) HasReadyRouter(ctx context.Context, scope coretenant.Scope) (bool, error) {

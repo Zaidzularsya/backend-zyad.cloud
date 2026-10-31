@@ -128,6 +128,7 @@ func TestSecretRoutes_ErrorMapping(t *testing.T) {
 		{"account not found", mikrotik.ErrAccountNotFound, http.StatusNotFound},
 		{"already paired", mikrotik.ErrSecretAlreadyPaired, http.StatusConflict},
 		{"isolated", mikrotik.ErrSecretIsolated, http.StatusConflict},
+		{"active task", mikrotik.ErrSecretHasActiveTask, http.StatusConflict},
 		{"not pairable", wrapped, http.StatusConflict},
 		{"unreachable", mikrotik.ErrUnreachable, http.StatusBadGateway},
 		{"auth failed", mikrotik.ErrAuthFailed, http.StatusBadGateway},
