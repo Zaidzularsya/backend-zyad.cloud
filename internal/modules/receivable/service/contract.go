@@ -175,6 +175,12 @@ type ReplayableListener interface {
 	InvoicePaidReplay(ctx context.Context, scope coretenant.Scope, inv InvoiceRef)
 }
 
+// VoidedListener: opt-in untuk listener yang perlu tahu invoice dibatalkan (void).
+// Sengaja tidak ditambahkan ke Listener supaya listener lama tidak berubah.
+type VoidedListener interface {
+	InvoiceVoided(ctx context.Context, scope coretenant.Scope, inv InvoiceRef)
+}
+
 // SettingsService mengelola pengaturan penagihan organisasi.
 type SettingsService interface {
 	Get(ctx context.Context, scope coretenant.Scope) (domain.Settings, error)

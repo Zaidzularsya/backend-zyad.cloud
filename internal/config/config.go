@@ -193,6 +193,9 @@ type MikrotikConfig struct {
 	// transport, which has no real-router evidence yet (default false).
 	// Parsed from MIKROTIK_SETUP_ALLOW_REST.
 	SetupAllowREST bool
+	// IsolationMode controls the isolation engine: "off" (default), "dry_run"
+	// or "on". Unknown values fall back to "off". Parsed from MIKROTIK_ISOLATION_MODE.
+	IsolationMode string
 }
 
 // DokuConfig holds DOKU Checkout API credentials. ClientID + SecretKey drive

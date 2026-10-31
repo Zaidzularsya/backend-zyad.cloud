@@ -258,6 +258,8 @@ func (s *invoiceService) Void(ctx context.Context, scope coretenant.Scope, id, r
 	if err := s.RefreshSnapshot(ctx, scope, inv.ID); err != nil {
 		slog.WarnContext(ctx, "receivable: refresh void snapshot failed", "invoice_id", inv.ID, "error", err)
 	}
+	// Void sudah ter-commit; listener hanya diberi tahu, kegagalannya tidak membatalkan void.
+	s.listeners.InvoiceVoided(ctx, scope, invoiceRef(inv))
 	return s.Get(ctx, scope, inv.ID)
 }
 

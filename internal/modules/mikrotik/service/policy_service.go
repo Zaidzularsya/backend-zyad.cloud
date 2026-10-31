@@ -47,6 +47,10 @@ func NewPolicyService(d PolicyDeps) *PolicyService {
 	return &PolicyService{repo: d.Repo, accounts: d.Accounts, products: d.Products, usage: d.Usage, audit: d.Audit, onChange: d.OnChange, now: now}
 }
 
+// Note: OnChange fires only for customer policy writes (SetExempt). Product
+// trigger changes (SetTrigger) affect many accounts and are reconciled by the
+// periodic evaluation job instead of per-account here.
+
 // SetExempt marks or unmarks a customer as exempt from isolir. The account is
 // resolved through AccountDirectory first, so an account of another
 // organization yields ErrAccountNotFound without touching the policy table.

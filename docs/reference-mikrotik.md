@@ -164,6 +164,7 @@ Event ditulis setelah mutasi commit; kegagalan menulis audit hanya di-log dan ti
 
 `MIKROTIK_SECRET_NOT_FOUND` (404), `MIKROTIK_ACCOUNT_NOT_FOUND` (404), `MIKROTIK_PRODUCT_NOT_FOUND` (404),
 `MIKROTIK_SECRET_ALREADY_PAIRED` (409), `MIKROTIK_SECRET_ISOLATED` (409), `MIKROTIK_SECRET_NOT_PAIRABLE` (409),
+`MIKROTIK_SECRET_HAS_ACTIVE_TASK` (409, Fase 3), `MIKROTIK_ROUTER_HAS_ISOLATED_SECRETS` (409, Fase 3, hapus router),
 `QUOTA_EXCEEDED` (409, dari kuota CRM saat `pair-new-customer`).
 
 ### Batas yang diketahui
@@ -173,10 +174,156 @@ Event ditulis setelah mutasi commit; kegagalan menulis audit hanya di-log dan ti
   tertinggal tanpa pairing.
 - Fase 2 tidak mengubah profile secret di router dan tidak mengisolir; itu Fase 3.
 
+## Mesin isolir (Fase 3)
+
+Mesin ini mengisolir pelanggan PPPoE yang punya invoice lewat jatuh tempo dan membuka isolirnya setelah lunas. Seluruhnya
+dikendalikan oleh `MIKROTIK_ISOLATION_MODE` (default `off`: tidak ada listener, tidak ada job, alur lama tidak berubah).
+
+**Status uji:** unit test dan integration test (Postgres privat) lulus. Uji lab terhadap router nyata
+(`TestLab_IsolateRestoreRoundTrip`, `internal/modules/mikrotik/service/isolation_lab_test.go`) **belum pernah dijalankan**
+karena kredensial lab tidak tersedia saat Task 10 dikerjakan; hasilnya tidak boleh dianggap lulus.
+
+### Aturan evaluasi
+
+- **Invoice kandidat** (`internal/app/mikrotik_overdue_source.go`): invoice akun dengan status `issued` atau `overdue`,
+  `due_date` lebih awal dari hari ini (WIB), dan memuat item dengan produk yang penanda triggernya `enabled` serta
+  `due_date >= effective_from`. Pembayaran sebagian tidak berpengaruh; invoice keluar dari himpunan hanya saat `paid`/`void`.
+- **State yang diinginkan** per akun: `isolated` bila ada minimal satu invoice kandidat **dan** akun tidak dikecualikan
+  (`exempt`); selain itu `normal`.
+- **Aksi per secret yang dipasangkan ke akun**: `isolate` bila state diinginkan `isolated`, secret `normal`, `present=true`
+  dan `needs_original_profile=false`; `restore` bila state diinginkan `normal` dan secret `isolated` (tanpa syarat `present`).
+  Secret yang tidak dipasangkan tidak pernah diisolir; secret terisolir yang kehilangan pasangan tetap dipulihkan oleh processor.
+- Evaluasi diulang di worker tepat sebelum menyentuh router; tugas yang tidak lagi sesuai dibatalkan (`superseded`).
+
+### Outbox tugas, status, prioritas
+
+Tabel `mikrotik_isolation_tasks`: satu tugas aktif (`pending`/`running`) per secret. Status: `pending`, `running`, `done`,
+`failed`, `cancelled`. Prioritas: `restore` = 100, `isolate` = 10 (restore diambil lebih dulu). Menjadwalkan `isolate`
+membatalkan `restore` pending (dan sebaliknya); tugas lawan yang sedang `running` dibiarkan dan akun dievaluasi ulang
+setelah selesai. Lease `running` 2 menit (tugas worker yang mati diambil ulang setelah itu). Aksi router: ubah `profile`
+secret, hapus sesi `/ppp/active` milik secret, baca ulang profile untuk konfirmasi; semua langkah idempoten. Isolasi tidak
+pernah menimpa `original_profile` dengan profile isolir; restore menolak target kosong atau sama dengan profile isolir.
+
+### Kunci per router
+
+Sebelum menyentuh router, processor mengambil advisory lock `mikrotik:router:{router_id}`. Bila router sedang dipegang
+worker lain, tugas dikembalikan ke `pending` 15 detik kemudian **tanpa** menambah `attempts`.
+
+### Coba ulang dan backoff
+
+Jeda setelah percobaan gagal ke-N adalah entri ke-N tabel (entri terakhir berulang). Interval job 2 menit, jadi jeda efektif
+tidak pernah lebih pendek dari itu.
+
+| Aksi | Jeda (setelah gagal ke-1, 2, 3, ...) | Maks percobaan | Notifikasi tenant mulai percobaan ke- |
+|---|---|---|---|
+| `isolate` | 1 mnt, 5 mnt, 15 mnt, 1 jam (berulang) | 8 | 5 |
+| `restore` | 30 dtk, 1 mnt, 2 mnt, 5 mnt, 15 mnt (berulang) | 12 | 3 |
+
+Kegagalan **permanen** (`router_not_found`, `router_not_ready`, `auth_failed`, `tls_untrusted`, `host_not_allowed`,
+`secret_missing`, `profile_missing`, `restore_target_invalid`) langsung menjadi `failed` dan langsung memberi tahu tenant.
+Kegagalan **sementara** (`unreachable`, `unknown`) dicoba ulang sampai anggaran habis lalu `failed` (tenant selalu diberi
+tahu saat habis). Satu tugas memberi tahu tenant paling banyak sekali. `secret_missing` juga menandai secret `present=false`.
+Setelah `failed`, tugas tidak dibuat ulang oleh processor; reconciler berikutnya mengevaluasi akun lagi dan membuat tugas
+baru, atau operator memakai `POST /tasks/{id}/retry`.
+
+**Masa jeda enqueue setelah gagal** (`domain.IsolateFailCooldown` 1 jam, `domain.RestoreFailCooldown` 15 menit):
+`EnqueueIsolate`/`EnqueueRestore` tidak membuat tugas baru selama tugas `failed` terakhir untuk secret **dan aksi yang
+sama** selesai kurang dari masa jeda itu (aksi lawan tidak terhalang). Tanpa ini reconciler membuat ulang tugas yang gagal
+permanen setiap tick dan tenant menerima alert tiap kali. `POST /tasks/{id}/retry` tidak terkena masa jeda.
+
+**Isolate parsial.** Bila `isolate` sudah memasang profile isolir di router lalu langkah berikutnya gagal (atau worker mati
+di antara `Set` dan penandaan DB), DB masih `normal`. Sebelum membatalkan tugas `isolate` yang sudah pernah diambil
+(`superseded` atau `entitlement_disabled`), processor membaca profile secret di router (read-only, di bawah kunci router);
+bila profile isolir, DB diselaraskan ke `isolated` (audit `partial=true`) dan evaluasi lanjutan menjadwalkan `restore`.
+Pembacaan yang gagal **tidak pernah** membatalkan tugas diam-diam: kegagalan sementara dihitung sebagai percobaan dan
+dicoba ulang dengan backoff `isolate` (alert tenant mengikuti ambang biasa); kegagalan permanen (mis. `auth_failed`,
+`host_not_allowed`, router terhapus) atau anggaran habis (8 percobaan) membuat tugas `failed` dengan kode
+`router_unverifiable` ("Router tidak dapat diperiksa; periksa profile pelanggan secara manual."), audit `task.failed`, alert
+tenant sekali, tanpa evaluasi lanjutan. Tugas `failed` tidak menghalangi hapus router/unpair dan bisa di-retry operator;
+masa jeda enqueue mencegah tugas yang sama dibuat ulang terus. Karena `ClaimBatch` selalu mengisi `started_at`,
+pembacaan ini terjadi untuk setiap pembatalan `isolate` yang diproses worker (satu `print`, tanpa tulis).
+
+### Mode
+
+| Mode | Efek |
+|---|---|
+| `off` (default; nilai tak dikenal dianggap `off`) | Tidak ada listener invoice/hook di API, tidak ada job di worker. |
+| `dry_run` | Evaluasi berjalan (hook API, listener invoice, reconciler worker) tetapi hanya mencatat keputusan ke log (`mikrotik: dry-run decision`); **tidak ada tugas dibuat dan tidak ada router disentuh**. Worker tetap membangun dependensi notifikasi, sehingga **tenant storage harus terkonfigurasi di worker** atau worker gagal start. |
+| `on` | Evaluasi membuat tugas; worker memprosesnya ke router, menulis audit, dan mengirim notifikasi. Tugas yang tersisa dari periode `on` sebelumnya tidak disentuh selama mode `dry_run`/`off`. |
+
+Mode dibaca dari env pada saat start (API dan worker): ubah lalu restart keduanya.
+
+### Pemicu
+
+- Listener receivable: `InvoicePaid`, `InvoicePaidReplay` (aman diulang), `InvoiceVoided` (evaluasi ulang akun pemilik invoice).
+- Perubahan pengecualian pelanggan (`customer_policy_changed`) dan pair/unpair secret (`secret_pairing_changed`).
+- **Reconcile periodik** tiap 2 menit di worker (`mikrotikIsolationInterval`): mengevaluasi akun yang punya invoice kandidat
+  atau secret terisolir. Ini satu-satunya jalur untuk perubahan penanda produk (aktif/nonaktif, `effective_from`),
+  jatuh tempo yang terlewati, dan pembuatan ulang tugas setelah `failed`. Hook langsung hanya mempercepat reaksi.
+- Hook berjalan setelah perubahan committed, dengan timeout 5 detik, dan hanya mencatat log bila gagal.
+
+### Hilangnya entitlement `mikrotik.enabled`
+
+Organisasi tanpa entitlement (atau bila pengecekan entitlement error) diproses **restore-only**: reconciler hanya
+mengevaluasi akun dengan secret terisolir dan tidak pernah membuat tugas `isolate`; tugas `isolate` yang terlanjur ada
+dibatalkan (`entitlement_disabled`) tanpa menyentuh router; `restore` tetap berjalan, tidak bergantung `isolir_ready`.
+Mode `dry_run` hanya mencatat log di jalur ini juga. Karena route `/app/mikrotik` dijaga entitlement yang sama, seluruh
+grup UI/API (dashboard tugas, retry, pengecualian pelanggan) tidak dapat diakses selama entitlement mati, sementara
+restore tetap berjalan otomatis.
+
+Hanya **organisasi aktif** yang dikunjungi worker: pelanggan terisolir milik organisasi yang disuspend tidak dibuka
+otomatis sampai organisasi aktif lagi.
+
+### Penjaga hapus router dan unpair
+
+- `DELETE /routers/{id}` ditolak 409 `MIKROTIK_ROUTER_HAS_ISOLATED_SECRETS` selama router punya secret `isolated` atau
+  secret dengan tugas `pending`/`running` (dicek di UPDATE yang sama dengan soft delete).
+- `POST /secrets/{id}/unpair` ditolak 409 `MIKROTIK_SECRET_HAS_ACTIVE_TASK` selama secret punya tugas `pending`/`running`
+  (melengkapi aturan lama: secret terisolir tidak bisa di-unpair, 409 `MIKROTIK_SECRET_ISOLATED`).
+- `PATCH /routers/{id}` yang mengubah host/kredensial **tidak** dijaga: mengarahkan router ke perangkat lain saat masih ada
+  pelanggan terisolir membuat restore berjalan ke perangkat yang salah. Setup ulang/cleanup isolir mengosongkan
+  `isolir_profile_name`, sehingga deteksi isolate parsial tidak bisa berjalan untuk router itu. Keduanya hanya
+  didokumentasikan.
+
+### Audit
+
+Ditulis sebagai event sistem (tanpa aktor) oleh worker, kecuali `task.retried` yang memuat aktor: `isolation.isolated`
+(metadata `partial=true` bila isolate gagal setelah profile terlanjur berubah dan DB diselaraskan), `isolation.restored`,
+`task.failed`, `task.cancelled`, `task.retried`, `notification.failed` (notifikasi pelanggan gagal; tugas tidak diulang).
+
+### Notifikasi
+
+- Tenant: event `mikrotik.isolation_task_failed` (template email `id-ID`) dikirim ke setiap anggota yang memegang
+  `mikrotik_task.read`, berisi nama router, nama secret, aksi, alasan tetap, dan tautan `/app/mikrotik/tasks`. Tidak
+  memuat host, username, atau password router.
+- Pelanggan: email/WhatsApp saat berhasil diisolir atau dibuka, memakai pengirim yang dikonfigurasi di pengaturan
+  receivable tenant; sekali per tugas, kegagalan kirim tidak menggagalkan tugas.
+
+### API dashboard tugas
+
+`GET /api/v1/app/mikrotik/tasks` (filter `status`, `router_id`; `limit` default 50, maks 200; `offset`),
+`GET /tasks/summary`, `POST /tasks/{id}/retry` (hanya `failed`; reset `attempts`). Detail di `api/openapi.yaml`.
+Respons retry tidak mengisi `router.name` dan `account` (klien memuat ulang daftar). Kode error: `MIKROTIK_TASK_NOT_FOUND`
+(404), `MIKROTIK_TASK_NOT_RETRYABLE` (409), `MIKROTIK_TASK_ACTIVE_EXISTS` (409), `VALIDATION_ERROR` (400, filter tidak valid).
+
+Permission `mikrotik_task.read` dan `mikrotik_task.retry` (migration 000174) saat ini hanya diberikan ke
+`organization_owner`. **Item terbuka:** apakah peran anggota biasa boleh membaca dashboard; hanya pemilik yang menerima
+notifikasi kegagalan sampai itu diputuskan.
+
+### Batas yang diketahui
+
+- RouterOS v6 dan transport REST **belum terbukti** untuk isolir/buka-isolir; uji lab Fase 3 belum dijalankan (lihat atas).
+- Sesi lama benar-benar terputus dan sesi baru mendapat profile isolir: belum terbukti dengan CPE nyata.
+- Redirect HTTP bersifat best-effort (HTTPS tidak bisa dialihkan).
+- Pembuatan ulang secret dengan nama sama di router (setelah dihapus) tidak diwarisi pairing-nya; tetap catatan terbuka.
+- Organisasi tanpa entitlement tetap dikunjungi job tiap 2 menit bila punya secret terisolir (restore-only); secara umum
+  job menelusuri semua organisasi aktif sehingga ada noise antrean/log untuk organisasi yang tidak berhak.
+- Satu tenant yang lambat (router tak terjangkau, timeout) dapat menunda tenant lain dalam satu tick worker; anggaran
+  waktu per tick per tenant belum diimplementasikan.
+
 ## Tidak termasuk Fase 1
 
-Mesin isolir otomatis dari invoice overdue, halaman isolir publik,
-dan wizard frontend. Lihat spec di atas (fase 2 sampai 4).
+Halaman isolir publik dan wizard/UI frontend (mesin isolir ada di Fase 3 di atas). Lihat spec di atas (fase 2 sampai 4).
 
 ## Belum terbukti
 

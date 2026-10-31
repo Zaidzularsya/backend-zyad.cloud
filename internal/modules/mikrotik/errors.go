@@ -117,3 +117,32 @@ var (
 	// ErrSecretIsolated: the PPP secret is currently isolated and cannot be unpaired.
 	ErrSecretIsolated = errors.New("ppp secret is isolated")
 )
+
+// Fase 3: mesin isolir.
+var (
+	// ErrTaskNotFound: the isolation task does not exist in this organization.
+	ErrTaskNotFound = errors.New("isolation task not found")
+	// ErrTaskNotRetryable: only a failed isolation task can be retried.
+	ErrTaskNotRetryable = errors.New("isolation task is not in a retryable state")
+	// ErrTaskActiveExists: another pending/running task already exists for the secret.
+	ErrTaskActiveExists = errors.New("an active task already exists for this secret")
+	// ErrRouterHasIsolatedSecrets: the router still has isolated secrets or
+	// secrets with a pending/running isolation task, so it cannot be deleted
+	// (nothing could restore those customers afterwards).
+	ErrRouterHasIsolatedSecrets = errors.New("router has isolated secrets or active isolation tasks")
+	// ErrSecretHasActiveTask: the PPP secret has a pending/running isolation
+	// task and cannot be unpaired until it finishes.
+	ErrSecretHasActiveTask = errors.New("ppp secret has an active isolation task")
+)
+
+// Fase 3: langkah router pada eksekutor isolir.
+var (
+	// ErrSecretMissingOnRouter: the PPP secret no longer exists on the router.
+	ErrSecretMissingOnRouter = errors.New("ppp secret is missing on the router")
+	// ErrRestoreProfileMissing: the profile to restore to does not exist on the router.
+	ErrRestoreProfileMissing = errors.New("restore profile does not exist on the router")
+	// ErrRestoreTargetInvalid: no usable original profile is known (empty or the isolir profile).
+	ErrRestoreTargetInvalid = errors.New("no valid original profile to restore to")
+	// ErrRouterNotIsolirReady: the router has no completed isolir setup.
+	ErrRouterNotIsolirReady = errors.New("router is not isolir ready")
+)

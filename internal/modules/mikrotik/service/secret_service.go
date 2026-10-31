@@ -42,6 +42,27 @@ type SecretService struct {
 	accounts    AccountDirectory
 	provisioner ContactProvisioner
 	now         func() time.Time
+	onChange    func(ctx context.Context, scope coretenant.Scope, accountID string)
+}
+
+// SetOnChange registers a hook run after a successful pair/unpair with the
+// affected account id. nil disables it. Wiring only; call before serving.
+func (s *SecretService) SetOnChange(fn func(ctx context.Context, scope coretenant.Scope, accountID string)) {
+	s.onChange = fn
+}
+
+// notifyChange runs after the mutation committed; the hook has no error return
+// and a panic in it must never fail the user's operation.
+func (s *SecretService) notifyChange(ctx context.Context, scope coretenant.Scope, accountID string) {
+	if s.onChange == nil || accountID == "" {
+		return
+	}
+	defer func() {
+		if rec := recover(); rec != nil {
+			slog.Error("mikrotik: secret onChange hook panicked", "account_id", accountID, "panic", rec)
+		}
+	}()
+	s.onChange(ctx, scope, accountID)
 }
 
 func NewSecretService(routers *RouterService, repo repository.SecretRepository, audit Auditor, accounts AccountDirectory, provisioner ContactProvisioner) *SecretService {
@@ -186,6 +207,7 @@ func (s *SecretService) commitPair(ctx context.Context, scope coretenant.Scope, 
 		return domain.PPPSecret{}, err
 	}
 	s.auditSecret(ctx, scope, "secret.paired", secret, accountID, actor)
+	s.notifyChange(ctx, scope, accountID)
 	return s.repo.FindByID(ctx, scope, secret.ID)
 }
 
@@ -204,6 +226,7 @@ func (s *SecretService) Unpair(ctx context.Context, scope coretenant.Scope, secr
 		accountID = *secret.AccountID
 	}
 	s.auditSecret(ctx, scope, "secret.unpaired", secret, accountID, actor)
+	s.notifyChange(ctx, scope, accountID)
 	return nil
 }
 

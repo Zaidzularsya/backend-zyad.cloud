@@ -50,6 +50,15 @@ func (r *Registry) InvoicePaidReplay(ctx context.Context, scope coretenant.Scope
 	}
 }
 
+// InvoiceVoided memanggil hanya listener yang mengimplementasikan VoidedListener.
+func (r *Registry) InvoiceVoided(ctx context.Context, scope coretenant.Scope, inv InvoiceRef) {
+	for _, l := range r.snapshot() {
+		if vl, ok := l.(VoidedListener); ok {
+			safely("invoice voided", func() { vl.InvoiceVoided(ctx, scope, inv) })
+		}
+	}
+}
+
 func (r *Registry) ContractCreated(ctx context.Context, scope coretenant.Scope, c ContractRef) {
 	for _, l := range r.snapshot() {
 		safely("contract created", func() { l.ContractCreated(ctx, scope, c) })

@@ -24,6 +24,7 @@ type fakeSecretRepo struct {
 	seq  int
 
 	pairCalls int
+	unpairErr error
 
 	listFilter            repository.SecretFilter
 	listLimit, listOffset int
@@ -124,6 +125,8 @@ func (f *fakeSecretRepo) Unpair(_ context.Context, _ coretenant.Scope, id string
 		return mikrotik.ErrSecretNotFound
 	case r.IsolationState != domain.IsolationNormal:
 		return mikrotik.ErrSecretIsolated
+	case f.unpairErr != nil:
+		return f.unpairErr
 	}
 	r.AccountID, r.PairedBy, r.PairedAt = nil, nil, nil
 	return nil
@@ -395,4 +398,49 @@ func TestImport_SkipsOverlongNameOrProfile(t *testing.T) {
 	if e.srepo.byName(e.router.ID, "bob") != nil || e.srepo.byName(e.router.ID, long) != nil {
 		t.Fatal("overlong rows must not be stored")
 	}
+}
+
+func (f *fakeSecretRepo) MarkIsolated(_ context.Context, _ coretenant.Scope, id, originalProfile string) (bool, error) {
+	r := f.byID(id)
+	if r == nil || r.AccountID == nil || r.IsolationState != domain.IsolationNormal {
+		return false, nil
+	}
+	r.IsolationState = domain.IsolationIsolated
+	if originalProfile != "" {
+		r.OriginalProfile = originalProfile
+	}
+	return true, nil
+}
+
+func (f *fakeSecretRepo) MarkNormal(_ context.Context, _ coretenant.Scope, id string) (bool, error) {
+	r := f.byID(id)
+	if r == nil || r.IsolationState != domain.IsolationIsolated {
+		return false, nil
+	}
+	r.IsolationState = domain.IsolationNormal
+	return true, nil
+}
+
+func (f *fakeSecretRepo) MarkAbsent(_ context.Context, _ coretenant.Scope, id string) error {
+	r := f.byID(id)
+	if r == nil {
+		return mikrotik.ErrSecretNotFound
+	}
+	r.Present = false
+	return nil
+}
+
+func (f *fakeSecretRepo) ListByAccount(_ context.Context, _ coretenant.Scope, accountID string) ([]domain.PPPSecret, error) {
+	var out []domain.PPPSecret
+	for _, r := range f.rows {
+		if r.AccountID != nil && *r.AccountID == accountID {
+			out = append(out, *r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+func (f *fakeSecretRepo) AccountsWithIsolatedSecrets(_ context.Context, _ coretenant.Scope) ([]string, error) {
+	return nil, nil
 }

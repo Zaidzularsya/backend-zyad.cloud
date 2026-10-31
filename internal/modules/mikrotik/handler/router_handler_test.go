@@ -28,6 +28,7 @@ type fakeService struct {
 	getFn      func(id string) (domain.Router, error)
 	listFn     func(limit, offset int) ([]domain.Router, int64, error)
 	checkFn    func(id string) (domain.Router, error)
+	deleteErr  error
 }
 
 func (f *fakeService) Register(_ context.Context, _ coretenant.Scope, in service.RegisterInput) (domain.Router, error) {
@@ -45,7 +46,9 @@ func (f *fakeService) Check(_ context.Context, _ coretenant.Scope, id string) (d
 func (f *fakeService) Update(context.Context, coretenant.Scope, string, service.UpdateInput) (domain.Router, error) {
 	return domain.Router{}, nil
 }
-func (f *fakeService) Delete(context.Context, coretenant.Scope, string, string) error { return nil }
+func (f *fakeService) Delete(context.Context, coretenant.Scope, string, string) error {
+	return f.deleteErr
+}
 
 func sampleRouter() domain.Router {
 	return domain.Router{
@@ -199,6 +202,8 @@ func TestErrorMappingTable(t *testing.T) {
 	}{
 		{mikrotik.ErrRouterNotFound, 404, "MIKROTIK_ROUTER_NOT_FOUND"},
 		{mikrotik.ErrRouterNameTaken, 409, "MIKROTIK_ROUTER_NAME_TAKEN"},
+		{mikrotik.ErrRouterHasIsolatedSecrets, 409, "MIKROTIK_ROUTER_HAS_ISOLATED_SECRETS"},
+		{mikrotik.ErrSecretHasActiveTask, 409, "MIKROTIK_SECRET_HAS_ACTIVE_TASK"},
 		{&mikrotik.InvalidInputError{Message: "bad host"}, 422, "VALIDATION_ERROR"},
 		{mikrotik.ErrHostNotAllowed, 422, "MIKROTIK_HOST_NOT_ALLOWED"},
 		{mikrotik.ErrTLSRequired, 422, "MIKROTIK_TLS_REQUIRED"},
@@ -228,6 +233,15 @@ func TestErrorMappingTable(t *testing.T) {
 			t.Fatalf("status/code = %d/%s, body = %s", w.Code, code, w.Body)
 		}
 	})
+}
+
+func TestDeleteRouterWithIsolationActivityReturns409(t *testing.T) {
+	r := routerFor(t, &fakeService{deleteErr: mikrotik.ErrRouterHasIsolatedSecrets})
+	w := performJSON(r, http.MethodDelete, "/app/mikrotik/routers/33333333-3333-3333-3333-333333333333", "")
+	code, _ := errorBody(t, w.Body.Bytes())
+	if w.Code != http.StatusConflict || code != "MIKROTIK_ROUTER_HAS_ISOLATED_SECRETS" || !strings.Contains(w.Body.String(), "Router tidak dapat dihapus") {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body)
+	}
 }
 
 func TestCheckFailureReturnsMappedError(t *testing.T) {

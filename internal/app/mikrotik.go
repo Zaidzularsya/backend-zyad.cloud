@@ -11,6 +11,7 @@ import (
 	mikrotikhandler "zyad.cloud/internal/modules/mikrotik/handler"
 	mikrotikrepo "zyad.cloud/internal/modules/mikrotik/repository"
 	mikrotikservice "zyad.cloud/internal/modules/mikrotik/service"
+	receivableservice "zyad.cloud/internal/modules/receivable/service"
 	"zyad.cloud/internal/platform/database"
 )
 
@@ -20,6 +21,7 @@ type mikrotikModule struct {
 	Setup  *mikrotikhandler.SetupHandler
 	Secret *mikrotikhandler.SecretHandler
 	Policy *mikrotikhandler.PolicyHandler
+	Task   *mikrotikhandler.TaskHandler
 }
 
 // mikrotikBuild carries the cross-module services the adapters wrap.
@@ -27,6 +29,9 @@ type mikrotikBuild struct {
 	Accounts mikrotikAccountSource
 	Contacts mikrotikContactCreator
 	Products mikrotikProductSource
+	// Listeners is the receivable registry; the isolation engine registers
+	// its invoice listener there when IsolationMode is not off.
+	Listeners *receivableservice.Registry
 }
 
 // buildMikrotik assembles the Mikrotik module: repositories, production
@@ -44,20 +49,37 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 
 	reader := newMikrotikReceivableReader(db)
 	accounts := mikrotikAccountDirectory{accounts: b.Accounts}
-	secrets := mikrotikservice.NewSecretService(svc, mikrotikrepo.NewSecretRepository(db), repo, accounts,
+	secretRepo := mikrotikrepo.NewSecretRepository(db)
+	policyRepo := mikrotikrepo.NewPolicyRepository(db)
+	secrets := mikrotikservice.NewSecretService(svc, secretRepo, repo, accounts,
 		mikrotikContactProvisioner{contacts: b.Contacts, accounts: b.Accounts})
-	policy := mikrotikservice.NewPolicyService(mikrotikservice.PolicyDeps{
-		Repo:     mikrotikrepo.NewPolicyRepository(db),
+	policyDeps := mikrotikservice.PolicyDeps{
+		Repo:     policyRepo,
 		Accounts: accounts,
 		Products: mikrotikProductCatalog{products: b.Products, inUse: reader},
 		Usage:    reader,
 		Audit:    repo,
-	})
+	}
+
+	// Isolation engine triggers (API process only: payments and pairing
+	// happen here; the worker runs the reconciler and the task processor).
+	// Mode off wires nothing, so existing flows are unchanged. All hooks are
+	// set before serving.
+	if mode := mikrotikIsolationMode(cfg.Mikrotik.IsolationMode); mode != mikrotikservice.ModeOff {
+		eval := mikrotikservice.NewEvaluator(mikrotikservice.EvaluatorDeps{
+			Source: reader, Policy: policyRepo, Secrets: secretRepo, Tasks: mikrotikrepo.NewTaskRepository(db), Mode: mode,
+		})
+		policyDeps.OnChange = mikrotikEvaluateHook(eval, "customer_policy_changed")
+		secrets.SetOnChange(mikrotikEvaluateHook(eval, "secret_pairing_changed"))
+		registerMikrotikInvoiceListener(mode, b.Listeners, mikrotikservice.NewInvoiceListener(reader, eval))
+	}
+	policy := mikrotikservice.NewPolicyService(policyDeps)
 	return mikrotikModule{
 		Router: mikrotikhandler.NewRouterHandler(svc),
 		Setup:  mikrotikhandler.NewSetupHandler(setup),
 		Secret: mikrotikhandler.NewSecretHandler(secrets),
 		Policy: mikrotikhandler.NewPolicyHandler(policy),
+		Task:   mikrotikhandler.NewTaskHandler(mikrotikservice.NewTaskService(mikrotikrepo.NewTaskRepository(db), secretRepo, repo)),
 	}
 }
 
@@ -103,5 +125,8 @@ func registerMikrotikRoutes(protected *gin.RouterGroup, deps Dependencies) {
 	}
 	if deps.MikrotikPolicyHandler != nil {
 		deps.MikrotikPolicyHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
+	}
+	if deps.MikrotikTaskHandler != nil {
+		deps.MikrotikTaskHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
 	}
 }
