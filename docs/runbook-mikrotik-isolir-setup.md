@@ -26,6 +26,8 @@ diakses lewat IP WireGuard.
 | REST port 443 (`www-ssl`) | connection refused (`www-ssl` disabled di router lab) | teramati di log lab (7.8), bukan assertion otomatis |
 | `Detect` dengan `Port=0` | REST dulu (404) → fallback binary: `api_type=binary`, ±1,1 dtk | teramati di log lab (7.8), bukan assertion otomatis |
 | `Detect` dengan `Port=8728` | binary dulu: `api_type=binary`, ±1,1 dtk | teramati di log lab (7.8), bukan assertion otomatis |
+| Impor Fase 2 (binary API): `Print /ppp/secret` dan `/ppp/profile` | 31 Okt 2026, CHR 7.8: 85 secret, 10 profile terbaca; semua baris punya key `name`, `profile`, `disabled`; `service` = `pppoe` (85/85), `disabled` = `false` (85/85), `.id`/`comment`/`password` ada. Hanya jumlah dan nilai non-sensitif yang dicatat | terbukti di lab (7.8), assertion otomatis (`TestLab_ImportListsPPPSecretsAndProfiles/binary`); distribusi nilai teramati lewat pembacaan sekali jalan, bukan assertion |
+| Impor Fase 2 lewat REST | `GET /rest/ppp/secret` membalas 404 (REST port 80 tidak aktif sebagai REST di lab; subtest di-skip) | **belum terbukti** |
 | Transport REST secara fungsional (v7) | tidak bisa diuji: `www-ssl` mati dan `/ip service` tidak boleh diubah di router lab | **belum terbukti** |
 | RouterOS v6 (transport apa pun) | tidak ada router v6 di lab | **belum terbukti** |
 | Binary API TLS (8729) | TCP 8729 terbuka menurut probe TCP koordinator dari shell sebelum Task 8 (bukan oleh helper); `/ip service` mencatat `api-ssl` aktif (log discovery); koneksi TLS API tidak pernah dicoba | **belum terbukti** |
