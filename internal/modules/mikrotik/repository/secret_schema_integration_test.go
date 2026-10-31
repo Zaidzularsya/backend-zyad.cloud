@@ -125,3 +125,36 @@ func TestSecretSchema_PermissionsGrantedToOwnerOnly(t *testing.T) {
 		t.Fatalf("total=%d owners=%d others=%d", total, owners, others)
 	}
 }
+
+func TestSecretSchema_AccountFKRejectsCrossOrg(t *testing.T) {
+	e := setupRouter(t)
+	r := e.create(t, e.tenants.A.Scope, "R1")
+	var accB string
+	secretScopedTx(t, e, e.tenants.B.Scope, func(tx pgx.Tx) {
+		if err := tx.QueryRow(e.ctx, `INSERT INTO receivable_accounts (organization_id, name) VALUES ($1, 'Cust B') RETURNING id`,
+			e.tenants.B.OrganizationID).Scan(&accB); err != nil {
+			t.Fatalf("insert account B: %v", err)
+		}
+		if err := tx.Commit(e.ctx); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+	})
+	t.Cleanup(func() {
+		secretScopedTx(t, e, e.tenants.B.Scope, func(tx pgx.Tx) {
+			_, _ = tx.Exec(e.ctx, "DELETE FROM receivable_accounts WHERE id = $1", accB)
+			_ = tx.Commit(e.ctx)
+		})
+	})
+	secretScopedTx(t, e, e.tenants.A.Scope, func(tx pgx.Tx) {
+		if _, err := tx.Exec(e.ctx, `INSERT INTO mikrotik_ppp_secrets (organization_id, router_id, name, profile, account_id)
+			VALUES ($1, $2, 'carol', 'default', $3)`, e.tenants.A.OrganizationID, r.ID, accB); err == nil {
+			t.Fatal("secret of org A pointing to an org B account must be rejected")
+		}
+	})
+	secretScopedTx(t, e, e.tenants.A.Scope, func(tx pgx.Tx) {
+		if _, err := tx.Exec(e.ctx, `INSERT INTO mikrotik_customer_policies (organization_id, account_id, exempt)
+			VALUES ($1, $2, true)`, e.tenants.A.OrganizationID, accB); err == nil {
+			t.Fatal("policy of org A pointing to an org B account must be rejected")
+		}
+	})
+}

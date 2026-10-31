@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS mikrotik_ppp_secrets (
 	CONSTRAINT fk_mikrotik_ppp_secrets_router
 		FOREIGN KEY (organization_id, router_id) REFERENCES mikrotik_routers(organization_id, id) ON DELETE CASCADE,
 	CONSTRAINT fk_mikrotik_ppp_secrets_account
-		FOREIGN KEY (account_id) REFERENCES receivable_accounts(id) ON DELETE SET NULL,
+		FOREIGN KEY (organization_id, account_id) REFERENCES receivable_accounts(organization_id, id),
 	CONSTRAINT fk_mikrotik_ppp_secrets_paired_by
 		FOREIGN KEY (paired_by) REFERENCES users(id) ON DELETE SET NULL
 );
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS mikrotik_customer_policies (
 	CONSTRAINT fk_mikrotik_customer_policies_organization_id
 		FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
 	CONSTRAINT fk_mikrotik_customer_policies_account
-		FOREIGN KEY (account_id) REFERENCES receivable_accounts(id) ON DELETE CASCADE,
+		FOREIGN KEY (organization_id, account_id) REFERENCES receivable_accounts(organization_id, id),
 	CONSTRAINT fk_mikrotik_customer_policies_set_by
 		FOREIGN KEY (set_by) REFERENCES users(id) ON DELETE SET NULL
 );
