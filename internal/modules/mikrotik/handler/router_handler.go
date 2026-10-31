@@ -195,9 +195,22 @@ func failRouter(c *gin.Context, err error) {
 	var tlsErr *mikrotik.TLSUntrustedError
 	var conflictErr *mikrotik.SetupConflictError
 	var stepErr *mikrotik.SetupStepError
+	var appErr *coreerrors.AppError
 	switch {
 	case errors.Is(err, mikrotik.ErrRouterNotFound):
 		response.Error(c, http.StatusNotFound, "MIKROTIK_ROUTER_NOT_FOUND", "router not found")
+	case errors.Is(err, mikrotik.ErrSecretNotFound):
+		response.Error(c, http.StatusNotFound, "MIKROTIK_SECRET_NOT_FOUND", "ppp secret not found")
+	case errors.Is(err, mikrotik.ErrAccountNotFound):
+		response.Error(c, http.StatusNotFound, "MIKROTIK_ACCOUNT_NOT_FOUND", "customer account not found")
+	case errors.Is(err, mikrotik.ErrProductNotFound):
+		response.Error(c, http.StatusNotFound, "MIKROTIK_PRODUCT_NOT_FOUND", "product not found")
+	case errors.Is(err, mikrotik.ErrSecretAlreadyPaired):
+		response.Error(c, http.StatusConflict, "MIKROTIK_SECRET_ALREADY_PAIRED", "ppp secret is already paired to a customer")
+	case errors.Is(err, mikrotik.ErrSecretIsolated):
+		response.Error(c, http.StatusConflict, "MIKROTIK_SECRET_ISOLATED", "ppp secret is isolated; restore its profile before unpairing")
+	case errors.Is(err, mikrotik.ErrSecretNotPairable):
+		response.Error(c, http.StatusConflict, "MIKROTIK_SECRET_NOT_PAIRABLE", err.Error())
 	case errors.Is(err, mikrotik.ErrRouterNameTaken):
 		response.Error(c, http.StatusConflict, "MIKROTIK_ROUTER_NAME_TAKEN", "router name is already used")
 	case errors.As(err, &invalidErr):
@@ -236,6 +249,10 @@ func failRouter(c *gin.Context, err error) {
 			msg = "router rejected setup step (" + stepErr.Step + "); cleanup is incomplete and can be retried"
 		}
 		response.Error(c, http.StatusBadGateway, "MIKROTIK_SETUP_FAILED", msg)
+	case errors.As(err, &appErr) && appErr.Status >= 400 && appErr.Status < 500:
+		// Deliberate client-facing refusals from other modules reached through
+		// the app adapters (e.g. 409 QUOTA_EXCEEDED when creating a CRM contact).
+		response.Error(c, appErr.Status, appErr.Code, appErr.Message)
 	default:
 		c.Error(err) // logged by middleware, not exposed
 		response.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
