@@ -195,6 +195,7 @@ func failRouter(c *gin.Context, err error) {
 	var tlsErr *mikrotik.TLSUntrustedError
 	var conflictErr *mikrotik.SetupConflictError
 	var stepErr *mikrotik.SetupStepError
+	var appErr *coreerrors.AppError
 	switch {
 	case errors.Is(err, mikrotik.ErrRouterNotFound):
 		response.Error(c, http.StatusNotFound, "MIKROTIK_ROUTER_NOT_FOUND", "router not found")
@@ -248,6 +249,10 @@ func failRouter(c *gin.Context, err error) {
 			msg = "router rejected setup step (" + stepErr.Step + "); cleanup is incomplete and can be retried"
 		}
 		response.Error(c, http.StatusBadGateway, "MIKROTIK_SETUP_FAILED", msg)
+	case errors.As(err, &appErr) && appErr.Status >= 400 && appErr.Status < 500:
+		// Deliberate client-facing refusals from other modules reached through
+		// the app adapters (e.g. 409 QUOTA_EXCEEDED when creating a CRM contact).
+		response.Error(c, appErr.Status, appErr.Code, appErr.Message)
 	default:
 		c.Error(err) // logged by middleware, not exposed
 		response.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")

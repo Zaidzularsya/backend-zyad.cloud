@@ -14,9 +14,24 @@ import (
 	"zyad.cloud/internal/platform/database"
 )
 
-// buildMikrotik assembles the Mikrotik router module: repository, production
-// RouterOS client factory, services and HTTP handlers.
-func buildMikrotik(cfg config.Config, db *database.Pool) (*mikrotikhandler.RouterHandler, *mikrotikhandler.SetupHandler) {
+// mikrotikModule groups the handlers built by buildMikrotik.
+type mikrotikModule struct {
+	Router *mikrotikhandler.RouterHandler
+	Setup  *mikrotikhandler.SetupHandler
+	Secret *mikrotikhandler.SecretHandler
+	Policy *mikrotikhandler.PolicyHandler
+}
+
+// mikrotikBuild carries the cross-module services the adapters wrap.
+type mikrotikBuild struct {
+	Accounts mikrotikAccountSource
+	Contacts mikrotikContactCreator
+	Products mikrotikProductSource
+}
+
+// buildMikrotik assembles the Mikrotik module: repositories, production
+// RouterOS client factory, services, cross-module adapters and HTTP handlers.
+func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrotikModule {
 	repo := mikrotikrepo.NewRouterRepository(db)
 	svc := mikrotikservice.NewRouterService(
 		repo,
@@ -26,7 +41,24 @@ func buildMikrotik(cfg config.Config, db *database.Pool) (*mikrotikhandler.Route
 	)
 	setup := mikrotikservice.NewSetupService(svc, repo, mikrotikrepo.NewAdvisoryLocker(db),
 		mikrotikservice.SetupOptions{AllowREST: cfg.Mikrotik.SetupAllowREST})
-	return mikrotikhandler.NewRouterHandler(svc), mikrotikhandler.NewSetupHandler(setup)
+
+	reader := newMikrotikReceivableReader(db)
+	accounts := mikrotikAccountDirectory{accounts: b.Accounts}
+	secrets := mikrotikservice.NewSecretService(svc, mikrotikrepo.NewSecretRepository(db), repo, accounts,
+		mikrotikContactProvisioner{contacts: b.Contacts, accounts: b.Accounts})
+	policy := mikrotikservice.NewPolicyService(mikrotikservice.PolicyDeps{
+		Repo:     mikrotikrepo.NewPolicyRepository(db),
+		Accounts: accounts,
+		Products: mikrotikProductCatalog{products: b.Products, inUse: reader},
+		Usage:    reader,
+		Audit:    repo,
+	})
+	return mikrotikModule{
+		Router: mikrotikhandler.NewRouterHandler(svc),
+		Setup:  mikrotikhandler.NewSetupHandler(setup),
+		Secret: mikrotikhandler.NewSecretHandler(secrets),
+		Policy: mikrotikhandler.NewPolicyHandler(policy),
+	}
 }
 
 // Every call that logs in to a tenant router (create, update, check, setup/*)

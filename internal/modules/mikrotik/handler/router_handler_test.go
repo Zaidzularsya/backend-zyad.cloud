@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	coreerrors "zyad.cloud/internal/core/errors"
 
 	"github.com/gin-gonic/gin"
 
@@ -205,6 +206,7 @@ func TestErrorMappingTable(t *testing.T) {
 		{mikrotik.ErrAuthFailed, 502, "MIKROTIK_AUTH_FAILED"},
 		{mikrotik.ErrUnreachable, 502, "MIKROTIK_UNREACHABLE"},
 		{fmt.Errorf("wrapped: %w", mikrotik.ErrRouterNotFound), 404, "MIKROTIK_ROUTER_NOT_FOUND"},
+		{coreerrors.New("QUOTA_EXCEEDED", "billing quota has been exceeded", 409), 409, "QUOTA_EXCEEDED"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.code, func(t *testing.T) {
