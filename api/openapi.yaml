@@ -11220,6 +11220,135 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/tasks:
+    get:
+      summary: List isolation tasks
+      operationId: listMikrotikTasks
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Daftar tugas isolir/buka-isolir (outbox mesin isolir Fase 3), terbaru lebih dulu, berpaginasi. Router hanya berupa id dan nama (tanpa host/kredensial); `last_error` sudah disanitasi. Tugas dibuat oleh mesin (mode `MIKROTIK_ISOLATION_MODE=on`), bukan lewat API. Permission: `mikrotik_task.read` (saat ini hanya organization_owner). Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: status
+        in: query
+        schema: {type: string, enum: [pending, running, done, failed, cancelled]}
+      - name: router_id
+        in: query
+        schema: {type: string, format: uuid}
+      - name: limit
+        in: query
+        description: "Default 50, maksimal 200 (dipotong ke 200; `meta.per_page` memuat ukuran efektif)."
+        schema: {type: integer, maximum: 200}
+      - name: offset
+        in: query
+        schema: {type: integer, minimum: 0}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikTaskListEnvelope'}
+        '400':
+          description: "VALIDATION_ERROR: `status` bukan salah satu nilai di atas, `router_id` bukan uuid, atau query tidak dapat di-bind"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/tasks/summary:
+    get:
+      summary: Isolation task summary
+      operationId: getMikrotikTaskSummary
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Jumlah tugas per status (semua status selalu ada, 0 bila kosong) dan waktu pembuatan restore pending yang paling lama menunggu. Permission: `mikrotik_task.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikTaskSummaryEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/tasks/{id}/retry:
+    post:
+      summary: Retry a failed isolation task
+      operationId: retryMikrotikTask
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Mengembalikan tugas berstatus `failed` ke `pending` (attempts direset ke 0, error dikosongkan, langsung jatuh tempo); worker mengambilnya pada siklus berikutnya (interval 2 menit). Respons memuat `router.id`, `secret.id` dan `secret.name` (bila secret masih ada); `router.name` dan `account` TIDAK diisi, klien memuat ulang daftar bila membutuhkannya. Audit: `task.retried`. Dibatasi per organization seperti rute mutasi mikrotik lain. Permission: `mikrotik_task.retry` (saat ini hanya organization_owner). Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikTaskEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "MIKROTIK_TASK_NOT_FOUND (termasuk id yang bukan uuid)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '409':
+          description: "MIKROTIK_TASK_NOT_RETRYABLE (hanya tugas `failed` yang dapat diulang) atau MIKROTIK_TASK_ACTIVE_EXISTS (secret sudah punya tugas pending/running lain; tugas tetap `failed`)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '429':
+          description: "RATE_LIMITED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
 components:
   parameters:
     OrganizationID:
@@ -16489,3 +16618,61 @@ components:
         success: {type: boolean}
         message: {type: string}
         data: {$ref: '#/components/schemas/MikrotikTriggerPreview'}
+    MikrotikTaskRef:
+      type: object
+      description: "Referensi id + nama. Pada respons retry hanya sebagian terisi (lihat endpoint)."
+      properties:
+        id: {type: string}
+        name: {type: string}
+    IsolationTask:
+      type: object
+      description: "Satu tugas isolate/restore untuk satu PPP secret. `router` hanya id dan nama; tidak pernah memuat host, port, atau kredensial."
+      properties:
+        id: {type: string, format: uuid}
+        action: {type: string, enum: [isolate, restore]}
+        status: {type: string, enum: [pending, running, done, failed, cancelled]}
+        priority: {type: integer, description: "100 = restore, 10 = isolate; restore didahulukan."}
+        attempts: {type: integer, description: "Jumlah percobaan gagal yang sudah dihitung."}
+        next_attempt_at: {type: string, format: date-time}
+        last_error_code: {type: string, description: "Kode tetap, mis. auth_failed, tls_untrusted, host_not_allowed, secret_missing, profile_missing, restore_target_invalid, router_not_found, router_not_ready, unreachable, unknown. Tidak diubah saat tugas dibatalkan (bisa masih berisi kode percobaan sebelumnya)."}
+        last_error: {type: string, description: "Teks tetap yang aman ditampilkan (tanpa teks mentah router/kredensial); pada tugas `cancelled` berisi alasan: superseded, state changed, entitlement_disabled."}
+        router: {$ref: '#/components/schemas/MikrotikTaskRef'}
+        secret: {$ref: '#/components/schemas/MikrotikTaskRef'}
+        account: {$ref: '#/components/schemas/MikrotikTaskRef'}
+        created_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time, nullable: true}
+    TaskSummary:
+      type: object
+      properties:
+        counts:
+          type: object
+          description: "Jumlah tugas per status; kelima kunci selalu ada."
+          properties:
+            pending: {type: integer}
+            running: {type: integer}
+            done: {type: integer}
+            failed: {type: integer}
+            cancelled: {type: integer}
+        oldest_pending_restore_at: {type: string, format: date-time, nullable: true, description: "created_at restore pending tertua; null bila tidak ada."}
+    MikrotikTaskEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/IsolationTask'}
+    MikrotikTaskListEnvelope:
+      type: object
+      required: [success, message, data, meta]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: '#/components/schemas/IsolationTask'}}
+        meta: {$ref: '#/components/schemas/PaginationMeta'}
+    MikrotikTaskSummaryEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/TaskSummary'}
