@@ -22,6 +22,8 @@ import (
 type fakeSecretRepo struct {
 	rows map[string]*domain.PPPSecret // key: routerID + "/" + name
 	seq  int
+
+	pairCalls int
 }
 
 func newFakeSecretRepo() *fakeSecretRepo {
@@ -60,7 +62,12 @@ func (f *fakeSecretRepo) MarkMissing(_ context.Context, _ coretenant.Scope, rout
 	return n, nil
 }
 
-func (f *fakeSecretRepo) FindByID(context.Context, coretenant.Scope, string) (domain.PPPSecret, error) {
+func (f *fakeSecretRepo) FindByID(_ context.Context, scope coretenant.Scope, id string) (domain.PPPSecret, error) {
+	for _, r := range f.rows {
+		if r.ID == id && r.OrganizationID == scope.OrganizationID() {
+			return *r, nil
+		}
+	}
 	return domain.PPPSecret{}, mikrotik.ErrSecretNotFound
 }
 
@@ -68,7 +75,53 @@ func (f *fakeSecretRepo) List(context.Context, coretenant.Scope, repository.Secr
 	return nil, 0, nil
 }
 
-func (f *fakeSecretRepo) SetOriginalProfile(context.Context, coretenant.Scope, string, string) error {
+func (f *fakeSecretRepo) byID(id string) *domain.PPPSecret {
+	for _, r := range f.rows {
+		if r.ID == id {
+			return r
+		}
+	}
+	return nil
+}
+
+// SetOriginalProfile mirrors the SQL: it also clears needs_original_profile.
+func (f *fakeSecretRepo) SetOriginalProfile(_ context.Context, _ coretenant.Scope, id, profile string) error {
+	r := f.byID(id)
+	if r == nil {
+		return mikrotik.ErrSecretNotFound
+	}
+	r.OriginalProfile, r.NeedsOriginalProfile = profile, false
+	return nil
+}
+
+// Pair mirrors the SQL guard (unpaired, present, not needs_original_profile).
+func (f *fakeSecretRepo) Pair(_ context.Context, _ coretenant.Scope, id, accountID, by string) error {
+	f.pairCalls++
+	r := f.byID(id)
+	switch {
+	case r == nil:
+		return mikrotik.ErrSecretNotFound
+	case r.AccountID != nil:
+		return mikrotik.ErrSecretAlreadyPaired
+	case !r.Present || r.NeedsOriginalProfile:
+		return mikrotik.ErrSecretNotPairable
+	}
+	r.AccountID, r.PairedBy = &accountID, &by
+	if r.OriginalProfile == "" {
+		r.OriginalProfile = r.Profile
+	}
+	return nil
+}
+
+func (f *fakeSecretRepo) Unpair(_ context.Context, _ coretenant.Scope, id string) error {
+	r := f.byID(id)
+	switch {
+	case r == nil:
+		return mikrotik.ErrSecretNotFound
+	case r.IsolationState != domain.IsolationNormal:
+		return mikrotik.ErrSecretIsolated
+	}
+	r.AccountID, r.PairedBy, r.PairedAt = nil, nil, nil
 	return nil
 }
 
@@ -107,7 +160,7 @@ func newSecretEnv(t *testing.T) secretEnv {
 	}
 	srepo := newFakeSecretRepo()
 	return secretEnv{
-		svc: NewSecretService(routers, srepo, rrepo), routers: routers, rrepo: rrepo, srepo: srepo,
+		svc: NewSecretService(routers, srepo, rrepo, nil, nil), routers: routers, rrepo: rrepo, srepo: srepo,
 		client: factory.client, scope: scope, router: router,
 	}
 }

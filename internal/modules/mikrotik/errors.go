@@ -112,4 +112,8 @@ var (
 	ErrSecretNotFound = errors.New("ppp secret not found")
 	// ErrSecretNotPairable: the PPP secret cannot be paired to a customer yet.
 	ErrSecretNotPairable = errors.New("ppp secret cannot be paired")
+	// ErrSecretAlreadyPaired: the PPP secret is already paired to a customer.
+	ErrSecretAlreadyPaired = errors.New("ppp secret is already paired")
+	// ErrSecretIsolated: the PPP secret is currently isolated and cannot be unpaired.
+	ErrSecretIsolated = errors.New("ppp secret is isolated")
 )

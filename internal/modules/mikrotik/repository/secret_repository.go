@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/mikrotik"
@@ -51,6 +52,14 @@ type SecretRepository interface {
 	List(ctx context.Context, scope coretenant.Scope, f SecretFilter, limit, offset int) ([]domain.PPPSecret, int64, error)
 	// SetOriginalProfile stores the profile to restore and clears needs_original_profile.
 	SetOriginalProfile(ctx context.Context, scope coretenant.Scope, id, profile string) error
+	// Pair links an unpaired, present secret without a pending original-profile
+	// requirement to an account and fills original_profile from the current
+	// profile when empty. Failure modes: ErrSecretNotFound, ErrSecretAlreadyPaired,
+	// ErrSecretNotPairable, ErrAccountNotFound (FK backstop for a foreign account).
+	Pair(ctx context.Context, scope coretenant.Scope, secretID, accountID, by string) error
+	// Unpair clears the link (keeping original_profile). ErrSecretIsolated when
+	// isolation_state is not normal; ErrSecretNotFound when absent.
+	Unpair(ctx context.Context, scope coretenant.Scope, secretID string) error
 }
 
 type secretRepository struct {
@@ -276,4 +285,65 @@ func (r *secretRepository) SetOriginalProfile(ctx context.Context, scope coreten
 		return nil
 	})
 	return mapSecretError(err)
+}
+
+func (r *secretRepository) Pair(ctx context.Context, scope coretenant.Scope, secretID, accountID, by string) error {
+	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
+			UPDATE mikrotik_ppp_secrets
+			SET account_id = $1, paired_by = $2, paired_at = now(),
+			    original_profile = COALESCE(NULLIF(original_profile, ''), profile), updated_at = now()
+			WHERE id = $3 AND organization_id = $4
+			  AND account_id IS NULL AND present AND NOT needs_original_profile`,
+			accountID, nullableString(by), secretID, scope.OrganizationID())
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() > 0 {
+			return nil
+		}
+		// Distinguish why nothing matched, in the same transaction.
+		var paired *string
+		err = tx.QueryRow(ctx, `SELECT account_id FROM mikrotik_ppp_secrets WHERE id = $1 AND organization_id = $2`,
+			secretID, scope.OrganizationID()).Scan(&paired)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+			return mikrotik.ErrSecretNotFound
+		case err != nil:
+			return err
+		case paired != nil:
+			return mikrotik.ErrSecretAlreadyPaired
+		}
+		return mikrotik.ErrSecretNotPairable
+	})
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+		return mikrotik.ErrAccountNotFound
+	}
+	return err
+}
+
+func (r *secretRepository) Unpair(ctx context.Context, scope coretenant.Scope, secretID string) error {
+	return withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
+			UPDATE mikrotik_ppp_secrets
+			SET account_id = NULL, paired_by = NULL, paired_at = NULL, updated_at = now()
+			WHERE id = $1 AND organization_id = $2 AND isolation_state = 'normal'`,
+			secretID, scope.OrganizationID())
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() > 0 {
+			return nil
+		}
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM mikrotik_ppp_secrets WHERE id = $1 AND organization_id = $2)`,
+			secretID, scope.OrganizationID()).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return mikrotik.ErrSecretNotFound
+		}
+		return mikrotik.ErrSecretIsolated
+	})
 }
