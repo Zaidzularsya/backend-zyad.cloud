@@ -56,14 +56,36 @@ func (e *Executor) Isolate(ctx context.Context, scope coretenant.Scope, secret d
 			return "", translateClientError(err, secrets...)
 		}
 	}
+	// From here the router is on the isolir profile (Set acknowledged, or it
+	// already was): a later failure must tell the caller so the DB can follow.
 	if err := dropActiveSessions(ctx, client, secret.Name, secrets); err != nil {
-		return "", err
+		return "", &ProfileChangedError{Original: original, Err: err}
 	}
-	if err := confirmProfile(ctx, client, secret.Name, isolir, secrets); err != nil {
-		return "", err
+	_, got, err := findSecret(ctx, client, secret.Name, secrets)
+	if err != nil {
+		return "", &ProfileChangedError{Original: original, Err: err}
+	}
+	if got != isolir {
+		// Set was acknowledged but not applied: the router is not known to have
+		// changed, so this is a plain transient failure.
+		return "", fmt.Errorf("%w: profile not applied on router", mikrotik.ErrUnreachable)
 	}
 	return original, nil
 }
+
+// ProfileChangedError reports an isolate that failed after the router was
+// already on the isolir profile. Original is the profile to restore to.
+// Unwrap keeps errors.Is/As and Classify working on the cause.
+type ProfileChangedError struct {
+	Original string
+	Err      error
+}
+
+func (e *ProfileChangedError) Error() string {
+	return "isolir profile applied on router but a later step failed"
+}
+
+func (e *ProfileChangedError) Unwrap() error { return e.Err }
 
 // Restore moves the secret back to secret.OriginalProfile. It does not require
 // isolir_ready (restoring must keep working after setup is cleaned up) but the

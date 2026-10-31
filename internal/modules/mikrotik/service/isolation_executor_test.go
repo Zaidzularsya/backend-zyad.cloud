@@ -223,3 +223,71 @@ func TestIsolate_UnreachableTransient_NoCredentialInError(t *testing.T) {
 		t.Fatalf("failure = %+v", f)
 	}
 }
+
+func TestIsolate_SessionRemovalFailsAfterSet_ReturnsProfileChangedError(t *testing.T) {
+	x := newExecEnv(t, true)
+	x.e.client.WriteHook = func(op, path string, _ pmk.Row) error {
+		if op == "remove" && path == "/ppp/active" {
+			return pmk.ErrAuthFailed
+		}
+		return nil
+	}
+	orig, err := x.ex.Isolate(context.Background(), x.e.scope, x.secret)
+	var pe *ProfileChangedError
+	if !errors.As(err, &pe) || pe.Original != "paket-10m" {
+		t.Fatalf("err = %v", err)
+	}
+	if orig != "" || !errors.Is(err, mikrotik.ErrAuthFailed) || Classify(err).Kind != FailPermanent {
+		t.Fatalf("orig = %q, classify = %+v", orig, Classify(err))
+	}
+	if strings.Contains(err.Error(), testPassword) {
+		t.Fatal("leaked credential")
+	}
+	if x.profile("alice") != isolirProfile {
+		t.Fatal("router must already be on the isolir profile")
+	}
+}
+
+func TestIsolate_AlreadyIsolatedThenFails_WrapsWithDBOriginal(t *testing.T) {
+	x := newExecEnv(t, true)
+	if _, err := x.ex.Isolate(context.Background(), x.e.scope, x.secret); err != nil {
+		t.Fatal(err)
+	}
+	x.e.client.Seed("/ppp/active", pmk.Row{"name": "alice"})
+	x.e.client.WriteHook = func(op, _ string, _ pmk.Row) error {
+		if op == "remove" {
+			return pmk.ErrUnreachable
+		}
+		return nil
+	}
+	_, err := x.ex.Isolate(context.Background(), x.e.scope, x.secret)
+	var pe *ProfileChangedError
+	if !errors.As(err, &pe) || pe.Original != "paket-10m" || Classify(err).Kind != FailTransient {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestIsolate_ConfirmMismatch_NotWrapped(t *testing.T) {
+	x := newExecEnv(t, true)
+	x.e.routers.factory = noopSetFactory{fakeFactory: &fakeFactory{client: x.e.client}, c: noopSetClient{x.e.client}}
+	_, err := x.ex.Isolate(context.Background(), x.e.scope, x.secret)
+	var pe *ProfileChangedError
+	if errors.As(err, &pe) || !errors.Is(err, mikrotik.ErrUnreachable) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestIsolate_SetFails_NotWrapped(t *testing.T) {
+	x := newExecEnv(t, true)
+	x.e.client.WriteHook = func(op, _ string, _ pmk.Row) error {
+		if op == "set" {
+			return pmk.ErrAuthFailed
+		}
+		return nil
+	}
+	_, err := x.ex.Isolate(context.Background(), x.e.scope, x.secret)
+	var pe *ProfileChangedError
+	if errors.As(err, &pe) || !errors.Is(err, mikrotik.ErrAuthFailed) {
+		t.Fatalf("err = %v", err)
+	}
+}

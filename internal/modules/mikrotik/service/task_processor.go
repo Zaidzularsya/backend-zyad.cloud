@@ -22,7 +22,8 @@ const (
 	// router; it does not count as an attempt.
 	routerBusyDelay = 15 * time.Second
 
-	eventTaskCompleted = "task_completed"
+	eventTaskCompleted     = "task_completed"
+	eventTaskFailedPartial = "task_failed_partial"
 
 	cancelSuperseded   = "superseded"
 	cancelStateChanged = "state changed"
@@ -250,10 +251,12 @@ func (p *TaskProcessor) failure(ctx context.Context, scope coretenant.Scope, tas
 		// failing action and loop every tick.
 		if err := p.d.Tasks.Fail(ctx, scope, task.ID, f.Code, f.Message); err != nil {
 			p.logLifecycleErr("fail", task, err)
-			return outcomeFailed
+		} else {
+			p.audit(ctx, scope, "task.failed", secret.RouterID, task, attempts)
+			p.alertTenant(ctx, scope, task, event)
 		}
-		p.audit(ctx, scope, "task.failed", secret.RouterID, task, attempts)
-		p.alertTenant(ctx, scope, task, event)
+		// Independent of Fail: the router may already be changed.
+		p.alignPartialIsolate(ctx, scope, task, secret, cause, attempts)
 		return outcomeFailed
 	}
 	if err := p.d.Tasks.RetryLater(ctx, scope, task.ID, next, f.Code, f.Message); err != nil {
@@ -264,6 +267,31 @@ func (p *TaskProcessor) failure(ctx context.Context, scope coretenant.Scope, tas
 		p.alertTenant(ctx, scope, task, event)
 	}
 	return outcomeRetried
+}
+
+// alignPartialIsolate handles an isolate that failed for good after the router
+// was already on the isolir profile. Without it the DB says "normal", so a
+// customer who pays never gets a restore. Transient failures are left to the
+// retry, which finishes the job idempotently.
+func (p *TaskProcessor) alignPartialIsolate(ctx context.Context, scope coretenant.Scope, task domain.IsolationTask, secret domain.PPPSecret, cause error, attempts int) {
+	var pe *ProfileChangedError
+	if task.Action != ActionIsolate || !errors.As(cause, &pe) {
+		return
+	}
+	changed, err := p.d.Secrets.MarkIsolated(ctx, scope, secret.ID, pe.Original)
+	if err != nil {
+		slog.Error("mikrotik: mark partially isolated secret failed", "task_id", task.ID, "secret_id", secret.ID, "error", err)
+		return
+	}
+	if !changed {
+		return
+	}
+	p.audit(ctx, scope, "isolation.isolated", secret.RouterID, task, attempts, "partial", true)
+	if secret.AccountID != nil && p.d.Evaluator != nil {
+		if _, err := p.d.Evaluator.Apply(ctx, scope, *secret.AccountID, eventTaskFailedPartial); err != nil {
+			slog.Error("mikrotik: follow-up evaluation failed", "account_id", *secret.AccountID, "error", err)
+		}
+	}
 }
 
 // cancel ends a task without touching the router and re-evaluates the account
@@ -336,18 +364,22 @@ func (p *TaskProcessor) alertTenant(ctx context.Context, scope coretenant.Scope,
 	}
 }
 
-func (p *TaskProcessor) audit(ctx context.Context, scope coretenant.Scope, event, routerID string, task domain.IsolationTask, attempts int) {
+// audit writes a system audit entry; extra is key/value pairs added to the
+// standard task metadata.
+func (p *TaskProcessor) audit(ctx context.Context, scope coretenant.Scope, event, routerID string, task domain.IsolationTask, attempts int, extra ...any) {
 	if p.d.Audit == nil {
 		return
 	}
-	err := p.d.Audit.InsertAudit(ctx, scope, repository.AuditEntry{
-		Event:    event,
-		TargetID: routerID,
-		Metadata: map[string]any{
-			"target": "task", "task_id": task.ID, "secret_id": task.SecretID,
-			"action": task.Action, "attempts": attempts,
-		},
-	})
+	meta := map[string]any{
+		"target": "task", "task_id": task.ID, "secret_id": task.SecretID,
+		"action": task.Action, "attempts": attempts,
+	}
+	for i := 0; i+1 < len(extra); i += 2 {
+		if k, ok := extra[i].(string); ok {
+			meta[k] = extra[i+1]
+		}
+	}
+	err := p.d.Audit.InsertAudit(ctx, scope, repository.AuditEntry{Event: event, TargetID: routerID, Metadata: meta})
 	if err != nil {
 		slog.Error("mikrotik: audit failed", "event", event, "task_id", task.ID, "error", err)
 	}

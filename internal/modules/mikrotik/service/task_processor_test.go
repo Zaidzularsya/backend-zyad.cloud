@@ -816,3 +816,102 @@ func TestProcess_NilNotifiers_Skipped(t *testing.T) {
 		t.Fatalf("result = %+v", res)
 	}
 }
+
+// failSessionRemoval makes /ppp/active removal fail after the profile Set.
+func failSessionRemoval(c *pmk.FakeClient, err error) {
+	c.WriteHook = func(op, path string, _ pmk.Row) error {
+		if op == "remove" && path == "/ppp/active" {
+			return err
+		}
+		return nil
+	}
+}
+
+func TestProcess_IsolatePartialThenPermanentFail_MarksIsolatedAndEnqueuesRestoreWhenPaid(t *testing.T) {
+	e := newProcEnv(t)
+	e.addSecret("s-1", e.routerA, "alice", domain.IsolationNormal, "paket-10m")
+	e.src.invoices = oneInvoice
+	e.enqueue(t)
+	// The customer pays while the isolate is on the router; then session
+	// removal fails permanently after the profile was already changed.
+	e.clientA.WriteHook = func(op, path string, _ pmk.Row) error {
+		switch {
+		case op == "set":
+			e.src.invoices = nil
+		case op == "remove" && path == "/ppp/active":
+			return pmk.ErrAuthFailed
+		}
+		return nil
+	}
+
+	res := e.run(t)
+	if res != (ProcessResult{Failed: 1}) {
+		t.Fatalf("result = %+v", res)
+	}
+	if routerProfile(e.clientA, "alice") != isolirProfile {
+		t.Fatal("precondition: router changed")
+	}
+	s := e.srepo.byID("s-1")
+	if s.IsolationState != domain.IsolationIsolated || s.OriginalProfile != "paket-10m" {
+		t.Fatalf("DB must mirror the router: %+v", s)
+	}
+	au := e.audits("isolation.isolated")
+	if len(au) != 1 || au[0].Metadata["partial"] != true || au[0].TargetID != e.routerA {
+		t.Fatalf("audit = %+v", au)
+	}
+	if len(e.audits("task.failed")) != 1 || len(e.alert.events) != 1 {
+		t.Fatal("task.failed audit and tenant alert are kept")
+	}
+	ts := e.tasks.forSecret("s-1")
+	if len(ts) != 2 || ts[0].Status != domain.TaskFailed || ts[1].Action != domain.ActionRestore || ts[1].Status != domain.TaskPending ||
+		ts[1].CreatedByEvent != "task_failed_partial" {
+		t.Fatalf("tasks = %+v", ts)
+	}
+}
+
+func TestProcess_IsolateFailsBeforeSet_DoesNotMarkIsolated(t *testing.T) {
+	e := newProcEnv(t)
+	e.addSecret("s-1", e.routerA, "alice", domain.IsolationNormal, "paket-10m")
+	e.src.invoices = oneInvoice
+	e.enqueue(t)
+	e.clientA.WriteHook = func(op, _ string, _ pmk.Row) error {
+		if op == "set" {
+			return pmk.ErrAuthFailed
+		}
+		return nil
+	}
+
+	if res := e.run(t); res != (ProcessResult{Failed: 1}) {
+		t.Fatalf("result = %+v", res)
+	}
+	if e.srepo.byID("s-1").IsolationState != domain.IsolationNormal || len(e.audits("isolation.isolated")) != 0 {
+		t.Fatal("must not mark isolated when the router did not change")
+	}
+	if n := len(e.tasks.forSecret("s-1")); n != 1 {
+		t.Fatalf("tasks = %d", n)
+	}
+}
+
+func TestProcess_IsolatePartialTransient_DoesNotMarkIsolatedYet(t *testing.T) {
+	e := newProcEnv(t)
+	e.addSecret("s-1", e.routerA, "alice", domain.IsolationNormal, "paket-10m")
+	e.src.invoices = oneInvoice
+	e.enqueue(t)
+	failSessionRemoval(e.clientA, pmk.ErrUnreachable)
+
+	if res := e.run(t); res != (ProcessResult{Retried: 1}) {
+		t.Fatalf("result = %+v", res)
+	}
+	if e.srepo.byID("s-1").IsolationState != domain.IsolationNormal || len(e.audits("isolation.isolated")) != 0 {
+		t.Fatal("a retry finishes the job; no state change yet")
+	}
+	// The retry completes idempotently once the router recovers.
+	e.clientA.WriteHook = nil
+	e.now = e.now.Add(time.Hour)
+	if res := e.run(t); res != (ProcessResult{Done: 1}) {
+		t.Fatalf("retry = %+v", res)
+	}
+	if s := e.srepo.byID("s-1"); s.IsolationState != domain.IsolationIsolated || s.OriginalProfile != "paket-10m" {
+		t.Fatalf("secret = %+v", s)
+	}
+}
