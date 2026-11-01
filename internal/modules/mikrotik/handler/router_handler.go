@@ -207,6 +207,8 @@ func failRouter(c *gin.Context, err error) {
 		response.Error(c, http.StatusNotFound, "MIKROTIK_PRODUCT_NOT_FOUND", "product not found")
 	case errors.Is(err, mikrotik.ErrSecretAlreadyPaired):
 		response.Error(c, http.StatusConflict, "MIKROTIK_SECRET_ALREADY_PAIRED", "ppp secret is already paired to a customer")
+	case errors.Is(err, mikrotik.ErrAnalyzeInProgress):
+		response.Error(c, http.StatusConflict, "MIKROTIK_ANALYZE_IN_PROGRESS", "another suggestion analysis is running for this router; try again when it finishes")
 	case errors.Is(err, mikrotik.ErrSecretIsolated):
 		response.Error(c, http.StatusConflict, "MIKROTIK_SECRET_ISOLATED", "ppp secret is isolated; restore its profile before unpairing")
 	case errors.Is(err, mikrotik.ErrSecretHasActiveTask):

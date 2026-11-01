@@ -7,6 +7,7 @@ import (
 	"sort"
 	"sync"
 	"testing"
+	"time"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/mikrotik"
@@ -241,5 +242,27 @@ func TestAnalyze_ConcurrentCallsIdempotent(t *testing.T) {
 	}
 	if len(locker.held) != 0 {
 		t.Fatal("lock leaked")
+	}
+}
+
+// stuckAccounts always returns the same page, as a broken adapter would.
+type stuckAccounts struct{ fakeAccounts }
+
+func (stuckAccounts) List(context.Context, coretenant.Scope, string, int) ([]AccountRef, error) {
+	return []AccountRef{{ID: "a1", Name: "Budi"}}, nil
+}
+
+func TestAnalyze_StopsOnNonAdvancingAccountPage(t *testing.T) {
+	secrets := sugSecrets{rows: []domain.PPPSecret{sec("s1", "Budi", true, nil)}}
+	svc := NewSuggestionService(sugRouters{}, secrets, stuckAccounts{}, &sugStore{}, &sugLocker{})
+	done := make(chan error, 1)
+	go func() { _, err := svc.Analyze(context.Background(), testScope(t), sugRouterID, "u1"); done <- err }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Analyze did not terminate on a non-advancing account page")
 	}
 }

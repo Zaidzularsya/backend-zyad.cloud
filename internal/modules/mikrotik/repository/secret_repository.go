@@ -39,7 +39,16 @@ type SecretFilter struct {
 	RouterID string
 	Paired   *bool
 	Search   string
+	// Suggestion narrows to SuggestionFilterSuggested or
+	// SuggestionFilterNeedsDecision (unpaired secrets only); "" means no filter.
+	Suggestion string
 }
+
+// Values of SecretFilter.Suggestion.
+const (
+	SuggestionFilterSuggested     = "suggested"
+	SuggestionFilterNeedsDecision = "needs_decision"
+)
 
 type SecretRepository interface {
 	// UpsertImported stores the rows in one transaction. It never touches
@@ -92,13 +101,26 @@ const secretColumns = `
 	present, last_seen_at, isolation_state, account_id, paired_by, paired_at, imported_at, created_at, updated_at
 `
 
-func scanSecret(row pgx.Row) (domain.PPPSecret, error) {
+// qualifiedSecretColumns prefixes secretColumns with the "s." alias used by List.
+var qualifiedSecretColumns = func() string {
+	cols := strings.Split(secretColumns, ",")
+	for i, c := range cols {
+		cols[i] = "s." + strings.TrimSpace(c)
+	}
+	return strings.Join(cols, ", ")
+}()
+
+func scanSecret(row pgx.Row) (domain.PPPSecret, error) { return scanSecretExtra(row) }
+
+// scanSecretExtra scans the secretColumns and then any extra destinations.
+func scanSecretExtra(row pgx.Row, extra ...any) (domain.PPPSecret, error) {
 	var s domain.PPPSecret
 	var original *string
-	err := row.Scan(
+	dest := append([]any{
 		&s.ID, &s.OrganizationID, &s.RouterID, &s.Name, &s.Profile, &original, &s.NeedsOriginalProfile, &s.Disabled, &s.Comment,
 		&s.Present, &s.LastSeenAt, &s.IsolationState, &s.AccountID, &s.PairedBy, &s.PairedAt, &s.ImportedAt, &s.CreatedAt, &s.UpdatedAt,
-	)
+	}, extra...)
+	err := row.Scan(dest...)
 	if err != nil {
 		return domain.PPPSecret{}, err
 	}
@@ -234,47 +256,78 @@ func (r *secretRepository) FindByID(ctx context.Context, scope coretenant.Scope,
 // likeEscaper escapes LIKE wildcards so a search term is matched literally.
 var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
+// listFrom joins the computed suggestion and its account (name/phone for the
+// UI). Every join is constrained to the same organization. A soft-deleted
+// account is not joined, so its suggestion is treated as absent.
+const listFrom = `mikrotik_ppp_secrets s
+	LEFT JOIN mikrotik_secret_suggestions sg ON sg.organization_id = s.organization_id AND sg.secret_id = s.id
+	LEFT JOIN receivable_accounts a ON a.organization_id = sg.organization_id AND a.id = sg.account_id AND a.deleted_at IS NULL`
+
+// usableSuggestion: a phone/name hint whose account still exists.
+const usableSuggestion = `(sg.basis IN ('phone', 'name') AND a.id IS NOT NULL)`
+
 func (r *secretRepository) List(ctx context.Context, scope coretenant.Scope, f SecretFilter, limit, offset int) ([]domain.PPPSecret, int64, error) {
 	limit = clampLimit(limit)
 	if offset < 0 {
 		offset = 0
 	}
-	where := []string{"organization_id = $1"}
+	where := []string{"s.organization_id = $1"}
 	args := []interface{}{scope.OrganizationID()}
 	if f.RouterID != "" {
 		args = append(args, f.RouterID)
-		where = append(where, fmt.Sprintf("router_id = $%d", len(args)))
+		where = append(where, fmt.Sprintf("s.router_id = $%d", len(args)))
 	}
 	if f.Paired != nil {
 		if *f.Paired {
-			where = append(where, "account_id IS NOT NULL")
+			where = append(where, "s.account_id IS NOT NULL")
 		} else {
-			where = append(where, "account_id IS NULL")
+			where = append(where, "s.account_id IS NULL")
 		}
+	}
+	switch f.Suggestion {
+	case SuggestionFilterSuggested:
+		where = append(where, "s.account_id IS NULL", usableSuggestion)
+	case SuggestionFilterNeedsDecision:
+		where = append(where, "s.account_id IS NULL", "s.present", "NOT "+usableSuggestion)
 	}
 	if q := strings.TrimSpace(f.Search); q != "" {
 		args = append(args, "%"+likeEscaper.Replace(q)+"%")
-		where = append(where, fmt.Sprintf(`(name ILIKE $%d OR comment ILIKE $%d)`, len(args), len(args)))
+		where = append(where, fmt.Sprintf(`(s.name ILIKE $%d OR s.comment ILIKE $%d)`, len(args), len(args)))
 	}
 	cond := strings.Join(where, " AND ")
 
 	items := []domain.PPPSecret{}
 	var total int64
 	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM mikrotik_ppp_secrets WHERE `+cond, args...).Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM `+listFrom+` WHERE `+cond, args...).Scan(&total); err != nil {
 			return err
 		}
 		pageArgs := append(append([]interface{}{}, args...), limit, offset)
-		rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT `+secretColumns+` FROM mikrotik_ppp_secrets WHERE `+cond+`
-			ORDER BY lower(name), id LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2), pageArgs...)
+		rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT `+qualifiedSecretColumns+`,
+				sg.basis, sg.candidates, a.id, a.name, a.phone
+			FROM `+listFrom+` WHERE `+cond+`
+			ORDER BY lower(s.name), s.id LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2), pageArgs...)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
-			item, scanErr := scanSecret(rows)
+			var basis, accID, accName, accPhone *string
+			var cands *int32
+			item, scanErr := scanSecretExtra(rows, &basis, &cands, &accID, &accName, &accPhone)
 			if scanErr != nil {
 				return scanErr
+			}
+			// Hints on already-paired secrets are stale rows; never expose them.
+			if basis != nil && cands != nil && item.AccountID == nil {
+				sg := &domain.SecretSuggestion{Basis: *basis, Candidates: int(*cands)}
+				switch {
+				case *basis == SuggestionBasisAmbiguous:
+					item.Suggestion = sg
+				case accID != nil:
+					sg.AccountID, sg.AccountName, sg.AccountPhone = *accID, derefString(accName), derefString(accPhone)
+					item.Suggestion = sg
+				}
 			}
 			items = append(items, item)
 		}

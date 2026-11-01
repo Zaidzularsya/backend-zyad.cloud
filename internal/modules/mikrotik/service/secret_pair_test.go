@@ -293,3 +293,58 @@ func TestUnpair_ActiveTaskRejected_NoAuditPairingKept(t *testing.T) {
 		t.Fatal("pairing must be kept and nothing audited")
 	}
 }
+
+func TestPairBulk_PartialFailureReportsPerRow(t *testing.T) {
+	e := newPairEnv(t)
+	ok := e.importOne(t, "alice", "paket")
+	taken := e.importOne(t, "bob", "paket")
+	if _, err := e.svc.Pair(context.Background(), e.scope, taken, "acct-1", testActor); err != nil {
+		t.Fatal(err)
+	}
+	audits := len(e.rrepo.audits)
+
+	res := e.svc.PairBulk(context.Background(), e.scope, []PairItem{
+		{SecretID: taken, AccountID: "acct-1"},
+		{SecretID: ok, AccountID: "acct-1"},
+		{SecretID: ok, AccountID: "acct-missing"},
+		{SecretID: "nope", AccountID: "acct-1"},
+	}, testActor)
+	if len(res) != 4 {
+		t.Fatalf("results = %+v", res)
+	}
+	if res[0].OK || res[0].Code != "MIKROTIK_SECRET_ALREADY_PAIRED" || res[0].SecretID != taken || res[0].Message == "" {
+		t.Errorf("row0 = %+v", res[0])
+	}
+	if !res[1].OK || res[1].Code != "" {
+		t.Errorf("row1 = %+v", res[1])
+	}
+	// Row 2 targets a secret row 1 just paired: the earlier row did not abort the later ones.
+	if res[2].OK || res[2].Code != "MIKROTIK_SECRET_ALREADY_PAIRED" {
+		t.Errorf("row2 = %+v", res[2])
+	}
+	if res[3].OK || res[3].Code != "MIKROTIK_SECRET_NOT_FOUND" {
+		t.Errorf("row3 = %+v", res[3])
+	}
+	if got := len(e.rrepo.audits) - audits; got != 1 {
+		t.Errorf("audit events = %d, want 1 (one per success)", got)
+	}
+}
+
+func TestPairBulk_UnknownErrorIsGeneric(t *testing.T) {
+	e := newPairEnv(t)
+	id := e.importOne(t, "alice", "paket")
+	e.svc.accounts = errAccounts{err: errors.New("dial 10.0.0.1 password=hunter2")}
+	res := e.svc.PairBulk(context.Background(), e.scope, []PairItem{{SecretID: id, AccountID: "acct-1"}}, testActor)
+	if res[0].OK || res[0].Code != "MIKROTIK_INTERNAL" || strings.Contains(res[0].Message, "hunter2") {
+		t.Fatalf("row = %+v", res[0])
+	}
+}
+
+type errAccounts struct {
+	fakeAccounts
+	err error
+}
+
+func (f errAccounts) Get(context.Context, coretenant.Scope, string) (AccountRef, error) {
+	return AccountRef{}, f.err
+}

@@ -77,10 +77,21 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 	return mikrotikModule{
 		Router: mikrotikhandler.NewRouterHandler(svc),
 		Setup:  mikrotikhandler.NewSetupHandler(setup),
-		Secret: mikrotikhandler.NewSecretHandler(secrets),
+		Secret: mikrotikhandler.NewSecretHandler(mikrotikSecretFacade{
+			SecretService: secrets,
+			SuggestionService: mikrotikservice.NewSuggestionService(svc, secretRepo, accounts,
+				mikrotikrepo.NewSuggestionRepository(db), mikrotikrepo.NewAdvisoryLocker(db)),
+		}),
 		Policy: mikrotikhandler.NewPolicyHandler(policy),
 		Task:   mikrotikhandler.NewTaskHandler(mikrotikservice.NewTaskService(mikrotikrepo.NewTaskRepository(db), secretRepo, repo)),
 	}
+}
+
+// mikrotikSecretFacade presents the secret and suggestion services as the one
+// service interface the secret handler expects.
+type mikrotikSecretFacade struct {
+	*mikrotikservice.SecretService
+	*mikrotikservice.SuggestionService
 }
 
 // Every call that logs in to a tenant router (create, update, check, setup/*)

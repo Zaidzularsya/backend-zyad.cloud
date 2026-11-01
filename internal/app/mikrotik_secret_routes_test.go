@@ -54,6 +54,14 @@ func (s *countingSecretService) SetOriginalProfile(context.Context, coretenant.S
 	s.calls++
 	return nil
 }
+func (s *countingSecretService) Analyze(context.Context, coretenant.Scope, string, string) (mikrotikservice.AnalyzeResult, error) {
+	s.calls++
+	return mikrotikservice.AnalyzeResult{}, nil
+}
+func (s *countingSecretService) PairBulk(context.Context, coretenant.Scope, []mikrotikservice.PairItem, string) []mikrotikservice.PairResult {
+	s.calls++
+	return nil
+}
 func (s *countingSecretService) SearchAccounts(context.Context, coretenant.Scope, string, int) ([]mikrotikservice.AccountRef, error) {
 	s.calls++
 	return nil, nil
@@ -117,6 +125,8 @@ type secretRouteCase struct {
 
 var secretRouteCases = []secretRouteCase{
 	{http.MethodPost, "/routers/" + rtRouter + "/secrets/import", ``, "mikrotik_secret.import", true},
+	{http.MethodPost, "/routers/" + rtRouter + "/secrets/analyze", ``, "mikrotik_secret.import", true},
+	{http.MethodPost, "/secrets/pair-bulk", `{"items":[{"secret_id":"` + rtSecret + `","account_id":"` + rtAccount + `"}]}`, "mikrotik_secret.pair", true},
 	{http.MethodGet, "/secrets", ``, "mikrotik_secret.read", false},
 	{http.MethodPost, "/secrets/" + rtSecret + "/pair", `{"account_id":"` + rtAccount + `"}`, "mikrotik_secret.pair", false},
 	{http.MethodPost, "/secrets/" + rtSecret + "/pair-new-customer", ``, "mikrotik_secret.pair", false},
@@ -244,8 +254,8 @@ func TestMikrotikSecretRoutes_ImportAndOriginalProfileAreProbeLimited(t *testing
 			free = append(free, rc)
 		}
 	}
-	if len(limited) != 2 {
-		t.Fatalf("expected import and original-profile to be limited, got %v", limited)
+	if len(limited) != 4 {
+		t.Fatalf("expected import, analyze, pair-bulk and original-profile to be limited, got %v", limited)
 	}
 	for _, rc := range limited {
 		counter := &fakeMikrotikCounter{counts: map[string]int64{}}

@@ -181,6 +181,56 @@ func (s *SecretService) Pair(ctx context.Context, scope coretenant.Scope, secret
 	return s.commitPair(ctx, scope, secret, account.ID, actor)
 }
 
+// PairItem is one secret/account pair of a bulk request.
+type PairItem struct{ SecretID, AccountID string }
+
+// PairResult is the outcome of one PairItem. Code and Message are empty when
+// OK; Message is fixed text, never an underlying error string.
+type PairResult struct {
+	SecretID string
+	OK       bool
+	Code     string
+	Message  string
+}
+
+// PairBulk pairs each item through Pair, in order. It is deliberately not
+// atomic: a failing row is reported and never stops the others, and each
+// success has already written its own audit event.
+func (s *SecretService) PairBulk(ctx context.Context, scope coretenant.Scope, items []PairItem, actor string) []PairResult {
+	out := make([]PairResult, 0, len(items))
+	for _, it := range items {
+		_, err := s.Pair(ctx, scope, it.SecretID, it.AccountID, actor)
+		if err == nil {
+			out = append(out, PairResult{SecretID: it.SecretID, OK: true})
+			continue
+		}
+		code, msg := pairErrorCode(err)
+		if code == "MIKROTIK_INTERNAL" {
+			slog.Warn("mikrotik: bulk pair row failed", "secret_id", it.SecretID, "error", scrub(err.Error()))
+		}
+		out = append(out, PairResult{SecretID: it.SecretID, Code: code, Message: msg})
+	}
+	return out
+}
+
+// pairErrorCode maps the sentinel errors Pair can return to the same codes the
+// HTTP error mapper uses, with fixed credential-free messages.
+func pairErrorCode(err error) (code, message string) {
+	switch {
+	case errors.Is(err, mikrotik.ErrSecretNotFound):
+		return "MIKROTIK_SECRET_NOT_FOUND", "ppp secret not found"
+	case errors.Is(err, mikrotik.ErrAccountNotFound):
+		return "MIKROTIK_ACCOUNT_NOT_FOUND", "customer account not found"
+	case errors.Is(err, mikrotik.ErrRouterNotFound):
+		return "MIKROTIK_ROUTER_NOT_FOUND", "router not found"
+	case errors.Is(err, mikrotik.ErrSecretAlreadyPaired):
+		return "MIKROTIK_SECRET_ALREADY_PAIRED", "ppp secret is already paired to a customer"
+	case errors.Is(err, mikrotik.ErrSecretNotPairable):
+		return "MIKROTIK_SECRET_NOT_PAIRABLE", "ppp secret cannot be paired right now"
+	}
+	return "MIKROTIK_INTERNAL", "internal error"
+}
+
 // PairNewCustomer creates a CRM contact and account named after the secret and
 // pairs them. Pairable is checked first so no contact is created for a secret
 // that cannot be paired. If Pair then loses a race the new contact stays

@@ -6,6 +6,9 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+
+	"zyad.cloud/internal/modules/mikrotik/domain"
+	"zyad.cloud/internal/modules/mikrotik/repository"
 )
 
 const insertSuggestionSQL = `
@@ -84,5 +87,88 @@ func TestMemberHasTaskRead(t *testing.T) {
 	}
 	if has("mikrotik_task.retry") {
 		t.Fatal("member must NOT have mikrotik_task.retry")
+	}
+}
+
+func TestSecretRepo_ListSuggestionFilter(t *testing.T) {
+	e := setupRouter(t)
+	scope := e.tenants.A.Scope
+	r := e.create(t, scope, "R-sugfilter")
+	other := e.create(t, scope, "R-sugfilter-other")
+	phone := seedSecret(t, e, scope, r.ID, repository.ImportedSecret{Name: "s-phone", Profile: "p"})
+	amb := seedSecret(t, e, scope, r.ID, repository.ImportedSecret{Name: "s-amb", Profile: "p"})
+	none := seedSecret(t, e, scope, r.ID, repository.ImportedSecret{Name: "s-none", Profile: "p"})
+	paired := seedSecret(t, e, scope, r.ID, repository.ImportedSecret{Name: "s-paired", Profile: "p"})
+	foreign := seedSecret(t, e, scope, other.ID, repository.ImportedSecret{Name: "s-other", Profile: "p"})
+	acct := newAccount(t, e, scope)
+	sugRepo := repository.NewSuggestionRepository(e.db)
+	if err := sugRepo.ReplaceForRouter(e.ctx, scope, r.ID, []repository.Suggestion{
+		{SecretID: phone, AccountID: acct, Basis: "phone", Candidates: 1},
+		{SecretID: amb, Basis: "ambiguous", Candidates: 2},
+		{SecretID: paired, AccountID: acct, Basis: "name", Candidates: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sugRepo.ReplaceForRouter(e.ctx, scope, other.ID, []repository.Suggestion{{SecretID: foreign, AccountID: acct, Basis: "name", Candidates: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	// A hint on an already-paired secret is stale and must not surface.
+	secretScopedTx(t, e, scope, func(tx pgx.Tx) {
+		if _, err := tx.Exec(e.ctx, `UPDATE mikrotik_ppp_secrets SET account_id = $1 WHERE id = $2`, acct, paired); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(e.ctx); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	repo := secretRepo(e)
+	ids := func(f repository.SecretFilter) (map[string]domain.PPPSecret, int64) {
+		f.RouterID = r.ID
+		items, total, err := repo.List(e.ctx, scope, f, 50, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := map[string]domain.PPPSecret{}
+		for _, it := range items {
+			m[it.ID] = it
+		}
+		return m, total
+	}
+
+	got, total := ids(repository.SecretFilter{Suggestion: repository.SuggestionFilterSuggested})
+	if total != 1 || len(got) != 1 || got[phone].Suggestion == nil {
+		t.Fatalf("suggested: total=%d got=%v", total, got)
+	}
+	sg := got[phone].Suggestion
+	if sg.AccountID != acct || sg.AccountName != "Cust" || sg.Basis != "phone" || sg.Candidates != 1 {
+		t.Fatalf("suggestion = %+v", sg)
+	}
+
+	got, total = ids(repository.SecretFilter{Suggestion: repository.SuggestionFilterNeedsDecision})
+	if total != 2 || len(got) != 2 || got[amb].Suggestion == nil || got[none].Suggestion != nil {
+		t.Fatalf("needs_decision: total=%d got=%v", total, got)
+	}
+	if a := got[amb].Suggestion; a.Basis != "ambiguous" || a.AccountID != "" || a.Candidates != 2 {
+		t.Fatalf("ambiguous = %+v", a)
+	}
+
+	// Composes with the other filters and keeps total consistent with the page.
+	unpaired := false
+	got, total = ids(repository.SecretFilter{Suggestion: repository.SuggestionFilterNeedsDecision, Paired: &unpaired, Search: "none"})
+	if total != 1 || len(got) != 1 || got[none].ID == "" {
+		t.Fatalf("composed: total=%d got=%v", total, got)
+	}
+
+	// Unfiltered listing: stale paired hint hidden, other router's secret absent.
+	got, total = ids(repository.SecretFilter{})
+	if total != 4 || got[paired].Suggestion != nil || got[phone].Suggestion == nil {
+		t.Fatalf("unfiltered: total=%d got=%v", total, got)
+	}
+
+	// Another organization sees none of it.
+	items, tot, err := repo.List(e.ctx, e.tenants.B.Scope, repository.SecretFilter{Suggestion: repository.SuggestionFilterSuggested}, 50, 0)
+	if err != nil || tot != 0 || len(items) != 0 {
+		t.Fatalf("org B: %v %d %d", err, tot, len(items))
 	}
 }

@@ -169,7 +169,11 @@ func (s *SuggestionService) Analyze(ctx context.Context, scope coretenant.Scope,
 		if len(page) == 0 {
 			break
 		}
-		after = page[len(page)-1].ID
+		last := page[len(page)-1].ID
+		if last <= after {
+			break // a non-advancing page would loop forever
+		}
+		after = last
 	}
 
 	res := AnalyzeResult{Total: len(secrets)}
