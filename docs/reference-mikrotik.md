@@ -134,7 +134,7 @@ sehingga hanya keduanya memakai rate limit probe (20 per menit per organization,
 - Aturan impor ulang: hanya kolom milik router (profile, disabled, comment, last_seen_at) yang diperbarui. Pairing,
   `original_profile`, dan `isolation_state` tidak pernah disentuh. `needs_original_profile` tidak pernah dihapus oleh
   impor; hanya `PUT .../original-profile` yang menghapusnya.
-- `present=false`: secret yang tidak ada lagi di router ditandai, tidak dihapus. Secret `present=false` tidak bisa dipasangkan.
+- `present=false`: secret yang tidak ada lagi di router ditandai, tidak dihapus. Secret `present=false` tidak bisa dipasangkan. `POST /secrets/pair-bulk` yang dibatalkan di tengah jalan melaporkan sisa item sebagai `MIKROTIK_INTERNAL` tanpa diproses.
 - `needs_original_profile=true`: secret ditemukan di profile isolir router (`isolir_profile_name`) dan belum punya
   `original_profile`. Pairing ditolak (409 `MIKROTIK_SECRET_NOT_PAIRABLE`) sampai `original_profile` ditetapkan; profile
   itu harus ada di `/ppp/profile` router dan bukan profile isolir (422 bila tidak).
@@ -320,7 +320,7 @@ Semua di bawah `/api/v1/app/mikrotik`, tunduk pada entitlement `mikrotik.enabled
 | Endpoint | Permission | Catatan |
 | --- | --- | --- |
 | `POST /routers/{id}/secrets/analyze` | `mikrotik_secret.import` | Hitung ulang saran pairing satu router; hasil `{total, suggested, needs_decision}`. Tidak login ke router, tetapi memakai rate limit probe. |
-| `GET /secrets?suggestion=suggested\|needs_decision` (juga `needs_original_profile=true\|false`) | `mikrotik_secret.read` | Filter `suggestion` hanya berlaku untuk secret present yang belum dipasangkan. Tiap secret memuat `suggestion` (`null` bila tidak ada). Catatan: `account_name` (nama pelanggan terpasang; `""` bila belum dipasangkan atau akun dihapus) hanya diisi oleh endpoint daftar ini. |
+| `GET /secrets?suggestion=suggested\|needs_decision` (juga `needs_original_profile=true\|false`) | `mikrotik_secret.read` | Filter `suggestion` hanya berlaku untuk secret present yang belum dipasangkan. Tiap secret memuat `suggestion` (`null` bila tidak ada; juga `null` untuk secret yang sudah dipasangkan atau `present=false`). Secret milik router yang sudah dihapus (soft delete) tidak ditampilkan, dan juga tidak dihitung di onboarding maupun status pelanggan. Pair/unpair menghapus saran lama secret itu. Catatan: `account_name` (nama pelanggan terpasang; `""` bila belum dipasangkan atau akun dihapus) hanya diisi oleh endpoint daftar ini. |
 | `POST /secrets/pair-bulk` | `mikrotik_secret.pair` | 1-200 item `{secret_id, account_id}`, tidak atomik, rate limit probe. |
 | `GET /onboarding` | `mikrotik_router.read` | Checklist kesiapan isolir. |
 | `GET /customers/status?account_ids=a,b` | `mikrotik_policy.read` | Status isolir per akun, maks 100 id unik. |

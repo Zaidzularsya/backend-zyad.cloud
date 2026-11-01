@@ -3,6 +3,7 @@
 package repository_test
 
 import (
+	"os"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -275,7 +276,14 @@ func TestSecretRepo_ListNeedsOriginalProfileAndAccountName(t *testing.T) {
 // both switched off. Postgres DDL is transactional: everything below happens in
 // ONE transaction that is always rolled back, so no other session ever sees the
 // dropped FK / disabled RLS and nothing needs repairing after a crash.
+//
+// The DDL still takes ACCESS EXCLUSIVE locks and needs table-owner rights, which
+// can block packages running in parallel on a shared database, so the test only
+// runs when TEST_DB_ALLOW_DDL=1 (use a private database, `-p 1`).
 func TestSecretRepo_ListAccountNameIsTenantScoped(t *testing.T) {
+	if os.Getenv("TEST_DB_ALLOW_DDL") != "1" {
+		t.Skip("runs transactional DDL (DROP CONSTRAINT, DISABLE RLS); set TEST_DB_ALLOW_DDL=1 on a private test database to run it")
+	}
 	e := setupRouter(t)
 	a, b := e.tenants.A.Scope, e.tenants.B.Scope
 	acctA := newAccount(t, e, a)

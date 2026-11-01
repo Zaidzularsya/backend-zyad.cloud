@@ -10799,7 +10799,7 @@ paths:
       - Mikrotik
       security:
       - BearerAuth: []
-      description: "Daftar secret dari cache lokal (tanpa menghubungi router), berpaginasi. Respons tidak pernah memuat password PPP. Tiap item memuat `suggestion` (null bila tidak ada saran). Permission: `mikrotik_secret.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      description: "Daftar secret dari cache lokal (tanpa menghubungi router), berpaginasi. Respons tidak pernah memuat password PPP. Tiap item memuat `suggestion` (null bila tidak ada saran, atau secret sudah dipasangkan/`present=false`). Secret milik router yang sudah dihapus tidak ditampilkan. Permission: `mikrotik_secret.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
       parameters:
       - name: router_id
         in: query

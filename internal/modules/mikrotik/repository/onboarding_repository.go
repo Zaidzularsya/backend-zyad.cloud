@@ -46,7 +46,8 @@ func (r *OnboardingRepository) Counts(ctx context.Context, scope coretenant.Scop
 			COUNT(*) FILTER (WHERE present AND account_id IS NOT NULL),
 			COUNT(*) FILTER (WHERE present AND needs_original_profile),
 			(SELECT COUNT(*) FROM mikrotik_product_triggers WHERE organization_id = $1 AND enabled)
-			FROM mikrotik_ppp_secrets WHERE organization_id = $1`, scope.OrganizationID()).
+			FROM mikrotik_ppp_secrets s WHERE s.organization_id = $1
+			AND EXISTS (SELECT 1 FROM mikrotik_routers r WHERE r.organization_id = s.organization_id AND r.id = s.router_id AND r.deleted_at IS NULL)`, scope.OrganizationID()).
 			Scan(&c.Routers, &c.RoutersReady, &c.SecretsTotal, &c.SecretsPaired, &c.NeedsProfile, &c.ProductsMarked)
 	})
 	return c, err
@@ -65,10 +66,11 @@ func (r *OnboardingRepository) AccountStatuses(ctx context.Context, scope corete
 		// secret still reports its exemption.
 		rows, err := tx.Query(ctx, `
 			WITH sec AS (
-				SELECT account_id, COUNT(*) AS n, bool_or(isolation_state = 'isolated') AS isolated
-				FROM mikrotik_ppp_secrets
-				WHERE organization_id = $1 AND account_id = ANY($2::uuid[])
-				GROUP BY account_id
+				SELECT s.account_id, COUNT(*) AS n, bool_or(s.isolation_state = 'isolated') AS isolated
+				FROM mikrotik_ppp_secrets s
+				WHERE s.organization_id = $1 AND s.account_id = ANY($2::uuid[])
+				  AND EXISTS (SELECT 1 FROM mikrotik_routers r WHERE r.organization_id = s.organization_id AND r.id = s.router_id AND r.deleted_at IS NULL)
+				GROUP BY s.account_id
 			), pol AS (
 				SELECT account_id, exempt FROM mikrotik_customer_policies
 				WHERE organization_id = $1 AND account_id = ANY($2::uuid[])

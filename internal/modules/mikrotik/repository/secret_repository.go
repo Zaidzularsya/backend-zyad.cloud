@@ -266,6 +266,9 @@ const listFrom = `mikrotik_ppp_secrets s
 	LEFT JOIN receivable_accounts a ON a.organization_id = sg.organization_id AND a.id = sg.account_id AND a.deleted_at IS NULL
 	LEFT JOIN receivable_accounts a2 ON a2.organization_id = s.organization_id AND a2.id = s.account_id AND a2.deleted_at IS NULL`
 
+// liveRouterOnly keeps secrets whose router is not soft-deleted.
+const liveRouterOnly = `EXISTS (SELECT 1 FROM mikrotik_routers lr WHERE lr.organization_id = s.organization_id AND lr.id = s.router_id AND lr.deleted_at IS NULL)`
+
 // usableSuggestion: a phone/name hint whose account still exists.
 const usableSuggestion = `(sg.basis IN ('phone', 'name') AND a.id IS NOT NULL)`
 
@@ -274,7 +277,9 @@ func (r *secretRepository) List(ctx context.Context, scope coretenant.Scope, f S
 	if offset < 0 {
 		offset = 0
 	}
-	where := []string{"s.organization_id = $1"}
+	// Secrets of a soft-deleted router are hidden everywhere (the isolation
+	// engine ignores them too); SoftDelete leaves the secret rows in place.
+	where := []string{"s.organization_id = $1", liveRouterOnly}
 	args := []interface{}{scope.OrganizationID()}
 	if f.RouterID != "" {
 		args = append(args, f.RouterID)
@@ -344,8 +349,8 @@ func listSecretsTx(ctx context.Context, tx pgx.Tx, cond string, args []interface
 			return nil, 0, scanErr
 		}
 		item.AccountName = derefString(paidName)
-		// Hints on already-paired secrets are stale rows; never expose them.
-		if basis != nil && cands != nil && item.AccountID == nil {
+		// Hints on paired or no-longer-present secrets are stale rows; never expose them.
+		if basis != nil && cands != nil && item.AccountID == nil && item.Present {
 			sg := &domain.SecretSuggestion{Basis: *basis, Candidates: int(*cands)}
 			switch {
 			case *basis == SuggestionBasisAmbiguous:
@@ -394,7 +399,7 @@ func (r *secretRepository) Pair(ctx context.Context, scope coretenant.Scope, sec
 			return err
 		}
 		if tag.RowsAffected() > 0 {
-			return nil
+			return dropSuggestion(ctx, tx, scope.OrganizationID(), secretID)
 		}
 		// Distinguish why nothing matched, in the same transaction.
 		var paired *string
@@ -417,6 +422,14 @@ func (r *secretRepository) Pair(ctx context.Context, scope coretenant.Scope, sec
 	return err
 }
 
+// dropSuggestion removes the computed hint of a secret in the caller's
+// transaction. After a pair/unpair the hint is stale and would otherwise
+// resurface and be offered (even pre-selected) for the wrong customer.
+func dropSuggestion(ctx context.Context, tx pgx.Tx, orgID, secretID string) error {
+	_, err := tx.Exec(ctx, `DELETE FROM mikrotik_secret_suggestions WHERE organization_id = $1 AND secret_id = $2`, orgID, secretID)
+	return err
+}
+
 func (r *secretRepository) Unpair(ctx context.Context, scope coretenant.Scope, secretID string) error {
 	return withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `
@@ -430,7 +443,7 @@ func (r *secretRepository) Unpair(ctx context.Context, scope coretenant.Scope, s
 			return err
 		}
 		if tag.RowsAffected() > 0 {
-			return nil
+			return dropSuggestion(ctx, tx, scope.OrganizationID(), secretID)
 		}
 		var state string
 		err = tx.QueryRow(ctx, `SELECT isolation_state FROM mikrotik_ppp_secrets WHERE id = $1 AND organization_id = $2`,
