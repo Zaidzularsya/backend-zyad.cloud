@@ -270,13 +270,11 @@ func TestSecretRepo_ListNeedsOriginalProfileAndAccountName(t *testing.T) {
 }
 
 // The composite FK (organization_id, account_id) normally makes a cross-org
-// pairing impossible, so the a2 join's tenant predicate is only observable by
-// building the row with the FK dropped. The test owns the table (non-superuser
-// role), drops fk_mikrotik_ppp_secrets_account, commits the forged row, and a
-// cleanup deletes it and re-adds the constraint (validated) afterwards.
-// RLS on receivable_accounts would hide org A's account from org B on its own
-// (the explicit join predicate is defense in depth), so RLS on that table is
-// switched off for the duration to make the predicate itself observable.
+// pairing impossible, and RLS on receivable_accounts already hides org A's
+// account from org B, so the explicit a2 join predicate is only observable with
+// both switched off. Postgres DDL is transactional: everything below happens in
+// ONE transaction that is always rolled back, so no other session ever sees the
+// dropped FK / disabled RLS and nothing needs repairing after a crash.
 func TestSecretRepo_ListAccountNameIsTenantScoped(t *testing.T) {
 	e := setupRouter(t)
 	a, b := e.tenants.A.Scope, e.tenants.B.Scope
@@ -284,39 +282,25 @@ func TestSecretRepo_ListAccountNameIsTenantScoped(t *testing.T) {
 	rb := e.create(t, b, "R-forged")
 	forged := seedSecret(t, e, b, rb.ID, repository.ImportedSecret{Name: "forged", Profile: "p"})
 
-	const fk = "fk_mikrotik_ppp_secrets_account"
-	if _, err := e.db.Exec(e.ctx, `ALTER TABLE mikrotik_ppp_secrets DROP CONSTRAINT `+fk); err != nil {
-		t.Fatalf("drop fk: %v", err)
-	}
-	if _, err := e.db.Exec(e.ctx, `ALTER TABLE receivable_accounts NO FORCE ROW LEVEL SECURITY, DISABLE ROW LEVEL SECURITY`); err != nil {
-		t.Fatalf("disable rls: %v", err)
-	}
-	t.Cleanup(func() {
-		if _, err := e.db.Exec(e.ctx, `ALTER TABLE receivable_accounts ENABLE ROW LEVEL SECURITY, FORCE ROW LEVEL SECURITY`); err != nil {
-			t.Errorf("restore rls: %v", err)
+	secretScopedTx(t, e, b, func(tx pgx.Tx) { // always rolled back (deferred in helper)
+		for _, ddl := range []string{
+			`ALTER TABLE mikrotik_ppp_secrets DROP CONSTRAINT fk_mikrotik_ppp_secrets_account`,
+			`ALTER TABLE receivable_accounts NO FORCE ROW LEVEL SECURITY`,
+			`ALTER TABLE receivable_accounts DISABLE ROW LEVEL SECURITY`,
+		} {
+			if _, err := tx.Exec(e.ctx, ddl); err != nil {
+				t.Fatalf("%s: %v", ddl, err)
+			}
 		}
-		if _, err := e.db.Exec(e.ctx, `DELETE FROM mikrotik_ppp_secrets WHERE id = $1`, forged); err != nil {
-			t.Errorf("cleanup delete: %v", err)
-		}
-		if _, err := e.db.Exec(e.ctx, `ALTER TABLE mikrotik_ppp_secrets ADD CONSTRAINT `+fk+
-			` FOREIGN KEY (organization_id, account_id) REFERENCES receivable_accounts(organization_id, id)`); err != nil {
-			t.Errorf("restore fk: %v", err)
-		}
-	})
-	secretScopedTx(t, e, b, func(tx pgx.Tx) {
 		if _, err := tx.Exec(e.ctx, `UPDATE mikrotik_ppp_secrets SET account_id = $1 WHERE id = $2`, acctA, forged); err != nil {
 			t.Fatal(err)
 		}
-		if err := tx.Commit(e.ctx); err != nil {
-			t.Fatal(err)
+		items, total, err := repository.ListSecretsInTx(e.ctx, tx, b.OrganizationID(), rb.ID, 50, 0)
+		if err != nil || total != 1 || len(items) != 1 {
+			t.Fatalf("org B list: err=%v total=%d n=%d", err, total, len(items))
+		}
+		if items[0].AccountID == nil || items[0].AccountName != "" {
+			t.Fatalf("org A account name leaked into org B: %+v", items[0])
 		}
 	})
-
-	items, total, err := secretRepo(e).List(e.ctx, b, repository.SecretFilter{RouterID: rb.ID}, 50, 0)
-	if err != nil || total != 1 || len(items) != 1 {
-		t.Fatalf("org B list: err=%v total=%d n=%d", err, total, len(items))
-	}
-	if items[0].AccountID == nil || items[0].AccountName != "" {
-		t.Fatalf("org A account name leaked into org B: %+v", items[0])
-	}
 }

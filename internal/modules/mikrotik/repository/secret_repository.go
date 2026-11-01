@@ -306,45 +306,58 @@ func (r *secretRepository) List(ctx context.Context, scope coretenant.Scope, f S
 	}
 	cond := strings.Join(where, " AND ")
 
-	items := []domain.PPPSecret{}
+	var items []domain.PPPSecret
 	var total int64
 	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM `+listFrom+` WHERE `+cond, args...).Scan(&total); err != nil {
-			return err
-		}
-		pageArgs := append(append([]interface{}{}, args...), limit, offset)
-		rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT `+qualifiedSecretColumns+`,
-				sg.basis, sg.candidates, a.id, a.name, a.phone, a2.name
-			FROM `+listFrom+` WHERE `+cond+`
-			ORDER BY lower(s.name), s.id LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2), pageArgs...)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var basis, accID, accName, accPhone, paidName *string
-			var cands *int32
-			item, scanErr := scanSecretExtra(rows, &basis, &cands, &accID, &accName, &accPhone, &paidName)
-			if scanErr != nil {
-				return scanErr
-			}
-			item.AccountName = derefString(paidName)
-			// Hints on already-paired secrets are stale rows; never expose them.
-			if basis != nil && cands != nil && item.AccountID == nil {
-				sg := &domain.SecretSuggestion{Basis: *basis, Candidates: int(*cands)}
-				switch {
-				case *basis == SuggestionBasisAmbiguous:
-					item.Suggestion = sg
-				case accID != nil:
-					sg.AccountID, sg.AccountName, sg.AccountPhone = *accID, derefString(accName), derefString(accPhone)
-					item.Suggestion = sg
-				}
-			}
-			items = append(items, item)
-		}
-		return rows.Err()
+		var err error
+		items, total, err = listSecretsTx(ctx, tx, cond, args, limit, offset)
+		return err
 	})
 	if err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
+// listSecretsTx runs the count and page queries of List inside the caller's
+// transaction (kept separate so tests can run the exact SQL in a rolled-back tx).
+func listSecretsTx(ctx context.Context, tx pgx.Tx, cond string, args []interface{}, limit, offset int) ([]domain.PPPSecret, int64, error) {
+	items := []domain.PPPSecret{}
+	var total int64
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM `+listFrom+` WHERE `+cond, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	pageArgs := append(append([]interface{}{}, args...), limit, offset)
+	rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT `+qualifiedSecretColumns+`,
+			sg.basis, sg.candidates, a.id, a.name, a.phone, a2.name
+		FROM `+listFrom+` WHERE `+cond+`
+		ORDER BY lower(s.name), s.id LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2), pageArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var basis, accID, accName, accPhone, paidName *string
+		var cands *int32
+		item, scanErr := scanSecretExtra(rows, &basis, &cands, &accID, &accName, &accPhone, &paidName)
+		if scanErr != nil {
+			return nil, 0, scanErr
+		}
+		item.AccountName = derefString(paidName)
+		// Hints on already-paired secrets are stale rows; never expose them.
+		if basis != nil && cands != nil && item.AccountID == nil {
+			sg := &domain.SecretSuggestion{Basis: *basis, Candidates: int(*cands)}
+			switch {
+			case *basis == SuggestionBasisAmbiguous:
+				item.Suggestion = sg
+			case accID != nil:
+				sg.AccountID, sg.AccountName, sg.AccountPhone = *accID, derefString(accName), derefString(accPhone)
+				item.Suggestion = sg
+			}
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
 		return nil, 0, err
 	}
 	return items, total, nil
