@@ -177,7 +177,7 @@ satu putaran.
 ## Endpoint
 
 Lihat `api/openapi.yaml` (tag `Receivable`). Ringkas, di bawah `/api/v1/app/receivable`:
-`accounts` (CRUD sebagian), `invoices` (list/create/get/update draft, `issue`, `void`, `pdf`, `link`, `send`,
+`accounts` (CRUD sebagian; list menerima `search` dan `contact_id` = id kontak CRM, UUID tidak valid → 422), `invoices` (list/create/get/update draft, `issue`, `void`, `pdf`, `link`, `send`,
 `sends`, `payments`), `payments`, `settings`, `members/senders`. Galat: `INVOICE_NOT_DRAFT|NOT_SENDABLE|NOT_PAYABLE|HAS_PAYMENTS`
 409, `PAYMENT_EXCEEDS_BALANCE|CHANNEL_UNAVAILABLE|VALIDATION_ERROR` 422, `INVOICE_NOT_FOUND|ACCOUNT_NOT_FOUND` 404,
 `INVOICE_PDF_FAILED` 502. Id di path/body divalidasi sebagai UUID di handler; PIC dan pengirim default divalidasi

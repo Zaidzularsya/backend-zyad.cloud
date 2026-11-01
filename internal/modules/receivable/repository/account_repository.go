@@ -106,19 +106,20 @@ func (r *accountRepository) ListAfterID(ctx context.Context, scope coretenant.Sc
 	return out, err
 }
 
-func (r *accountRepository) List(ctx context.Context, scope coretenant.Scope, search string, limit, offset int) ([]domain.Account, int64, error) {
+func (r *accountRepository) List(ctx context.Context, scope coretenant.Scope, search, contactID string, limit, offset int) ([]domain.Account, int64, error) {
 	out := []domain.Account{}
 	var total int64
 	pattern := "%" + escapeLike(search) + "%"
 	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
 		const where = `a.organization_id = $1 AND a.deleted_at IS NULL
-			AND ($2 = '%%' OR a.name ILIKE $2 OR a.company_name ILIKE $2 OR a.email ILIKE $2)`
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM receivable_accounts a WHERE `+where, scope.OrganizationID(), pattern).Scan(&total); err != nil {
+			AND ($2 = '%%' OR a.name ILIKE $2 OR a.company_name ILIKE $2 OR a.email ILIKE $2)
+			AND ($3 = '' OR (a.source_type = 'crm_contact' AND a.source_id::text = $3))`
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM receivable_accounts a WHERE `+where, scope.OrganizationID(), pattern, contactID).Scan(&total); err != nil {
 			return err
 		}
 		rows, err := tx.Query(ctx, `
 			SELECT `+accountColumns+` FROM receivable_accounts a WHERE `+where+`
-			ORDER BY lower(a.name), a.id LIMIT $3 OFFSET $4`, scope.OrganizationID(), pattern, clampLimit(limit), max(offset, 0))
+			ORDER BY lower(a.name), a.id LIMIT $4 OFFSET $5`, scope.OrganizationID(), pattern, contactID, clampLimit(limit), max(offset, 0))
 		if err != nil {
 			return err
 		}

@@ -9,9 +9,11 @@ type AccountRequest struct {
 }
 
 type AccountListQuery struct {
-	Search  string `form:"search"`
-	Page    int    `form:"page"`
-	PerPage int    `form:"per_page"`
+	Search string `form:"search"`
+	// ContactID menyaring account yang bersumber dari kontak CRM tersebut.
+	ContactID string `form:"contact_id" binding:"omitempty,uuid"`
+	Page      int    `form:"page"`
+	PerPage   int    `form:"per_page"`
 }
 
 type InvoiceItemRequest struct {

@@ -39,7 +39,7 @@ const (
 
 type mikrotikAccountSource interface {
 	Get(ctx context.Context, scope coretenant.Scope, id string) (receivabledomain.Account, error)
-	List(ctx context.Context, scope coretenant.Scope, search string, limit, offset int) ([]receivabledomain.Account, int64, error)
+	List(ctx context.Context, scope coretenant.Scope, search, contactID string, limit, offset int) ([]receivabledomain.Account, int64, error)
 	ListAfterID(ctx context.Context, scope coretenant.Scope, afterID string, limit int) ([]receivabledomain.Account, error)
 	EnsureForSource(ctx context.Context, scope coretenant.Scope, in receivableservice.AccountInput, userID string) (receivabledomain.Account, error)
 }
@@ -65,7 +65,7 @@ func (d mikrotikAccountDirectory) Search(ctx context.Context, scope coretenant.S
 	if limit <= 0 || limit > mikrotikAccountSearchMax {
 		limit = mikrotikAccountSearchMax
 	}
-	list, _, err := d.accounts.List(ctx, scope, q, limit, 0)
+	list, _, err := d.accounts.List(ctx, scope, q, "", limit, 0)
 	if err != nil {
 		return nil, err
 	}

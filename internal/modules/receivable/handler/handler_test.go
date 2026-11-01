@@ -139,6 +139,8 @@ type fakeAccountSvc struct {
 	service.AccountService
 	created service.AccountInput
 	getErr  error
+	// diisi List: filter yang sampai ke service.
+	listSearch, listContactID string
 }
 
 func (f *fakeAccountSvc) Create(_ context.Context, _ coretenant.Scope, in service.AccountInput, _ string) (domain.Account, error) {
@@ -148,7 +150,8 @@ func (f *fakeAccountSvc) Create(_ context.Context, _ coretenant.Scope, in servic
 func (f *fakeAccountSvc) Get(context.Context, coretenant.Scope, string) (domain.Account, error) {
 	return domain.Account{ID: accID, Name: "Budi", SourceType: "crm_contact", SourceID: "c1"}, f.getErr
 }
-func (f *fakeAccountSvc) List(context.Context, coretenant.Scope, string, int, int) ([]domain.Account, int64, error) {
+func (f *fakeAccountSvc) List(_ context.Context, _ coretenant.Scope, search, contactID string, _, _ int) ([]domain.Account, int64, error) {
+	f.listSearch, f.listContactID = search, contactID
 	return []domain.Account{{ID: accID, Name: "Budi"}}, 1, nil
 }
 
@@ -565,5 +568,22 @@ func TestSettingsEndpoint(t *testing.T) {
 	w = call(f.r, http.MethodGet, base("/settings"), "")
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"invoice_lead_days":3`) {
 		t.Fatalf("get = %d %s", w.Code, w.Body)
+	}
+}
+
+func TestAccountList_ContactIDFilter(t *testing.T) {
+	const contact = "cccccccc-0000-0000-0000-000000000001"
+	f := newFixture(t, allReceivablePerms...)
+	if w := call(f.r, http.MethodGet, base("/accounts?search=bud&contact_id="+contact), ""); w.Code != http.StatusOK || f.accounts.listContactID != contact || f.accounts.listSearch != "bud" {
+		t.Fatalf("filter = %d %s contact=%q search=%q", w.Code, w.Body, f.accounts.listContactID, f.accounts.listSearch)
+	}
+	f.accounts.listContactID = "stale"
+	if w := call(f.r, http.MethodGet, base("/accounts"), ""); w.Code != http.StatusOK || f.accounts.listContactID != "" {
+		t.Fatalf("omitted = %d contact=%q", w.Code, f.accounts.listContactID)
+	}
+	f.accounts.listContactID = "untouched"
+	w := call(f.r, http.MethodGet, base("/accounts?contact_id=banana"), "")
+	if w.Code != http.StatusUnprocessableEntity || f.accounts.listContactID != "untouched" {
+		t.Fatalf("invalid uuid = %d %s (service reached=%v)", w.Code, w.Body, f.accounts.listContactID != "untouched")
 	}
 }

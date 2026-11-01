@@ -8582,6 +8582,10 @@ paths:
       - name: search
         in: query
         schema: {type: string}
+      - name: contact_id
+        in: query
+        description: "Only accounts linked to this CRM contact (UUID); combined with `search` by AND. A malformed UUID returns 422."
+        schema: {type: string, format: uuid}
       - name: page
         in: query
         schema: {type: integer}

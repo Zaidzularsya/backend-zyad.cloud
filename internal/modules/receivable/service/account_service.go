@@ -105,6 +105,6 @@ func (s *accountService) ListAfterID(ctx context.Context, scope coretenant.Scope
 	return s.repo.ListAfterID(ctx, scope, afterID, limit)
 }
 
-func (s *accountService) List(ctx context.Context, scope coretenant.Scope, search string, limit, offset int) ([]domain.Account, int64, error) {
-	return s.repo.List(ctx, scope, strings.TrimSpace(search), limit, offset)
+func (s *accountService) List(ctx context.Context, scope coretenant.Scope, search, contactID string, limit, offset int) ([]domain.Account, int64, error) {
+	return s.repo.List(ctx, scope, strings.TrimSpace(search), strings.TrimSpace(contactID), limit, offset)
 }

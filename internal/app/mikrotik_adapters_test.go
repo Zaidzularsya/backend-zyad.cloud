@@ -56,7 +56,7 @@ func (f *fakeAccounts) Get(_ context.Context, s coretenant.Scope, id string) (re
 	}
 	return receivabledomain.Account{}, receivable.ErrAccountNotFound
 }
-func (f *fakeAccounts) List(_ context.Context, s coretenant.Scope, q string, limit, _ int) ([]receivabledomain.Account, int64, error) {
+func (f *fakeAccounts) List(_ context.Context, s coretenant.Scope, q, _ string, limit, _ int) ([]receivabledomain.Account, int64, error) {
 	f.listSearch, f.listLimit = q, limit
 	var out []receivabledomain.Account
 	for _, a := range f.byOrg[s.OrganizationID()] {
