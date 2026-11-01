@@ -320,7 +320,7 @@ Semua di bawah `/api/v1/app/mikrotik`, tunduk pada entitlement `mikrotik.enabled
 | Endpoint | Permission | Catatan |
 | --- | --- | --- |
 | `POST /routers/{id}/secrets/analyze` | `mikrotik_secret.import` | Hitung ulang saran pairing satu router; hasil `{total, suggested, needs_decision}`. Tidak login ke router, tetapi memakai rate limit probe. |
-| `GET /secrets?suggestion=suggested\|needs_decision` (juga `needs_original_profile=true\|false`) | `mikrotik_secret.read` | Hanya secret present yang belum dipasangkan. Tiap secret memuat `suggestion` (`null` bila tidak ada) dan `account_name` (nama pelanggan terpasang; `""` bila belum dipasangkan atau akun dihapus). |
+| `GET /secrets?suggestion=suggested\|needs_decision` (juga `needs_original_profile=true\|false`) | `mikrotik_secret.read` | Filter `suggestion` hanya berlaku untuk secret present yang belum dipasangkan. Tiap secret memuat `suggestion` (`null` bila tidak ada). Catatan: `account_name` (nama pelanggan terpasang; `""` bila belum dipasangkan atau akun dihapus) hanya diisi oleh endpoint daftar ini. |
 | `POST /secrets/pair-bulk` | `mikrotik_secret.pair` | 1-200 item `{secret_id, account_id}`, tidak atomik, rate limit probe. |
 | `GET /onboarding` | `mikrotik_router.read` | Checklist kesiapan isolir. |
 | `GET /customers/status?account_ids=a,b` | `mikrotik_policy.read` | Status isolir per akun, maks 100 id unik. |
