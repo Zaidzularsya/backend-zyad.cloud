@@ -286,7 +286,7 @@ func (r *secretRepository) List(ctx context.Context, scope coretenant.Scope, f S
 	}
 	switch f.Suggestion {
 	case SuggestionFilterSuggested:
-		where = append(where, "s.account_id IS NULL", usableSuggestion)
+		where = append(where, "s.account_id IS NULL", "s.present", usableSuggestion)
 	case SuggestionFilterNeedsDecision:
 		where = append(where, "s.account_id IS NULL", "s.present", "NOT "+usableSuggestion)
 	}

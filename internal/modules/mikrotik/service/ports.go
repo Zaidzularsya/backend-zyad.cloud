@@ -96,3 +96,9 @@ type TenantAlerter interface {
 // TaskFailureEvent is the tenant-facing description of a failing task. Reason
 // is TaskFailure.Message (fixed, credential-free text).
 type TaskFailureEvent struct{ TaskID, RouterName, SecretName, Action, Reason string }
+
+// SenderSettings tells whether the organization has a default sender
+// configured for customer notifications (owned by the receivable module).
+type SenderSettings interface {
+	HasDefaultSender(ctx context.Context, scope coretenant.Scope) (bool, error)
+}

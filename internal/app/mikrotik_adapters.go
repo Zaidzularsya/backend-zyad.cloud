@@ -268,3 +268,17 @@ func (r mikrotikReceivableReader) ForProduct(ctx context.Context, scope coretena
 	})
 	return u, err
 }
+
+// ---- SenderSettings ----
+
+// mikrotikSenderSettings answers whether the receivable module has a default
+// sender configured (the same value the isolir notifier uses to send).
+type mikrotikSenderSettings struct{ settings mikrotikNotifSettings }
+
+func (a mikrotikSenderSettings) HasDefaultSender(ctx context.Context, scope coretenant.Scope) (bool, error) {
+	s, err := a.settings.Get(ctx, scope)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(s.DefaultSenderUserID) != "", nil
+}

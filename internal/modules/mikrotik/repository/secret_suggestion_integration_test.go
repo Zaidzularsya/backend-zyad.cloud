@@ -140,6 +140,24 @@ func TestSecretRepo_ListSuggestionFilter(t *testing.T) {
 	if total != 1 || len(got) != 1 || got[phone].Suggestion == nil {
 		t.Fatalf("suggested: total=%d got=%v", total, got)
 	}
+
+	// A suggested secret that vanished from the router is no longer actionable.
+	gone := seedSecret(t, e, scope, r.ID, repository.ImportedSecret{Name: "s-gone", Profile: "p"})
+	if err := sugRepo.ReplaceForRouter(e.ctx, scope, r.ID, []repository.Suggestion{
+		{SecretID: phone, AccountID: acct, Basis: "phone", Candidates: 1},
+		{SecretID: amb, Basis: "ambiguous", Candidates: 2},
+		{SecretID: paired, AccountID: acct, Basis: "name", Candidates: 1},
+		{SecretID: gone, AccountID: acct, Basis: "phone", Candidates: 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.MarkAbsent(e.ctx, scope, gone); err != nil {
+		t.Fatal(err)
+	}
+	got, total = ids(repository.SecretFilter{Suggestion: repository.SuggestionFilterSuggested})
+	if total != 1 || len(got) != 1 || got[phone].Suggestion == nil || got[gone].ID != "" {
+		t.Fatalf("suggested must exclude absent secrets: total=%d got=%v", total, got)
+	}
 	sg := got[phone].Suggestion
 	if sg.AccountID != acct || sg.AccountName != "Cust" || sg.Basis != "phone" || sg.Candidates != 1 {
 		t.Fatalf("suggestion = %+v", sg)
@@ -162,7 +180,7 @@ func TestSecretRepo_ListSuggestionFilter(t *testing.T) {
 
 	// Unfiltered listing: stale paired hint hidden, other router's secret absent.
 	got, total = ids(repository.SecretFilter{})
-	if total != 4 || got[paired].Suggestion != nil || got[phone].Suggestion == nil {
+	if total != 5 || got[paired].Suggestion != nil || got[phone].Suggestion == nil {
 		t.Fatalf("unfiltered: total=%d got=%v", total, got)
 	}
 

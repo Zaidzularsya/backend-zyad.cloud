@@ -224,7 +224,7 @@ func TestBuildMikrotik_WiresAllHandlers(t *testing.T) {
 	m := buildMikrotik(config.Config{}, nil, mikrotikBuild{
 		Accounts: &fakeAccounts{}, Contacts: &fakeContacts{}, Products: fakeProducts{},
 	})
-	if m.Router == nil || m.Setup == nil || m.Secret == nil || m.Policy == nil {
+	if m.Router == nil || m.Setup == nil || m.Secret == nil || m.Policy == nil || m.Onboarding == nil {
 		t.Fatalf("handlers must all be built: %+v", m)
 	}
 }
@@ -242,5 +242,34 @@ func TestAccountDirectory_ListKeyset(t *testing.T) {
 	p2, err := d.List(context.Background(), mkScope("org-a"), "a2", 2)
 	if err != nil || len(p2) != 1 || p2[0].ID != "a3" {
 		t.Fatalf("page2: %+v %v", p2, err)
+	}
+}
+
+type fakeSettingsReader struct {
+	s   receivabledomain.Settings
+	err error
+}
+
+func (f fakeSettingsReader) Get(context.Context, coretenant.Scope) (receivabledomain.Settings, error) {
+	return f.s, f.err
+}
+
+func TestSenderSettings_HasDefaultSender(t *testing.T) {
+	cases := []struct {
+		name string
+		in   fakeSettingsReader
+		want bool
+		err  bool
+	}{
+		{"set", fakeSettingsReader{s: receivabledomain.Settings{DefaultSenderUserID: "u1"}}, true, false},
+		{"empty", fakeSettingsReader{}, false, false},
+		{"blank", fakeSettingsReader{s: receivabledomain.Settings{DefaultSenderUserID: "  "}}, false, false},
+		{"error", fakeSettingsReader{err: errors.New("db")}, false, true},
+	}
+	for _, tc := range cases {
+		got, err := mikrotikSenderSettings{settings: tc.in}.HasDefaultSender(context.Background(), coretenant.Scope{})
+		if got != tc.want || (err != nil) != tc.err {
+			t.Errorf("%s: got %v, %v", tc.name, got, err)
+		}
 	}
 }
