@@ -307,9 +307,39 @@ Ditulis sebagai event sistem (tanpa aktor) oleh worker, kecuali `task.retried` y
 Respons retry tidak mengisi `router.name` dan `account` (klien memuat ulang daftar). Kode error: `MIKROTIK_TASK_NOT_FOUND`
 (404), `MIKROTIK_TASK_NOT_RETRYABLE` (409), `MIKROTIK_TASK_ACTIVE_EXISTS` (409), `VALIDATION_ERROR` (400, filter tidak valid).
 
-Permission `mikrotik_task.read` dan `mikrotik_task.retry` (migration 000174) saat ini hanya diberikan ke
-`organization_owner`. **Item terbuka:** apakah peran anggota biasa boleh membaca dashboard; hanya pemilik yang menerima
-notifikasi kegagalan sampai itu diputuskan.
+Permission `mikrotik_task.read` dan `mikrotik_task.retry` dibuat oleh migration 000174 dan diberikan ke
+`organization_owner`. Migration 000175 menambah `mikrotik_task.read` ke peran `member`: anggota biasa boleh membuka
+dashboard tugas (`GET /tasks`, `GET /tasks/summary`) tetapi `POST /tasks/{id}/retry` tetap 403, begitu pula seluruh
+route Mikrotik lain (router, secret, kebijakan, onboarding). Notifikasi kegagalan tugas tetap hanya ke pemilik.
+
+## UI tenant gelombang 1: analisis, pairing massal, onboarding
+
+Semua di bawah `/api/v1/app/mikrotik`, tunduk pada entitlement `mikrotik.enabled`. Migration `000175` membuat tabel saran
+(`mikrotik_secret_suggestions`) dan grant member di atas. Skema lengkap di `api/openapi.yaml`.
+
+| Endpoint | Permission | Catatan |
+| --- | --- | --- |
+| `POST /routers/{id}/secrets/analyze` | `mikrotik_secret.import` | Hitung ulang saran pairing satu router; hasil `{total, suggested, needs_decision}`. Tidak login ke router, tetapi memakai rate limit probe. |
+| `GET /secrets?suggestion=suggested\|needs_decision` | `mikrotik_secret.read` | Hanya secret present yang belum dipasangkan. Tiap secret memuat `suggestion` (`null` bila tidak ada). |
+| `POST /secrets/pair-bulk` | `mikrotik_secret.pair` | 1-200 item `{secret_id, account_id}`, tidak atomik, rate limit probe. |
+| `GET /onboarding` | `mikrotik_router.read` | Checklist kesiapan isolir. |
+| `GET /customers/status?account_ids=a,b` | `mikrotik_policy.read` | Status isolir per akun, maks 100 id unik. |
+
+- Pencocokan saran: nomor telepon lebih dulu, lalu nama persis (tanpa beda huruf besar/kecil, di-trim). Lebih dari satu akun
+  pada level pemenang menjadi `basis=ambiguous` (field `account_*` kosong, `candidates` >= 2) dan masuk `needs_decision`.
+  `suggested` = satu kecocokan phone/name. Secret yang belum dianalisis juga masuk `needs_decision`.
+- `pair-bulk`: kegagalan per item dilaporkan di `results[]` (HTTP 200) dengan `code` per baris
+  (`MIKROTIK_SECRET_NOT_FOUND`, `MIKROTIK_ACCOUNT_NOT_FOUND`, `MIKROTIK_ROUTER_NOT_FOUND`, `MIKROTIK_SECRET_ALREADY_PAIRED`,
+  `MIKROTIK_SECRET_NOT_PAIRABLE`, `MIKROTIK_INTERNAL`). Hanya body salah bentuk (items kosong/>200, uuid tidak valid,
+  `secret_id` berulang, field tidak dikenal) yang gagal seluruhnya dengan 422 `VALIDATION_ERROR`.
+- `analyze` pada id router yang bukan uuid menjawab 404 `MIKROTIK_ROUTER_NOT_FOUND`. Analisis kedua untuk router yang sama
+  saat yang pertama berjalan: 409 `MIKROTIK_ANALYZE_IN_PROGRESS` (tidak ada yang berubah).
+- `onboarding.complete` = router siap (`isolir_ready`) dan >= 1 secret terpasang dan tidak ada secret yang menunggu
+  `original_profile` dan >= 1 produk ditandai dan pengirim default receivable terisi. Secret dihitung hanya yang present.
+- `customers/status`: `isolation_state` = `isolated` (ada secret terpasang yang terisolir), `normal` (ada secret terpasang,
+  tidak ada yang terisolir), `none` (tanpa secret terpasang, walau `exempt`). `account_ids` kosong/bukan uuid/lebih dari 100: 422.
+- Peran `member` hanya memegang `mikrotik_task.read`, jadi di UI tenant ia hanya melihat dashboard tugas (read-only).
+- Kode error baru: `MIKROTIK_ANALYZE_IN_PROGRESS` (409).
 
 ### Batas yang diketahui
 

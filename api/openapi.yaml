@@ -10692,6 +10692,101 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/routers/{id}/secrets/analyze:
+    post:
+      summary: Analyze pairing suggestions of a router
+      operationId: analyzeMikrotikSecrets
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Menghitung ulang saran pairing untuk secret `present` yang belum dipasangkan pada satu router, lalu menyimpannya (menggantikan saran router itu secara atomik). Hanya membaca cache secret lokal dan direktori akun pelanggan; TIDAK login ke router, tetapi memakai rate limit probe yang sama dengan import karena berat. Pencocokan: nomor telepon lebih dulu, lalu nama persis (tanpa beda huruf besar/kecil, di-trim). Lebih dari satu akun pada level pemenang menghasilkan `basis=ambiguous`. Hasil dibaca lewat `GET /secrets` (objek `suggestion`, filter `suggestion`). Satu analisis per router pada satu waktu. Permission: `mikrotik_secret.import`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikAnalyzeResultEnvelope'}
+        '429':
+          description: "RATE_LIMITED (maksimal 20 panggilan per menit per organization; counter yang sama dengan import, /check, /setup/*)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "MIKROTIK_ROUTER_NOT_FOUND (termasuk id yang bukan uuid)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '409':
+          description: "MIKROTIK_ANALYZE_IN_PROGRESS (analisis lain untuk router ini sedang berjalan; tidak ada yang berubah, coba lagi setelah selesai)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/secrets/pair-bulk:
+    post:
+      summary: Pair many PPP secrets to customer accounts
+      operationId: pairMikrotikSecretsBulk
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Memasangkan 1 sampai 200 secret sekaligus; setiap item diproses berurutan lewat logika yang sama dengan `POST /secrets/{id}/pair`. Sengaja TIDAK atomik: item yang gagal dilaporkan di `results` (HTTP tetap 200) dan tidak menghentikan item lain; item yang berhasil sudah menulis audit `secret.paired` sendiri. `secret_id` tidak boleh berulang dalam satu permintaan. Hanya permintaan yang salah bentuk yang gagal seluruhnya (422). Kode per-item: MIKROTIK_SECRET_NOT_FOUND, MIKROTIK_ACCOUNT_NOT_FOUND, MIKROTIK_ROUTER_NOT_FOUND, MIKROTIK_SECRET_ALREADY_PAIRED, MIKROTIK_SECRET_NOT_PAIRABLE, MIKROTIK_INTERNAL (pesan tetap, tanpa detail internal). Memakai rate limit probe yang sama dengan import (satu permintaan = satu hitungan). Permission: `mikrotik_secret.pair`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MikrotikPairBulkRequest'}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikPairBulkEnvelope'}
+        '429':
+          description: "RATE_LIMITED (maksimal 20 panggilan per menit per organization; counter yang sama dengan import, /check, /setup/*)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR (body salah bentuk, field tidak dikenal, items kosong atau lebih dari 200, uuid tidak valid, atau secret_id berulang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
   /api/v1/app/mikrotik/secrets:
     get:
       summary: List cached PPP secrets
@@ -10700,7 +10795,7 @@ paths:
       - Mikrotik
       security:
       - BearerAuth: []
-      description: "Daftar secret dari cache lokal (tanpa menghubungi router), berpaginasi. Respons tidak pernah memuat password PPP. Permission: `mikrotik_secret.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      description: "Daftar secret dari cache lokal (tanpa menghubungi router), berpaginasi. Respons tidak pernah memuat password PPP. Tiap item memuat `suggestion` (null bila tidak ada saran). Permission: `mikrotik_secret.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
       parameters:
       - name: router_id
         in: query
@@ -10713,6 +10808,10 @@ paths:
         in: query
         description: "Pencarian teks."
         schema: {type: string, maxLength: 100}
+      - name: suggestion
+        in: query
+        description: "Hanya untuk secret `present` yang belum dipasangkan, berdasarkan hasil `POST /routers/{id}/secrets/analyze`. `suggested` = ada saran akun tunggal (basis phone/name) yang akunnya masih ada; `needs_decision` = sisanya (ambigu, tidak cocok, belum dianalisis, atau akun saran sudah hilang). Nilai lain 422 VALIDATION_ERROR."
+        schema: {type: string, enum: [suggested, needs_decision]}
       - name: page
         in: query
         schema: {type: integer}
@@ -11225,6 +11324,77 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/onboarding:
+    get:
+      summary: Isolir setup checklist
+      operationId: getMikrotikOnboarding
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Ringkasan kesiapan fitur isolir untuk organization aktif (satu panggilan, tanpa menghubungi router). `complete=true` hanya bila router_ready, `secrets_paired` >= 1, `secrets_needs_profile` = 0, `products_marked` >= 1, dan `sender_configured`. Secret dihitung hanya yang `present`. Permission: `mikrotik_router.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikOnboardingEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/customers/status:
+    get:
+      summary: Isolir status of several customers
+      operationId: getMikrotikCustomersStatus
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Status isolir ringkas untuk daftar akun pelanggan (satu query), dalam urutan permintaan setelah dedup (huruf kecil, pertama menang). `isolation_state`: `isolated` bila ada secret terpasangnya yang terisolir, `normal` bila ada secret terpasang dan tidak ada yang terisolir, `none` bila belum ada secret terpasang (walaupun `exempt`). `secrets` menghitung semua secret terpasang akun itu (present maupun tidak). Akun yang tidak dikenal organization ini tetap dikembalikan sebagai `none`/`exempt=false`/`secrets=0` (tidak ada pembeda 404). Permission: `mikrotik_policy.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: account_ids
+        in: query
+        required: true
+        description: "Daftar uuid dipisah koma; maksimal 100 id unik."
+        schema: {type: string}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikCustomerStatusListEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR (kosong, elemen kosong/bukan uuid, atau lebih dari 100 id unik)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
   /api/v1/app/mikrotik/tasks:
     get:
       summary: List isolation tasks
@@ -11233,7 +11403,7 @@ paths:
       - Mikrotik
       security:
       - BearerAuth: []
-      description: "Daftar tugas isolir/buka-isolir (outbox mesin isolir Fase 3), terbaru lebih dulu, berpaginasi. Router hanya berupa id dan nama (tanpa host/kredensial); `last_error` sudah disanitasi. Tugas dibuat oleh mesin (mode `MIKROTIK_ISOLATION_MODE=on`), bukan lewat API. Permission: `mikrotik_task.read` (saat ini hanya organization_owner). Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      description: "Daftar tugas isolir/buka-isolir (outbox mesin isolir Fase 3), terbaru lebih dulu, berpaginasi. Router hanya berupa id dan nama (tanpa host/kredensial); `last_error` sudah disanitasi. Tugas dibuat oleh mesin (mode `MIKROTIK_ISOLATION_MODE=on`), bukan lewat API. Permission: `mikrotik_task.read` (organization_owner dan member; member hanya baca). Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
       parameters:
       - name: status
         in: query
@@ -11312,7 +11482,7 @@ paths:
       - Mikrotik
       security:
       - BearerAuth: []
-      description: "Mengembalikan tugas berstatus `failed` ke `pending` (attempts direset ke 0, error dikosongkan, langsung jatuh tempo); worker mengambilnya pada siklus berikutnya (interval 2 menit). Respons memuat `router.id`, `secret.id` dan `secret.name` (bila secret masih ada); `router.name` dan `account` TIDAK diisi, klien memuat ulang daftar bila membutuhkannya. Audit: `task.retried`. Dibatasi per organization seperti rute mutasi mikrotik lain. Permission: `mikrotik_task.retry` (saat ini hanya organization_owner). Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      description: "Mengembalikan tugas berstatus `failed` ke `pending` (attempts direset ke 0, error dikosongkan, langsung jatuh tempo); worker mengambilnya pada siklus berikutnya (interval 2 menit). Respons memuat `router.id`, `secret.id` dan `secret.name` (bila secret masih ada); `router.name` dan `account` TIDAK diisi, klien memuat ulang daftar bila membutuhkannya. Audit: `task.retried`. Dibatasi per organization seperti rute mutasi mikrotik lain. Permission: `mikrotik_task.retry` (saat ini hanya organization_owner; member mendapat 403). Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
       parameters:
       - name: id
         in: path
@@ -16486,6 +16656,19 @@ components:
         paired_at: {type: string, format: date-time, nullable: true}
         last_seen_at: {type: string, format: date-time, nullable: true}
         comment: {type: string}
+        suggestion:
+          allOf:
+          - $ref: '#/components/schemas/MikrotikSecretSuggestion'
+          nullable: true
+          description: "Saran pairing hasil analisis; null bila tidak ada. Untuk `basis=ambiguous`, field account_* kosong dan `candidates` >= 2."
+    MikrotikSecretSuggestion:
+      type: object
+      properties:
+        account_id: {type: string, description: "Kosong bila ambiguous."}
+        account_name: {type: string}
+        account_phone: {type: string}
+        basis: {type: string, enum: [phone, name, ambiguous]}
+        candidates: {type: integer, description: "Jumlah akun kandidat pada level pencocokan pemenang."}
     MikrotikSecretEnvelope:
       type: object
       required: [success, message, data]
@@ -16515,6 +16698,84 @@ components:
         success: {type: boolean}
         message: {type: string}
         data: {$ref: '#/components/schemas/MikrotikImportResult'}
+    MikrotikAnalyzeResult:
+      type: object
+      properties:
+        total: {type: integer, description: "Secret present yang belum dipasangkan dan dianalisis."}
+        suggested: {type: integer, description: "Baris dengan satu kecocokan phone/name."}
+        needs_decision: {type: integer, description: "Baris ambigu ditambah baris tanpa kecocokan."}
+    MikrotikAnalyzeResultEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/MikrotikAnalyzeResult'}
+    MikrotikPairBulkRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: object
+            required: [secret_id, account_id]
+            properties:
+              secret_id: {type: string, format: uuid}
+              account_id: {type: string, format: uuid}
+    MikrotikPairBulkResult:
+      type: object
+      properties:
+        secret_id: {type: string}
+        ok: {type: boolean}
+        code: {type: string, description: "Kosong bila ok. Selain itu salah satu: MIKROTIK_SECRET_NOT_FOUND, MIKROTIK_ACCOUNT_NOT_FOUND, MIKROTIK_ROUTER_NOT_FOUND, MIKROTIK_SECRET_ALREADY_PAIRED, MIKROTIK_SECRET_NOT_PAIRABLE, MIKROTIK_INTERNAL."}
+        message: {type: string, description: "Teks tetap; kosong bila ok."}
+    MikrotikPairBulkResponse:
+      type: object
+      description: "Satu entri per item permintaan, dalam urutan yang sama."
+      properties:
+        results: {type: array, items: {$ref: '#/components/schemas/MikrotikPairBulkResult'}}
+    MikrotikPairBulkEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/MikrotikPairBulkResponse'}
+    MikrotikOnboardingStatus:
+      type: object
+      properties:
+        router_registered: {type: boolean, description: ">= 1 router tidak terhapus."}
+        router_ready: {type: boolean, description: ">= 1 router dengan isolir_ready."}
+        secrets_total: {type: integer, description: "Secret yang masih present di router."}
+        secrets_paired: {type: integer}
+        secrets_needs_profile: {type: integer, description: "Secret present yang menunggu original_profile."}
+        products_marked: {type: integer, description: "Produk dengan penanda isolir aktif."}
+        sender_configured: {type: boolean, description: "Pengirim default di pengaturan receivable terisi."}
+        complete: {type: boolean}
+    MikrotikOnboardingEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/MikrotikOnboardingStatus'}
+    MikrotikCustomerStatus:
+      type: object
+      properties:
+        account_id: {type: string, format: uuid}
+        isolation_state: {type: string, enum: [normal, isolated, none]}
+        exempt: {type: boolean}
+        secrets: {type: integer}
+    MikrotikCustomerStatusListEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: '#/components/schemas/MikrotikCustomerStatus'}}
     MikrotikPairSecretRequest:
       type: object
       required: [account_id]
