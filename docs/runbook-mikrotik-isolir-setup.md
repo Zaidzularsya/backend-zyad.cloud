@@ -339,6 +339,26 @@ MIKROTIK_LAB_WRITE=1 go test -tags mikrotiklab -run 'TestLabIsolirTransports|Tes
 go test -tags mikrotiklab -run 'TestLabIsolirLeftovers' -v ./internal/platform/mikrotik/
 ```
 
+### Hasil uji lab Fase 3 (1 Nov 2026)
+
+`TestLab_IsolateRestoreRoundTrip` (`internal/modules/mikrotik/service/isolation_lab_test.go`) dijalankan terhadap CHR
+RouterOS 7.8 di `192.168.56.106` dengan `MIKROTIK_LAB_WRITE=1`. Alamat `10.0.12.5` (WireGuard) tidak terjangkau dari
+WSL saat itu, jadi `MIKROTIK_LAB_HOST` di-override ke `192.168.56.106` dengan kredensial yang sama.
+
+| Transport | Hasil | Catatan |
+|---|---|---|
+| binary (API 8728), RouterOS 7.8 | **PASS** | isolate -> isolate (idempoten, `original_profile` tetap `default`) -> restore (profile kembali `default`); `/ppp/active` per nama = 0 baris tanpa galat |
+| rest, RouterOS 7.8 | SKIP | port 80 membalas 404 (REST tidak tersedia di lab); **belum terbukti** |
+| binary, RouterOS v6 | tidak diuji | tidak ada router v6 di lab |
+
+Persiapan dan pembersihan: profile `zyad-isolir` tidak ada di lab (pembersihan Fase 1 menghapusnya), jadi dibuat
+sementara (comment `zyad-tmp-roundtrip`) dan dihapus setelah tes; `TestLabIsolirLeftovers` melaporkan 0 objek
+`zyad-*` tersisa.
+
+Belum terbukti oleh uji ini: penghapusan sesi aktif yang benar-benar online (secret uji **disabled**, jadi tidak ada
+sesi; filter `?name=` dan format `.id` pada sesi nyata belum teruji), pelanggan tersambung ulang ke profile isolir dan
+dapat menjangkau halaman bayar (butuh CPE nyata dan Fase 4), RouterOS v6, dan transport REST.
+
 ## 12. Operasional: timeout HTTP dan nginx
 
 Satu siklus lab preview + apply + preview + apply + cleanup makan ±70 dtk karena klien binary login ulang per
@@ -368,7 +388,8 @@ Impor dan `original-profile` login ke router, dibatasi 20 panggilan per menit pe
 ## 14. Mengaktifkan mesin isolir (Fase 3)
 
 Referensi perilaku: `docs/reference-mikrotik.md` bagian "Mesin isolir (Fase 3)". **Status uji:** uji lab Fase 3
-(bagian 14.5) **belum pernah dijalankan**; RouterOS v6 dan transport REST belum terbukti. Jangan menyalakan `on` di
+(bagian 14.5) dijalankan 1 Nov 2026 dan **lulus hanya untuk transport binary di RouterOS 7.8** (CHR); RouterOS v6,
+transport REST, dan penghapusan sesi aktif yang benar-benar online belum terbukti. Jangan menyalakan `on` di
 produksi sebelum gerbang deploy di rencana Fase 3 terpenuhi (uji lab v6 dan v7, nginx `proxy_read_timeout` diterapkan,
 persetujuan eksplisit).
 
@@ -438,7 +459,7 @@ persetujuan eksplisit).
 
 `unknown` berarti kegagalan tak terduga yang sudah diulang otomatis; periksa log worker (`mikrotik: isolation task attempt failed`).
 
-### 14.5 Menjalankan uji lab (BELUM dijalankan untuk Fase 3)
+### 14.5 Menjalankan uji lab (dijalankan 1 Nov 2026, binary 7.8 lulus)
 
 Uji kontrak Executor ke router nyata. Ia membuat secret uji **disabled** `zyad-labtest-user` di profile `default`
 (dibersihkan di `t.Cleanup`), lalu `Isolate` -> `Isolate` lagi (idempoten) -> `Restore`, dan mengecek filter
@@ -457,7 +478,11 @@ go test -tags mikrotiklab -run TestLab_IsolateRestoreRoundTrip -v -count=1 ./int
 Opsional: `MIKROTIK_LAB_PORT` (port API binary, default 8728), `MIKROTIK_LAB_REST_PORT` (default 80),
 `MIKROTIK_LAB_ISOLIR_PROFILE` (default `zyad-isolir`). Tanpa env atau tanpa `MIKROTIK_LAB_WRITE=1` tes di-skip.
 Hanya jumlah baris dan nama profile yang dicatat, tidak pernah kredensial. Catat hasil (PASS/FAIL per transport dan
-versi RouterOS) di bagian 11 setelah dijalankan.
+versi RouterOS) di bagian 11 setelah dijalankan (hasil 1 Nov 2026 tercatat di sana).
+
+Catatan menjalankan ulang: profile isolir hasil setup Fase 1 sudah dihapus oleh pembersihan lab (bagian 11), jadi
+sebelum tes buat profile PPP `zyad-isolir` sementara (atau jalankan setup Fase 1) dan hapus lagi sesudahnya; pastikan
+yang dihapus hanya profile buatan sendiri.
 
 ### 14.6 Rollback
 

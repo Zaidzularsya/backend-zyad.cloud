@@ -180,8 +180,9 @@ Mesin ini mengisolir pelanggan PPPoE yang punya invoice lewat jatuh tempo dan me
 dikendalikan oleh `MIKROTIK_ISOLATION_MODE` (default `off`: tidak ada listener, tidak ada job, alur lama tidak berubah).
 
 **Status uji:** unit test dan integration test (Postgres privat) lulus. Uji lab terhadap router nyata
-(`TestLab_IsolateRestoreRoundTrip`, `internal/modules/mikrotik/service/isolation_lab_test.go`) **belum pernah dijalankan**
-karena kredensial lab tidak tersedia saat Task 10 dikerjakan; hasilnya tidak boleh dianggap lulus.
+(`TestLab_IsolateRestoreRoundTrip`, `internal/modules/mikrotik/service/isolation_lab_test.go`) dijalankan 1 Nov 2026:
+**PASS untuk transport binary di RouterOS 7.8** (isolate, isolate idempoten, restore); REST di-skip (tidak tersedia di
+lab) dan RouterOS v6 tidak diuji. Detail di `docs/runbook-mikrotik-isolir-setup.md` bagian 11.
 
 ### Aturan evaluasi
 
@@ -312,7 +313,8 @@ notifikasi kegagalan sampai itu diputuskan.
 
 ### Batas yang diketahui
 
-- RouterOS v6 dan transport REST **belum terbukti** untuk isolir/buka-isolir; uji lab Fase 3 belum dijalankan (lihat atas).
+- RouterOS v6 dan transport REST **belum terbukti** untuk isolir/buka-isolir; uji lab Fase 3 hanya lulus untuk binary di
+  RouterOS 7.8 dengan secret uji disabled (lihat atas).
 - Sesi lama benar-benar terputus dan sesi baru mendapat profile isolir: belum terbukti dengan CPE nyata.
 - Redirect HTTP bersifat best-effort (HTTPS tidak bisa dialihkan).
 - Pembuatan ulang secret dengan nama sama di router (setelah dihapus) tidak diwarisi pairing-nya; tetap catatan terbuka.
