@@ -83,6 +83,29 @@ func (r *accountRepository) FindBySource(ctx context.Context, scope coretenant.S
 	return out, err
 }
 
+func (r *accountRepository) ListAfterID(ctx context.Context, scope coretenant.Scope, afterID string, limit int) ([]domain.Account, error) {
+	out := []domain.Account{}
+	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT `+accountColumns+` FROM receivable_accounts a
+			WHERE a.organization_id = $1 AND a.deleted_at IS NULL AND ($2 = '' OR a.id > $2::uuid)
+			ORDER BY a.id LIMIT $3`, scope.OrganizationID(), afterID, clampLimit(limit))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			a, err := scanAccount(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, a)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 func (r *accountRepository) List(ctx context.Context, scope coretenant.Scope, search string, limit, offset int) ([]domain.Account, int64, error) {
 	out := []domain.Account{}
 	var total int64

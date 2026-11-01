@@ -146,3 +146,9 @@ var (
 	// ErrRouterNotIsolirReady: the router has no completed isolir setup.
 	ErrRouterNotIsolirReady = errors.New("router is not isolir ready")
 )
+
+// Gelombang 1 UI: usulan pairing otomatis.
+var (
+	// ErrAnalyzeInProgress: another analysis holds this router's lock; nothing was changed.
+	ErrAnalyzeInProgress = errors.New("another suggestion analysis is running for this router; try again when it finishes")
+)

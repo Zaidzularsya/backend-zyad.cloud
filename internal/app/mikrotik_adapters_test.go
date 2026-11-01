@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"sort"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -62,6 +63,23 @@ func (f *fakeAccounts) List(_ context.Context, s coretenant.Scope, q string, lim
 		out = append(out, a)
 	}
 	return out, int64(len(out)), nil
+}
+func (f *fakeAccounts) ListAfterID(_ context.Context, s coretenant.Scope, afterID string, limit int) ([]receivabledomain.Account, error) {
+	var ids []string
+	for id := range f.byOrg[s.OrganizationID()] {
+		if id > afterID {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	if len(ids) > limit {
+		ids = ids[:limit]
+	}
+	out := make([]receivabledomain.Account, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, f.byOrg[s.OrganizationID()][id])
+	}
+	return out, nil
 }
 func (f *fakeAccounts) EnsureForSource(_ context.Context, _ coretenant.Scope, in receivableservice.AccountInput, _ string) (receivabledomain.Account, error) {
 	f.ensured = append(f.ensured, in)
@@ -208,5 +226,21 @@ func TestBuildMikrotik_WiresAllHandlers(t *testing.T) {
 	})
 	if m.Router == nil || m.Setup == nil || m.Secret == nil || m.Policy == nil {
 		t.Fatalf("handlers must all be built: %+v", m)
+	}
+}
+
+func TestAccountDirectory_ListKeyset(t *testing.T) {
+	f := &fakeAccounts{byOrg: map[string]map[string]receivabledomain.Account{
+		"org-a": {"a1": {ID: "a1", Name: "A", Phone: "08"}, "a2": {ID: "a2", Name: "B"}, "a3": {ID: "a3", Name: "C"}},
+		"org-b": {"b1": {ID: "b1", Name: "Other"}},
+	}}
+	d := mikrotikAccountDirectory{accounts: f}
+	p1, err := d.List(context.Background(), mkScope("org-a"), "", 2)
+	if err != nil || len(p1) != 2 || p1[0].ID != "a1" || p1[0].Phone != "08" || p1[1].ID != "a2" {
+		t.Fatalf("page1: %+v %v", p1, err)
+	}
+	p2, err := d.List(context.Background(), mkScope("org-a"), "a2", 2)
+	if err != nil || len(p2) != 1 || p2[0].ID != "a3" {
+		t.Fatalf("page2: %+v %v", p2, err)
 	}
 }

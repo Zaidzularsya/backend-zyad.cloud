@@ -801,3 +801,33 @@ func TestInvoiceListDueBefore(t *testing.T) {
 		t.Fatalf("due before = %d %+v", total, ids)
 	}
 }
+
+func TestAccountListAfterID_KeysetAndIsolation(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	for i := 0; i < 3; i++ {
+		e.account(t, scope, "Keyset")
+	}
+	e.account(t, e.tenants.B.Scope, "OtherOrg")
+	seen := map[string]bool{}
+	prev, after := "", ""
+	for {
+		page, err := e.accounts.ListAfterID(e.ctx, scope, after, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page) == 0 {
+			break
+		}
+		for _, a := range page {
+			if a.ID <= prev || seen[a.ID] {
+				t.Fatalf("not strictly ascending/unique: %s after %s", a.ID, prev)
+			}
+			seen[a.ID], prev = true, a.ID
+		}
+		after = page[len(page)-1].ID
+	}
+	if len(seen) < 3 {
+		t.Fatalf("saw %d accounts", len(seen))
+	}
+}

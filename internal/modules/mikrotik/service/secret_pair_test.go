@@ -25,6 +25,10 @@ func (f fakeAccounts) Search(context.Context, coretenant.Scope, string, int) ([]
 	return nil, nil
 }
 
+func (f fakeAccounts) List(context.Context, coretenant.Scope, string, int) ([]AccountRef, error) {
+	return nil, nil
+}
+
 type fakeProvisioner struct {
 	calls   int
 	gotName string

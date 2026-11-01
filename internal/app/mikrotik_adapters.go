@@ -40,6 +40,7 @@ const (
 type mikrotikAccountSource interface {
 	Get(ctx context.Context, scope coretenant.Scope, id string) (receivabledomain.Account, error)
 	List(ctx context.Context, scope coretenant.Scope, search string, limit, offset int) ([]receivabledomain.Account, int64, error)
+	ListAfterID(ctx context.Context, scope coretenant.Scope, afterID string, limit int) ([]receivabledomain.Account, error)
 	EnsureForSource(ctx context.Context, scope coretenant.Scope, in receivableservice.AccountInput, userID string) (receivabledomain.Account, error)
 }
 
@@ -65,6 +66,19 @@ func (d mikrotikAccountDirectory) Search(ctx context.Context, scope coretenant.S
 		limit = mikrotikAccountSearchMax
 	}
 	list, _, err := d.accounts.List(ctx, scope, q, limit, 0)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]mikrotikservice.AccountRef, 0, len(list))
+	for _, a := range list {
+		out = append(out, accountRef(a))
+	}
+	return out, nil
+}
+
+// List pages accounts by id; receivable's clampLimit caps one page at 200.
+func (d mikrotikAccountDirectory) List(ctx context.Context, scope coretenant.Scope, afterID string, limit int) ([]mikrotikservice.AccountRef, error) {
+	list, err := d.accounts.ListAfterID(ctx, scope, afterID, limit)
 	if err != nil {
 		return nil, err
 	}

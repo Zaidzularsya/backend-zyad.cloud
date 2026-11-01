@@ -245,6 +245,10 @@ func (f fakeAccounts) List(context.Context, coretenant.Scope, string, int, int) 
 	return nil, 0, nil
 }
 
+func (f fakeAccounts) ListAfterID(context.Context, coretenant.Scope, string, int) ([]domain.Account, error) {
+	return nil, nil
+}
+
 type fakeCounter struct{ calls int }
 
 func (c *fakeCounter) Next(context.Context, coretenant.Scope, string, int) (int, error) {

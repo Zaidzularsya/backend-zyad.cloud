@@ -16,6 +16,8 @@ type AccountDirectory interface {
 	// Get returns mikrotik.ErrAccountNotFound when the account is not owned by the organization.
 	Get(ctx context.Context, scope coretenant.Scope, id string) (AccountRef, error)
 	Search(ctx context.Context, scope coretenant.Scope, q string, limit int) ([]AccountRef, error)
+	// List pages through all accounts ordered by id ascending (keyset; afterID "" = from the start).
+	List(ctx context.Context, scope coretenant.Scope, afterID string, limit int) ([]AccountRef, error)
 }
 
 // ContactProvisioner creates a CRM contact and account from a PPP secret.
