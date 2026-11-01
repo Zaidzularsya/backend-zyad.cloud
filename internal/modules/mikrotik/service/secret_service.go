@@ -199,6 +199,13 @@ type PairResult struct {
 func (s *SecretService) PairBulk(ctx context.Context, scope coretenant.Scope, items []PairItem, actor string) []PairResult {
 	out := make([]PairResult, 0, len(items))
 	for _, it := range items {
+		// Once the request is cancelled every further Pair would fail and log;
+		// report the rest as internal failures without touching the database.
+		if ctx.Err() != nil {
+			code, msg := pairErrorCode(ctx.Err())
+			out = append(out, PairResult{SecretID: it.SecretID, Code: code, Message: msg})
+			continue
+		}
 		_, err := s.Pair(ctx, scope, it.SecretID, it.AccountID, actor)
 		if err == nil {
 			out = append(out, PairResult{SecretID: it.SecretID, OK: true})

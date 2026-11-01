@@ -17,12 +17,17 @@ import (
 
 func TestNormalizePhone(t *testing.T) {
 	for in, want := range map[string]string{
-		"0812-3456-7890":    "6281234567890",
-		"+62 812 3456 7890": "6281234567890",
-		"6281234567890":     "6281234567890",
-		"":                  "",
-		"abc":               "",
-		"123":               "",
+		"0812-3456-7890":     "6281234567890",
+		"+62 812 3456 7890":  "6281234567890",
+		"6281234567890":      "6281234567890",
+		"":                   "",
+		"abc":                "",
+		"123":                "",
+		"81234567890":        "6281234567890",  // mobile without prefix
+		"0062 812 3456 789":  "628123456789",   // 00 international prefix
+		"1234567890123456":   "",               // 16 digits: over the 15 cap
+		"+62 0812":           "",               // 6 digits left: too short
+		"+62 0812 3456 7890": "62081234567890", // 62 kept as-is, no stripping of the inner 0
 	} {
 		if got := NormalizePhone(in); got != want {
 			t.Errorf("NormalizePhone(%q) = %q, want %q", in, got, want)

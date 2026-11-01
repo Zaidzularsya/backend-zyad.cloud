@@ -10,36 +10,23 @@ import (
 	"zyad.cloud/internal/modules/mikrotik"
 	"zyad.cloud/internal/modules/mikrotik/domain"
 	"zyad.cloud/internal/modules/mikrotik/repository"
+	"zyad.cloud/internal/shared/phone"
 )
 
 const (
 	suggestAccountPage = 500
 	suggestSecretPage  = 200
-	minPhoneDigits     = 8
 )
 
-// NormalizePhone keeps digits only and rewrites a leading 0 or 62 to 62.
-// It returns "" when fewer than 8 digits remain, so junk never matches.
+// NormalizePhone delegates to the shared Indonesian phone rule (the same one
+// behind normalize_phone_id in SQL) and returns "" for anything it rejects
+// (<8 or >15 digits), so junk never matches.
 func NormalizePhone(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if r >= '0' && r <= '9' {
-			b.WriteRune(r)
-		}
-	}
-	d := b.String()
-	if len(d) < minPhoneDigits {
+	n, ok := phone.NormalizeID(s)
+	if !ok {
 		return ""
 	}
-	switch {
-	case strings.HasPrefix(d, "62"):
-	case strings.HasPrefix(d, "0"):
-		d = "62" + d[1:]
-	}
-	if len(d) < minPhoneDigits {
-		return ""
-	}
-	return d
+	return n
 }
 
 func normalizeName(s string) string {

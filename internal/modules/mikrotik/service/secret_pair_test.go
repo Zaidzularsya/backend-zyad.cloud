@@ -348,3 +348,30 @@ type errAccounts struct {
 func (f errAccounts) Get(context.Context, coretenant.Scope, string) (AccountRef, error) {
 	return AccountRef{}, f.err
 }
+
+func TestPairBulk_CancelledContextSkipsRemainingRows(t *testing.T) {
+	e := newPairEnv(t)
+	id := e.importOne(t, "alice", "paket")
+	audits := len(e.rrepo.audits)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	res := e.svc.PairBulk(ctx, e.scope, []PairItem{{SecretID: id, AccountID: "acct-1"}, {SecretID: "x", AccountID: "acct-1"}}, testActor)
+	if len(res) != 2 {
+		t.Fatalf("results = %+v", res)
+	}
+	for i, r := range res {
+		if r.OK || r.Code != "MIKROTIK_INTERNAL" || r.Message != "internal error" {
+			t.Errorf("row%d = %+v", i, r)
+		}
+	}
+	if res[0].SecretID != id {
+		t.Errorf("secret id lost: %+v", res[0])
+	}
+	got, err := e.svc.repo.FindByID(context.Background(), e.scope, id)
+	if err != nil || got.AccountID != nil {
+		t.Fatalf("secret must stay unpaired: %+v %v", got, err)
+	}
+	if len(e.rrepo.audits) != audits {
+		t.Error("no audit expected")
+	}
+}
