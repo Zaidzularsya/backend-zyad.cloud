@@ -5,6 +5,7 @@ package repository_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -480,6 +481,10 @@ func TestAccountListContactFilter(t *testing.T) {
 	list, total, err := e.accounts.List(e.ctx, a, "", c1, 10, 0)
 	if err != nil || total != 1 || len(list) != 1 || list[0].ID != one.ID {
 		t.Fatalf("filter c1 = %+v total=%d err=%v", list, total, err)
+	}
+	// An uppercase UUID passes request validation and must match the same contact.
+	if list, total, err := e.accounts.List(e.ctx, a, "", strings.ToUpper(c1), 10, 0); err != nil || total != 1 || len(list) != 1 || list[0].ID != one.ID {
+		t.Fatalf("uppercase filter = %+v total=%d err=%v", list, total, err)
 	}
 	if _, total, _ := e.accounts.List(e.ctx, a, "", "", 10, 0); total != 3 {
 		t.Fatalf("no filter total = %d, want 3", total)

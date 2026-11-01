@@ -113,7 +113,7 @@ func (r *accountRepository) List(ctx context.Context, scope coretenant.Scope, se
 	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
 		const where = `a.organization_id = $1 AND a.deleted_at IS NULL
 			AND ($2 = '%%' OR a.name ILIKE $2 OR a.company_name ILIKE $2 OR a.email ILIKE $2)
-			AND ($3 = '' OR (a.source_type = 'crm_contact' AND a.source_id::text = $3))`
+			AND ($3::text = '' OR (a.source_type = 'crm_contact' AND a.source_id = NULLIF($3::text, '')::uuid))`
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM receivable_accounts a WHERE `+where, scope.OrganizationID(), pattern, contactID).Scan(&total); err != nil {
 			return err
 		}
