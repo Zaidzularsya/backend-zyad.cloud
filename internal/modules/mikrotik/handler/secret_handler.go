@@ -2,7 +2,9 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -25,6 +27,8 @@ type SecretService interface {
 	PairNewCustomer(ctx context.Context, scope coretenant.Scope, secretID, actor string) (domain.PPPSecret, error)
 	Unpair(ctx context.Context, scope coretenant.Scope, secretID, actor string) error
 	SetOriginalProfile(ctx context.Context, scope coretenant.Scope, secretID, profile, actor string) error
+	Analyze(ctx context.Context, scope coretenant.Scope, routerID, actor string) (service.AnalyzeResult, error)
+	PairBulk(ctx context.Context, scope coretenant.Scope, items []service.PairItem, actor string) []service.PairResult
 	SearchAccounts(ctx context.Context, scope coretenant.Scope, q string, limit int) ([]service.AccountRef, error)
 }
 
@@ -41,6 +45,8 @@ func NewSecretHandler(svc SecretService) *SecretHandler { return &SecretHandler{
 func (h *SecretHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker, probeLimit gin.HandlerFunc) {
 	limit := orPass(probeLimit)
 	router.POST("/routers/:id/secrets/import", limit, permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_secret.import"), h.Import)
+	router.POST("/routers/:id/secrets/analyze", limit, permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_secret.import"), h.Analyze)
+	router.POST("/secrets/pair-bulk", limit, permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_secret.pair"), h.PairBulk)
 	router.GET("/secrets", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_secret.read"), h.List)
 	router.POST("/secrets/:id/pair", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_secret.pair"), h.Pair)
 	router.POST("/secrets/:id/pair-new-customer", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_secret.pair"), h.PairNewCustomer)
@@ -70,6 +76,54 @@ func (h *SecretHandler) Import(c *gin.Context) {
 	corehttp.OK(c, "success", dto.ImportResultFromRepo(res))
 }
 
+// Analyze recomputes the pairing suggestions of one router. It reads only the
+// local cache and the account directory (no router login) but is heavy, so it
+// shares the import rate limit.
+func (h *SecretHandler) Analyze(c *gin.Context) {
+	scope, ok := scopeOrFail(c)
+	if !ok {
+		return
+	}
+	routerID := c.Param("id")
+	if !validUUID(routerID) {
+		failRouter(c, mikrotik.ErrRouterNotFound)
+		return
+	}
+	res, err := h.svc.Analyze(c.Request.Context(), scope, routerID, permissionmiddleware.UserID(c))
+	if err != nil {
+		failRouter(c, err)
+		return
+	}
+	corehttp.OK(c, "success", dto.AnalyzeResultFromService(res))
+}
+
+// PairBulk pairs up to 200 secrets. Row failures are reported in the 200
+// response; only a malformed request fails as a whole.
+func (h *SecretHandler) PairBulk(c *gin.Context) {
+	scope, ok := scopeOrFail(c)
+	if !ok {
+		return
+	}
+	var req dto.PairBulkRequest
+	if err := bindStrictJSON(c, &req); err != nil {
+		validationFail(c, err)
+		return
+	}
+	items := make([]service.PairItem, 0, len(req.Items))
+	seen := make(map[string]struct{}, len(req.Items))
+	for _, it := range req.Items {
+		key := strings.ToLower(it.SecretID)
+		if _, dup := seen[key]; dup {
+			validationFail(c, errors.New("duplicate secret_id in items"))
+			return
+		}
+		seen[key] = struct{}{}
+		items = append(items, service.PairItem{SecretID: it.SecretID, AccountID: it.AccountID})
+	}
+	results := h.svc.PairBulk(c.Request.Context(), scope, items, permissionmiddleware.UserID(c))
+	corehttp.OK(c, "success", dto.PairBulkFromService(results))
+}
+
 func (h *SecretHandler) List(c *gin.Context) {
 	scope, ok := scopeOrFail(c)
 	if !ok {
@@ -92,7 +146,7 @@ func (h *SecretHandler) List(c *gin.Context) {
 		perPage = domain.MaxRouterPageSize
 	}
 	secrets, total, err := h.svc.List(c.Request.Context(), scope,
-		repository.SecretFilter{RouterID: query.RouterID, Paired: query.Paired, Search: query.Q}, perPage, (page-1)*perPage)
+		repository.SecretFilter{RouterID: query.RouterID, Paired: query.Paired, Search: query.Q, Suggestion: query.Suggestion, NeedsOriginalProfile: query.NeedsOriginalProfile}, perPage, (page-1)*perPage)
 	if err != nil {
 		failRouter(c, err)
 		return

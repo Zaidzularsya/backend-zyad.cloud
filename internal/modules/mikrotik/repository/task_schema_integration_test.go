@@ -126,7 +126,7 @@ func TestTaskSchema_DownMigrations(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(e.ctx)
-	for _, f := range []string{"000174_mikrotik_isolation_permissions_notification", "000173_create_mikrotik_isolation_tasks"} {
+	for _, f := range []string{"000175_mikrotik_secret_suggestions", "000174_mikrotik_isolation_permissions_notification", "000173_create_mikrotik_isolation_tasks"} {
 		sql, err := os.ReadFile("../../../../migrations/" + f + ".down.sql")
 		if err != nil {
 			t.Fatal(err)

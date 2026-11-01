@@ -50,7 +50,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 		return
 	}
 	page, perPage := pageParams(q.Page, q.PerPage)
-	accounts, total, err := h.svc.List(c.Request.Context(), scope, q.Search, perPage, (page-1)*perPage)
+	accounts, total, err := h.svc.List(c.Request.Context(), scope, q.Search, q.ContactID, perPage, (page-1)*perPage)
 	if err != nil {
 		failReceivable(c, err)
 		return

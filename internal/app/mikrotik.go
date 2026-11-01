@@ -11,6 +11,7 @@ import (
 	mikrotikhandler "zyad.cloud/internal/modules/mikrotik/handler"
 	mikrotikrepo "zyad.cloud/internal/modules/mikrotik/repository"
 	mikrotikservice "zyad.cloud/internal/modules/mikrotik/service"
+	receivablerepo "zyad.cloud/internal/modules/receivable/repository"
 	receivableservice "zyad.cloud/internal/modules/receivable/service"
 	"zyad.cloud/internal/platform/database"
 )
@@ -22,6 +23,8 @@ type mikrotikModule struct {
 	Secret *mikrotikhandler.SecretHandler
 	Policy *mikrotikhandler.PolicyHandler
 	Task   *mikrotikhandler.TaskHandler
+	// Onboarding serves the setup checklist and per-customer isolir status.
+	Onboarding *mikrotikhandler.OnboardingHandler
 }
 
 // mikrotikBuild carries the cross-module services the adapters wrap.
@@ -77,10 +80,23 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 	return mikrotikModule{
 		Router: mikrotikhandler.NewRouterHandler(svc),
 		Setup:  mikrotikhandler.NewSetupHandler(setup),
-		Secret: mikrotikhandler.NewSecretHandler(secrets),
+		Secret: mikrotikhandler.NewSecretHandler(mikrotikSecretFacade{
+			SecretService: secrets,
+			SuggestionService: mikrotikservice.NewSuggestionService(svc, secretRepo, accounts,
+				mikrotikrepo.NewSuggestionRepository(db), mikrotikrepo.NewAdvisoryLocker(db)),
+		}),
 		Policy: mikrotikhandler.NewPolicyHandler(policy),
 		Task:   mikrotikhandler.NewTaskHandler(mikrotikservice.NewTaskService(mikrotikrepo.NewTaskRepository(db), secretRepo, repo)),
+		Onboarding: mikrotikhandler.NewOnboardingHandler(mikrotikservice.NewOnboardingService(
+			mikrotikrepo.NewOnboardingRepository(db), mikrotikSenderSettings{settings: receivablerepo.NewSettingsRepository(db)})),
 	}
+}
+
+// mikrotikSecretFacade presents the secret and suggestion services as the one
+// service interface the secret handler expects.
+type mikrotikSecretFacade struct {
+	*mikrotikservice.SecretService
+	*mikrotikservice.SuggestionService
 }
 
 // Every call that logs in to a tenant router (create, update, check, setup/*)
@@ -128,5 +144,8 @@ func registerMikrotikRoutes(protected *gin.RouterGroup, deps Dependencies) {
 	}
 	if deps.MikrotikTaskHandler != nil {
 		deps.MikrotikTaskHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
+	}
+	if deps.MikrotikOnboardingHandler != nil {
+		deps.MikrotikOnboardingHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
 	}
 }

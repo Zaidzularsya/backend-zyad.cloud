@@ -16,6 +16,8 @@ type AccountDirectory interface {
 	// Get returns mikrotik.ErrAccountNotFound when the account is not owned by the organization.
 	Get(ctx context.Context, scope coretenant.Scope, id string) (AccountRef, error)
 	Search(ctx context.Context, scope coretenant.Scope, q string, limit int) ([]AccountRef, error)
+	// List pages through all accounts ordered by id ascending (keyset; afterID "" = from the start).
+	List(ctx context.Context, scope coretenant.Scope, afterID string, limit int) ([]AccountRef, error)
 }
 
 // ContactProvisioner creates a CRM contact and account from a PPP secret.
@@ -94,3 +96,9 @@ type TenantAlerter interface {
 // TaskFailureEvent is the tenant-facing description of a failing task. Reason
 // is TaskFailure.Message (fixed, credential-free text).
 type TaskFailureEvent struct{ TaskID, RouterName, SecretName, Action, Reason string }
+
+// SenderSettings tells whether the organization has a default sender
+// configured for customer notifications (owned by the receivable module).
+type SenderSettings interface {
+	HasDefaultSender(ctx context.Context, scope coretenant.Scope) (bool, error)
+}

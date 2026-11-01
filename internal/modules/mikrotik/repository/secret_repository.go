@@ -39,7 +39,18 @@ type SecretFilter struct {
 	RouterID string
 	Paired   *bool
 	Search   string
+	// Suggestion narrows to SuggestionFilterSuggested or
+	// SuggestionFilterNeedsDecision (unpaired secrets only); "" means no filter.
+	Suggestion string
+	// NeedsOriginalProfile narrows on the needs_original_profile flag; nil means any.
+	NeedsOriginalProfile *bool
 }
+
+// Values of SecretFilter.Suggestion.
+const (
+	SuggestionFilterSuggested     = "suggested"
+	SuggestionFilterNeedsDecision = "needs_decision"
+)
 
 type SecretRepository interface {
 	// UpsertImported stores the rows in one transaction. It never touches
@@ -92,13 +103,26 @@ const secretColumns = `
 	present, last_seen_at, isolation_state, account_id, paired_by, paired_at, imported_at, created_at, updated_at
 `
 
-func scanSecret(row pgx.Row) (domain.PPPSecret, error) {
+// qualifiedSecretColumns prefixes secretColumns with the "s." alias used by List.
+var qualifiedSecretColumns = func() string {
+	cols := strings.Split(secretColumns, ",")
+	for i, c := range cols {
+		cols[i] = "s." + strings.TrimSpace(c)
+	}
+	return strings.Join(cols, ", ")
+}()
+
+func scanSecret(row pgx.Row) (domain.PPPSecret, error) { return scanSecretExtra(row) }
+
+// scanSecretExtra scans the secretColumns and then any extra destinations.
+func scanSecretExtra(row pgx.Row, extra ...any) (domain.PPPSecret, error) {
 	var s domain.PPPSecret
 	var original *string
-	err := row.Scan(
+	dest := append([]any{
 		&s.ID, &s.OrganizationID, &s.RouterID, &s.Name, &s.Profile, &original, &s.NeedsOriginalProfile, &s.Disabled, &s.Comment,
 		&s.Present, &s.LastSeenAt, &s.IsolationState, &s.AccountID, &s.PairedBy, &s.PairedAt, &s.ImportedAt, &s.CreatedAt, &s.UpdatedAt,
-	)
+	}, extra...)
+	err := row.Scan(dest...)
 	if err != nil {
 		return domain.PPPSecret{}, err
 	}
@@ -234,53 +258,111 @@ func (r *secretRepository) FindByID(ctx context.Context, scope coretenant.Scope,
 // likeEscaper escapes LIKE wildcards so a search term is matched literally.
 var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
+// listFrom joins the computed suggestion and its account (name/phone for the
+// UI), plus the paired account (a2) for its display name. Every join is constrained to the same organization. A soft-deleted
+// account is not joined, so its suggestion is treated as absent.
+const listFrom = `mikrotik_ppp_secrets s
+	LEFT JOIN mikrotik_secret_suggestions sg ON sg.organization_id = s.organization_id AND sg.secret_id = s.id
+	LEFT JOIN receivable_accounts a ON a.organization_id = sg.organization_id AND a.id = sg.account_id AND a.deleted_at IS NULL
+	LEFT JOIN receivable_accounts a2 ON a2.organization_id = s.organization_id AND a2.id = s.account_id AND a2.deleted_at IS NULL`
+
+// liveRouterOnly keeps secrets whose router is not soft-deleted.
+const liveRouterOnly = `EXISTS (SELECT 1 FROM mikrotik_routers lr WHERE lr.organization_id = s.organization_id AND lr.id = s.router_id AND lr.deleted_at IS NULL)`
+
+// usableSuggestion: a phone/name hint whose account still exists.
+const usableSuggestion = `(sg.basis IN ('phone', 'name') AND a.id IS NOT NULL)`
+
 func (r *secretRepository) List(ctx context.Context, scope coretenant.Scope, f SecretFilter, limit, offset int) ([]domain.PPPSecret, int64, error) {
 	limit = clampLimit(limit)
 	if offset < 0 {
 		offset = 0
 	}
-	where := []string{"organization_id = $1"}
+	// Secrets of a soft-deleted router are hidden everywhere (the isolation
+	// engine ignores them too); SoftDelete leaves the secret rows in place.
+	where := []string{"s.organization_id = $1", liveRouterOnly}
 	args := []interface{}{scope.OrganizationID()}
 	if f.RouterID != "" {
 		args = append(args, f.RouterID)
-		where = append(where, fmt.Sprintf("router_id = $%d", len(args)))
+		where = append(where, fmt.Sprintf("s.router_id = $%d", len(args)))
 	}
 	if f.Paired != nil {
 		if *f.Paired {
-			where = append(where, "account_id IS NOT NULL")
+			where = append(where, "s.account_id IS NOT NULL")
 		} else {
-			where = append(where, "account_id IS NULL")
+			where = append(where, "s.account_id IS NULL")
 		}
+	}
+	if f.NeedsOriginalProfile != nil {
+		if *f.NeedsOriginalProfile {
+			where = append(where, "s.needs_original_profile = true")
+		} else {
+			where = append(where, "s.needs_original_profile = false")
+		}
+	}
+	switch f.Suggestion {
+	case SuggestionFilterSuggested:
+		where = append(where, "s.account_id IS NULL", "s.present", usableSuggestion)
+	case SuggestionFilterNeedsDecision:
+		where = append(where, "s.account_id IS NULL", "s.present", "NOT "+usableSuggestion)
 	}
 	if q := strings.TrimSpace(f.Search); q != "" {
 		args = append(args, "%"+likeEscaper.Replace(q)+"%")
-		where = append(where, fmt.Sprintf(`(name ILIKE $%d OR comment ILIKE $%d)`, len(args), len(args)))
+		where = append(where, fmt.Sprintf(`(s.name ILIKE $%d OR s.comment ILIKE $%d)`, len(args), len(args)))
 	}
 	cond := strings.Join(where, " AND ")
 
-	items := []domain.PPPSecret{}
+	var items []domain.PPPSecret
 	var total int64
 	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM mikrotik_ppp_secrets WHERE `+cond, args...).Scan(&total); err != nil {
-			return err
-		}
-		pageArgs := append(append([]interface{}{}, args...), limit, offset)
-		rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT `+secretColumns+` FROM mikrotik_ppp_secrets WHERE `+cond+`
-			ORDER BY lower(name), id LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2), pageArgs...)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			item, scanErr := scanSecret(rows)
-			if scanErr != nil {
-				return scanErr
-			}
-			items = append(items, item)
-		}
-		return rows.Err()
+		var err error
+		items, total, err = listSecretsTx(ctx, tx, cond, args, limit, offset)
+		return err
 	})
 	if err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
+// listSecretsTx runs the count and page queries of List inside the caller's
+// transaction (kept separate so tests can run the exact SQL in a rolled-back tx).
+func listSecretsTx(ctx context.Context, tx pgx.Tx, cond string, args []interface{}, limit, offset int) ([]domain.PPPSecret, int64, error) {
+	items := []domain.PPPSecret{}
+	var total int64
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM `+listFrom+` WHERE `+cond, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	pageArgs := append(append([]interface{}{}, args...), limit, offset)
+	rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT `+qualifiedSecretColumns+`,
+			sg.basis, sg.candidates, a.id, a.name, a.phone, a2.name
+		FROM `+listFrom+` WHERE `+cond+`
+		ORDER BY lower(s.name), s.id LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2), pageArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var basis, accID, accName, accPhone, paidName *string
+		var cands *int32
+		item, scanErr := scanSecretExtra(rows, &basis, &cands, &accID, &accName, &accPhone, &paidName)
+		if scanErr != nil {
+			return nil, 0, scanErr
+		}
+		item.AccountName = derefString(paidName)
+		// Hints on paired or no-longer-present secrets are stale rows; never expose them.
+		if basis != nil && cands != nil && item.AccountID == nil && item.Present {
+			sg := &domain.SecretSuggestion{Basis: *basis, Candidates: int(*cands)}
+			switch {
+			case *basis == SuggestionBasisAmbiguous:
+				item.Suggestion = sg
+			case accID != nil:
+				sg.AccountID, sg.AccountName, sg.AccountPhone = *accID, derefString(accName), derefString(accPhone)
+				item.Suggestion = sg
+			}
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
 		return nil, 0, err
 	}
 	return items, total, nil
@@ -317,7 +399,7 @@ func (r *secretRepository) Pair(ctx context.Context, scope coretenant.Scope, sec
 			return err
 		}
 		if tag.RowsAffected() > 0 {
-			return nil
+			return dropSuggestion(ctx, tx, scope.OrganizationID(), secretID)
 		}
 		// Distinguish why nothing matched, in the same transaction.
 		var paired *string
@@ -340,6 +422,14 @@ func (r *secretRepository) Pair(ctx context.Context, scope coretenant.Scope, sec
 	return err
 }
 
+// dropSuggestion removes the computed hint of a secret in the caller's
+// transaction. After a pair/unpair the hint is stale and would otherwise
+// resurface and be offered (even pre-selected) for the wrong customer.
+func dropSuggestion(ctx context.Context, tx pgx.Tx, orgID, secretID string) error {
+	_, err := tx.Exec(ctx, `DELETE FROM mikrotik_secret_suggestions WHERE organization_id = $1 AND secret_id = $2`, orgID, secretID)
+	return err
+}
+
 func (r *secretRepository) Unpair(ctx context.Context, scope coretenant.Scope, secretID string) error {
 	return withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, `
@@ -353,7 +443,7 @@ func (r *secretRepository) Unpair(ctx context.Context, scope coretenant.Scope, s
 			return err
 		}
 		if tag.RowsAffected() > 0 {
-			return nil
+			return dropSuggestion(ctx, tx, scope.OrganizationID(), secretID)
 		}
 		var state string
 		err = tx.QueryRow(ctx, `SELECT isolation_state FROM mikrotik_ppp_secrets WHERE id = $1 AND organization_id = $2`,

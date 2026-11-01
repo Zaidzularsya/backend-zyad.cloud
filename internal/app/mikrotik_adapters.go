@@ -39,7 +39,8 @@ const (
 
 type mikrotikAccountSource interface {
 	Get(ctx context.Context, scope coretenant.Scope, id string) (receivabledomain.Account, error)
-	List(ctx context.Context, scope coretenant.Scope, search string, limit, offset int) ([]receivabledomain.Account, int64, error)
+	List(ctx context.Context, scope coretenant.Scope, search, contactID string, limit, offset int) ([]receivabledomain.Account, int64, error)
+	ListAfterID(ctx context.Context, scope coretenant.Scope, afterID string, limit int) ([]receivabledomain.Account, error)
 	EnsureForSource(ctx context.Context, scope coretenant.Scope, in receivableservice.AccountInput, userID string) (receivabledomain.Account, error)
 }
 
@@ -64,7 +65,20 @@ func (d mikrotikAccountDirectory) Search(ctx context.Context, scope coretenant.S
 	if limit <= 0 || limit > mikrotikAccountSearchMax {
 		limit = mikrotikAccountSearchMax
 	}
-	list, _, err := d.accounts.List(ctx, scope, q, limit, 0)
+	list, _, err := d.accounts.List(ctx, scope, q, "", limit, 0)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]mikrotikservice.AccountRef, 0, len(list))
+	for _, a := range list {
+		out = append(out, accountRef(a))
+	}
+	return out, nil
+}
+
+// List pages accounts by id; receivable's clampLimit caps one page at 200.
+func (d mikrotikAccountDirectory) List(ctx context.Context, scope coretenant.Scope, afterID string, limit int) ([]mikrotikservice.AccountRef, error) {
+	list, err := d.accounts.ListAfterID(ctx, scope, afterID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -253,4 +267,18 @@ func (r mikrotikReceivableReader) ForProduct(ctx context.Context, scope coretena
 			scope.OrganizationID(), productID, today, from).Scan(&u.OverdueInvoices)
 	})
 	return u, err
+}
+
+// ---- SenderSettings ----
+
+// mikrotikSenderSettings answers whether the receivable module has a default
+// sender configured (the same value the isolir notifier uses to send).
+type mikrotikSenderSettings struct{ settings mikrotikNotifSettings }
+
+func (a mikrotikSenderSettings) HasDefaultSender(ctx context.Context, scope coretenant.Scope) (bool, error) {
+	s, err := a.settings.Get(ctx, scope)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(s.DefaultSenderUserID) != "", nil
 }

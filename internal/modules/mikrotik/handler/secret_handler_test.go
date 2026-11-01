@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +40,22 @@ type fakeSecretService struct {
 	searchQ      string
 	searchLimit  int
 	calls        int
+
+	analyzeRouter string
+	analyzeRes    service.AnalyzeResult
+	bulkItems     []service.PairItem
+	bulkResults   []service.PairResult
+}
+
+func (f *fakeSecretService) Analyze(_ context.Context, _ coretenant.Scope, routerID, _ string) (service.AnalyzeResult, error) {
+	f.calls++
+	f.analyzeRouter = routerID
+	return f.analyzeRes, f.err
+}
+func (f *fakeSecretService) PairBulk(_ context.Context, _ coretenant.Scope, items []service.PairItem, _ string) []service.PairResult {
+	f.calls++
+	f.bulkItems = items
+	return f.bulkResults
 }
 
 func (f *fakeSecretService) Import(_ context.Context, _ coretenant.Scope, routerID, _ string) (repository.ImportResult, error) {
@@ -272,6 +289,8 @@ func TestSecretRoutesRequirePermissions(t *testing.T) {
 		{http.MethodPost, "/app/mikrotik/secrets/:id/unpair", "mikrotik_secret.unpair"},
 		{http.MethodPut, "/app/mikrotik/secrets/:id/original-profile", "mikrotik_secret.pair"},
 		{http.MethodGet, "/app/mikrotik/accounts/search", "mikrotik_secret.read"},
+		{http.MethodPost, "/app/mikrotik/routers/:id/secrets/analyze", "mikrotik_secret.import"},
+		{http.MethodPost, "/app/mikrotik/secrets/pair-bulk", "mikrotik_secret.pair"},
 	}
 	assertRoutesRequirePermissions(t, routes, func(g *gin.RouterGroup, p *recordingChecker) {
 		NewSecretHandler(&fakeSecretService{}).RegisterRoutes(g, p, nil)
@@ -358,5 +377,189 @@ func assertRoutesRequirePermissions(t *testing.T, routes []struct{ method, path,
 		if len(checker.asked) == 0 || checker.asked[0] != rt.perm {
 			t.Errorf("%s %s: asked %v, want %s", rt.method, rt.path, checker.asked, rt.perm)
 		}
+	}
+}
+
+func TestAnalyzeRoute_RequiresImportPermission(t *testing.T) {
+	checker := &recordingChecker{}
+	r := newTestRouter(t)
+	r.Use(func(c *gin.Context) { permissionmiddleware.SetUserID(c, "user-1") })
+	svc := &fakeSecretService{}
+	NewSecretHandler(svc).RegisterRoutes(r.Group("/app/mikrotik"), checker, nil)
+	w := performJSON(r, http.MethodPost, "/app/mikrotik/routers/"+testRouterID+"/secrets/analyze", ``)
+	if w.Code != http.StatusForbidden || svc.calls != 0 {
+		t.Fatalf("status = %d calls = %d", w.Code, svc.calls)
+	}
+	if len(checker.asked) == 0 || checker.asked[0] != "mikrotik_secret.import" {
+		t.Fatalf("asked %v", checker.asked)
+	}
+}
+
+func TestAnalyzeRoute_ReturnsCountsAndMapsInProgress(t *testing.T) {
+	url := "/app/mikrotik/routers/" + testRouterID + "/secrets/analyze"
+	svc := &fakeSecretService{analyzeRes: service.AnalyzeResult{Total: 5, Suggested: 3, NeedsDecision: 2}}
+	w := performJSON(secretRouter(t, svc), http.MethodPost, url, ``)
+	if w.Code != http.StatusOK || svc.analyzeRouter != testRouterID {
+		t.Fatalf("status=%d router=%q body=%s", w.Code, svc.analyzeRouter, w.Body)
+	}
+	var body struct{ Data map[string]int }
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Data["total"] != 5 || body.Data["suggested"] != 3 || body.Data["needs_decision"] != 2 {
+		t.Fatalf("data = %v", body.Data)
+	}
+	w = performJSON(secretRouter(t, &fakeSecretService{err: mikrotik.ErrAnalyzeInProgress}), http.MethodPost, url, ``)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "MIKROTIK_ANALYZE_IN_PROGRESS") {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body)
+	}
+	if w := performJSON(secretRouter(t, &fakeSecretService{}), http.MethodPost, "/app/mikrotik/routers/x/secrets/analyze", ``); w.Code != http.StatusNotFound {
+		t.Fatalf("malformed id status = %d", w.Code)
+	}
+}
+
+func TestListSecrets_SuggestionFilter(t *testing.T) {
+	svc := &fakeSecretService{}
+	r := secretRouter(t, svc)
+	for _, v := range []string{"suggested", "needs_decision"} {
+		w := performJSON(r, http.MethodGet, "/app/mikrotik/secrets?paired=false&suggestion="+v, "")
+		if w.Code != http.StatusOK || svc.listFilter.Suggestion != v || svc.listFilter.Paired == nil || *svc.listFilter.Paired {
+			t.Fatalf("%s: status=%d filter=%+v", v, w.Code, svc.listFilter)
+		}
+	}
+	calls := svc.calls
+	if w := performJSON(r, http.MethodGet, "/app/mikrotik/secrets?suggestion=bogus", ""); w.Code != http.StatusUnprocessableEntity || svc.calls != calls {
+		t.Fatalf("bogus: status=%d", w.Code)
+	}
+}
+
+func TestListSecrets_NeedsOriginalProfileFilter(t *testing.T) {
+	svc := &fakeSecretService{}
+	r := secretRouter(t, svc)
+	for _, v := range []bool{true, false} {
+		w := performJSON(r, http.MethodGet, "/app/mikrotik/secrets?paired=false&needs_original_profile="+strconv.FormatBool(v), "")
+		if w.Code != http.StatusOK || svc.listFilter.NeedsOriginalProfile == nil || *svc.listFilter.NeedsOriginalProfile != v {
+			t.Fatalf("%v: status=%d filter=%+v", v, w.Code, svc.listFilter)
+		}
+	}
+	if w := performJSON(r, http.MethodGet, "/app/mikrotik/secrets", ""); w.Code != http.StatusOK || svc.listFilter.NeedsOriginalProfile != nil {
+		t.Fatalf("absent param must stay nil: status=%d filter=%+v", w.Code, svc.listFilter)
+	}
+	calls := svc.calls
+	if w := performJSON(r, http.MethodGet, "/app/mikrotik/secrets?needs_original_profile=banana", ""); w.Code != http.StatusUnprocessableEntity || svc.calls != calls {
+		t.Fatalf("banana: status=%d", w.Code)
+	}
+}
+
+func TestListSecrets_ResponseCarriesAccountName(t *testing.T) {
+	paired := sampleSecret()
+	paired.AccountName = "Budi"
+	unpaired := sampleSecret()
+	unpaired.AccountID = nil
+	b, _ := json.Marshal(dto.SecretListFromDomain([]domain.PPPSecret{paired, unpaired}))
+	var out []map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out[0]["account_name"] != "Budi" {
+		t.Fatalf("paired account_name = %v", out[0]["account_name"])
+	}
+	if v, ok := out[1]["account_name"]; !ok || v != "" {
+		t.Fatalf("unpaired account_name = %v (present=%v)", v, ok)
+	}
+}
+
+func TestListSecrets_ResponseCarriesSuggestion(t *testing.T) {
+	sec := sampleSecret()
+	sec.AccountID = nil
+	b, _ := json.Marshal(dto.SecretListFromDomain([]domain.PPPSecret{
+		sec,
+		func() domain.PPPSecret {
+			x := sec
+			x.Suggestion = &domain.SecretSuggestion{AccountID: testAccountID, AccountName: "Alice", AccountPhone: "0812", Basis: "phone", Candidates: 1}
+			return x
+		}(),
+	}))
+	var out []map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := out[0]["suggestion"]; !ok || v != nil {
+		t.Fatalf("want explicit null suggestion, got %v (present=%v)", v, ok)
+	}
+	sg, _ := out[1]["suggestion"].(map[string]any)
+	if sg["account_id"] != testAccountID || sg["account_name"] != "Alice" || sg["account_phone"] != "0812" || sg["basis"] != "phone" || sg["candidates"].(float64) != 1 {
+		t.Fatalf("suggestion = %v", sg)
+	}
+}
+
+const bulkURL = "/app/mikrotik/secrets/pair-bulk"
+
+func TestPairBulk_PartialFailureReportsPerRow(t *testing.T) {
+	const second = "66666666-6666-6666-6666-666666666666"
+	svc := &fakeSecretService{bulkResults: []service.PairResult{
+		{SecretID: testSecretID, OK: false, Code: "MIKROTIK_SECRET_ALREADY_PAIRED", Message: "ppp secret is already paired to a customer"},
+		{SecretID: second, OK: true},
+	}}
+	body := `{"items":[{"secret_id":"` + testSecretID + `","account_id":"` + testAccountID + `"},{"secret_id":"` + second + `","account_id":"` + testAccountID + `"}]}`
+	w := performJSON(secretRouter(t, svc), http.MethodPost, bulkURL, body)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", w.Code, w.Body)
+	}
+	var out struct {
+		Data struct {
+			Results []struct {
+				SecretID string `json:"secret_id"`
+				OK       bool   `json:"ok"`
+				Code     string `json:"code"`
+				Message  string `json:"message"`
+			} `json:"results"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	r := out.Data.Results
+	if len(r) != 2 || r[0].SecretID != testSecretID || r[0].OK || r[0].Code != "MIKROTIK_SECRET_ALREADY_PAIRED" || !r[1].OK || r[1].SecretID != second {
+		t.Fatalf("results = %+v", r)
+	}
+	if len(svc.bulkItems) != 2 || svc.bulkItems[0].AccountID != testAccountID {
+		t.Fatalf("items = %+v", svc.bulkItems)
+	}
+}
+
+func TestPairBulk_RejectsDuplicateSecretID(t *testing.T) {
+	svc := &fakeSecretService{}
+	item := `{"secret_id":"` + testSecretID + `","account_id":"` + testAccountID + `"}`
+	w := performJSON(secretRouter(t, svc), http.MethodPost, bulkURL, `{"items":[`+item+`,`+item+`]}`)
+	if w.Code != http.StatusUnprocessableEntity || svc.calls != 0 {
+		t.Fatalf("status = %d calls = %d body = %s", w.Code, svc.calls, w.Body)
+	}
+}
+
+func TestPairBulk_RejectsEmptyAndOver200(t *testing.T) {
+	var many []string
+	for i := 0; i < 201; i++ {
+		many = append(many, fmt.Sprintf(`{"secret_id":"00000000-0000-4000-8000-%012d","account_id":"%s"}`, i, testAccountID))
+	}
+	for name, body := range map[string]string{
+		"empty items":  `{"items":[]}`,
+		"missing":      `{}`,
+		"over 200":     `{"items":[` + strings.Join(many, ",") + `]}`,
+		"bad uuid":     `{"items":[{"secret_id":"x","account_id":"` + testAccountID + `"}]}`,
+		"unknown key":  `{"items":[{"secret_id":"` + testSecretID + `","account_id":"` + testAccountID + `","x":1}]}`,
+		"missing acct": `{"items":[{"secret_id":"` + testSecretID + `"}]}`,
+	} {
+		svc := &fakeSecretService{}
+		w := performJSON(secretRouter(t, svc), http.MethodPost, bulkURL, body)
+		if w.Code != http.StatusUnprocessableEntity || svc.calls != 0 {
+			t.Errorf("%s: status = %d calls = %d", name, w.Code, svc.calls)
+		}
+	}
+	// Exactly 200 is accepted.
+	svc := &fakeSecretService{}
+	w := performJSON(secretRouter(t, svc), http.MethodPost, bulkURL, `{"items":[`+strings.Join(many[:200], ",")+`]}`)
+	if w.Code != http.StatusOK || len(svc.bulkItems) != 200 {
+		t.Fatalf("200 items: status = %d", w.Code)
 	}
 }

@@ -241,8 +241,12 @@ func (f fakeAccounts) FindByID(_ context.Context, _ coretenant.Scope, id string)
 func (f fakeAccounts) FindBySource(context.Context, coretenant.Scope, string, string) (domain.Account, error) {
 	return domain.Account{}, pgx.ErrNoRows
 }
-func (f fakeAccounts) List(context.Context, coretenant.Scope, string, int, int) ([]domain.Account, int64, error) {
+func (f fakeAccounts) List(context.Context, coretenant.Scope, string, string, int, int) ([]domain.Account, int64, error) {
 	return nil, 0, nil
+}
+
+func (f fakeAccounts) ListAfterID(context.Context, coretenant.Scope, string, int) ([]domain.Account, error) {
+	return nil, nil
 }
 
 type fakeCounter struct{ calls int }
