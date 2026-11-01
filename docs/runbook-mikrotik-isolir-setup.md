@@ -312,8 +312,8 @@ Status: **belum terbukti** dengan user berhak minimum (membuat user/grup di rout
    Selama REST belum terbukti, backend menolak setup `apply`/`cleanup` untuk router `api_type=rest`
    (422 `MIKROTIK_SETUP_REST_UNVERIFIED`) kecuali env `MIKROTIK_SETUP_ALLOW_REST=true`; `preview` tetap jalan.
 10. User API berhak minimum cukup untuk penyiapan, isolir, restore, dan pembersihan.
-11. Hapus profile isolir yang masih dipakai secret.
-12. Penyiapan idempoten dengan kondisi "sebagian ada" (bagian 5).
+11. Hapus profile isolir yang masih dipakai secret. **Terbukti di lab 2 Nov 2026** (RouterOS 7.8, binary): RouterOS mengizinkan penghapusan dan secret menunjuk `*D`; penjaga `Cleanup` aplikasi menolak lebih dulu (bagian 11).
+12. Penyiapan idempoten dengan kondisi "sebagian ada" (bagian 5). **Terbukti di lab 2 Nov 2026** (RouterOS 7.8, binary), 7 skenario kerusakan (bagian 11).
 13. Router dengan FastTrack aktif: RouterOS menambah aturan dinamis "special dummy rule" di puncak daftar filter;
     penyiapan mengabaikan baris `dynamic=true` saat memilih `{FIRST_FORWARD_ID}` dan saat memeriksa urutan. Hanya diuji
     dengan fake client; **belum terbukti di router asli** (FastTrack disabled di lab).
@@ -358,6 +358,30 @@ sementara (comment `zyad-tmp-roundtrip`) dan dihapus setelah tes; `TestLabIsolir
 Belum terbukti oleh uji ini: penghapusan sesi aktif yang benar-benar online (secret uji **disabled**, jadi tidak ada
 sesi; filter `?name=` dan format `.id` pada sesi nyata belum teruji), pelanggan tersambung ulang ke profile isolir dan
 dapat menjangkau halaman bayar (butuh CPE nyata dan Fase 4), RouterOS v6, dan transport REST.
+
+### Hasil uji lab butir 11 dan 12 (2 Nov 2026)
+
+Dijalankan terhadap CHR RouterOS 7.8 di `192.168.56.106` (binary API 8728; kredensial dari `~/.mikrotik-lab.env`,
+`MIKROTIK_LAB_WRITE=1`, backup `pre-zyad-isolir*` sudah ada). Hanya objek `zyad-*` yang dibuat dan dihapus;
+`TestLabIsolirLeftovers` melaporkan 0 objek tersisa sesudahnya. Kode uji: `service/setup_partial_lab_test.go` dan
+`platform/mikrotik/section10_lab_test.go`.
+
+| Uji | Hasil | Catatan |
+|---|---|---|
+| `TestLabSetupPartialRepair` (butir 12) | **PASS**, 7 skenario | Setelah setup penuh, satu bagian dihapus dari router: entri allowlist, aturan forward ke-2 (dns tcp), ke-1 (dns udp), terakhir (drop), keempat aturan forward sekaligus, profile isolir, pool+profile. Di tiap skenario preview merencanakan tepat `create` untuk objek yang hilang (sisanya `exists`, tanpa `update`), apply menulis tepat sejumlah itu, urutan 4 aturan forward kembali identik di puncak daftar forward statis (`accept udp 53`, `accept tcp 53`, `accept allowlist`, `drop`), preview berikutnya semua `exists`, dan `isolir_ready` tetap. |
+| `TestLabSetupCleanupRefusesWhileProfileInUse` (butir 11, sisi aplikasi) | **PASS** | Dengan secret uji (disabled, `zyad-labtest-inuse`) memakai profile isolir, `Cleanup` mengembalikan `SetupConflictError` ("1 PPP secret(s) still use the isolir profile; restore them first"), tidak menghapus satu objek pun, dan `isolir_ready` tetap true. Setelah secret dihapus, `Cleanup` berhasil dan 0 objek `zyad-*` tersisa. |
+| `TestLabSection10_ProbeProfileInUseDelete` (butir 11, sisi RouterOS) | probe | RouterOS 7.8 **mengizinkan** menghapus profile yang dipakai secret; secret lalu menampilkan `profile="*D"` (referensi menggantung). Artinya penjaga di `Cleanup` adalah satu-satunya pencegah; tanpa itu pelanggan terisolir kehilangan profile-nya diam-diam. |
+
+Temuan turunan (belum ditangani dan **belum diuji**): secret dengan referensi menggantung (`profile` berbentuk
+`*<hex>`) yang masuk lewat impor tersimpan apa adanya sebagai `profile`; saat dipasangkan, `Pair` mengisi
+`original_profile` dari profile saat ini bila kosong (kode `secret_repository.go`), sehingga `original_profile` bisa berisi
+`*D`. Bagaimana RouterOS menanggapi `Set profile=*D` saat restore belum dicoba. Perlu diputuskan apakah impor menandai
+secret itu `needs_original_profile`.
+
+Tidak dijalankan karena dilarang di router lab (lihat bagian 9 dan catatan `/ip service`): butir 9 TLS 8729 (`api-ssl`
+tidak punya sertifikat, handshake ditolak) dan butir 10 (user berhak minimum, perlu membuat user/grup). Butir 1-5, 7, 8
+butuh sesi PPPoE hidup: pada 2 Nov 2026 `/ppp active` = 0 sesi (CPE OpenWrt tidak tersambung, jalur kendali ke CPE tidak
+tersedia dari WSL).
 
 ## 12. Operasional: timeout HTTP dan nginx
 
