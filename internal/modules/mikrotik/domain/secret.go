@@ -37,6 +37,9 @@ type PPPSecret struct {
 	// Suggestion is the computed pairing hint; set only by SecretRepository.List
 	// for unpaired secrets and nil otherwise.
 	Suggestion *SecretSuggestion
+	// AccountName is the paired customer's name; empty when unpaired or the
+	// account is soft-deleted. Set only by SecretRepository.List.
+	AccountName string
 }
 
 // SecretSuggestion is a read-only pairing hint. For Basis "ambiguous" the

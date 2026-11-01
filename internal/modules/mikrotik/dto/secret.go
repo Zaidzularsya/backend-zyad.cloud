@@ -15,8 +15,10 @@ type SecretListQuery struct {
 	Q        string `form:"q" binding:"max=100"`
 	// Suggestion narrows unpaired secrets by auto-match state.
 	Suggestion string `form:"suggestion" binding:"omitempty,oneof=suggested needs_decision"`
-	Page       int    `form:"page"`
-	PerPage    int    `form:"per_page"`
+	// NeedsOriginalProfile nil means both.
+	NeedsOriginalProfile *bool `form:"needs_original_profile"`
+	Page                 int   `form:"page"`
+	PerPage              int   `form:"per_page"`
 }
 
 type PairSecretRequest struct {
@@ -34,19 +36,21 @@ type AccountSearchQuery struct {
 // SecretResponse never carries the PPP password or any credential: the cache
 // does not store one and this view must not grow one.
 type SecretResponse struct {
-	ID                   string     `json:"id"`
-	RouterID             string     `json:"router_id"`
-	Name                 string     `json:"name"`
-	Profile              string     `json:"profile"`
-	OriginalProfile      string     `json:"original_profile"`
-	NeedsOriginalProfile bool       `json:"needs_original_profile"`
-	Disabled             bool       `json:"disabled"`
-	Present              bool       `json:"present"`
-	IsolationState       string     `json:"isolation_state"`
-	AccountID            *string    `json:"account_id"`
-	PairedAt             *time.Time `json:"paired_at"`
-	LastSeenAt           *time.Time `json:"last_seen_at"`
-	Comment              string     `json:"comment"`
+	ID                   string  `json:"id"`
+	RouterID             string  `json:"router_id"`
+	Name                 string  `json:"name"`
+	Profile              string  `json:"profile"`
+	OriginalProfile      string  `json:"original_profile"`
+	NeedsOriginalProfile bool    `json:"needs_original_profile"`
+	Disabled             bool    `json:"disabled"`
+	Present              bool    `json:"present"`
+	IsolationState       string  `json:"isolation_state"`
+	AccountID            *string `json:"account_id"`
+	// AccountName is "" when unpaired or the account was soft-deleted.
+	AccountName string     `json:"account_name"`
+	PairedAt    *time.Time `json:"paired_at"`
+	LastSeenAt  *time.Time `json:"last_seen_at"`
+	Comment     string     `json:"comment"`
 	// Suggestion is null when there is no hint. For basis "ambiguous" the
 	// account_* fields are empty and candidates >= 2.
 	Suggestion *SuggestionResponse `json:"suggestion"`
@@ -114,7 +118,7 @@ func SecretFromDomain(s domain.PPPSecret) SecretResponse {
 		ID:         s.ID, RouterID: s.RouterID, Name: s.Name, Profile: s.Profile,
 		OriginalProfile: s.OriginalProfile, NeedsOriginalProfile: s.NeedsOriginalProfile,
 		Disabled: s.Disabled, Present: s.Present, IsolationState: s.IsolationState,
-		AccountID: s.AccountID, PairedAt: s.PairedAt, LastSeenAt: s.LastSeenAt, Comment: s.Comment,
+		AccountID: s.AccountID, AccountName: s.AccountName, PairedAt: s.PairedAt, LastSeenAt: s.LastSeenAt, Comment: s.Comment,
 	}
 }
 

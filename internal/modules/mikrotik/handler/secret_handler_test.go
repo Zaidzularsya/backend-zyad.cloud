@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -429,6 +430,42 @@ func TestListSecrets_SuggestionFilter(t *testing.T) {
 	calls := svc.calls
 	if w := performJSON(r, http.MethodGet, "/app/mikrotik/secrets?suggestion=bogus", ""); w.Code != http.StatusUnprocessableEntity || svc.calls != calls {
 		t.Fatalf("bogus: status=%d", w.Code)
+	}
+}
+
+func TestListSecrets_NeedsOriginalProfileFilter(t *testing.T) {
+	svc := &fakeSecretService{}
+	r := secretRouter(t, svc)
+	for _, v := range []bool{true, false} {
+		w := performJSON(r, http.MethodGet, "/app/mikrotik/secrets?paired=false&needs_original_profile="+strconv.FormatBool(v), "")
+		if w.Code != http.StatusOK || svc.listFilter.NeedsOriginalProfile == nil || *svc.listFilter.NeedsOriginalProfile != v {
+			t.Fatalf("%v: status=%d filter=%+v", v, w.Code, svc.listFilter)
+		}
+	}
+	if w := performJSON(r, http.MethodGet, "/app/mikrotik/secrets", ""); w.Code != http.StatusOK || svc.listFilter.NeedsOriginalProfile != nil {
+		t.Fatalf("absent param must stay nil: status=%d filter=%+v", w.Code, svc.listFilter)
+	}
+	calls := svc.calls
+	if w := performJSON(r, http.MethodGet, "/app/mikrotik/secrets?needs_original_profile=banana", ""); w.Code != http.StatusUnprocessableEntity || svc.calls != calls {
+		t.Fatalf("banana: status=%d", w.Code)
+	}
+}
+
+func TestListSecrets_ResponseCarriesAccountName(t *testing.T) {
+	paired := sampleSecret()
+	paired.AccountName = "Budi"
+	unpaired := sampleSecret()
+	unpaired.AccountID = nil
+	b, _ := json.Marshal(dto.SecretListFromDomain([]domain.PPPSecret{paired, unpaired}))
+	var out []map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out[0]["account_name"] != "Budi" {
+		t.Fatalf("paired account_name = %v", out[0]["account_name"])
+	}
+	if v, ok := out[1]["account_name"]; !ok || v != "" {
+		t.Fatalf("unpaired account_name = %v (present=%v)", v, ok)
 	}
 }
 

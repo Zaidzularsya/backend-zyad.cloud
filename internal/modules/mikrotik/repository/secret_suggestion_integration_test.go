@@ -190,3 +190,81 @@ func TestSecretRepo_ListSuggestionFilter(t *testing.T) {
 		t.Fatalf("org B: %v %d %d", err, tot, len(items))
 	}
 }
+
+func TestSecretRepo_ListNeedsOriginalProfileAndAccountName(t *testing.T) {
+	e := setupRouter(t)
+	scope := e.tenants.A.Scope
+	r := e.create(t, scope, "R-needs")
+	other := e.create(t, scope, "R-needs-other")
+	needsU := seedSecret(t, e, scope, r.ID, repository.ImportedSecret{Name: "n-unpaired", Profile: "iso", NeedsOriginalProfile: true})
+	okU := seedSecret(t, e, scope, r.ID, repository.ImportedSecret{Name: "o-unpaired", Profile: "p"})
+	pairedLive := seedSecret(t, e, scope, r.ID, repository.ImportedSecret{Name: "p-live", Profile: "p"})
+	pairedDel := seedSecret(t, e, scope, r.ID, repository.ImportedSecret{Name: "p-deleted", Profile: "p"})
+	needsOther := seedSecret(t, e, scope, other.ID, repository.ImportedSecret{Name: "n-other", Profile: "iso", NeedsOriginalProfile: true})
+	live := newAccount(t, e, scope)
+	del := newAccount(t, e, scope)
+	secretScopedTx(t, e, scope, func(tx pgx.Tx) {
+		for _, q := range []struct{ sec, acc string }{{pairedLive, live}, {pairedDel, del}} {
+			if _, err := tx.Exec(e.ctx, `UPDATE mikrotik_ppp_secrets SET account_id = $1 WHERE id = $2`, q.acc, q.sec); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := tx.Exec(e.ctx, `UPDATE receivable_accounts SET deleted_at = now() WHERE id = $1`, del); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(e.ctx); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	repo := secretRepo(e)
+	list := func(f repository.SecretFilter) (map[string]domain.PPPSecret, int64) {
+		items, total, err := repo.List(e.ctx, scope, f, 50, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := map[string]domain.PPPSecret{}
+		for _, it := range items {
+			m[it.ID] = it
+		}
+		return m, total
+	}
+	yes, no, unpaired := true, false, false
+
+	got, total := list(repository.SecretFilter{NeedsOriginalProfile: &yes})
+	if total != 2 || len(got) != 2 || got[needsU].ID == "" || got[needsOther].ID == "" {
+		t.Fatalf("true: total=%d got=%v", total, got)
+	}
+	got, total = list(repository.SecretFilter{NeedsOriginalProfile: &yes, Paired: &unpaired, RouterID: r.ID})
+	if total != 1 || len(got) != 1 || got[needsU].ID == "" {
+		t.Fatalf("true+unpaired+router: total=%d got=%v", total, got)
+	}
+	got, total = list(repository.SecretFilter{NeedsOriginalProfile: &no, RouterID: r.ID})
+	if total != 3 || len(got) != 3 || got[needsU].ID != "" {
+		t.Fatalf("false+router: total=%d got=%v", total, got)
+	}
+	got, total = list(repository.SecretFilter{NeedsOriginalProfile: &no, Paired: &unpaired, RouterID: r.ID})
+	if total != 1 || len(got) != 1 || got[okU].ID == "" {
+		t.Fatalf("false+unpaired+router: total=%d got=%v", total, got)
+	}
+
+	got, total = list(repository.SecretFilter{RouterID: r.ID})
+	if total != 4 {
+		t.Fatalf("unfiltered total = %d", total)
+	}
+	if got[pairedLive].AccountName != "Cust" {
+		t.Fatalf("paired account name = %q", got[pairedLive].AccountName)
+	}
+	if got[okU].AccountName != "" || got[needsU].AccountName != "" {
+		t.Fatalf("unpaired must have empty name: %q %q", got[okU].AccountName, got[needsU].AccountName)
+	}
+	if got[pairedDel].AccountID == nil || got[pairedDel].AccountName != "" {
+		t.Fatalf("soft-deleted account must give empty name: %+v", got[pairedDel])
+	}
+
+	// Org B sees nothing of org A, including account names.
+	items, tot, err := repo.List(e.ctx, e.tenants.B.Scope, repository.SecretFilter{}, 50, 0)
+	if err != nil || tot != 0 || len(items) != 0 {
+		t.Fatalf("org B: %v %d %d", err, tot, len(items))
+	}
+}

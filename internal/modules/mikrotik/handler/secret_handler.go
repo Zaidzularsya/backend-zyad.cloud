@@ -146,7 +146,7 @@ func (h *SecretHandler) List(c *gin.Context) {
 		perPage = domain.MaxRouterPageSize
 	}
 	secrets, total, err := h.svc.List(c.Request.Context(), scope,
-		repository.SecretFilter{RouterID: query.RouterID, Paired: query.Paired, Search: query.Q, Suggestion: query.Suggestion}, perPage, (page-1)*perPage)
+		repository.SecretFilter{RouterID: query.RouterID, Paired: query.Paired, Search: query.Q, Suggestion: query.Suggestion, NeedsOriginalProfile: query.NeedsOriginalProfile}, perPage, (page-1)*perPage)
 	if err != nil {
 		failRouter(c, err)
 		return

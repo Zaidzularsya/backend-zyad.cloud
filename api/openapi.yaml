@@ -10812,6 +10812,10 @@ paths:
         in: query
         description: "Hanya untuk secret `present` yang belum dipasangkan, berdasarkan hasil `POST /routers/{id}/secrets/analyze`. `suggested` = ada saran akun tunggal (basis phone/name) yang akunnya masih ada; `needs_decision` = sisanya (ambigu, tidak cocok, belum dianalisis, atau akun saran sudah hilang). Nilai lain 422 VALIDATION_ERROR."
         schema: {type: string, enum: [suggested, needs_decision]}
+      - name: needs_original_profile
+        in: query
+        description: "true = hanya secret yang masih butuh profile asli, false = hanya yang tidak; kosong = semua. Bisa dikombinasikan dengan filter lain. Nilai bukan boolean 422 VALIDATION_ERROR."
+        schema: {type: boolean}
       - name: page
         in: query
         schema: {type: integer}
@@ -16653,6 +16657,7 @@ components:
         present: {type: boolean, description: "false bila secret tidak ada lagi di router pada impor terakhir."}
         isolation_state: {type: string, enum: [normal, isolated]}
         account_id: {type: string, format: uuid, nullable: true}
+        account_name: {type: string, description: "Nama pelanggan yang dipasangkan; string kosong bila belum dipasangkan atau akun sudah dihapus. Hanya diisi oleh `GET /secrets` (daftar)."}
         paired_at: {type: string, format: date-time, nullable: true}
         last_seen_at: {type: string, format: date-time, nullable: true}
         comment: {type: string}

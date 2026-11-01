@@ -42,6 +42,8 @@ type SecretFilter struct {
 	// Suggestion narrows to SuggestionFilterSuggested or
 	// SuggestionFilterNeedsDecision (unpaired secrets only); "" means no filter.
 	Suggestion string
+	// NeedsOriginalProfile narrows on the needs_original_profile flag; nil means any.
+	NeedsOriginalProfile *bool
 }
 
 // Values of SecretFilter.Suggestion.
@@ -257,11 +259,12 @@ func (r *secretRepository) FindByID(ctx context.Context, scope coretenant.Scope,
 var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
 // listFrom joins the computed suggestion and its account (name/phone for the
-// UI). Every join is constrained to the same organization. A soft-deleted
+// UI), plus the paired account (a2) for its display name. Every join is constrained to the same organization. A soft-deleted
 // account is not joined, so its suggestion is treated as absent.
 const listFrom = `mikrotik_ppp_secrets s
 	LEFT JOIN mikrotik_secret_suggestions sg ON sg.organization_id = s.organization_id AND sg.secret_id = s.id
-	LEFT JOIN receivable_accounts a ON a.organization_id = sg.organization_id AND a.id = sg.account_id AND a.deleted_at IS NULL`
+	LEFT JOIN receivable_accounts a ON a.organization_id = sg.organization_id AND a.id = sg.account_id AND a.deleted_at IS NULL
+	LEFT JOIN receivable_accounts a2 ON a2.organization_id = s.organization_id AND a2.id = s.account_id AND a2.deleted_at IS NULL`
 
 // usableSuggestion: a phone/name hint whose account still exists.
 const usableSuggestion = `(sg.basis IN ('phone', 'name') AND a.id IS NOT NULL)`
@@ -284,6 +287,13 @@ func (r *secretRepository) List(ctx context.Context, scope coretenant.Scope, f S
 			where = append(where, "s.account_id IS NULL")
 		}
 	}
+	if f.NeedsOriginalProfile != nil {
+		if *f.NeedsOriginalProfile {
+			where = append(where, "s.needs_original_profile = true")
+		} else {
+			where = append(where, "s.needs_original_profile = false")
+		}
+	}
 	switch f.Suggestion {
 	case SuggestionFilterSuggested:
 		where = append(where, "s.account_id IS NULL", "s.present", usableSuggestion)
@@ -304,7 +314,7 @@ func (r *secretRepository) List(ctx context.Context, scope coretenant.Scope, f S
 		}
 		pageArgs := append(append([]interface{}{}, args...), limit, offset)
 		rows, err := tx.Query(ctx, fmt.Sprintf(`SELECT `+qualifiedSecretColumns+`,
-				sg.basis, sg.candidates, a.id, a.name, a.phone
+				sg.basis, sg.candidates, a.id, a.name, a.phone, a2.name
 			FROM `+listFrom+` WHERE `+cond+`
 			ORDER BY lower(s.name), s.id LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2), pageArgs...)
 		if err != nil {
@@ -312,12 +322,13 @@ func (r *secretRepository) List(ctx context.Context, scope coretenant.Scope, f S
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var basis, accID, accName, accPhone *string
+			var basis, accID, accName, accPhone, paidName *string
 			var cands *int32
-			item, scanErr := scanSecretExtra(rows, &basis, &cands, &accID, &accName, &accPhone)
+			item, scanErr := scanSecretExtra(rows, &basis, &cands, &accID, &accName, &accPhone, &paidName)
 			if scanErr != nil {
 				return scanErr
 			}
+			item.AccountName = derefString(paidName)
 			// Hints on already-paired secrets are stale rows; never expose them.
 			if basis != nil && cands != nil && item.AccountID == nil {
 				sg := &domain.SecretSuggestion{Basis: *basis, Candidates: int(*cands)}
