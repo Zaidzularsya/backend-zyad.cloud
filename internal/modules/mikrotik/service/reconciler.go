@@ -74,10 +74,9 @@ func (r *Reconciler) run(ctx context.Context, scope coretenant.Scope, restoreOnl
 	}
 	// One control snapshot per run: every account is evaluated against the
 	// same mode and grace, and the trigger listing uses the same cutoff.
-	ctl, err := r.eval.control(ctx, scope)
-	if err != nil {
-		return res, err
-	}
+	// A failed read yields a snapshot that blocks isolation only, so the
+	// isolated accounts below are still visited and restored.
+	ctl := r.eval.control(ctx, scope)
 	seen := map[string]struct{}{}
 	visit := func(accountID string) error {
 		if err := ctx.Err(); err != nil {

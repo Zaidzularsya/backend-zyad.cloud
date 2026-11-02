@@ -20,7 +20,14 @@ const (
 	ReasonSimulation   = "simulation"     // tenant mode simulation
 	ReasonPaused       = "paused"         // tenant mode paused (or unknown)
 	ReasonNotInPilot   = "not_in_pilot"   // tenant mode pilot, account not a pilot
+	// ReasonControlUnreadable: the tenant control settings could not be read;
+	// isolation fails closed, restores still run.
+	ReasonControlUnreadable = "control_unreadable"
 )
+
+// modeControlUnreadable is the sentinel ControlSettings.Mode the evaluator
+// uses when the settings read failed. It is not a stored tenant mode.
+const modeControlUnreadable = "control_unreadable"
 
 // IsolateAllowed combines the operator kill switch (env, the engine mode
 // ModeOff/ModeDryRun/ModeOn; anything else counts as off) with the tenant
@@ -43,6 +50,8 @@ func IsolateAllowed(env string, ctl domain.ControlSettings, isPilot bool) GateRe
 		return GateResult{Reason: ReasonNotInPilot}
 	case domain.ModeSimulation:
 		return GateResult{Reason: ReasonSimulation}
+	case modeControlUnreadable:
+		return GateResult{Reason: ReasonControlUnreadable}
 	default: // paused, or a value the engine does not know
 		return GateResult{Reason: ReasonPaused}
 	}

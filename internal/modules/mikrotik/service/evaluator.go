@@ -41,6 +41,9 @@ type Decision struct {
 	Secrets        []SecretAction
 	IsolateAllowed bool
 	BlockedReason  string
+	// IsPilot: the account is in the tenant's pilot list (the tenant's own
+	// test account); customer notifications are never sent for it.
+	IsPilot bool
 }
 
 // ControlReader reads the tenant isolation control; satisfied by
@@ -82,50 +85,47 @@ func (e *Evaluator) mode() string {
 }
 
 // control loads the tenant control snapshot used for one evaluation (or one
-// reconcile run).
-func (e *Evaluator) control(ctx context.Context, scope coretenant.Scope) (domain.ControlSettings, error) {
+// reconcile run). A failed read never fails the evaluation: it yields a
+// snapshot that blocks every isolation (ReasonControlUnreadable) with grace 0,
+// so restores are still evaluated and enqueued.
+func (e *Evaluator) control(ctx context.Context, scope coretenant.Scope) domain.ControlSettings {
 	if e.d.Control == nil {
-		return domain.ControlSettings{OrganizationID: scope.OrganizationID(), Mode: domain.ModeActive}, nil
+		return domain.ControlSettings{OrganizationID: scope.OrganizationID(), Mode: domain.ModeActive}
 	}
 	ctl, err := e.d.Control.Get(ctx, scope)
 	if err != nil {
-		return domain.ControlSettings{}, fmt.Errorf("load isolation control: %w", err)
+		slog.ErrorContext(ctx, "mikrotik: isolation control unreadable; isolation blocked, restores continue",
+			"organization_id", scope.OrganizationID(), "error", scrub(err.Error()))
+		return domain.ControlSettings{OrganizationID: scope.OrganizationID(), Mode: modeControlUnreadable}
 	}
-	return ctl, nil
+	return ctl
 }
 
-func (e *Evaluator) pilotState(ctx context.Context, scope coretenant.Scope, accountID string) (bool, bool, error) {
+// pilotState treats a failed read as "not a pilot, no test running": that can
+// only block an isolation (pilot mode) or end a pilot test, never a restore.
+func (e *Evaluator) pilotState(ctx context.Context, scope coretenant.Scope, accountID string) (bool, bool) {
 	if e.d.Control == nil {
-		return false, false, nil
+		return false, false
 	}
 	isPilot, testActive, err := e.d.Control.PilotState(ctx, scope, accountID)
 	if err != nil {
-		return false, false, fmt.Errorf("load pilot state: %w", err)
+		slog.ErrorContext(ctx, "mikrotik: pilot state unreadable; treated as not a pilot",
+			"account_id", accountID, "error", scrub(err.Error()))
+		return false, false
 	}
-	return isPilot, testActive, nil
+	return isPilot, testActive
 }
 
 // isolateGate is the isolation gate of one account without evaluating its
 // invoices or secrets (used before taking a router lock).
-func (e *Evaluator) isolateGate(ctx context.Context, scope coretenant.Scope, accountID string) (GateResult, error) {
-	ctl, err := e.control(ctx, scope)
-	if err != nil {
-		return GateResult{}, err
-	}
-	isPilot, _, err := e.pilotState(ctx, scope, accountID)
-	if err != nil {
-		return GateResult{}, err
-	}
-	return IsolateAllowed(e.mode(), ctl, isPilot), nil
+func (e *Evaluator) isolateGate(ctx context.Context, scope coretenant.Scope, accountID string) GateResult {
+	isPilot, _ := e.pilotState(ctx, scope, accountID)
+	return IsolateAllowed(e.mode(), e.control(ctx, scope), isPilot)
 }
 
 // Decide is read-only: it never writes tasks or secrets.
 func (e *Evaluator) Decide(ctx context.Context, scope coretenant.Scope, accountID string) (Decision, error) {
-	ctl, err := e.control(ctx, scope)
-	if err != nil {
-		return Decision{}, err
-	}
-	return e.decide(ctx, scope, accountID, ctl)
+	return e.decide(ctx, scope, accountID, e.control(ctx, scope))
 }
 
 // decide evaluates the account against one control snapshot. An account is
@@ -145,16 +145,13 @@ func (e *Evaluator) decide(ctx context.Context, scope coretenant.Scope, accountI
 	if err != nil {
 		return Decision{}, fmt.Errorf("list account secrets: %w", err)
 	}
-	isPilot, testActive, err := e.pilotState(ctx, scope, accountID)
-	if err != nil {
-		return Decision{}, err
-	}
+	isPilot, testActive := e.pilotState(ctx, scope, accountID)
 
 	exempt := EffectiveExempt(policy, today)
 	gate := IsolateAllowed(e.mode(), ctl, isPilot)
 	dec := Decision{
 		AccountID: accountID, Desired: domain.IsolationNormal, Exempt: exempt, Invoices: invoices,
-		IsolateAllowed: gate.Allowed, BlockedReason: gate.Reason,
+		IsolateAllowed: gate.Allowed, BlockedReason: gate.Reason, IsPilot: isPilot,
 	}
 	if (len(invoices) > 0 || testActive) && !exempt {
 		dec.Desired = domain.IsolationIsolated
@@ -192,11 +189,7 @@ func (e *Evaluator) apply(ctx context.Context, scope coretenant.Scope, accountID
 	if e.mode() == ModeOff {
 		return Decision{}, nil
 	}
-	ctl, err := e.control(ctx, scope)
-	if err != nil {
-		return Decision{}, err
-	}
-	return e.applyWith(ctx, scope, accountID, event, restoreOnly, ctl)
+	return e.applyWith(ctx, scope, accountID, event, restoreOnly, e.control(ctx, scope))
 }
 
 // applyWith is apply against a control snapshot read by the caller (the
