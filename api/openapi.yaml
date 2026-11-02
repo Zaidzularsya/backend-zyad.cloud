@@ -11746,7 +11746,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '404':
-          description: "MIKROTIK_ACCOUNT_NOT_FOUND (akun di luar organisasi atau account_id bukan uuid)"
+          description: "MIKROTIK_ACCOUNT_NOT_FOUND (hanya bila account_id bukan uuid; akun yang bukan pilot atau tidak dikenal tetap menjawab 204)"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -11786,7 +11786,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '404':
-          description: "MIKROTIK_ACCOUNT_NOT_FOUND (akun di luar organisasi atau account_id bukan uuid)"
+          description: "MIKROTIK_ACCOUNT_NOT_FOUND (hanya bila account_id bukan uuid)"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -11796,7 +11796,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '422':
-          description: "VALIDATION_ERROR (akun bukan pilot, atau belum punya secret terpasang)"
+          description: "VALIDATION_ERROR (akun bukan pilot atau tidak dikenal, atau belum punya secret terpasang)"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -11832,12 +11832,12 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '404':
-          description: "MIKROTIK_ACCOUNT_NOT_FOUND (akun di luar organisasi atau account_id bukan uuid)"
+          description: "MIKROTIK_ACCOUNT_NOT_FOUND (hanya bila account_id bukan uuid)"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '422':
-          description: "VALIDATION_ERROR (akun bukan pilot)"
+          description: "VALIDATION_ERROR (akun bukan pilot atau tidak dikenal)"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -11854,7 +11854,7 @@ paths:
       - Mikrotik
       security:
       - BearerAuth: []
-      description: "Menjadwalkan tugas pemulihan untuk setiap secret terisolir; hanya saat mode tenant `paused`. Tidak menghubungi router langsung dan tidak pernah melepas pairing. `enqueued` = tugas dibuat; `skipped` = tidak memenuhi syarat, sudah punya tugas aktif, atau dalam masa jeda; `failed` = enqueue gagal (dicatat di log, tidak menghentikan proses). Mode dibaca ulang tiap halaman 200 secret; bila tenant keluar dari `paused` di tengah jalan, proses berhenti dengan `aborted=true` dan hitungan parsial. Mengulang panggilan aman (secret dengan tugas aktif dilewati). Audit: `control.restore_all`. Permission: `mikrotik_control.restore` (hanya organization_owner). Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      description: "Menjadwalkan tugas pemulihan untuk setiap secret terisolir; hanya saat env `MIKROTIK_ISOLATION_MODE=on` (tanpa itu tidak ada worker yang memproses tugas; 409 MIKROTIK_ENGINE_OFF, diperiksa lebih dulu) dan mode tenant `paused` (409 MIKROTIK_NOT_PAUSED). Tidak menghubungi router langsung dan tidak pernah melepas pairing. `enqueued` = tugas dibuat; `skipped` = tidak memenuhi syarat, sudah punya tugas aktif, atau dalam masa jeda; `failed` = enqueue gagal (dicatat di log, tidak menghentikan proses). Mode dibaca ulang tiap halaman 200 secret; bila tenant keluar dari `paused` di tengah jalan, proses berhenti dengan `aborted=true` dan hitungan parsial. Mengulang panggilan aman (secret dengan tugas aktif dilewati). Audit: `control.restore_all`. Permission: `mikrotik_control.restore` (hanya organization_owner). Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
       responses:
         '200':
           description: "Success"
@@ -11872,7 +11872,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '409':
-          description: "MIKROTIK_NOT_PAUSED (mode tenant bukan `paused`)"
+          description: "MIKROTIK_ENGINE_OFF (env MIKROTIK_ISOLATION_MODE bukan `on`; diperiksa lebih dulu) atau MIKROTIK_NOT_PAUSED (mode tenant bukan `paused`)"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -11903,7 +11903,8 @@ paths:
       - name: page
         in: query
         required: false
-        schema: {type: integer, minimum: 1, default: 1}
+        description: "Dipotong, tidak ditolak: nilai kurang dari 1 dianggap 1."
+        schema: {type: integer, default: 1}
       - name: per_page
         in: query
         required: false
@@ -11973,7 +11974,7 @@ paths:
       - Mikrotik
       security:
       - BearerAuth: []
-      description: "Mengekspor kandidat (filter `status` dan `q` yang sama dengan daftar) sebagai CSV UTF-8, dibaca bertahap (keyset, 1000 baris per halaman), maksimal 100.000 baris. Header: `Content-Disposition: attachment; filename=\"isolir-kandidat-YYYYMMDD.csv\"`, `X-Total-Count` (total baris yang cocok, bisa melebihi batas ekspor), `Cache-Control: no-store`. Sel diawali tanda kutip tunggal bila dapat terbaca sebagai rumus (= + - @, tab, CR). Berisi nama dan nomor telepon pelanggan; hanya butuh permission baca. Galat sebelum byte pertama dijawab sebagai JSON biasa. Bila gagal setelah respons dimulai, koneksi diputus (tanpa penutup chunk) sehingga klien melihat unduhan tidak lengkap, bukan berkas utuh palsu; klien harus memperlakukan galat jaringan sebagai ekspor gagal. Permission: `mikrotik_control.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      description: "Mengekspor kandidat (filter `status` dan `q` yang sama dengan daftar) sebagai CSV UTF-8, dibaca bertahap (keyset, 1000 baris per halaman), maksimal 100.000 baris. Header: `Content-Disposition: attachment; filename=\"isolir-kandidat-YYYYMMDD.csv\"`, `X-Total-Count` (total baris yang cocok, bisa melebihi batas ekspor), `Cache-Control: no-store`. Sel diawali tanda kutip tunggal bila dapat terbaca sebagai rumus: diawali tab/CR, atau karakter pertama setelah spasi Unicode di depan (dipangkas dulu) adalah = + - @. Berisi nama dan nomor telepon pelanggan; hanya butuh permission baca. Galat sebelum byte pertama dijawab sebagai JSON biasa. Bila gagal setelah respons dimulai, koneksi diputus (tanpa penutup chunk) sehingga klien melihat unduhan tidak lengkap, bukan berkas utuh palsu; klien harus memperlakukan galat jaringan sebagai ekspor gagal. Permission: `mikrotik_control.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
       parameters:
       - name: status
         in: query
@@ -17301,7 +17302,7 @@ components:
         exempt: {type: boolean}
         secrets: {type: integer}
         exempted_until: {type: string, format: date, nullable: true, description: "Nilai tersimpan `mikrotik_customer_policies.exempted_until`; hanya bermakna selagi `exempt=true`. Pengecualian yang sudah lewat tetap dilaporkan apa adanya (`exempt=true` sesuai data); klien membandingkan tanggalnya dengan hari ini (WIB)."}
-        pending_isolation: {type: boolean, description: "Engine akan mengisolir pelanggan ini hari ini (status preview will_isolate; ditampilkan apa pun mode tenant). False bila tidak ada invoice kandidat atau pembacaan prediksi gagal."}
+        pending_isolation: {type: boolean, description: "Diprediksi akan diisolir bila isolir aktif (status preview will_isolate; tidak bergantung pada mode tenant atau env). False bila tidak ada invoice kandidat atau pembacaan prediksi gagal."}
     MikrotikCustomerStatusListEnvelope:
       type: object
       required: [success, message, data]

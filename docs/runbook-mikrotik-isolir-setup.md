@@ -404,7 +404,10 @@ persetujuan eksplisit).
 
 ### 14.2 Rollout bertahap
 
-1. **`off`** (default): tidak ada efek. Pastikan migration sampai 000174 sudah jalan.
+> **Langkah 3 diganti oleh bagian 15.** Sejak Gelombang 2 env `on` saja tidak mengisolir siapa pun: tenant baru berada di mode
+> `simulation`; isolir baru jalan setelah mode `pilot` (hanya akun pilot) atau `active` (butuh `pilot_verified_at`). Ikuti 15.2.
+
+1. **`off`** (default): tidak ada efek. Pastikan migration sampai 000178 sudah jalan.
 2. **`dry_run`**: set `MIKROTIK_ISOLATION_MODE=dry_run` di env API **dan** worker, restart keduanya. Amati log worker/API
    untuk `mikrotik: dry-run decision` (kolom `desired`, `invoices`, `secret_actions`). Tidak ada tugas dan tidak ada
    perubahan router. Periksa bahwa daftar akun yang akan diisolir sesuai harapan (jangan ada yang tak terduga).
@@ -526,7 +529,7 @@ adalah urutan kerja operator.
 4. Mode `active` (boleh sekaligus dengan `exemptions` untuk akun yang harus dilindungi). Pantau log aktivitas dan dashboard
    tugas (14.3) beberapa siklus reconcile pertama.
 5. **Jeda**: mode `paused` menghentikan isolir baru; pemulihan tetap berjalan. **Pulihkan semua** (`POST /control/restore-all`,
-   hanya saat `paused`) mengantrekan restore untuk setiap secret terisolir; ulangi bila `skipped` > 0 dan tugas lama sudah
+   hanya saat `paused` dan env `on`; env `off`/`dry_run` ditolak 409 `MIKROTIK_ENGINE_OFF`) mengantrekan restore untuk setiap secret terisolir; ulangi bila `skipped` > 0 dan tugas lama sudah
    selesai. Pairing tidak pernah dilepas.
 
 ### 15.3 Membaca log aktivitas
@@ -539,10 +542,12 @@ berarti gerbang menutup setelah tugas dibuat (mis. mode diubah ke `paused`); bil
 
 ### 15.4 Gerbang deploy
 
-- **nginx**: `proxy_read_timeout` minimal **300s** untuk `location /api/v1/app/mikrotik/`, termasuk
-  `/control/preview/export` (alirannya bisa panjang). Vhost harus memakai `proxy_http_version 1.1;` agar ekspor yang
-  diputus di tengah jalan tidak dikira berkas lengkap oleh klien (chunked encoding membutuhkan HTTP/1.1 ke upstream; tanpa
-  itu proxy dapat menyajikan respons yang terpotong sebagai selesai).
+- **nginx** (alasan teknis, **belum diuji di nginx nyata**): `proxy_read_timeout` minimal **300s** untuk
+  `location /api/v1/app/mikrotik/`, termasuk `/control/preview/export`: ekspor dialirkan bertahap (sampai 100.000 baris)
+  sehingga durasinya bisa lama; nilai 300s juga menutup setup/apply (bagian 12). Vhost sebaiknya memakai
+  `proxy_http_version 1.1;` agar ekspor yang diputus di tengah jalan (backend sengaja memutus koneksi saat gagal setelah
+  respons dimulai) tidak tampak sebagai berkas lengkap bagi klien: chunked encoding membutuhkan HTTP/1.1 ke upstream.
+  Verifikasi setelah deploy dengan mengekspor dan membandingkan jumlah baris dengan header `X-Total-Count`.
 - **`MIKROTIK_ALLOWED_PRIVATE_CIDRS`** harus mencakup subnet WireGuard tenant yang routernya dijangkau lewat tunnel.
 - **Migration `000178`** membuat index pada `audit_logs` (`idx_audit_logs_mikrotik_org_created`) tanpa `CONCURRENTLY`,
   sehingga mengambil kunci SHARE singkat (menahan tulis ke `audit_logs` selama pembuatan). Jalankan pada jam sepi.
@@ -551,9 +556,17 @@ berarti gerbang menutup setelah tugas dibuat (mis. mode diubah ke `paused`); bil
 
 ### 15.5 Rollback
 
-1. Cepat: ubah mode tenant ke `paused` (isolir baru berhenti, restore tetap jalan) atau set env `MIKROTIK_ISOLATION_MODE=off`
-   di API dan worker (lihat 14.6: pelanggan terisolir tetap apa adanya sampai dipulihkan).
-2. Pulihkan pelanggan: mode `paused` lalu `POST /control/restore-all`, atau prosedur manual 14.6.
-3. Migration `000176`-`000178` bersifat aditif (tabel/kolom/index baru; kode lama mengabaikannya). Bila harus di-down:
+Prinsip: **jaga env `on` selama memulihkan pelanggan.** Tugas restore hanya diproses worker bila env `on` (pada `off` tidak
+ada job, pada `dry_run` processor tidak jalan), dan `restore-all` menolak env selain `on` (409 `MIKROTIK_ENGINE_OFF`).
+Mematikan env lebih dulu justru meninggalkan pelanggan terisolir.
+
+1. Hentikan isolir baru: set mode tenant ke `paused` (`PUT /control/mode`). Restore tetap berjalan.
+2. Pulihkan: `POST /control/restore-all` (env `on` dan mode `paused`). Ulangi bila `skipped` > 0 setelah tugas lama selesai.
+3. Verifikasi: `GET /control` (`isolated_secrets` = 0), `GET /tasks/summary` (tidak ada `pending`/`running`, tidak ada
+   `oldest_pending_restore_at`), dan log aktivitas (tugas `failed` ditangani dulu dengan tabel 14.4).
+4. Baru sesudah tidak ada yang terisolir, bila perlu set env `MIKROTIK_ISOLATION_MODE=off` di API dan worker, restart.
+5. Bila env sudah `off`/`dry_run` dan masih ada pelanggan terisolir: `restore-all` tidak tersedia. Pilih: kembalikan env ke
+   `on` (mode tenant `paused`) lalu langkah 2, atau pulihkan manual per secret seperti 14.6.
+6. Migration `000176`-`000178` bersifat aditif (tabel/kolom/index baru; kode lama mengabaikannya). Bila harus di-down:
    urutan `000178` → `000177` → `000176`. Down `000176` menghapus tabel pengaturan dan pilot serta kolom `exempted_until`
    (pengaturan mode, grace, dan pilot hilang; tenant kembali ke default `simulation`).

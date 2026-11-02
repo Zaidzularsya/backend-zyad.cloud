@@ -106,10 +106,19 @@ var (
 
 func newMikrotikControlEngine(t *testing.T, entitled bool, granted []string) (*gin.Engine, *countingControlService) {
 	t.Helper()
+	return newMikrotikControlEngineWithCounter(t, entitled, granted, nil)
+}
+
+func newMikrotikControlEngineWithCounter(t *testing.T, entitled bool, granted []string, counter *fakeMikrotikCounter) (*gin.Engine, *countingControlService) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	allowed := map[string]bool{}
 	for _, p := range granted {
 		allowed[p] = true
+	}
+	var rateCounter middleware.RateCounter
+	if counter != nil {
+		rateCounter = counter
 	}
 	tc := mikrotikTenantContext(t, rtOrg)
 	svc := &countingControlService{}
@@ -129,6 +138,7 @@ func newMikrotikControlEngine(t *testing.T, entitled bool, granted []string) (*g
 		MikrotikControlHandler:  mikrotikhandler.NewControlHandler(svc),
 		MikrotikPreviewHandler:  mikrotikhandler.NewPreviewHandler(countingPreviewService{c: svc}),
 		MikrotikActivityHandler: mikrotikhandler.NewActivityHandler(countingActivityService{c: svc}),
+		MikrotikRateCounter:     rateCounter,
 	})
 	return engine, svc
 }
@@ -200,33 +210,30 @@ func TestActivityRoute_ReadPermission(t *testing.T) {
 // Control, preview and activity routes only touch the database (tasks contact
 // routers), so they must not consume the router probe budget.
 func TestControlRoutes_NotBehindProbeRateLimiter(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	const org = "11111111-1111-1111-1111-111111111111"
 	counter := &fakeMikrotikCounter{counts: map[string]int64{}}
-	svc := &countingControlService{}
-	engine := gin.New()
-	protected := engine.Group("/api/v1")
-	protected.Use(func(c *gin.Context) {
-		c.Request = c.Request.WithContext(coretenant.WithContext(c.Request.Context(), mikrotikTenantContext(t, org)))
-		c.Next()
-	})
-	registerMikrotikRoutes(protected, Dependencies{
-		CRMEntitlementChecker:   &recordingEntitlements{allow: true},
-		PermissionChecker:       permissionSetChecker{allowed: map[string]bool{"mikrotik_control.read": true, "mikrotik_control.update": true, "mikrotik_control.restore": true}},
-		MikrotikRouterHandler:   mikrotikhandler.NewRouterHandler(&countingRouterService{}),
-		MikrotikControlHandler:  mikrotikhandler.NewControlHandler(svc),
-		MikrotikPreviewHandler:  mikrotikhandler.NewPreviewHandler(countingPreviewService{c: svc}),
-		MikrotikActivityHandler: mikrotikhandler.NewActivityHandler(countingActivityService{c: svc}),
-		MikrotikRateCounter:     counter,
-	})
+	granted := append([]string{"mikrotik_router.create"}, ownerControlPermissions...)
+	engine, svc := newMikrotikControlEngineWithCounter(t, true, granted, counter)
+
+	const rounds = mikrotikProbeLimit + 3
 	for _, rc := range controlRouteCases {
-		for i := 0; i <= mikrotikProbeLimit+2; i++ {
-			if w := doControl(engine, rc); w.Code == http.StatusTooManyRequests {
-				t.Fatalf("%s %s: rate limited at request %d", rc.method, rc.path, i+1)
+		for i := 0; i < rounds; i++ {
+			w := doControl(engine, rc)
+			if w.Code != http.StatusOK && w.Code != http.StatusNoContent && w.Code != http.StatusAccepted {
+				t.Fatalf("%s %s request %d: status %d body %s", rc.method, rc.path, i+1, w.Code, w.Body)
 			}
 		}
 	}
+	if want := len(controlRouteCases) * rounds; svc.calls != want {
+		t.Errorf("service calls = %d, want %d", svc.calls, want)
+	}
 	if len(counter.counts) != 0 {
 		t.Errorf("probe counter was touched: %v", counter.counts)
+	}
+
+	// Positive control: the same wiring does count router routes, so the
+	// empty counter above proves the control routes are really not limited.
+	doControl(engine, secretRouteCase{http.MethodPost, "/routers", `{"name":"a","host":"10.0.0.1","port":8728,"username":"u","password":"p"}`, "mikrotik_router.create", false})
+	if len(counter.counts) == 0 {
+		t.Error("router route did not touch the probe counter; the wiring does not rate limit")
 	}
 }

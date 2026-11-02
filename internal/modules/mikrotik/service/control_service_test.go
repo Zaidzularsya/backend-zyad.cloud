@@ -366,6 +366,23 @@ func TestRestoreAll_OnlyWhenPaused(t *testing.T) {
 	}
 }
 
+// With the engine env off or dry_run no worker processes restore tasks, so
+// RestoreAll must refuse (checked before the paused check) and enqueue nothing.
+func TestRestoreAll_RequiresEngineOn(t *testing.T) {
+	for _, engine := range []string{ModeOff, ModeDryRun} {
+		for _, mode := range []string{domain.ModePaused, domain.ModeActive} {
+			e := newCtlEnv(t, engine, mode)
+			e.sec.isolated = []string{"s1"}
+			if _, err := e.svc.RestoreAll(context.Background(), e.scope, "u1"); !errors.Is(err, mikrotik.ErrEngineOff) {
+				t.Fatalf("engine %s mode %s: err = %v, want ErrEngineOff", engine, mode, err)
+			}
+			if len(e.tasks.restore) != 0 || len(e.audit.entries) != 0 {
+				t.Fatalf("engine %s mode %s: nothing may be enqueued or audited", engine, mode)
+			}
+		}
+	}
+}
+
 func TestRestoreAll_BatchesAndReportsSkipped(t *testing.T) {
 	e := newCtlEnv(t, ModeOn, domain.ModePaused)
 	for i := 0; i < 450; i++ {

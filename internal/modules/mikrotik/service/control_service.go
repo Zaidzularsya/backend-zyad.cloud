@@ -432,11 +432,18 @@ func (s *ControlService) reevaluate(ctx context.Context, scope coretenant.Scope,
 }
 
 // RestoreAll queues a restore for every isolated secret while the tenant is
-// paused. The mode is re-read before every page: when the tenant leaves
-// paused mid-run, the run stops with Aborted and a partial count. One failing
+// paused and the engine env is on (ErrEngineOff otherwise, checked first).
+// The mode is re-read before every page: when the tenant leaves paused
+// mid-run, the run stops with Aborted and a partial count. One failing
 // enqueue is counted and does not stop the run; repeating the call skips
 // secrets that already have an active task.
 func (s *ControlService) RestoreAll(ctx context.Context, scope coretenant.Scope, actor string) (RestoreAllResult, error) {
+	// Restore tasks are only processed by the worker when the engine env is
+	// "on" (off has no job, dry_run never touches routers). Refuse first, before
+	// the paused check, rather than queue tasks nothing will run.
+	if s.engine != ModeOn {
+		return RestoreAllResult{}, mikrotik.ErrEngineOff
+	}
 	var res RestoreAllResult
 	after := ""
 	for first := true; ; first = false {
