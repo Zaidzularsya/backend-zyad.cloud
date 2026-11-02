@@ -16,3 +16,6 @@ func ListSecretsInTx(ctx context.Context, tx pgx.Tx, orgID, routerID string, lim
 	cond := "s.organization_id = $1 AND s.router_id = $2"
 	return listSecretsTx(ctx, tx, cond, []interface{}{orgID, routerID}, limit, offset)
 }
+
+// ActivityListSQL exposes the activity page query to EXPLAIN tests.
+const ActivityListSQL = activityListSQL
