@@ -300,20 +300,20 @@ Status: **belum terbukti** dengan user berhak minimum (membuat user/grup di rout
 
 ## 10. Daftar "belum terbukti" (wajib diuji dengan CPE nyata sebelum fase 3 aktif di produksi)
 
-1. Sesi PPPoE dengan profile isolir mendapat IP dari `zyad-isolir-pool` dan masuk address-list `zyad-isolir`.
-2. DNS dari sesi terisolir: ke resolver router (rantai `input`, hanya inspeksi read-only) dan ke resolver eksternal (F1/F2).
-3. Sesi terisolir hanya bisa DNS + host allowlist; trafik lain ter-drop (termasuk pada router dengan FastTrack aktif).
-4. Halaman platform/tenant dan checkout DOKU bisa dibuka dari sesi terisolir; daftar `{DOKU_HOSTS}` final.
-5. `Set profile` + `/ppp active remove` memutus sesi lama dan CPE tersambung ulang dengan profile baru; begitu juga restore.
-6. Galat `Remove` pada id sesi yang tidak ada.
-7. Secret dengan `remote-address` sendiri: tetap terisolir lewat address-list.
+1. Sesi PPPoE dengan profile isolir mendapat IP dari `zyad-isolir-pool` dan masuk address-list `zyad-isolir`. **Terbukti di lab 2 Nov 2026** dengan CPE nyata (bagian 11).
+2. DNS dari sesi terisolir: ke resolver router (rantai `input`, hanya inspeksi read-only) dan ke resolver eksternal (F1/F2). **Terbukti di lab 2 Nov 2026** (bagian 11).
+3. Sesi terisolir hanya bisa DNS + host allowlist; trafik lain ter-drop (termasuk pada router dengan FastTrack aktif). **Terbukti di lab 2 Nov 2026** tanpa FastTrack (bagian 11); FastTrack aktif belum.
+4. Halaman platform/tenant dan checkout DOKU bisa dibuka dari sesi terisolir; daftar `{DOKU_HOSTS}` final. **Sebagian terbukti 2 Nov 2026**: platform `zyad.online` dan host sandbox DOKU terjangkau; domain checkout DOKU nyata belum diuji (bagian 11).
+5. `Set profile` + `/ppp active remove` memutus sesi lama dan CPE tersambung ulang dengan profile baru; begitu juga restore. **Terbukti di lab 2 Nov 2026** (bagian 11).
+6. Galat `Remove` pada id sesi yang tidak ada. **Terbukti 2 Nov 2026**: `no such item (4)`.
+7. Secret dengan `remote-address` sendiri: tetap terisolir lewat address-list. **Terbukti sekali, manual, 2 Nov 2026** (bagian 11); tidak ada tes otomatis.
 8. Pengalihan HTTP (opsi A atau B) mengantar browser ke halaman isolir tenant.
 9. Semua hal di atas pada RouterOS v6 (binary API) dan v7 lewat REST; binary API TLS (8729).
    Selama REST belum terbukti, backend menolak setup `apply`/`cleanup` untuk router `api_type=rest`
    (422 `MIKROTIK_SETUP_REST_UNVERIFIED`) kecuali env `MIKROTIK_SETUP_ALLOW_REST=true`; `preview` tetap jalan.
 10. User API berhak minimum cukup untuk penyiapan, isolir, restore, dan pembersihan.
-11. Hapus profile isolir yang masih dipakai secret.
-12. Penyiapan idempoten dengan kondisi "sebagian ada" (bagian 5).
+11. Hapus profile isolir yang masih dipakai secret. **Terbukti di lab 2 Nov 2026** (RouterOS 7.8, binary): RouterOS mengizinkan penghapusan dan secret menunjuk `*D`; penjaga `Cleanup` aplikasi menolak lebih dulu (bagian 11).
+12. Penyiapan idempoten dengan kondisi "sebagian ada" (bagian 5). **Terbukti di lab 2 Nov 2026** (RouterOS 7.8, binary), 7 skenario kerusakan (bagian 11).
 13. Router dengan FastTrack aktif: RouterOS menambah aturan dinamis "special dummy rule" di puncak daftar filter;
     penyiapan mengabaikan baris `dynamic=true` saat memilih `{FIRST_FORWARD_ID}` dan saat memeriksa urutan. Hanya diuji
     dengan fake client; **belum terbukti di router asli** (FastTrack disabled di lab).
@@ -358,6 +358,75 @@ sementara (comment `zyad-tmp-roundtrip`) dan dihapus setelah tes; `TestLabIsolir
 Belum terbukti oleh uji ini: penghapusan sesi aktif yang benar-benar online (secret uji **disabled**, jadi tidak ada
 sesi; filter `?name=` dan format `.id` pada sesi nyata belum teruji), pelanggan tersambung ulang ke profile isolir dan
 dapat menjangkau halaman bayar (butuh CPE nyata dan Fase 4), RouterOS v6, dan transport REST.
+
+### Hasil uji lab butir 11 dan 12 (2 Nov 2026)
+
+Dijalankan terhadap CHR RouterOS 7.8 di `192.168.56.106` (binary API 8728; kredensial dari `~/.mikrotik-lab.env`,
+`MIKROTIK_LAB_WRITE=1`, backup `pre-zyad-isolir*` sudah ada). Hanya objek `zyad-*` yang dibuat dan dihapus;
+`TestLabIsolirLeftovers` melaporkan 0 objek tersisa sesudahnya. Kode uji: `service/setup_partial_lab_test.go` dan
+`platform/mikrotik/section10_lab_test.go`.
+
+| Uji | Hasil | Catatan |
+|---|---|---|
+| `TestLabSetupPartialRepair` (butir 12) | **PASS**, 7 skenario | Setelah setup penuh, satu bagian dihapus dari router: entri allowlist, aturan forward ke-2 (dns tcp), ke-1 (dns udp), terakhir (drop), keempat aturan forward sekaligus, profile isolir, pool+profile. Di tiap skenario preview merencanakan tepat `create` untuk objek yang hilang (sisanya `exists`, tanpa `update`), apply menulis tepat sejumlah itu, urutan 4 aturan forward kembali identik di puncak daftar forward statis (`accept udp 53`, `accept tcp 53`, `accept allowlist`, `drop`), preview berikutnya semua `exists`, dan `isolir_ready` tetap. |
+| `TestLabSetupCleanupRefusesWhileProfileInUse` (butir 11, sisi aplikasi) | **PASS** | Dengan secret uji (disabled, `zyad-labtest-inuse`) memakai profile isolir, `Cleanup` mengembalikan `SetupConflictError` ("1 PPP secret(s) still use the isolir profile; restore them first"), tidak menghapus satu objek pun, dan `isolir_ready` tetap true. Setelah secret dihapus, `Cleanup` berhasil dan 0 objek `zyad-*` tersisa. |
+| `TestLabSection10_ProbeProfileInUseDelete` (butir 11, sisi RouterOS) | probe | RouterOS 7.8 **mengizinkan** menghapus profile yang dipakai secret; secret lalu menampilkan `profile="*D"` (referensi menggantung). Artinya penjaga di `Cleanup` adalah satu-satunya pencegah; tanpa itu pelanggan terisolir kehilangan profile-nya diam-diam. |
+
+Temuan turunan (belum ditangani dan **belum diuji**): secret dengan referensi menggantung (`profile` berbentuk
+`*<hex>`) yang masuk lewat impor tersimpan apa adanya sebagai `profile`; saat dipasangkan, `Pair` mengisi
+`original_profile` dari profile saat ini bila kosong (kode `secret_repository.go`), sehingga `original_profile` bisa berisi
+`*D`. Bagaimana RouterOS menanggapi `Set profile=*D` saat restore belum dicoba. Perlu diputuskan apakah impor menandai
+secret itu `needs_original_profile`.
+
+### Hasil uji hidup dengan CPE nyata (2 Nov 2026)
+
+CPE OpenWrt `10mbps@debug` (profile asli `10M-P8`, alamat normal `10.10.8.255`) tersambung PPPoE ke `ether6` lab. Kode
+uji: `service/isolation_live_lab_test.go` (`TestLabLiveIsolateRestore`, butuh `MIKROTIK_LAB_WRITE=1` dan
+`MIKROTIK_LAB_LIVE_USER=<user PPPoE CPE>`). Setup penuh dipasang lewat `SetupService`, lalu `Executor.Isolate` dan
+`Executor.Restore` dijalankan pada secret itu; profile asli dikembalikan oleh cleanup tes. Dijalankan dua kali: PASS
+(186 dtk pada run bersih). `5mbps@debug` tidak disentuh. Setelah uji: 0 objek `zyad-*`, profile secret kembali `10M-P8`.
+
+| Butir | Hasil | Bukti |
+|---|---|---|
+| 1. IP dari pool isolir + address-list | **Terbukti** | Setelah `Isolate`, CPE tersambung ulang sendiri dengan alamat `10.255.254.254` (di dalam `10.255.254.0/24`); address-list `zyad-isolir` memuat alamat itu sebagai entri dinamis. Setelah `Restore` alamat kembali `10.10.8.255` dan entri hilang. |
+| 5. Sesi lama diputus, CPE tersambung ulang dengan profile baru / lama | **Terbukti** | Sesi lama (`*80000008`) hilang pada `Isolate`; sesi baru muncul dengan profile isolir (dan lagi setelah `Restore`) dalam jendela tunggu 150 dtk tanpa tindakan manual di CPE. |
+| 6. `Remove` pada id sesi yang sudah tidak ada | **Terbukti** | `mikrotik: router error: no such item (4)`. Executor tidak terpengaruh karena mencari sesi berdasarkan nama. |
+| 7. Secret dengan `remote-address` sendiri | **Terbukti sekali (manual)** | Dengan `remote-address=10.10.8.77` pada secret, sesi mendapat alamat itu (di luar pool); setelah `Isolate` sesi baru tetap masuk address-list `zyad-isolir`, jadi isolir lewat address-list tetap berlaku. Bagian ini tidak dimasukkan ke tes otomatis: `RouterClient` tidak punya `unset`, dan RouterOS API menolak nilai kosong (`invalid value for argument remote-address`); mengosongkan `remote-address` butuh `/ppp/secret/unset`. |
+| (pengamatan) filter forward | lihat uji lalu lintas di bawah | Pada uji pertama (tanpa lalu lintas dari sisi CPE) hanya aturan `drop` yang menghitung (2 paket / 152 byte). Uji lalu lintas di bawah mengisi kekosongan itu. |
+
+#### Uji lalu lintas dari sisi CPE (2 Nov 2026)
+
+CPE punya jalur manajemen SSH di `192.168.56.50` (alamat tambahan di `br-lan`, eth1 ke Cloud host-only; tidak lewat
+sesi PPPoE; DHCP LAN OpenWrt dimatikan). Kode uji: `service/isolation_traffic_lab_test.go`
+(`TestLabLiveIsolatedTraffic`, butuh `MIKROTIK_LAB_CPE_SSH` dan `MIKROTIK_LAB_CPE_KEY` selain env uji hidup). Probe
+read-only (`nslookup`, `wget` ke `/dev/null`, `ping`) dijalankan di tiga fase: kontrol sebelum isolir, saat terisolir,
+dan sesudah restore. PASS (182 dtk). Alamat sesi terisolir `10.255.254.2` dari `zyad-isolir-pool`; resolver CPE berganti
+ke `10.255.254.1` (dns-server profile isolir).
+
+| Probe | Normal | Terisolir | Setelah restore |
+|---|---|---|---|
+| DNS ke resolver router (`10.255.254.1` / `10.255.5.1`) | berhasil | **berhasil** (juga `10.255.5.1`) | berhasil |
+| DNS ke resolver eksternal `8.8.8.8` | berhasil | **berhasil** | berhasil |
+| HTTP dan HTTPS `zyad.online` (allowlist platform) | berhasil | **berhasil** | berhasil |
+| HTTPS `sandbox.doku.com`, `api-sandbox.doku.com` (allowlist DOKU) | HTTP 503 pada `/` (terjangkau) | **HTTP 503 (terjangkau)** | HTTP 503 |
+| HTTP dan HTTPS `example.com` (di luar allowlist) | berhasil | **diblokir** (`Failed to send request: Operation not permitted`) | berhasil |
+| ICMP ke `8.8.8.8` | berhasil | **diblokir** (100% loss) | berhasil |
+
+Penghitung aturan forward `zyad-managed` sesudah fase terisolir: `accept udp 53` = 2 paket, `accept allowlist` = 58 paket
+(4,2 KB), `drop` = 30 paket (1,9 KB), `accept tcp 53` = 0. Jadi DNS eksternal lewat aturan `accept udp 53`, trafik ke
+platform dan DOKU lewat allowlist, dan sisanya kena `drop`.
+
+Catatan: (a) DOKU sandbox menjawab 503 pada `/` di semua fase; itu dianggap "terjangkau" karena sambungan TCP/TLS dan
+balasan HTTP sampai, sedangkan alur yang di-drop berakhir sebagai galat sambungan. (b) Resolver router menjawab nama apa
+pun untuk sesi terisolir (termasuk `10.255.5.1`); itu perilaku yang diharapkan karena DNS ke router memakai rantai `input`,
+bukan `forward`. (c) Domain checkout DOKU yang sebenarnya (bukan host sandbox) belum diuji; daftar `{DOKU_HOSTS}` final
+tetap menunggu uji checkout nyata. (d) Pengalihan HTTP (butir 8) tidak diuji: setup uji tidak memakai `RedirectURL`, dan
+halaman isolir tenant (Fase 4) belum ada.
+
+Tidak dijalankan karena dilarang di router lab (lihat bagian 9 dan catatan `/ip service`): butir 9 TLS 8729 (`api-ssl`
+tidak punya sertifikat, handshake ditolak) dan butir 10 (user berhak minimum, perlu membuat user/grup). Butir 1-5, 7, 8
+butuh sesi PPPoE hidup: pada 2 Nov 2026 `/ppp active` = 0 sesi (CPE OpenWrt tidak tersambung, jalur kendali ke CPE tidak
+tersedia dari WSL).
 
 ## 12. Operasional: timeout HTTP dan nginx
 
