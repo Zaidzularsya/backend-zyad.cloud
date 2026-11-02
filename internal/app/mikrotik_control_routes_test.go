@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -65,6 +66,27 @@ var controlRouteCases = []secretRouteCase{
 	{http.MethodPost, "/control/pilot/" + rtAccount + "/test", ``, "mikrotik_control.update", false},
 	{http.MethodDelete, "/control/pilot/" + rtAccount + "/test", ``, "mikrotik_control.update", false},
 	{http.MethodPost, "/control/restore-all", ``, "mikrotik_control.restore", false},
+	{http.MethodGet, "/control/preview", ``, "mikrotik_control.read", false},
+	{http.MethodGet, "/control/preview/summary", ``, "mikrotik_control.read", false},
+	{http.MethodGet, "/control/preview/export", ``, "mikrotik_control.read", false},
+}
+
+// countingPreviewService shares the control service call counter.
+type countingPreviewService struct{ c *countingControlService }
+
+func (s countingPreviewService) Summary(context.Context, coretenant.Scope) (mikrotikservice.CandidateSummary, error) {
+	s.c.calls++
+	return mikrotikservice.CandidateSummary{}, nil
+}
+func (s countingPreviewService) List(context.Context, coretenant.Scope, mikrotikservice.CandidateFilter, int, int) ([]mikrotikservice.CandidateRow, int64, error) {
+	s.c.calls++
+	return nil, 0, nil
+}
+func (s countingPreviewService) ExportCSV(_ context.Context, _ coretenant.Scope, _ mikrotikservice.CandidateFilter, w io.Writer, begin func(int64)) error {
+	s.c.calls++
+	begin(0)
+	_, err := io.WriteString(w, "Akun\n")
+	return err
 }
 
 // Grants of migrations 000175/000177: member reads, organization_owner all.
@@ -96,6 +118,7 @@ func newMikrotikControlEngine(t *testing.T, entitled bool, granted []string) (*g
 		PermissionChecker:      permissionSetChecker{allowed: allowed},
 		MikrotikRouterHandler:  mikrotikhandler.NewRouterHandler(&countingRouterService{}),
 		MikrotikControlHandler: mikrotikhandler.NewControlHandler(svc),
+		MikrotikPreviewHandler: mikrotikhandler.NewPreviewHandler(countingPreviewService{c: svc}),
 	})
 	return engine, svc
 }
@@ -126,6 +149,15 @@ func TestControlRoutes_Permissions(t *testing.T) {
 		w = doControl(engine, rc)
 		if (w.Code != http.StatusOK && w.Code != http.StatusNoContent && w.Code != http.StatusAccepted) || svc.calls != 1 {
 			t.Errorf("owner %s %s: status %d calls %d body %s", rc.method, rc.path, w.Code, svc.calls, w.Body)
+		}
+
+		// No bearer token: rejected before any gate.
+		engine, svc = newMikrotikControlEngine(t, true, ownerControlPermissions)
+		req := httptest.NewRequest(rc.method, "/api/v1/app/mikrotik"+rc.path, strings.NewReader(rc.body))
+		nw := httptest.NewRecorder()
+		engine.ServeHTTP(nw, req)
+		if nw.Code != http.StatusUnauthorized || svc.calls != 0 {
+			t.Errorf("no token %s %s: status %d calls %d", rc.method, rc.path, nw.Code, svc.calls)
 		}
 
 		// The mikrotik.enabled entitlement gates the whole group.
