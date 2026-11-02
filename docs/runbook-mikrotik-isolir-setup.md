@@ -301,9 +301,9 @@ Status: **belum terbukti** dengan user berhak minimum (membuat user/grup di rout
 ## 10. Daftar "belum terbukti" (wajib diuji dengan CPE nyata sebelum fase 3 aktif di produksi)
 
 1. Sesi PPPoE dengan profile isolir mendapat IP dari `zyad-isolir-pool` dan masuk address-list `zyad-isolir`. **Terbukti di lab 2 Nov 2026** dengan CPE nyata (bagian 11).
-2. DNS dari sesi terisolir: ke resolver router (rantai `input`, hanya inspeksi read-only) dan ke resolver eksternal (F1/F2).
-3. Sesi terisolir hanya bisa DNS + host allowlist; trafik lain ter-drop (termasuk pada router dengan FastTrack aktif).
-4. Halaman platform/tenant dan checkout DOKU bisa dibuka dari sesi terisolir; daftar `{DOKU_HOSTS}` final.
+2. DNS dari sesi terisolir: ke resolver router (rantai `input`, hanya inspeksi read-only) dan ke resolver eksternal (F1/F2). **Terbukti di lab 2 Nov 2026** (bagian 11).
+3. Sesi terisolir hanya bisa DNS + host allowlist; trafik lain ter-drop (termasuk pada router dengan FastTrack aktif). **Terbukti di lab 2 Nov 2026** tanpa FastTrack (bagian 11); FastTrack aktif belum.
+4. Halaman platform/tenant dan checkout DOKU bisa dibuka dari sesi terisolir; daftar `{DOKU_HOSTS}` final. **Sebagian terbukti 2 Nov 2026**: platform `zyad.online` dan host sandbox DOKU terjangkau; domain checkout DOKU nyata belum diuji (bagian 11).
 5. `Set profile` + `/ppp active remove` memutus sesi lama dan CPE tersambung ulang dengan profile baru; begitu juga restore. **Terbukti di lab 2 Nov 2026** (bagian 11).
 6. Galat `Remove` pada id sesi yang tidak ada. **Terbukti 2 Nov 2026**: `no such item (4)`.
 7. Secret dengan `remote-address` sendiri: tetap terisolir lewat address-list. **Terbukti sekali, manual, 2 Nov 2026** (bagian 11); tidak ada tes otomatis.
@@ -392,11 +392,36 @@ uji: `service/isolation_live_lab_test.go` (`TestLabLiveIsolateRestore`, butuh `M
 | 5. Sesi lama diputus, CPE tersambung ulang dengan profile baru / lama | **Terbukti** | Sesi lama (`*80000008`) hilang pada `Isolate`; sesi baru muncul dengan profile isolir (dan lagi setelah `Restore`) dalam jendela tunggu 150 dtk tanpa tindakan manual di CPE. |
 | 6. `Remove` pada id sesi yang sudah tidak ada | **Terbukti** | `mikrotik: router error: no such item (4)`. Executor tidak terpengaruh karena mencari sesi berdasarkan nama. |
 | 7. Secret dengan `remote-address` sendiri | **Terbukti sekali (manual)** | Dengan `remote-address=10.10.8.77` pada secret, sesi mendapat alamat itu (di luar pool); setelah `Isolate` sesi baru tetap masuk address-list `zyad-isolir`, jadi isolir lewat address-list tetap berlaku. Bagian ini tidak dimasukkan ke tes otomatis: `RouterClient` tidak punya `unset`, dan RouterOS API menolak nilai kosong (`invalid value for argument remote-address`); mengosongkan `remote-address` butuh `/ppp/secret/unset`. |
-| (pengamatan) filter forward | sebagian | Selama 20 dtk sesi terisolir, aturan `drop` akhir menghitung 2 paket / 152 byte; ketiga aturan `accept` (DNS udp/tcp 53, allowlist) tetap 0 karena CPE tidak mengirim DNS pada jendela itu. Jadi `drop` terbukti terkena trafik sumber di address-list, tetapi **allowlist/DNS belum terbukti** (butir 2–4). |
+| (pengamatan) filter forward | lihat uji lalu lintas di bawah | Pada uji pertama (tanpa lalu lintas dari sisi CPE) hanya aturan `drop` yang menghitung (2 paket / 152 byte). Uji lalu lintas di bawah mengisi kekosongan itu. |
 
-Masih butuh shell di CPE (atau klien di balik CPE) untuk menghasilkan trafik: butir 2 (DNS ke resolver router dan
-eksternal), 3 (hanya DNS + allowlist yang lolos, trafik lain di-drop), 4 (halaman platform dan checkout DOKU terbuka dari
-sesi terisolir), 8 (pengalihan HTTP ke halaman isolir tenant; butuh Fase 4).
+#### Uji lalu lintas dari sisi CPE (2 Nov 2026)
+
+CPE punya jalur manajemen SSH di `192.168.56.50` (alamat tambahan di `br-lan`, eth1 ke Cloud host-only; tidak lewat
+sesi PPPoE; DHCP LAN OpenWrt dimatikan). Kode uji: `service/isolation_traffic_lab_test.go`
+(`TestLabLiveIsolatedTraffic`, butuh `MIKROTIK_LAB_CPE_SSH` dan `MIKROTIK_LAB_CPE_KEY` selain env uji hidup). Probe
+read-only (`nslookup`, `wget` ke `/dev/null`, `ping`) dijalankan di tiga fase: kontrol sebelum isolir, saat terisolir,
+dan sesudah restore. PASS (182 dtk). Alamat sesi terisolir `10.255.254.2` dari `zyad-isolir-pool`; resolver CPE berganti
+ke `10.255.254.1` (dns-server profile isolir).
+
+| Probe | Normal | Terisolir | Setelah restore |
+|---|---|---|---|
+| DNS ke resolver router (`10.255.254.1` / `10.255.5.1`) | berhasil | **berhasil** (juga `10.255.5.1`) | berhasil |
+| DNS ke resolver eksternal `8.8.8.8` | berhasil | **berhasil** | berhasil |
+| HTTP dan HTTPS `zyad.online` (allowlist platform) | berhasil | **berhasil** | berhasil |
+| HTTPS `sandbox.doku.com`, `api-sandbox.doku.com` (allowlist DOKU) | HTTP 503 pada `/` (terjangkau) | **HTTP 503 (terjangkau)** | HTTP 503 |
+| HTTP dan HTTPS `example.com` (di luar allowlist) | berhasil | **diblokir** (`Failed to send request: Operation not permitted`) | berhasil |
+| ICMP ke `8.8.8.8` | berhasil | **diblokir** (100% loss) | berhasil |
+
+Penghitung aturan forward `zyad-managed` sesudah fase terisolir: `accept udp 53` = 2 paket, `accept allowlist` = 58 paket
+(4,2 KB), `drop` = 30 paket (1,9 KB), `accept tcp 53` = 0. Jadi DNS eksternal lewat aturan `accept udp 53`, trafik ke
+platform dan DOKU lewat allowlist, dan sisanya kena `drop`.
+
+Catatan: (a) DOKU sandbox menjawab 503 pada `/` di semua fase; itu dianggap "terjangkau" karena sambungan TCP/TLS dan
+balasan HTTP sampai, sedangkan alur yang di-drop berakhir sebagai galat sambungan. (b) Resolver router menjawab nama apa
+pun untuk sesi terisolir (termasuk `10.255.5.1`); itu perilaku yang diharapkan karena DNS ke router memakai rantai `input`,
+bukan `forward`. (c) Domain checkout DOKU yang sebenarnya (bukan host sandbox) belum diuji; daftar `{DOKU_HOSTS}` final
+tetap menunggu uji checkout nyata. (d) Pengalihan HTTP (butir 8) tidak diuji: setup uji tidak memakai `RedirectURL`, dan
+halaman isolir tenant (Fase 4) belum ada.
 
 Tidak dijalankan karena dilarang di router lab (lihat bagian 9 dan catatan `/ip service`): butir 9 TLS 8729 (`api-ssl`
 tidak punya sertifikat, handshake ditolak) dan butir 10 (user berhak minimum, perlu membuat user/grup). Butir 1-5, 7, 8
