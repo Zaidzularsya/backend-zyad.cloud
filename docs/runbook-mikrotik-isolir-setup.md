@@ -499,3 +499,61 @@ yang dihapus hanya profile buatan sendiri.
      ```
      `isolation_state` di database tetap `isolated` sampai tugas restore berjalan. Bila mesin dinyalakan lagi, restore
      itu idempoten (profile sudah benar) dan hanya menyelaraskan status.
+
+## 15. Pusat kendali: peluncuran bertahap dan pemulihan
+
+Referensi perilaku dan tabel aturan: `docs/reference-mikrotik.md` bagian "Pusat Kendali (Gelombang 2)". Bagian ini
+adalah urutan kerja operator.
+
+### 15.1 Gerbang yang ada
+
+- **Env `MIKROTIK_ISOLATION_MODE`** (API dan worker, restart keduanya): `off` | `dry_run` | `on`. Env selalu menang atas
+  mode tenant; hanya `on` yang membiarkan tenant benar-benar mengisolir.
+- **Mode tenant** (`PUT /control/mode`): `simulation` (default), `pilot`, `active`, `paused`. Tenant baru dengan env `on`
+  tidak mengisolir siapa pun sampai memilih `pilot` atau `active`.
+- Entitlement `mikrotik.enabled` per organisasi; `active` menuntut pilot terverifikasi.
+
+### 15.2 Urutan peluncuran yang aman
+
+1. Env `dry_run`: periksa log `mikrotik: dry-run decision`. Tidak ada tugas dibuat.
+2. Env `on` dengan entitlement hanya untuk satu organisasi uji. Tenant masih `simulation`: engine hanya mencatat
+   keputusan (`mikrotik: simulation decision`). Tinjau **pratinjau** (`GET /control/preview/summary`, daftar, dan ekspor CSV):
+   periksa `target`, `blocked` dan alasan tiap status (`needs_profile`, `secret_missing`, `router_not_ready`).
+   Atur `grace_days` dan pengecualian sesuai kebutuhan.
+3. Mode `pilot`, tambahkan **akun milik sendiri** ke daftar pilot (`PUT /control/pilot/{account_id}`), jalankan
+   **uji pilot** (`POST .../test`, jendela 10 menit). Pastikan koneksi akun uji benar-benar terputus lalu pulih; setelah
+   isolir dan restore selesai, `pilot_verified_at` terisi. Akun pilot tidak menerima notifikasi pelanggan.
+4. Mode `active` (boleh sekaligus dengan `exemptions` untuk akun yang harus dilindungi). Pantau log aktivitas dan dashboard
+   tugas (14.3) beberapa siklus reconcile pertama.
+5. **Jeda**: mode `paused` menghentikan isolir baru; pemulihan tetap berjalan. **Pulihkan semua** (`POST /control/restore-all`,
+   hanya saat `paused`) mengantrekan restore untuk setiap secret terisolir; ulangi bila `skipped` > 0 dan tugas lama sudah
+   selesai. Pairing tidak pernah dilepas.
+
+### 15.3 Membaca log aktivitas
+
+`GET /control/activity` (terbaru dulu, `limit` maks 100, `offset`) memuat isolir/pemulihan, tugas gagal/dibatalkan/diulang,
+perubahan mode dan grace, restore-all, aktivitas pilot, dan perubahan pengecualian. Kalimatnya berbahasa Indonesia; kode
+alasan teknis tidak ditampilkan di pesan. Tugas dibatalkan `mode_blocked`
+berarti gerbang menutup setelah tugas dibuat (mis. mode diubah ke `paused`); bila router sempat terisolir, restore
+`mode_blocked_restore` menyusul otomatis. Log hanya memuat event kendali dan tugas, bukan pengelolaan router/secret.
+
+### 15.4 Gerbang deploy
+
+- **nginx**: `proxy_read_timeout` minimal **300s** untuk `location /api/v1/app/mikrotik/`, termasuk
+  `/control/preview/export` (alirannya bisa panjang). Vhost harus memakai `proxy_http_version 1.1;` agar ekspor yang
+  diputus di tengah jalan tidak dikira berkas lengkap oleh klien (chunked encoding membutuhkan HTTP/1.1 ke upstream; tanpa
+  itu proxy dapat menyajikan respons yang terpotong sebagai selesai).
+- **`MIKROTIK_ALLOWED_PRIVATE_CIDRS`** harus mencakup subnet WireGuard tenant yang routernya dijangkau lewat tunnel.
+- **Migration `000178`** membuat index pada `audit_logs` (`idx_audit_logs_mikrotik_org_created`) tanpa `CONCURRENTLY`,
+  sehingga mengambil kunci SHARE singkat (menahan tulis ke `audit_logs` selama pembuatan). Jalankan pada jam sepi.
+- Migration `000176` (tabel pengaturan, pilot, kolom `exempted_until`) dan `000177` (permission) harus sudah jalan sebelum
+  API baru dinyalakan.
+
+### 15.5 Rollback
+
+1. Cepat: ubah mode tenant ke `paused` (isolir baru berhenti, restore tetap jalan) atau set env `MIKROTIK_ISOLATION_MODE=off`
+   di API dan worker (lihat 14.6: pelanggan terisolir tetap apa adanya sampai dipulihkan).
+2. Pulihkan pelanggan: mode `paused` lalu `POST /control/restore-all`, atau prosedur manual 14.6.
+3. Migration `000176`-`000178` bersifat aditif (tabel/kolom/index baru; kode lama mengabaikannya). Bila harus di-down:
+   urutan `000178` → `000177` → `000176`. Down `000176` menghapus tabel pengaturan dan pilot serta kolom `exempted_until`
+   (pengaturan mode, grace, dan pilot hilang; tenant kembali ke default `simulation`).

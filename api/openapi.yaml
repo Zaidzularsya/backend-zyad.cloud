@@ -11140,7 +11140,7 @@ paths:
       - Mikrotik
       security:
       - BearerAuth: []
-      description: "Menetapkan atau mencabut pengecualian isolir. `reason` wajib (1-500 karakter) saat `exempt=true`. Audit: `customer_policy.exempt_set`. `exempted_until` (opsional, `YYYY-MM-DD`) adalah hari bisnis WIB terakhir pengecualian berlaku (inklusif); hanya bermakna saat `exempt=true` (diabaikan dan disimpan NULL bila `exempt=false`); null/kosong = tanpa batas waktu. Tanggal sebelum hari ini (WIB) atau format salah: 422. Hanya menyimpan kebijakan; belum ada efek ke router pada fase ini. Permission: `mikrotik_policy.update`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      description: "Menetapkan atau mencabut pengecualian isolir. `reason` wajib (1-500 karakter) saat `exempt=true`. Audit: `customer_policy.exempt_set`. `exempted_until` (opsional, `YYYY-MM-DD`) adalah hari bisnis WIB terakhir pengecualian berlaku (inklusif); hanya bermakna saat `exempt=true` (diabaikan dan disimpan NULL bila `exempt=false`); null/kosong = tanpa batas waktu. Tanggal sebelum hari ini (WIB) atau format salah: 422. Setelah disimpan, akun dievaluasi ulang bila engine (`MIKROTIK_ISOLATION_MODE`) bukan `off`, jadi pengecualian yang baru dicabut atau sudah kedaluwarsa dapat membuat akun menjadi kandidat pada evaluasi/reconcile berikutnya; pengecualian yang diberikan memulihkan akun terisolir. Permission: `mikrotik_policy.update`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
       parameters:
       - name: account_id
         in: path
@@ -11524,6 +11524,528 @@ paths:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '429':
           description: "RATE_LIMITED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/control:
+    get:
+      summary: Get control center state
+      operationId: getMikrotikControl
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Keadaan pusat kendali isolir tenant. `mode` adalah mode tenant yang tersimpan (default `simulation` bila organisasi belum punya baris pengaturan). `engine` adalah saklar env `MIKROTIK_ISOLATION_MODE` (off|dry_run|on). `effective_mode` = `engine` bila engine bukan `on`, selain itu = `mode` tenant. `isolated_secrets` = jumlah secret yang sedang terisolir. Permission: `mikrotik_control.read` (organization_owner dan member). Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikControlStateEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/control/grace-days:
+    put:
+      summary: Set grace days
+      operationId: setMikrotikControlGraceDays
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Mengubah toleransi keterlambatan. Invoice menjadi kandidat isolir bila `due_date` < (hari bisnis WIB - grace_days). Rentang 0..60. Menurunkan nilai dapat membuat lebih banyak pelanggan menjadi kandidat; menaikkan dapat membuat pelanggan terisolir dipulihkan pada evaluasi berikutnya bila invoice terlambatnya masuk jendela baru (grace tidak pernah mencegah pemulihan). Audit: `control.grace_days_changed`. Permission: `mikrotik_control.update` (hanya organization_owner). Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MikrotikSetGraceDaysRequest'}
+      responses:
+        '200':
+          description: "Success (keadaan terbaru)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikControlStateEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR (grace_days kosong, bukan integer, di luar 0..60, atau field tidak dikenal)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/control/mode:
+    put:
+      summary: Set isolation mode
+      operationId: setMikrotikControlMode
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Mengubah mode tenant: `simulation`, `pilot`, `active`, `paused`. `active` hanya boleh bila pilot sudah terverifikasi (`pilot_verified_at` terisi) dari mode asal apa pun. `exemptions` hanya diterima bersama `mode=active`: akun-akun dikecualikan (maks 500 id unik, `reason` 1-500 karakter wajib, `until` opsional `YYYY-MM-DD` tidak boleh sebelum hari ini WIB) dan mode disimpan dalam satu transaksi; satu akun tak dikenal membatalkan seluruhnya. Memanggil dengan mode yang sama tanpa pengecualian tidak menulis apa pun. Audit: `control.mode_changed` dan `customer_policy.exempt_set` per akun. Permission: `mikrotik_control.update` (hanya organization_owner). Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MikrotikSetModeRequest'}
+      responses:
+        '200':
+          description: "Success (keadaan terbaru)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikControlStateEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "MIKROTIK_ACCOUNT_NOT_FOUND (akun pengecualian tidak dikenal atau bukan uuid)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '409':
+          description: "MIKROTIK_PILOT_REQUIRED (mode=active sebelum pilot terverifikasi)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '422':
+          description: "MIKROTIK_MODE_INVALID (mode tidak dikenal, atau exemptions bersama mode selain active) atau VALIDATION_ERROR (reason kosong/terlalu panjang, until salah format atau sudah lewat, lebih dari 500 akun, field tidak dikenal)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/control/pilot:
+    get:
+      summary: List pilot accounts
+      operationId: listMikrotikControlPilot
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Akun pilot tenant, urut `added_at`, lalu `account_id`; tanpa paginasi. `verified` adalah heuristik per akun: verifikasi tingkat organisasi (`pilot_verified_at`) terjadi setelah uji terakhir akun itu dimulai. Permission: `mikrotik_control.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikPilotListEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/control/pilot/{account_id}:
+    put:
+      summary: Add pilot account
+      operationId: addMikrotikControlPilot
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Menambahkan akun ke daftar pilot (idempoten). Audit: `pilot.added`. Akun pilot tidak pernah menerima notifikasi pelanggan. Permission: `mikrotik_control.update` (hanya organization_owner). Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '204':
+          description: "Ditambahkan"
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "MIKROTIK_ACCOUNT_NOT_FOUND (akun di luar organisasi atau account_id bukan uuid)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+    delete:
+      summary: Remove pilot account
+      operationId: removeMikrotikControlPilot
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Menghapus akun dari daftar pilot (idempoten; bukan pilot = 204 tanpa efek). Uji yang sedang berjalan dihentikan lebih dulu, lalu akun dievaluasi ulang sehingga isolir pilot dipulihkan. Audit: `pilot.test_stopped` (bila ada uji aktif) dan `pilot.removed`. Permission: `mikrotik_control.update` (hanya organization_owner). Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '204':
+          description: "Dihapus"
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "MIKROTIK_ACCOUNT_NOT_FOUND (akun di luar organisasi atau account_id bukan uuid)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/control/pilot/{account_id}/test:
+    post:
+      summary: Start pilot test
+      operationId: startMikrotikControlPilotTest
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Mengisolir satu akun pilot selama 10 menit lalu menjadwalkan tugas isolir. Syarat: engine env `on`, mode tenant `pilot`, akun ada di daftar pilot dan punya secret terpasang. Bila setelah evaluasi tidak ada yang bisa diisolir, jendela uji diakhiri lagi dan hasilnya 409 `MIKROTIK_PILOT_TEST_NOT_RUNNABLE` (audit `pilot.test_failed`). `pilot_verified_at` baru terisi setelah tugas isolir lalu pemulihan selesai (tingkat organisasi). Audit: `pilot.test_started`. Permission: `mikrotik_control.update` (hanya organization_owner). Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '202':
+          description: "Accepted; `test_until` adalah akhir jendela uji"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikPilotTestEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "MIKROTIK_ACCOUNT_NOT_FOUND (akun di luar organisasi atau account_id bukan uuid)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '409':
+          description: "MIKROTIK_ENGINE_OFF (env MIKROTIK_ISOLATION_MODE bukan `on`), MIKROTIK_PILOT_MODE_REQUIRED (mode tenant bukan `pilot`), atau MIKROTIK_PILOT_TEST_NOT_RUNNABLE (akun dikecualikan, tidak punya secret yang dapat diisolir, atau diblokir mode)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR (akun bukan pilot, atau belum punya secret terpasang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+    delete:
+      summary: Stop pilot test
+      operationId: stopMikrotikControlPilotTest
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Mengakhiri jendela uji sekarang dan mengevaluasi ulang akun sehingga pemulihan dijadwalkan. Tanpa uji aktif: 204 tanpa efek. Audit: `pilot.test_stopped`. Permission: `mikrotik_control.update` (hanya organization_owner). Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: account_id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '204':
+          description: "Dihentikan (atau tidak ada uji aktif)"
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "MIKROTIK_ACCOUNT_NOT_FOUND (akun di luar organisasi atau account_id bukan uuid)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR (akun bukan pilot)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/control/restore-all:
+    post:
+      summary: Restore all isolated customers
+      operationId: restoreAllMikrotikControl
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Menjadwalkan tugas pemulihan untuk setiap secret terisolir; hanya saat mode tenant `paused`. Tidak menghubungi router langsung dan tidak pernah melepas pairing. `enqueued` = tugas dibuat; `skipped` = tidak memenuhi syarat, sudah punya tugas aktif, atau dalam masa jeda; `failed` = enqueue gagal (dicatat di log, tidak menghentikan proses). Mode dibaca ulang tiap halaman 200 secret; bila tenant keluar dari `paused` di tengah jalan, proses berhenti dengan `aborted=true` dan hitungan parsial. Mengulang panggilan aman (secret dengan tugas aktif dilewati). Audit: `control.restore_all`. Permission: `mikrotik_control.restore` (hanya organization_owner). Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikRestoreAllEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '409':
+          description: "MIKROTIK_NOT_PAUSED (mode tenant bukan `paused`)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/control/preview:
+    get:
+      summary: List isolation candidates
+      operationId: listMikrotikControlPreview
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Akun yang punya invoice kandidat (jatuh tempo sebelum cutoff = hari bisnis WIB - grace_days), urut tanggal jatuh tempo tertua lalu `account_id`, berpaginasi (`meta`). `status` memprediksi apa yang dilakukan engine; prioritas: exempt, no_secret, already_isolated, will_isolate, needs_profile, secret_missing, router_not_ready. `will_isolate` adalah prediksi aksi isolir yang dapat berjalan dan ditampilkan apa pun mode tenant (artinya: bila mode `active`). Data memuat nama dan telepon pelanggan. Permission: `mikrotik_control.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema: {type: string, enum: [exempt, no_secret, already_isolated, needs_profile, secret_missing, router_not_ready, will_isolate]}
+      - name: q
+        in: query
+        required: false
+        description: "Substring nama atau telepon (tanpa beda huruf besar/kecil), maks 100 karakter."
+        schema: {type: string, maxLength: 100}
+      - name: page
+        in: query
+        required: false
+        schema: {type: integer, minimum: 1, default: 1}
+      - name: per_page
+        in: query
+        required: false
+        description: "Default 50, maks 100 (nilai lebih besar dipotong; nilai kurang dari 1 memakai default)."
+        schema: {type: integer, default: 50, maximum: 100}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikPreviewListEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR (status tidak dikenal, q lebih dari 100 karakter, page/per_page bukan angka)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/control/preview/summary:
+    get:
+      summary: Candidate preview summary
+      operationId: getMikrotikControlPreviewSummary
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Hitungan ringkas kandidat. `target` = akun berstatus will_isolate; `blocked` = no_secret + needs_profile + secret_missing + router_not_ready; `paired_accounts` = akun dengan secret terpasang pada router tidak terhapus; `safe` = paired_accounts - target (minimal 0); `cutoff` = tanggal (YYYY-MM-DD) batas jatuh tempo kandidat. Permission: `mikrotik_control.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikPreviewSummaryEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/control/preview/export:
+    get:
+      summary: Export isolation candidates as CSV
+      operationId: exportMikrotikControlPreview
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Mengekspor kandidat (filter `status` dan `q` yang sama dengan daftar) sebagai CSV UTF-8, dibaca bertahap (keyset, 1000 baris per halaman), maksimal 100.000 baris. Header: `Content-Disposition: attachment; filename=\"isolir-kandidat-YYYYMMDD.csv\"`, `X-Total-Count` (total baris yang cocok, bisa melebihi batas ekspor), `Cache-Control: no-store`. Sel diawali tanda kutip tunggal bila dapat terbaca sebagai rumus (= + - @, tab, CR). Berisi nama dan nomor telepon pelanggan; hanya butuh permission baca. Galat sebelum byte pertama dijawab sebagai JSON biasa. Bila gagal setelah respons dimulai, koneksi diputus (tanpa penutup chunk) sehingga klien melihat unduhan tidak lengkap, bukan berkas utuh palsu; klien harus memperlakukan galat jaringan sebagai ekspor gagal. Permission: `mikrotik_control.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: status
+        in: query
+        required: false
+        schema: {type: string, enum: [exempt, no_secret, already_isolated, needs_profile, secret_missing, router_not_ready, will_isolate]}
+      - name: q
+        in: query
+        required: false
+        description: "Substring nama atau telepon (tanpa beda huruf besar/kecil), maks 100 karakter."
+        schema: {type: string, maxLength: 100}
+      responses:
+        '200':
+          description: "CSV. Kolom: Akun, Telepon, Status, Alasan, Hari Terlambat, Jumlah Invoice, Saldo, Router, Produk, Dikecualikan Sampai."
+          content:
+            text/csv:
+              schema: {type: string, format: binary}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR (status tidak dikenal atau q lebih dari 100 karakter)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/control/activity:
+    get:
+      summary: Control center activity log
+      operationId: listMikrotikControlActivity
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Log aktivitas pusat kendali dari audit, terbaru lebih dulu. Hanya event: isolation.isolated, isolation.restored, task.failed, task.cancelled, task.retried, control.mode_changed, control.grace_days_changed, control.restore_all, pilot.added, pilot.removed, pilot.test_started, pilot.test_stopped, pilot.test_failed, customer_policy.exempt_set. `message` berbahasa Indonesia, hanya memuat nilai berbentuk kode dari metadata (tidak pernah teks bebas, host, atau kredensial). `account_name`/`secret_name`/`account_id` bisa kosong. Paginasi limit/offset di `meta` (limit default 50, maks 100). Permission: `mikrotik_control.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema: {type: integer, default: 50, maximum: 100}
+      - name: offset
+        in: query
+        required: false
+        schema: {type: integer, minimum: 0, default: 0}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikActivityListEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR (limit/offset bukan angka)"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -16779,7 +17301,7 @@ components:
         exempt: {type: boolean}
         secrets: {type: integer}
         exempted_until: {type: string, format: date, nullable: true, description: "Nilai tersimpan `mikrotik_customer_policies.exempted_until`; hanya bermakna selagi `exempt=true`. Pengecualian yang sudah lewat tetap dilaporkan apa adanya (`exempt=true` sesuai data); klien membandingkan tanggalnya dengan hari ini (WIB)."}
-        pending_isolation: {type: boolean, description: "Dicadangkan; saat ini selalu false."}
+        pending_isolation: {type: boolean, description: "Engine akan mengisolir pelanggan ini hari ini (status preview will_isolate; ditampilkan apa pun mode tenant). False bila tidak ada invoice kandidat atau pembacaan prediksi gagal."}
     MikrotikCustomerStatusListEnvelope:
       type: object
       required: [success, message, data]
@@ -16955,3 +17477,145 @@ components:
         success: {type: boolean}
         message: {type: string}
         data: {$ref: '#/components/schemas/TaskSummary'}
+    MikrotikControlState:
+      type: object
+      properties:
+        mode: {type: string, enum: [simulation, pilot, active, paused], description: "Mode tenant tersimpan; default simulation tanpa baris pengaturan."}
+        grace_days: {type: integer, minimum: 0, maximum: 60}
+        pilot_verified_at: {type: string, format: date-time, nullable: true, description: "Terisi sekali setelah tugas isolir lalu pemulihan pilot selesai; tingkat organisasi."}
+        engine: {type: string, enum: [off, dry_run, on], description: "Saklar env MIKROTIK_ISOLATION_MODE."}
+        effective_mode: {type: string, description: "off atau dry_run bila engine demikian; bila engine on, sama dengan mode."}
+        pilot_count: {type: integer}
+        test_active_count: {type: integer, description: "Akun pilot dengan uji yang masih berjalan."}
+        isolated_secrets: {type: integer}
+    MikrotikControlStateEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/MikrotikControlState'}
+    MikrotikSetGraceDaysRequest:
+      type: object
+      required: [grace_days]
+      properties:
+        grace_days: {type: integer, minimum: 0, maximum: 60}
+    MikrotikSetModeExemptions:
+      type: object
+      properties:
+        account_ids: {type: array, maxItems: 500, items: {type: string, format: uuid}}
+        reason: {type: string, minLength: 1, maxLength: 500, description: "Wajib bila account_ids tidak kosong."}
+        until: {type: string, format: date, description: "Hari bisnis WIB terakhir pengecualian (inklusif); kosong = tanpa batas waktu."}
+    MikrotikSetModeRequest:
+      type: object
+      required: [mode]
+      properties:
+        mode: {type: string, enum: [simulation, pilot, active, paused]}
+        exemptions: {$ref: '#/components/schemas/MikrotikSetModeExemptions'}
+    MikrotikPilotAccount:
+      type: object
+      properties:
+        account_id: {type: string, format: uuid}
+        account_name: {type: string, description: "Kosong bila akun tidak ditemukan."}
+        added_at: {type: string, format: date-time}
+        test_active: {type: boolean}
+        test_until: {type: string, format: date-time, nullable: true}
+        verified: {type: boolean, description: "Heuristik: pilot_verified_at organisasi tidak lebih awal dari awal uji terakhir akun ini."}
+    MikrotikPilotListEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: '#/components/schemas/MikrotikPilotAccount'}}
+    MikrotikPilotTest:
+      type: object
+      properties:
+        test_until: {type: string, format: date-time}
+    MikrotikPilotTestEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/MikrotikPilotTest'}
+    MikrotikRestoreAll:
+      type: object
+      properties:
+        enqueued: {type: integer}
+        skipped: {type: integer}
+        failed: {type: integer}
+        aborted: {type: boolean, description: "Tenant keluar dari mode paused di tengah proses; hitungan parsial."}
+    MikrotikRestoreAllEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/MikrotikRestoreAll'}
+    MikrotikPreviewItem:
+      type: object
+      properties:
+        account_id: {type: string, format: uuid}
+        account_name: {type: string}
+        phone: {type: string}
+        status: {type: string, enum: [exempt, no_secret, already_isolated, needs_profile, secret_missing, router_not_ready, will_isolate]}
+        overdue_days: {type: integer, description: "Dari jatuh tempo kandidat tertua sampai hari ini (WIB)."}
+        invoice_count: {type: integer}
+        oldest_invoice_number: {type: string}
+        balance: {type: string, description: "Desimal sebagai string: jumlah grand_total - amount_paid invoice kandidat."}
+        router_name: {type: string, description: "Router dari secret terpasang pertama."}
+        products: {type: string, description: "Nama produk pemicu, dipisah koma."}
+        pilot: {type: boolean}
+        exempted_until: {type: string, format: date, nullable: true}
+    MikrotikPreviewSummary:
+      type: object
+      properties:
+        target: {type: integer}
+        exempt: {type: integer}
+        blocked: {type: integer}
+        already_isolated: {type: integer}
+        paired_accounts: {type: integer}
+        safe: {type: integer}
+        grace_days: {type: integer}
+        cutoff: {type: string, format: date}
+    MikrotikPreviewListEnvelope:
+      type: object
+      required: [success, message, data, meta]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: '#/components/schemas/MikrotikPreviewItem'}}
+        meta: {$ref: '#/components/schemas/PaginationMeta'}
+    MikrotikPreviewSummaryEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/MikrotikPreviewSummary'}
+    MikrotikActivityItem:
+      type: object
+      properties:
+        id: {type: string}
+        at: {type: string, format: date-time}
+        event: {type: string}
+        actor_user_id: {type: string, description: "Kosong untuk event mesin."}
+        account_id: {type: string}
+        account_name: {type: string}
+        secret_name: {type: string}
+        message: {type: string}
+    MikrotikActivityMeta:
+      type: object
+      properties:
+        limit: {type: integer}
+        offset: {type: integer}
+        total: {type: integer, format: int64}
+    MikrotikActivityListEnvelope:
+      type: object
+      required: [success, message, data, meta]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {type: array, items: {$ref: '#/components/schemas/MikrotikActivityItem'}}
+        meta: {$ref: '#/components/schemas/MikrotikActivityMeta'}

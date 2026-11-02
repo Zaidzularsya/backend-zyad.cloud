@@ -342,7 +342,7 @@ Semua di bawah `/api/v1/app/mikrotik`, tunduk pada entitlement `mikrotik.enabled
 - `customers/status`: `isolation_state` = `isolated` (ada secret terpasang yang terisolir), `normal` (ada secret terpasang,
   tidak ada yang terisolir), `none` (tanpa secret terpasang, walau `exempt`). `account_ids` kosong/bukan uuid/lebih dari 100: 422.
   Setiap item juga memuat `exempted_until` (nilai tersimpan, `YYYY-MM-DD` atau null; pengecualian yang sudah lewat tetap
-  dilaporkan dengan `exempt` sesuai data, klien membandingkan tanggal) dan `pending_isolation` (dicadangkan, saat ini selalu false).
+  dilaporkan dengan `exempt` sesuai data, klien membandingkan tanggal) dan `pending_isolation` (engine akan mengisolir akun itu hari ini: status preview `will_isolate`, lihat "Pusat Kendali").
 - Peran `member` hanya memegang `mikrotik_task.read`, jadi di UI tenant ia hanya melihat dashboard tugas (read-only).
 - Kode error baru: `MIKROTIK_ANALYZE_IN_PROGRESS` (409).
 
@@ -357,6 +357,124 @@ Semua di bawah `/api/v1/app/mikrotik`, tunduk pada entitlement `mikrotik.enabled
   job menelusuri semua organisasi aktif sehingga ada noise antrean/log untuk organisasi yang tidak berhak.
 - Satu tenant yang lambat (router tak terjangkau, timeout) dapat menunda tenant lain dalam satu tick worker; anggaran
   waktu per tick per tenant belum diimplementasikan.
+
+## Pusat Kendali (Gelombang 2)
+
+Pusat kendali memberi tenant kemudi atas mesin isolir (Fase 3): mode peluncuran bertahap, toleransi keterlambatan,
+akun pilot, pratinjau kandidat, pemulihan massal, dan log aktivitas. Semua di bawah `/api/v1/app/mikrotik/control`,
+tunduk pada entitlement `mikrotik.enabled`. Skema lengkap dan kode error ada di `api/openapi.yaml`. Tabel:
+`mikrotik_org_settings`, `mikrotik_pilot_accounts`, kolom `mikrotik_customer_policies.exempted_until` (migration `000176`),
+permission (`000177`), index audit (`000178`).
+
+### Endpoint dan permission
+
+| Endpoint | Permission | Catatan |
+| --- | --- | --- |
+| `GET /control` | `mikrotik_control.read` | Mode, grace, `engine`, `effective_mode`, hitungan pilot, `isolated_secrets` |
+| `PUT /control/grace-days` | `mikrotik_control.update` | `{grace_days}` 0..60 |
+| `PUT /control/mode` | `mikrotik_control.update` | `{mode, exemptions?}` |
+| `GET /control/pilot` | `mikrotik_control.read` | Daftar akun pilot |
+| `PUT /control/pilot/{account_id}`, `DELETE /control/pilot/{account_id}` | `mikrotik_control.update` | 204, idempoten |
+| `POST /control/pilot/{account_id}/test` (202), `DELETE .../test` (204) | `mikrotik_control.update` | Mulai/hentikan uji pilot |
+| `POST /control/restore-all` | `mikrotik_control.restore` | Hanya saat mode `paused` |
+| `GET /control/preview`, `/preview/summary`, `/preview/export` | `mikrotik_control.read` | Pratinjau kandidat, ringkasan, CSV |
+| `GET /control/activity` | `mikrotik_control.read` | Log aktivitas |
+
+`mikrotik_control.read`: `organization_owner` dan `member`. `mikrotik_control.update` dan `mikrotik_control.restore`: hanya
+`organization_owner` (member mendapat 403 pada setiap mutasi). Tidak satu pun rute ini menghubungi router secara langsung
+(tugas yang melakukannya), jadi rute ini tidak memakai rate limit probe.
+
+Kode error khusus: 409 `MIKROTIK_PILOT_REQUIRED` (aktivasi sebelum pilot terverifikasi), `MIKROTIK_NOT_PAUSED` (restore-all
+di luar `paused`), `MIKROTIK_ENGINE_OFF` (uji pilot saat env bukan `on`), `MIKROTIK_PILOT_MODE_REQUIRED` (uji pilot saat mode
+bukan `pilot`), `MIKROTIK_PILOT_TEST_NOT_RUNNABLE` (akun dikecualikan, tanpa secret yang dapat diisolir, atau diblokir mode);
+422 `MIKROTIK_MODE_INVALID` (mode tidak dikenal, atau `exemptions` bersama mode selain `active`) dan `VALIDATION_ERROR`;
+404 `MIKROTIK_ACCOUNT_NOT_FOUND`.
+
+### Mode dan tabel aturan
+
+Dua lapis: env `MIKROTIK_ISOLATION_MODE` (saklar operator) dan mode tenant (`simulation`, `pilot`, `active`, `paused`).
+**Env selalu menang.** Pemulihan (restore) tidak pernah diblokir oleh mode mana pun; yang digerbang hanya aksi isolir.
+
+| Env \ tenant | `simulation` | `pilot` | `active` | `paused` |
+| --- | --- | --- | --- | --- |
+| `off` | tidak ada apa pun yang dibuat atau dijalankan | sama | sama | sama |
+| `dry_run` | hanya log keputusan, tanpa tugas | sama | sama | sama |
+| `on` | isolir diblokir (alasan `simulation`), keputusan dicatat di log; restore berjalan | isolir hanya untuk akun pilot, selain itu `not_in_pilot`; restore berjalan | isolir untuk semua kandidat; restore berjalan | isolir diblokir (`paused`); restore berjalan |
+
+- **Default `simulation`** bila organisasi belum punya baris di `mikrotik_org_settings`. Akibatnya dengan env `on`, tenant
+  baru **tidak mengisolir siapa pun** sampai ia memilih `pilot` atau `active`.
+- `active` hanya dapat dipilih setelah `pilot_verified_at` terisi (dari mode asal apa pun), kalau tidak 409
+  `MIKROTIK_PILOT_REQUIRED`. `exemptions` hanya diterima bersama `active` (maks 500 akun, `reason` wajib, `until` opsional)
+  dan disimpan satu transaksi dengan mode.
+- `effective_mode` pada `GET /control`: `off`/`dry_run` bila env demikian, selain itu mode tenant.
+- Tugas isolir yang sudah di antrean tetapi gerbang menutup sebelum dijalankan dibatalkan dengan alasan `mode_blocked`.
+  Bila saat itu router sudah terlanjur memakai profile isolir (isolir parsial), secret ditandai terisolir lalu dijadwalkan
+  restore dengan event `mode_blocked_restore` yang tetap berjalan walau akun masih menunggak. Pelanggan **tidak** menerima
+  notifikasi "dipulihkan" untuk restore itu (ia tidak pernah diberi tahu terisolir).
+- Bila pengaturan kendali tenant tidak dapat dibaca (galat DB), isolir diblokir dengan alasan `control_unreadable`
+  (gagal-tertutup) dan pemulihan tetap berjalan. Konsekuensi: pembacaan gagal memakai grace 0 untuk evaluasi itu, sehingga
+  restore bisa tertunda untuk pelanggan yang invoice terbarunya sebenarnya masih di dalam jendela grace asli.
+
+### Grace days dan pengecualian
+
+- Rumus: invoice menjadi kandidat bila `due_date < hari bisnis WIB - grace_days` (cutoff = hari bisnis dikurangi grace;
+  `due_date` tepat di cutoff belum kandidat). Rentang 0..60; 0 = perilaku Gelombang 1.
+- Menaikkan `grace_days` dapat memulihkan pelanggan terisolir yang invoice terlambatnya jatuh dalam jendela baru; grace
+  tidak pernah mencegah pemulihan. Menurunkannya memperbanyak kandidat.
+- `exempted_until` (di `PUT /customers/{account_id}/policy`, `customers/status`, `preview`, dan `exemptions.until`) adalah
+  hari bisnis WIB terakhir pengecualian, **inklusif**; kosong/null = tanpa batas. Tidak boleh sebelum hari ini. Setelah lewat,
+  pengecualian tidak lagi berlaku, dan akun menjadi kandidat pada reconcile berikutnya (nilainya tetap dilaporkan apa
+  adanya; klien membandingkan tanggal).
+- `customers/status.pending_isolation` = status preview akun itu `will_isolate`.
+
+### Uji pilot
+
+1. Syarat: env `on`, mode tenant `pilot`, akun ada di daftar pilot dan punya secret terpasang. Selain itu 409/422.
+2. `POST .../test` membuka jendela **10 menit**, mengevaluasi akun, dan menjadwalkan isolir (walau akun tidak punya
+   invoice kandidat). Bila tidak ada yang bisa diisolir, jendela diakhiri dan hasilnya 409
+   `MIKROTIK_PILOT_TEST_NOT_RUNNABLE` (audit `pilot.test_failed`).
+3. Saat jendela habis atau `DELETE .../test` dipanggil, akun dievaluasi ulang dan restore dijadwalkan.
+4. `pilot_verified_at` (tingkat organisasi, sekali) terisi hanya setelah ada tugas isolir `done` sejak uji dimulai **lalu**
+   restore selesai. `verified` per akun di `GET /control/pilot` adalah heuristik (verifikasi organisasi terjadi sesudah uji
+   terakhir akun itu dimulai).
+5. Akun pilot **tidak pernah menerima notifikasi pelanggan** (isolir maupun pemulihan). Menghapus akun dari pilot
+   menghentikan uji dan memulihkan isolirnya.
+
+### Pratinjau kandidat
+
+`status` memprediksi apa yang akan dilakukan engine terhadap akun yang punya invoice kandidat. Urutan prioritas (yang
+pertama cocok menang): `exempt` → `no_secret` → `already_isolated` (semua secret sudah terisolir) → `will_isolate` (ada secret
+yang dapat diisolir: normal, present, original profile diketahui, router `isolir_ready` dan profile isolir terisi) →
+`needs_profile` → `secret_missing` → `router_not_ready`. `will_isolate` adalah **prediksi aksi isolir yang bisa berjalan**
+dan ditampilkan apa pun mode tenant, artinya "bila aktif".
+
+`GET /preview/summary`: `target` (will_isolate), `exempt`, `blocked` (no_secret + needs_profile + secret_missing +
+router_not_ready), `already_isolated`, `paired_accounts`, `safe` = `paired_accounts - target` (minimal 0), `grace_days`,
+`cutoff` (YYYY-MM-DD). Daftar dipaginasi (`page`, `per_page` default 50 maks 100, `meta`), filter `status` dan `q`.
+
+**Ekspor CSV** (`GET /preview/export`, filter sama): maksimal 100.000 baris, dibaca keyset 1000 baris per halaman dan
+dialirkan; header `Content-Disposition: attachment`, `X-Total-Count`, `Cache-Control: no-store`. Sel yang dapat terbaca
+sebagai rumus (awal `= + - @`, tab, CR) diberi awalan `'`. Berkas memuat **nama dan telepon pelanggan** dan hanya butuh
+permission baca. Galat sebelum byte pertama menjawab JSON; galat sesudah respons dimulai memutus koneksi sehingga unduhan
+tampak tidak lengkap (bukan berkas utuh palsu).
+
+### Restore-all
+
+`POST /control/restore-all` hanya saat mode `paused` (selain itu 409 `MIKROTIK_NOT_PAUSED`). Ia **mengantrekan** tugas
+restore untuk tiap secret terisolir (halaman 200; mode dibaca ulang tiap halaman) lalu segera menjawab; router baru
+disentuh oleh processor. Hasil `{enqueued, skipped, failed, aborted}`: `skipped` = tidak memenuhi syarat, sudah punya
+tugas aktif, atau dalam masa jeda; `failed` = enqueue gagal (dicatat di log, tidak menghentikan); `aborted=true` bila
+tenant meninggalkan `paused` di tengah proses (hitungan parsial). Aman diulang. Tidak pernah melepas pairing.
+
+### Log aktivitas dan audit
+
+`GET /control/activity` (limit default 50, maks 100, offset; `meta.total`) menampilkan event audit dari daftar putih:
+`isolation.isolated`, `isolation.restored`, `task.failed`, `task.cancelled`, `task.retried`, `control.mode_changed`,
+`control.grace_days_changed`, `control.restore_all`, `pilot.added`, `pilot.removed`, `pilot.test_started`,
+`pilot.test_stopped`, `pilot.test_failed`, `customer_policy.exempt_set`. Event pengelolaan router/secret sengaja tidak
+ditampilkan. `message` berbahasa Indonesia dan hanya memuat nilai berbentuk kode dari metadata. Event audit yang ditulis
+pusat kendali: `control.mode_changed`, `control.grace_days_changed`, `control.restore_all`, `pilot.added`, `pilot.removed`,
+`pilot.test_started`, `pilot.test_stopped`, `pilot.test_failed`, `customer_policy.exempt_set`.
 
 ## Tidak termasuk Fase 1
 
