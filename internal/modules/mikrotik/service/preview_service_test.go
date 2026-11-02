@@ -15,11 +15,14 @@ import (
 )
 
 func TestCandidateStatus_PriorityTable(t *testing.T) {
-	ready := CandidateSecret{Present: true, RouterReady: true}
-	isolated := CandidateSecret{Present: true, RouterReady: true, Isolated: true}
-	needs := CandidateSecret{Present: true, RouterReady: true, NeedsOriginalProfile: true}
-	missing := CandidateSecret{RouterReady: true}
+	// RouterReady = isolir_ready, RouterProfile = non-empty isolir_profile_name.
+	ready := CandidateSecret{Present: true, RouterReady: true, RouterProfile: true}
+	isolated := CandidateSecret{Present: true, RouterReady: true, RouterProfile: true, Isolated: true}
+	isolatedNeeds := CandidateSecret{Present: true, RouterReady: true, RouterProfile: true, Isolated: true, NeedsOriginalProfile: true}
+	needs := CandidateSecret{Present: true, RouterReady: true, RouterProfile: true, NeedsOriginalProfile: true}
+	missing := CandidateSecret{RouterReady: true, RouterProfile: true}
 	notReady := CandidateSecret{Present: true}
+	noProfile := CandidateSecret{Present: true, RouterReady: true}
 	for _, tc := range []struct {
 		name    string
 		exempt  bool
@@ -33,17 +36,25 @@ func TestCandidateStatus_PriorityTable(t *testing.T) {
 		{"needs profile", false, []CandidateSecret{needs}, CandidateNeedsProfile},
 		{"secret missing", false, []CandidateSecret{missing}, CandidateSecretMissing},
 		{"router not ready", false, []CandidateSecret{notReady}, CandidateRouterNotReady},
+		{"ready router without isolir profile name", false, []CandidateSecret{noProfile}, CandidateRouterNotReady},
 		// collisions: the higher priority wins
 		{"exempt + no secret", true, nil, CandidateExempt},
 		{"exempt + already isolated", true, []CandidateSecret{isolated}, CandidateExempt},
-		{"isolated + needs profile on an isolated secret", false, []CandidateSecret{{Present: true, Isolated: true, NeedsOriginalProfile: true}}, CandidateAlreadyIsolated},
-		{"partly isolated + needs profile", false, []CandidateSecret{isolated, needs}, CandidateNeedsProfile},
-		{"needs profile + missing", false, []CandidateSecret{{NeedsOriginalProfile: true}}, CandidateNeedsProfile},
+		{"needs flag on the only (isolated) secret", false, []CandidateSecret{isolatedNeeds}, CandidateAlreadyIsolated},
+		{"isolated + normal needing profile", false, []CandidateSecret{isolated, needs}, CandidateNeedsProfile},
+		{"needs profile + missing", false, []CandidateSecret{{RouterReady: true, RouterProfile: true, NeedsOriginalProfile: true}}, CandidateNeedsProfile},
 		{"missing + router not ready", false, []CandidateSecret{{}}, CandidateSecretMissing},
 		{"one ready among not ready", false, []CandidateSecret{notReady, ready}, CandidateWillIsolate},
 		{"present on unready router, missing on ready router", false, []CandidateSecret{notReady, missing}, CandidateRouterNotReady},
 		{"partly isolated, rest isolatable", false, []CandidateSecret{isolated, ready}, CandidateWillIsolate},
-		{"needs profile only on the isolated secret", false, []CandidateSecret{{Present: true, RouterReady: true, Isolated: true, NeedsOriginalProfile: true}, missing}, CandidateWillIsolate},
+		{"needs flag only on the isolated secret, other actionable", false, []CandidateSecret{isolatedNeeds, ready}, CandidateWillIsolate},
+		{"needs flag only on the isolated secret, other missing", false, []CandidateSecret{isolatedNeeds, missing}, CandidateSecretMissing},
+		// engine-prediction cases (the engine only cuts normal, present,
+		// profile-known secrets on a ready router with an isolir profile)
+		{"(a) isolated on ready + normal on unready router", false, []CandidateSecret{isolated, notReady}, CandidateRouterNotReady},
+		{"(b) isolated + normal not present", false, []CandidateSecret{isolated, missing}, CandidateSecretMissing},
+		{"(c) isolated + normal on router without profile name", false, []CandidateSecret{isolated, noProfile}, CandidateRouterNotReady},
+		{"(d) actionable + another needing profile", false, []CandidateSecret{ready, needs}, CandidateWillIsolate},
 	} {
 		if got := CandidateStatusOf(tc.exempt, tc.secrets); got != tc.want {
 			t.Errorf("%s: got %s want %s", tc.name, got, tc.want)
@@ -51,16 +62,21 @@ func TestCandidateStatus_PriorityTable(t *testing.T) {
 	}
 }
 
-// fakeCandidateSource serves rows from memory; total is len(rows) unless
-// infinite, in which case every page is full.
+// fakeCandidateSource serves rows (sorted by OldestDue, AccountID) from
+// memory and honours CandidateFilter.After like the SQL keyset. infinite
+// serves full pages forever. failOnCall (1-based) fails that call only;
+// beforeCall may mutate rows between pages.
 type fakeCandidateSource struct {
-	rows      []CandidateRow
-	infinite  bool
-	summary   CandidateSummary
-	err       error
-	calls     []candidateCall
-	sumCutoff time.Time
-	sumToday  time.Time
+	rows       []CandidateRow
+	infinite   bool
+	served     int
+	summary    CandidateSummary
+	err        error
+	failOnCall int
+	beforeCall func(n int, f *fakeCandidateSource)
+	calls      []candidateCall
+	sumCutoff  time.Time
+	sumToday   time.Time
 }
 
 type candidateCall struct {
@@ -69,26 +85,53 @@ type candidateCall struct {
 	limit, offset int
 }
 
+func candidateAfter(r CandidateRow, c *CandidateCursor) bool {
+	if !r.OldestDue.Equal(c.OldestDue) {
+		return r.OldestDue.After(c.OldestDue)
+	}
+	return r.AccountID > c.AccountID
+}
+
 func (f *fakeCandidateSource) ListCandidates(_ context.Context, _ coretenant.Scope, today, cutoff time.Time, flt CandidateFilter, limit, offset int) ([]CandidateRow, int64, error) {
 	f.calls = append(f.calls, candidateCall{today, cutoff, flt, limit, offset})
+	n := len(f.calls)
+	if f.beforeCall != nil {
+		f.beforeCall(n, f)
+	}
 	if f.err != nil {
 		return nil, 0, f.err
+	}
+	if f.failOnCall == n {
+		return nil, 0, errors.New("page read failed")
 	}
 	if f.infinite {
 		out := make([]CandidateRow, limit)
 		for i := range out {
-			out[i] = CandidateRow{AccountID: fmt.Sprintf("acc-%d", offset+i), AccountName: "Budi", Status: CandidateWillIsolate}
+			out[i] = CandidateRow{AccountID: fmt.Sprintf("acc-%08d", f.served+i), AccountName: "Budi", Status: CandidateWillIsolate}
 		}
+		f.served += limit
 		return out, 1 << 40, nil
 	}
-	if offset >= len(f.rows) {
-		return []CandidateRow{}, int64(len(f.rows)), nil
+	rows := f.rows
+	total := int64(len(f.rows))
+	if flt.After != nil {
+		total = 0 // keyset pages do not count
+		var rest []CandidateRow
+		for _, r := range f.rows {
+			if candidateAfter(r, flt.After) {
+				rest = append(rest, r)
+			}
+		}
+		rows = rest
+	}
+	if offset >= len(rows) {
+		return []CandidateRow{}, total, nil
 	}
 	end := offset + limit
-	if end > len(f.rows) {
-		end = len(f.rows)
+	if end > len(rows) {
+		end = len(rows)
 	}
-	return f.rows[offset:end], int64(len(f.rows)), nil
+	return rows[offset:end], total, nil
 }
 
 func (f *fakeCandidateSource) Summary(_ context.Context, _ coretenant.Scope, today, cutoff time.Time) (CandidateSummary, error) {
@@ -172,17 +215,18 @@ func TestCSVExport_EscapesFormulaCells(t *testing.T) {
 			OverdueDays: 5, InvoiceCount: 2, Balance: "150000.00", ExemptUntil: &until},
 		{AccountName: "\tTab", Phone: "\rcr", Status: CandidateWillIsolate, RouterName: "R1", Products: "Paket 10M", OverdueDays: 1, InvoiceCount: 1, Balance: "1.00"},
 		{AccountName: "Budi, \"Jr\"", Phone: "0812", Status: CandidateRouterNotReady},
+		{AccountName: "  =1+1", Phone: "\u3000+62811", RouterName: " @x", Products: "Paket - 10M", Status: CandidateWillIsolate},
 	}}
 	var buf bytes.Buffer
 	var began int64 = -1
 	if err := newPreviewForTest(src, 0).ExportCSV(context.Background(), coretenant.Scope{}, CandidateFilter{}, &buf, func(total int64) { began = total }); err != nil {
 		t.Fatal(err)
 	}
-	if began != 3 {
+	if began != 4 {
 		t.Fatalf("begin total = %d", began)
 	}
 	recs := readCSV(t, buf.Bytes())
-	if len(recs) != 4 || len(recs[0]) != 10 || recs[0][0] != "Akun" {
+	if len(recs) != 5 || len(recs[0]) != 10 || recs[0][0] != "Akun" {
 		t.Fatalf("records = %q", recs)
 	}
 	r1 := recs[1]
@@ -197,6 +241,9 @@ func TestCSVExport_EscapesFormulaCells(t *testing.T) {
 	}
 	if recs[3][0] != "Budi, \"Jr\"" || recs[3][9] != "" {
 		t.Errorf("row3 = %q", recs[3])
+	}
+	if r := recs[4]; r[0] != "'  =1+1" || r[1] != "'\u3000+62811" || r[7] != "' @x" || r[8] != "Paket - 10M" {
+		t.Errorf("row4 = %q", r)
 	}
 }
 
@@ -214,9 +261,60 @@ func TestCSVExport_RowCap(t *testing.T) {
 		t.Fatalf("pages = %d", len(src.calls))
 	}
 	for i, c := range src.calls {
-		if c.limit != candidateExportPage || c.offset != i*candidateExportPage || c.f.Status != CandidateWillIsolate {
+		if c.limit != candidateExportPage || c.offset != 0 || c.f.Status != CandidateWillIsolate {
 			t.Fatalf("call %d = %+v", i, c)
 		}
+		if i == 0 && c.f.After != nil {
+			t.Fatalf("first page with cursor: %+v", c.f.After)
+		}
+		if i > 0 && (c.f.After == nil || c.f.After.AccountID != fmt.Sprintf("acc-%08d", i*candidateExportPage-1)) {
+			t.Fatalf("call %d cursor = %+v", i, c.f.After)
+		}
+	}
+}
+
+func TestCSVExport_KeysetSurvivesInsertsBetweenPages(t *testing.T) {
+	day := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	var rows []CandidateRow
+	for i := 0; i < 2500; i++ {
+		rows = append(rows, CandidateRow{AccountID: fmt.Sprintf("acc-%05d", i), AccountName: fmt.Sprintf("n%05d", i), OldestDue: day.AddDate(0, 0, i/100)})
+	}
+	src := &fakeCandidateSource{rows: rows, beforeCall: func(n int, f *fakeCandidateSource) {
+		if n == 2 { // a new, older candidate appears before the cursor
+			f.rows = append([]CandidateRow{{AccountID: "acc-new", AccountName: "new", OldestDue: day.AddDate(0, 0, -1)}}, f.rows...)
+		}
+	}}
+	var buf bytes.Buffer
+	if err := newPreviewForTest(src, 0).ExportCSV(context.Background(), coretenant.Scope{}, CandidateFilter{}, &buf, func(int64) {}); err != nil {
+		t.Fatal(err)
+	}
+	recs := readCSV(t, buf.Bytes())[1:]
+	seen := map[string]bool{}
+	for _, r := range recs {
+		if seen[r[0]] {
+			t.Fatalf("duplicated row %s", r[0])
+		}
+		seen[r[0]] = true
+	}
+	if len(recs) != 2500 || seen["new"] {
+		t.Fatalf("rows = %d (new seen %v)", len(recs), seen["new"])
+	}
+	if len(src.calls) != 3 {
+		t.Fatalf("calls = %d", len(src.calls))
+	}
+}
+
+func TestCSVExport_FailureAfterBeginReturnsError(t *testing.T) {
+	var rows []CandidateRow
+	for i := 0; i < 1500; i++ {
+		rows = append(rows, CandidateRow{AccountID: fmt.Sprintf("acc-%05d", i)})
+	}
+	src := &fakeCandidateSource{rows: rows, failOnCall: 2}
+	began := false
+	var buf bytes.Buffer
+	err := newPreviewForTest(src, 0).ExportCSV(context.Background(), coretenant.Scope{}, CandidateFilter{}, &buf, func(int64) { began = true })
+	if err == nil || !began {
+		t.Fatalf("err = %v began = %v", err, began)
 	}
 }
 
@@ -249,7 +347,17 @@ func TestOnboardingStatuses_PendingIsolation(t *testing.T) {
 	if !got[0].PendingIsolation || got[1].PendingIsolation || got[2].PendingIsolation {
 		t.Fatalf("pending = %+v", got)
 	}
-	if c := src.calls[0]; len(c.f.AccountIDs) != 3 || c.limit != 3 {
+	if c := src.calls[0]; len(c.f.AccountIDs) != 3 || c.limit != 3 || !c.f.StatusOnly {
 		t.Fatalf("call = %+v", c)
+	}
+}
+
+func TestOnboardingStatuses_PendingReadFailureDegrades(t *testing.T) {
+	repo := &fakeOnboardingRepo{statuses: map[string]repository.AccountStatus{"a1": {Secrets: 1}}}
+	svc := NewOnboardingService(repo, fakeSender{})
+	svc.SetPendingReader(newPreviewForTest(&fakeCandidateSource{err: errors.New("db password=secret down")}, 0))
+	got, err := svc.CustomerStatuses(context.Background(), coretenant.Scope{}, []string{"a1", "a2"})
+	if err != nil || len(got) != 2 || got[0].PendingIsolation || got[1].PendingIsolation || got[0].IsolationState != CustomerNormal {
+		t.Fatalf("degrade: %+v %v", got, err)
 	}
 }

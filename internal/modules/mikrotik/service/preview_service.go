@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"zyad.cloud/internal/core/businesstime"
@@ -30,15 +31,26 @@ const (
 )
 
 // CandidateSecret is the per-secret input of CandidateStatusOf: one paired
-// secret of the account on a non-deleted router.
+// secret of the account on a non-deleted router. RouterReady is the router's
+// isolir_ready; RouterProfile tells that its isolir_profile_name is set.
 type CandidateSecret struct {
-	Present, Isolated, NeedsOriginalProfile, RouterReady bool
+	Present, Isolated, NeedsOriginalProfile, RouterReady, RouterProfile bool
 }
 
-// CandidateStatusOf is the preview status of an account that has candidate
-// invoices. exempt is the effective exemption (EffectiveExempt). The SQL read
-// model mirrors this function; an integration test runs the same table through
-// both.
+// actionable mirrors what the engine really cuts: the evaluator only isolates
+// normal, present secrets with a known original profile, and the task only
+// succeeds on an isolir-ready router with an isolir profile name.
+func (s CandidateSecret) actionable() bool {
+	return !s.Isolated && s.Present && !s.NeedsOriginalProfile && s.RouterReady && s.RouterProfile
+}
+
+// CandidateStatusOf predicts what the engine does with an account that has
+// candidate invoices. exempt is the effective exemption (EffectiveExempt).
+// Priority (first match wins): exempt, no_secret, already_isolated (every
+// secret isolated), will_isolate (any actionable secret), needs_profile (a
+// normal secret waits for its original profile), secret_missing (no normal
+// secret is present), router_not_ready. The SQL read model mirrors this
+// function; an integration test runs the same table through both.
 func CandidateStatusOf(exempt bool, secrets []CandidateSecret) string {
 	if exempt {
 		return CandidateExempt
@@ -46,24 +58,24 @@ func CandidateStatusOf(exempt bool, secrets []CandidateSecret) string {
 	if len(secrets) == 0 {
 		return CandidateNoSecret
 	}
-	allIsolated, needsProfile, anyPresent, anyReady := true, false, false, false
+	allIsolated, anyActionable, needsProfile, anyNormalPresent := true, false, false, false
 	for _, s := range secrets {
 		allIsolated = allIsolated && s.Isolated
+		anyActionable = anyActionable || s.actionable()
 		needsProfile = needsProfile || (!s.Isolated && s.NeedsOriginalProfile)
-		anyPresent = anyPresent || s.Present
-		anyReady = anyReady || (s.Present && s.RouterReady)
+		anyNormalPresent = anyNormalPresent || (!s.Isolated && s.Present)
 	}
 	switch {
 	case allIsolated:
 		return CandidateAlreadyIsolated
+	case anyActionable:
+		return CandidateWillIsolate
 	case needsProfile:
 		return CandidateNeedsProfile
-	case !anyPresent:
+	case !anyNormalPresent:
 		return CandidateSecretMissing
-	case !anyReady:
-		return CandidateRouterNotReady
 	}
-	return CandidateWillIsolate
+	return CandidateRouterNotReady
 }
 
 // ValidCandidateStatus reports whether s is one of the Candidate* statuses.
@@ -176,7 +188,7 @@ func (s *PreviewService) PendingIsolation(ctx context.Context, scope coretenant.
 	if len(accountIDs) == 0 {
 		return out, nil
 	}
-	f := CandidateFilter{AccountIDs: accountIDs}
+	f := CandidateFilter{AccountIDs: accountIDs, StatusOnly: true}
 	if err := validateCandidateFilter(f); err != nil {
 		return nil, err
 	}
@@ -209,9 +221,16 @@ var candidateCSVHeader = []string{
 }
 
 // csvCell neutralises spreadsheet formulas (CSV injection): a cell starting
-// with = + - @ tab or CR gets a leading single quote.
+// with tab or CR, or whose first non-space character (Unicode spaces such as
+// U+3000 included) is = + - or @, gets a leading single quote.
 func csvCell(v string) string {
-	if v != "" && strings.ContainsRune("=+-@\t\r", rune(v[0])) {
+	if v == "" {
+		return v
+	}
+	if v[0] == '\t' || v[0] == '\r' {
+		return "'" + v
+	}
+	if t := strings.TrimLeftFunc(v, unicode.IsSpace); t != "" && strings.ContainsRune("=+-@", rune(t[0])) {
 		return "'" + v
 	}
 	return v
@@ -236,11 +255,13 @@ func candidateCSVRecord(r CandidateRow) []string {
 	return rec
 }
 
-// ExportCSV writes the filtered candidates as CSV, in pages of 1000, up to
-// MaxCandidateExportRows rows. Everything that can fail cheaply (filter,
-// settings, the first page) happens before begin is called with the total
-// matching rows, so the caller can still answer with a JSON error; after
-// begin, each page is flushed (w is flushed too when it has Flush()).
+// ExportCSV writes the filtered candidates as CSV, in keyset pages of 1000,
+// up to MaxCandidateExportRows rows. Everything that can fail cheaply
+// (filter, settings, the first page with its total) happens before begin is
+// called with the total matching rows, so the caller can still answer with a
+// JSON error. An error returned after begin means the file is incomplete; the
+// caller must not finish the response as if it were whole. Each page is
+// flushed (w too when it has Flush()).
 func (s *PreviewService) ExportCSV(ctx context.Context, scope coretenant.Scope, f CandidateFilter, w io.Writer, begin func(total int64)) error {
 	if err := validateCandidateFilter(f); err != nil {
 		return err
@@ -249,6 +270,7 @@ func (s *PreviewService) ExportCSV(ctx context.Context, scope coretenant.Scope, 
 	if err != nil {
 		return err
 	}
+	f.After = nil
 	rows, total, err := s.src.ListCandidates(ctx, scope, today, cutoff, f, candidateExportPage, 0)
 	if err != nil {
 		return err
@@ -283,8 +305,9 @@ func (s *PreviewService) ExportCSV(ctx context.Context, scope coretenant.Scope, 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		rows, _, err = s.src.ListCandidates(ctx, scope, today, cutoff, f, candidateExportPage, written)
-		if err != nil {
+		last := rows[len(rows)-1]
+		f.After = &CandidateCursor{OldestDue: last.OldestDue, AccountID: last.AccountID}
+		if rows, _, err = s.src.ListCandidates(ctx, scope, today, cutoff, f, candidateExportPage, 0); err != nil {
 			return err
 		}
 	}

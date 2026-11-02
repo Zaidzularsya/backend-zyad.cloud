@@ -3,16 +3,21 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"zyad.cloud/internal/core/middleware"
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	coretenant "zyad.cloud/internal/core/tenant"
+	"zyad.cloud/internal/modules/mikrotik/domain"
 	"zyad.cloud/internal/modules/mikrotik/service"
 )
 
@@ -136,4 +141,75 @@ func TestPreviewRoutes_ExportErrorIsJSON(t *testing.T) {
 	if w.Code != http.StatusInternalServerError || strings.HasPrefix(w.Header().Get("Content-Type"), "text/csv") {
 		t.Fatalf("export error: %d %v %s", w.Code, w.Header(), w.Body)
 	}
+}
+
+type fixedGrace struct{}
+
+func (fixedGrace) Get(context.Context, coretenant.Scope) (domain.ControlSettings, error) {
+	return domain.ControlSettings{Mode: domain.ModeActive}, nil
+}
+
+// pageTwoFails serves one full export page, then fails.
+type pageTwoFails struct{ calls int }
+
+func (s *pageTwoFails) ListCandidates(_ context.Context, _ coretenant.Scope, _, _ time.Time, _ service.CandidateFilter, limit, _ int) ([]service.CandidateRow, int64, error) {
+	s.calls++
+	if s.calls > 1 {
+		return nil, 0, errors.New("page read failed")
+	}
+	rows := make([]service.CandidateRow, limit)
+	for i := range rows {
+		rows[i] = service.CandidateRow{AccountID: fmt.Sprintf("acc-%05d", i), AccountName: "Budi", Status: service.CandidateWillIsolate}
+	}
+	return rows, 5000, nil
+}
+
+func (s *pageTwoFails) Summary(context.Context, coretenant.Scope, time.Time, time.Time) (service.CandidateSummary, error) {
+	return service.CandidateSummary{}, nil
+}
+
+func abortingExportRouter(t *testing.T) *gin.Engine {
+	r := newTestRouter(t)
+	r.Use(middleware.Recovery(nil))
+	NewPreviewHandler(service.NewPreviewService(&pageTwoFails{}, fixedGrace{}, nil)).RegisterRoutes(r.Group("/app/mikrotik"), nil, nil)
+	return r
+}
+
+// A failure after the CSV started must not look like a complete file: the
+// connection is closed without the final chunk and without an error body.
+func TestPreviewExport_MidStreamFailureAbortsConnection(t *testing.T) {
+	srv := httptest.NewServer(abortingExportRouter(t))
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + previewBase + "/export")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/csv") {
+		t.Fatalf("status %d type %s", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+	body, readErr := io.ReadAll(resp.Body)
+	if readErr == nil {
+		t.Fatalf("truncated export ended cleanly (%d bytes)", len(body))
+	}
+	if strings.Contains(string(body), "INTERNAL_ERROR") || !strings.HasPrefix(string(body), "Akun,") {
+		t.Fatalf("body tail = %q", body[max(0, len(body)-200):])
+	}
+}
+
+// Without a hijackable connection (HTTP/2, recorders) the handler panics
+// with http.ErrAbortHandler, which Recovery passes on to net/http untouched.
+func TestPreviewExport_MidStreamFailureWithoutHijackPanicsAbort(t *testing.T) {
+	r := abortingExportRouter(t)
+	w := httptest.NewRecorder()
+	defer func() {
+		if rec := recover(); rec != http.ErrAbortHandler {
+			t.Fatalf("recovered %v, want http.ErrAbortHandler", rec)
+		}
+		if strings.Contains(w.Body.String(), "INTERNAL_ERROR") {
+			t.Fatalf("error body appended to the csv")
+		}
+	}()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, previewBase+"/export", nil))
+	t.Fatal("expected http.ErrAbortHandler panic")
 }

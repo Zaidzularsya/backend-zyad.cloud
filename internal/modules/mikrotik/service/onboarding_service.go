@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/mikrotik/repository"
@@ -60,7 +61,7 @@ func NewOnboardingService(repo OnboardingReader, sender SenderSettings) *Onboard
 }
 
 // SetPendingReader enables pending_isolation in CustomerStatuses. Without
-// one (nil), PendingIsolation stays false.
+// one (nil), or when its read fails, PendingIsolation stays false.
 func (s *OnboardingService) SetPendingReader(p PendingReader) { s.pending = p }
 
 // Summary computes the checklist. complete requires all five conditions.
@@ -96,8 +97,11 @@ func (s *OnboardingService) CustomerStatuses(ctx context.Context, scope coretena
 	}
 	var pending map[string]bool
 	if s.pending != nil {
+		// pending_isolation is advisory: a failed candidate read must not
+		// fail the status badges, so every account reports false.
 		if pending, err = s.pending.PendingIsolation(ctx, scope, accountIDs); err != nil {
-			return nil, err
+			slog.WarnContext(ctx, "mikrotik: pending isolation read failed; reporting false", "error", scrub(err.Error()))
+			pending = nil
 		}
 	}
 	out := make([]CustomerStatus, 0, len(accountIDs))

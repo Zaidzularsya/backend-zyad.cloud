@@ -43,13 +43,24 @@ func domainPolicy(exempt bool, until *time.Time) domain.CustomerPolicy {
 	return domain.CustomerPolicy{Exempt: exempt, ExemptedUntil: until}
 }
 
+// router inserts a router; a ready one gets the isolir profile name "isolir".
 func (f usageFixture) router(t *testing.T, org, name string, ready bool) string {
+	t.Helper()
+	var profile any
+	if ready {
+		profile = "isolir"
+	}
+	return f.routerWithProfile(t, org, name, ready, profile)
+}
+
+// routerWithProfile sets isolir_profile_name verbatim (nil = NULL).
+func (f usageFixture) routerWithProfile(t *testing.T, org, name string, ready bool, profile any) string {
 	t.Helper()
 	var id string
 	f.tx(org, func(tx pgx.Tx) {
 		if err := tx.QueryRow(f.ctx, `
-			INSERT INTO mikrotik_routers (organization_id, name, host, port, api_type, use_tls, username, password_encrypted, isolir_ready)
-			VALUES ($1, $2, '10.0.0.1', 8728, 'binary', false, 'u', 'x', $3) RETURNING id::text`, org, name, ready).Scan(&id); err != nil {
+			INSERT INTO mikrotik_routers (organization_id, name, host, port, api_type, use_tls, username, password_encrypted, isolir_ready, isolir_profile_name)
+			VALUES ($1, $2, '10.0.0.1', 8728, 'binary', false, 'u', 'x', $3, $4) RETURNING id::text`, org, name, ready, profile).Scan(&id); err != nil {
 			t.Fatalf("router: %v", err)
 		}
 	})
@@ -123,34 +134,48 @@ func TestCandidateStatus_SQLMatchesGo(t *testing.T) {
 	a := f.tenants.A.OrganizationID
 	sa := scopeOf(t, f, a)
 	f.trigger(t, a, f.prodP, true, f.today.AddDate(0, 0, -60))
-	ready, notReady := f.router(t, a, "ready", true), f.router(t, a, "not-ready", false)
+	routers := map[string]string{
+		"ready":   f.router(t, a, "ready", true),
+		"unready": f.router(t, a, "not-ready", false),
+		"noprof":  f.routerWithProfile(t, a, "ready-empty-profile", true, ""),
+		"nullprf": f.routerWithProfile(t, a, "ready-null-profile", true, nil),
+	}
 	yesterday, today := f.today.AddDate(0, 0, -1), f.today
 
-	S := func(present, isolated, needs, onReady bool) mikrotikservice.CandidateSecret {
-		return mikrotikservice.CandidateSecret{Present: present, Isolated: isolated, NeedsOriginalProfile: needs, RouterReady: onReady}
+	type sec struct {
+		present, isolated, needs bool
+		router                   string
 	}
+	S := func(present, isolated, needs bool, router string) sec { return sec{present, isolated, needs, router} }
 	cases := []struct {
 		name    string
 		exempt  bool
 		until   *time.Time
-		secrets []mikrotikservice.CandidateSecret
+		secrets []sec
 	}{
-		{"will isolate", false, nil, []mikrotikservice.CandidateSecret{S(true, false, false, true)}},
-		{"exempt forever", true, nil, []mikrotikservice.CandidateSecret{S(true, false, false, true)}},
-		{"exempt until today", true, &today, []mikrotikservice.CandidateSecret{S(true, false, false, true)}},
-		{"exempt until yesterday", true, &yesterday, []mikrotikservice.CandidateSecret{S(true, false, false, true)}},
+		{"will isolate", false, nil, []sec{S(true, false, false, "ready")}},
+		{"exempt forever", true, nil, []sec{S(true, false, false, "ready")}},
+		{"exempt until today", true, &today, []sec{S(true, false, false, "ready")}},
+		{"exempt until yesterday", true, &yesterday, []sec{S(true, false, false, "ready")}},
+		{"exempt false with future until", false, &today, []sec{S(true, false, false, "ready")}},
 		{"no secret", false, nil, nil},
 		{"exempt + no secret", true, nil, nil},
-		{"already isolated", false, nil, []mikrotikservice.CandidateSecret{S(true, true, false, true), S(false, true, false, false)}},
-		{"isolated + needs on isolated", false, nil, []mikrotikservice.CandidateSecret{S(true, true, true, true)}},
-		{"partly isolated + needs", false, nil, []mikrotikservice.CandidateSecret{S(true, true, false, true), S(true, false, true, true)}},
-		{"needs + missing", false, nil, []mikrotikservice.CandidateSecret{S(false, false, true, true)}},
-		{"secret missing", false, nil, []mikrotikservice.CandidateSecret{S(false, false, false, true)}},
-		{"router not ready", false, nil, []mikrotikservice.CandidateSecret{S(true, false, false, false)}},
-		{"present unready, missing ready", false, nil, []mikrotikservice.CandidateSecret{S(true, false, false, false), S(false, false, false, true)}},
-		{"one ready among unready", false, nil, []mikrotikservice.CandidateSecret{S(true, false, false, false), S(true, false, false, true)}},
-		{"needs only on isolated secret", false, nil, []mikrotikservice.CandidateSecret{S(true, true, true, true), S(false, false, false, true)}},
-		{"exempt false with future until", false, &today, []mikrotikservice.CandidateSecret{S(true, false, false, true)}},
+		{"already isolated", false, nil, []sec{S(true, true, false, "ready"), S(false, true, false, "unready")}},
+		{"needs flag on the only (isolated) secret", false, nil, []sec{S(true, true, true, "ready")}},
+		{"isolated + normal needing profile", false, nil, []sec{S(true, true, false, "ready"), S(true, false, true, "ready")}},
+		{"needs + missing", false, nil, []sec{S(false, false, true, "ready")}},
+		{"secret missing", false, nil, []sec{S(false, false, false, "ready")}},
+		{"router not ready", false, nil, []sec{S(true, false, false, "unready")}},
+		{"ready router, empty profile name", false, nil, []sec{S(true, false, false, "noprof")}},
+		{"ready router, NULL profile name", false, nil, []sec{S(true, false, false, "nullprf")}},
+		{"present unready, missing ready", false, nil, []sec{S(true, false, false, "unready"), S(false, false, false, "ready")}},
+		{"one ready among unready", false, nil, []sec{S(true, false, false, "unready"), S(true, false, false, "ready")}},
+		{"needs flag only on isolated, other actionable", false, nil, []sec{S(true, true, true, "ready"), S(true, false, false, "ready")}},
+		{"needs flag only on isolated, other missing", false, nil, []sec{S(true, true, true, "ready"), S(false, false, false, "ready")}},
+		{"(a) isolated on ready + normal on unready", false, nil, []sec{S(true, true, false, "ready"), S(true, false, false, "unready")}},
+		{"(b) isolated + normal not present", false, nil, []sec{S(true, true, false, "ready"), S(false, false, false, "ready")}},
+		{"(c) isolated + normal on router without profile", false, nil, []sec{S(true, true, false, "ready"), S(true, false, false, "noprof")}},
+		{"(d) actionable + another needing profile", false, nil, []sec{S(true, false, false, "ready"), S(true, false, true, "ready")}},
 	}
 	want := map[string]string{}
 	var ids []string
@@ -161,15 +186,16 @@ func TestCandidateStatus_SQLMatchesGo(t *testing.T) {
 		if c.exempt || c.until != nil {
 			f.policy(t, a, acc, c.exempt, c.until)
 		}
+		var goSecrets []mikrotikservice.CandidateSecret
 		for j, s := range c.secrets {
-			rt := notReady
-			if s.RouterReady {
-				rt = ready
-			}
-			f.secret(t, a, acc, fmt.Sprintf("tbl-%02d-%d", i, j), secretSpec{present: s.Present, isolated: s.Isolated, needsProfile: s.NeedsOriginalProfile, router: rt})
+			f.secret(t, a, acc, fmt.Sprintf("tbl-%02d-%d", i, j), secretSpec{present: s.present, isolated: s.isolated, needsProfile: s.needs, router: routers[s.router]})
+			goSecrets = append(goSecrets, mikrotikservice.CandidateSecret{
+				Present: s.present, Isolated: s.isolated, NeedsOriginalProfile: s.needs,
+				RouterReady: s.router != "unready", RouterProfile: s.router == "ready",
+			})
 		}
 		exempt := mikrotikservice.EffectiveExempt(domainPolicy(c.exempt, c.until), f.today)
-		want[acc] = mikrotikservice.CandidateStatusOf(exempt, c.secrets)
+		want[acc] = mikrotikservice.CandidateStatusOf(exempt, goSecrets)
 	}
 	rows, total, err := f.reader.ListCandidates(f.ctx, sa, f.today, f.today, mikrotikservice.CandidateFilter{AccountIDs: ids}, 100, 0)
 	if err != nil {
@@ -182,6 +208,16 @@ func TestCandidateStatus_SQLMatchesGo(t *testing.T) {
 	for i, c := range cases {
 		if got[ids[i]] != want[ids[i]] {
 			t.Errorf("%s: sql %q go %q", c.name, got[ids[i]], want[ids[i]])
+		}
+	}
+	// The status-only variant (pending badges) computes the same statuses.
+	quick, _, err := f.reader.ListCandidates(f.ctx, sa, f.today, f.today, mikrotikservice.CandidateFilter{AccountIDs: ids, StatusOnly: true}, 100, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, st := range statusesOf(t, quick) {
+		if st != got[id] {
+			t.Errorf("status-only %s: %s vs %s", id, st, got[id])
 		}
 	}
 	// A secret on a deleted router does not count as paired.
@@ -365,5 +401,63 @@ func TestCandidates_Pagination_StableOrder(t *testing.T) {
 		if got[i] != want[i].id {
 			t.Fatalf("position %d: got %s want %s", i, got[i], want[i].id)
 		}
+	}
+}
+
+// TestCandidates_KeysetPaging walks the list with CandidateFilter.After while
+// a new, older candidate appears between pages: no row repeats or is skipped.
+func TestCandidates_KeysetPaging(t *testing.T) {
+	f := setupCandidateFixture(t)
+	a := f.tenants.A.OrganizationID
+	sa := scopeOf(t, f, a)
+	f.trigger(t, a, f.prodP, true, f.today.AddDate(0, 0, -60))
+	var all []string
+	for i := 0; i < 6; i++ {
+		acc := f.account(t, a, fmt.Sprintf("ks-%d", i))
+		all = append(all, acc)
+		f.invoiceNo(t, a, acc, "issued", fmt.Sprintf("KS-%d", i), f.today.AddDate(0, 0, -1-(i%2)), "0", f.prodP)
+	}
+	page, total, err := f.reader.ListCandidates(f.ctx, sa, f.today, f.today, mikrotikservice.CandidateFilter{}, 3, 0)
+	if err != nil || total != 6 || len(page) != 3 {
+		t.Fatalf("first page: %d rows total %d %v", len(page), total, err)
+	}
+	seen := map[string]bool{}
+	for _, r := range page {
+		seen[r.AccountID] = true
+	}
+	// Inserted before the cursor: with OFFSET it would shift a row into page 2 again.
+	late := f.account(t, a, "ks-new")
+	f.invoiceNo(t, a, late, "issued", "KS-NEW", f.today.AddDate(0, 0, -30), "0", f.prodP)
+	for {
+		last := page[len(page)-1]
+		page, total, err = f.reader.ListCandidates(f.ctx, sa, f.today, f.today,
+			mikrotikservice.CandidateFilter{After: &mikrotikservice.CandidateCursor{OldestDue: last.OldestDue, AccountID: last.AccountID}}, 3, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if total != 0 {
+			t.Fatalf("keyset page counted total %d", total)
+		}
+		for _, r := range page {
+			if seen[r.AccountID] {
+				t.Fatalf("row %s repeated", r.AccountName)
+			}
+			seen[r.AccountID] = true
+		}
+		if len(page) < 3 {
+			break
+		}
+	}
+	for _, id := range all {
+		if !seen[id] {
+			t.Fatalf("row %s skipped", id)
+		}
+	}
+	if seen[late] {
+		t.Fatal("row inserted before the cursor was returned")
+	}
+	// An offset past the end still reports the total (empty-page fallback).
+	if rows, total, err := f.reader.ListCandidates(f.ctx, sa, f.today, f.today, mikrotikservice.CandidateFilter{}, 3, 30); err != nil || len(rows) != 0 || total != 7 {
+		t.Fatalf("past the end: %d rows total %d %v", len(rows), total, err)
 	}
 }

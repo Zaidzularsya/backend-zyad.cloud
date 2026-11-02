@@ -118,9 +118,20 @@ const (
 // CandidateFilter narrows the candidate list. Status is one of the
 // Candidate* statuses ("" = all); Q is a case-insensitive substring of the
 // account name or phone; AccountIDs restricts to those accounts (nil = all).
+// After switches to keyset paging: rows strictly after the cursor in
+// (oldest_due, account_id) order; offset is then ignored and the total is not
+// counted (0). StatusOnly skips the per-row product names.
 type CandidateFilter struct {
 	Status, Q  string
 	AccountIDs []string
+	After      *CandidateCursor
+	StatusOnly bool
+}
+
+// CandidateCursor is the sort key of the last row of a page.
+type CandidateCursor struct {
+	OldestDue time.Time
+	AccountID string
 }
 
 // CandidateRow is one account with at least one candidate invoice.
@@ -130,6 +141,7 @@ type CandidateFilter struct {
 // RouterName is the router of the account's first paired secret.
 type CandidateRow struct {
 	AccountID, AccountName, Phone, Status, RouterName string
+	OldestDue                                         time.Time
 	Products                                          string
 	OverdueDays, InvoiceCount                         int
 	OldestInvoiceNumber                               string
@@ -153,7 +165,7 @@ type CandidateSummary struct {
 // CandidateCutoff(today, graceDays) and decides which invoices are candidates.
 type CandidateSource interface {
 	// ListCandidates is ordered by oldest candidate due date, then account id;
-	// total counts every row matching f.
+	// total counts every row matching f (except on keyset pages, see After).
 	ListCandidates(ctx context.Context, scope coretenant.Scope, today, cutoff time.Time, f CandidateFilter, limit, offset int) ([]CandidateRow, int64, error)
 	// Summary fills every count except GraceDays, Cutoff and Safe.
 	Summary(ctx context.Context, scope coretenant.Scope, today, cutoff time.Time) (CandidateSummary, error)

@@ -89,8 +89,9 @@ func (h *PreviewHandler) List(c *gin.Context) {
 }
 
 // Export streams the filtered candidates as CSV. Errors before the first
-// byte are answered as JSON; a failure mid-stream can only be logged (the
-// status line is already sent), leaving a truncated file.
+// byte are answered as JSON. After the response started, a failure must not
+// end as a clean 200 with a truncated file, so the connection is aborted
+// (see abortResponse).
 func (h *PreviewHandler) Export(c *gin.Context) {
 	scope, q, ok := bindPreviewQuery(c)
 	if !ok {
@@ -114,5 +115,23 @@ func (h *PreviewHandler) Export(c *gin.Context) {
 		failRouter(c, err)
 		return
 	}
-	slog.ErrorContext(c.Request.Context(), "mikrotik: candidate export aborted mid-stream", "error", err.Error())
+	slog.WarnContext(c.Request.Context(), "mikrotik: candidate export aborted mid-stream", "error", err.Error())
+	abortResponse(c)
+}
+
+// abortResponse kills a response that already started. On HTTP/1.x the
+// connection is hijacked and closed, so the client sees an incomplete body
+// (no final chunk) instead of a complete file. Where hijacking is not
+// supported (HTTP/2, test recorders) it panics with http.ErrAbortHandler,
+// which core Recovery passes through and net/http turns into a silent
+// connection/stream reset.
+func abortResponse(c *gin.Context) {
+	if u, ok := c.Writer.(interface{ Unwrap() http.ResponseWriter }); ok {
+		if conn, _, err := http.NewResponseController(u.Unwrap()).Hijack(); err == nil {
+			_ = conn.Close()
+			c.Abort()
+			return
+		}
+	}
+	panic(http.ErrAbortHandler)
 }
