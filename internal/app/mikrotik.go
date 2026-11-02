@@ -25,6 +25,8 @@ type mikrotikModule struct {
 	Task   *mikrotikhandler.TaskHandler
 	// Onboarding serves the setup checklist and per-customer isolir status.
 	Onboarding *mikrotikhandler.OnboardingHandler
+	// Control serves the tenant control center (mode, grace days, pilot, restore all).
+	Control *mikrotikhandler.ControlHandler
 }
 
 // mikrotikBuild carries the cross-module services the adapters wrap.
@@ -68,14 +70,18 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 	// happen here; the worker runs the reconciler and the task processor).
 	// Mode off wires nothing, so existing flows are unchanged. All hooks are
 	// set before serving.
-	if mode := mikrotikIsolationMode(cfg.Mikrotik.IsolationMode); mode != mikrotikservice.ModeOff {
-		eval := mikrotikservice.NewEvaluator(mikrotikservice.EvaluatorDeps{
-			Source: reader, Policy: policyRepo, Secrets: secretRepo, Tasks: mikrotikrepo.NewTaskRepository(db), Mode: mode,
-			Control: mikrotikrepo.NewControlRepository(db),
+	engineMode := mikrotikIsolationMode(cfg.Mikrotik.IsolationMode)
+	controlRepo := mikrotikrepo.NewControlRepository(db)
+	taskRepo := mikrotikrepo.NewTaskRepository(db)
+	var eval *mikrotikservice.Evaluator
+	if engineMode != mikrotikservice.ModeOff {
+		eval = mikrotikservice.NewEvaluator(mikrotikservice.EvaluatorDeps{
+			Source: reader, Policy: policyRepo, Secrets: secretRepo, Tasks: taskRepo, Mode: engineMode,
+			Control: controlRepo,
 		})
 		policyDeps.OnChange = mikrotikEvaluateHook(eval, "customer_policy_changed")
 		secrets.SetOnChange(mikrotikEvaluateHook(eval, "secret_pairing_changed"))
-		registerMikrotikInvoiceListener(mode, b.Listeners, mikrotikservice.NewInvoiceListener(reader, eval))
+		registerMikrotikInvoiceListener(engineMode, b.Listeners, mikrotikservice.NewInvoiceListener(reader, eval))
 	}
 	policy := mikrotikservice.NewPolicyService(policyDeps)
 	return mikrotikModule{
@@ -87,9 +93,13 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 				mikrotikrepo.NewSuggestionRepository(db), mikrotikrepo.NewAdvisoryLocker(db)),
 		}),
 		Policy: mikrotikhandler.NewPolicyHandler(policy),
-		Task:   mikrotikhandler.NewTaskHandler(mikrotikservice.NewTaskService(mikrotikrepo.NewTaskRepository(db), secretRepo, repo)),
+		Task:   mikrotikhandler.NewTaskHandler(mikrotikservice.NewTaskService(taskRepo, secretRepo, repo)),
 		Onboarding: mikrotikhandler.NewOnboardingHandler(mikrotikservice.NewOnboardingService(
 			mikrotikrepo.NewOnboardingRepository(db), mikrotikSenderSettings{settings: receivablerepo.NewSettingsRepository(db)})),
+		// eval is nil while the engine is off; the service then refuses pilot tests.
+		Control: mikrotikhandler.NewControlHandler(mikrotikservice.NewControlService(mikrotikservice.ControlDeps{
+			Control: controlRepo, Secrets: secretRepo, Tasks: taskRepo, Accounts: accounts, Audit: repo, Evaluator: eval,
+		}, engineMode)),
 	}
 }
 
@@ -148,5 +158,8 @@ func registerMikrotikRoutes(protected *gin.RouterGroup, deps Dependencies) {
 	}
 	if deps.MikrotikOnboardingHandler != nil {
 		deps.MikrotikOnboardingHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
+	}
+	if deps.MikrotikControlHandler != nil {
+		deps.MikrotikControlHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
 	}
 }

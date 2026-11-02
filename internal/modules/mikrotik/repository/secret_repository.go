@@ -88,6 +88,9 @@ type SecretRepository interface {
 	// AccountsWithIsolatedSecrets returns the distinct paired accounts that own
 	// at least one isolated secret.
 	AccountsWithIsolatedSecrets(ctx context.Context, scope coretenant.Scope) ([]string, error)
+	// ListIsolated pages the organization's isolated secrets on routers that
+	// are not deleted, ordered by id (keyset; afterID "" = from the start).
+	ListIsolated(ctx context.Context, scope coretenant.Scope, afterID string, limit int) ([]domain.PPPSecret, error)
 }
 
 type secretRepository struct {
@@ -552,4 +555,34 @@ func (r *secretRepository) AccountsWithIsolatedSecrets(ctx context.Context, scop
 		return nil, err
 	}
 	return ids, nil
+}
+
+func (r *secretRepository) ListIsolated(ctx context.Context, scope coretenant.Scope, afterID string, limit int) ([]domain.PPPSecret, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 500
+	}
+	items := []domain.PPPSecret{}
+	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT `+qualifiedSecretColumns+` FROM mikrotik_ppp_secrets s
+			JOIN mikrotik_routers rt ON rt.organization_id = s.organization_id AND rt.id = s.router_id
+			WHERE s.organization_id = $1 AND s.isolation_state = 'isolated' AND rt.deleted_at IS NULL
+			  AND ($2::text = '' OR s.id > NULLIF($2::text, '')::uuid)
+			ORDER BY s.id LIMIT $3`, scope.OrganizationID(), afterID, limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			item, scanErr := scanSecret(rows)
+			if scanErr != nil {
+				return scanErr
+			}
+			items = append(items, item)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
 }

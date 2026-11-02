@@ -152,3 +152,17 @@ var (
 	// ErrAnalyzeInProgress: another analysis holds this router's lock; nothing was changed.
 	ErrAnalyzeInProgress = errors.New("another suggestion analysis is running for this router; try again when it finishes")
 )
+
+// Gelombang 2: control center.
+var (
+	// ErrModeInvalid: unknown isolation mode, or exemptions sent with a mode other than active.
+	ErrModeInvalid = errors.New("invalid isolation mode change")
+	// ErrPilotRequired: active needs at least one successful pilot test (pilot_verified_at).
+	ErrPilotRequired = errors.New("complete at least one successful pilot test before activating automatic isolation")
+	// ErrPilotModeRequired: a pilot test can only run while the tenant mode is pilot.
+	ErrPilotModeRequired = errors.New("a pilot test can only run in pilot mode")
+	// ErrEngineOff: the isolation engine is not switched on for this deployment.
+	ErrEngineOff = errors.New("the isolation engine is not switched on")
+	// ErrNotPaused: restore-all is only allowed while the tenant mode is paused.
+	ErrNotPaused = errors.New("restore all is only allowed while isolation is paused")
+)
