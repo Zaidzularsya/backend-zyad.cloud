@@ -616,3 +616,35 @@ func TestProcessor_PartialIsolateBlockedByMode_EnqueuesRestore(t *testing.T) {
 		})
 	}
 }
+
+// RestoreAll queues restores for customers who are usually still overdue;
+// while the tenant stays paused they must run instead of being superseded.
+func TestProcessor_RestoreAllRunsWhileOverduePaused(t *testing.T) {
+	ctl := newFakeControl(domain.ModePaused, 0)
+	e, _ := newProcEnvWithControl(t, ctl)
+	e.addSecret("s-1", e.routerA, "alice", domain.IsolationIsolated, isolirProfile)
+	e.src.invoices = oneInvoice
+	if ok, err := e.tasks.EnqueueRestore(context.Background(), e.scope, "s-1", eventRestoreAll); err != nil || !ok {
+		t.Fatalf("enqueue restore_all: ok=%v err=%v", ok, err)
+	}
+	if res := e.run(t); res != (ProcessResult{Done: 1}) {
+		t.Fatalf("restore_all run = %+v", res)
+	}
+	if got := routerProfile(e.clientA, "alice"); got != "paket-10m" || e.srepo.byID("s-1").IsolationState != domain.IsolationNormal {
+		t.Fatalf("router profile = %q, want original", got)
+	}
+
+	// Once the tenant is active again the same overdue customer must stay
+	// isolated: the restore_all task is superseded, not forced.
+	ctl2 := newFakeControl(domain.ModeActive, 0)
+	e2, _ := newProcEnvWithControl(t, ctl2)
+	e2.addSecret("s-1", e2.routerA, "alice", domain.IsolationIsolated, isolirProfile)
+	e2.src.invoices = oneInvoice
+	_, _ = e2.tasks.EnqueueRestore(context.Background(), e2.scope, "s-1", eventRestoreAll)
+	if res := e2.run(t); res != (ProcessResult{Cancelled: 1}) {
+		t.Fatalf("active run = %+v, want cancelled", res)
+	}
+	if routerProfile(e2.clientA, "alice") != isolirProfile {
+		t.Fatal("overdue customer must stay isolated when the tenant is active")
+	}
+}

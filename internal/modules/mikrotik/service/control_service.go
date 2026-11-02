@@ -467,7 +467,7 @@ func (s *ControlService) RestoreAll(ctx context.Context, scope coretenant.Scope,
 			return RestoreAllResult{}, err
 		}
 		for _, sec := range page {
-			ok, qErr := s.d.Tasks.EnqueueRestore(ctx, scope, sec.ID, "restore_all")
+			ok, qErr := s.d.Tasks.EnqueueRestore(ctx, scope, sec.ID, eventRestoreAll)
 			switch {
 			case qErr != nil:
 				res.Failed++

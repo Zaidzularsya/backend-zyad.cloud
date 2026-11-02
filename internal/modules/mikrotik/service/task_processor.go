@@ -37,6 +37,10 @@ const (
 	// cancel found the router already on the isolir profile (a partial
 	// isolate). It runs even though the account is still overdue.
 	eventModeBlockedRestore = "mode_blocked_restore"
+	// eventRestoreAll: the restore queued by ControlService.RestoreAll while
+	// the tenant is paused. The customer is usually still overdue, so like a
+	// mode_blocked restore it runs while the gate stays closed.
+	eventRestoreAll = "restore_all"
 )
 
 // PilotRecorder records a successful pilot round trip; satisfied by
@@ -210,10 +214,11 @@ func (p *TaskProcessor) process(ctx context.Context, scope coretenant.Scope, tas
 	if err != nil {
 		return p.release(ctx, scope, task, "re-evaluate", err)
 	}
-	// A mode_blocked restore undoes a partial isolate the tenant's mode does
-	// not allow; the account is still overdue, so the evaluation alone would
-	// supersede it. It is honoured only while the gate stays closed.
-	if task.Action == ActionRestore && task.CreatedByEvent == eventModeBlockedRestore && want == "" &&
+	// A mode_blocked or restore_all restore undoes an isolation the tenant's
+	// mode does not allow (a partial isolate, or paused + "restore all"); the
+	// account is still overdue, so the evaluation alone would supersede it.
+	// It is honoured only while the gate stays closed.
+	if task.Action == ActionRestore && (task.CreatedByEvent == eventModeBlockedRestore || task.CreatedByEvent == eventRestoreAll) && want == "" &&
 		secret.IsolationState == domain.IsolationIsolated && dec.Desired == domain.IsolationIsolated && !dec.IsolateAllowed {
 		want = ActionRestore
 	}
