@@ -31,12 +31,23 @@ const (
 type SecretAction struct{ SecretID, Action string }
 
 // Decision is the evaluated isolation state of one customer account.
+// IsolateAllowed/BlockedReason come from IsolateAllowed (env mode, tenant
+// control, pilot membership); they only ever gate isolate actions.
 type Decision struct {
-	AccountID string
-	Desired   string // domain.IsolationNormal | domain.IsolationIsolated
-	Exempt    bool
-	Invoices  []TriggerInvoice
-	Secrets   []SecretAction
+	AccountID      string
+	Desired        string // domain.IsolationNormal | domain.IsolationIsolated
+	Exempt         bool   // effective exemption (expired ones do not count)
+	Invoices       []TriggerInvoice
+	Secrets        []SecretAction
+	IsolateAllowed bool
+	BlockedReason  string
+}
+
+// ControlReader reads the tenant isolation control; satisfied by
+// repository.ControlRepository.
+type ControlReader interface {
+	Get(ctx context.Context, scope coretenant.Scope) (domain.ControlSettings, error)
+	PilotState(ctx context.Context, scope coretenant.Scope, accountID string) (isPilot, testActive bool, err error)
 }
 
 type EvaluatorDeps struct {
@@ -46,6 +57,9 @@ type EvaluatorDeps struct {
 	Tasks   repository.TaskRepository
 	Now     func() time.Time
 	Mode    string
+	// Control is optional: nil behaves as tenant mode active, grace 0 and
+	// no pilot accounts (the Gelombang 1 behavior).
+	Control ControlReader
 }
 
 // Evaluator derives the desired isolation state of a customer account and
@@ -67,10 +81,59 @@ func (e *Evaluator) mode() string {
 	return ModeOff
 }
 
+// control loads the tenant control snapshot used for one evaluation (or one
+// reconcile run).
+func (e *Evaluator) control(ctx context.Context, scope coretenant.Scope) (domain.ControlSettings, error) {
+	if e.d.Control == nil {
+		return domain.ControlSettings{OrganizationID: scope.OrganizationID(), Mode: domain.ModeActive}, nil
+	}
+	ctl, err := e.d.Control.Get(ctx, scope)
+	if err != nil {
+		return domain.ControlSettings{}, fmt.Errorf("load isolation control: %w", err)
+	}
+	return ctl, nil
+}
+
+func (e *Evaluator) pilotState(ctx context.Context, scope coretenant.Scope, accountID string) (bool, bool, error) {
+	if e.d.Control == nil {
+		return false, false, nil
+	}
+	isPilot, testActive, err := e.d.Control.PilotState(ctx, scope, accountID)
+	if err != nil {
+		return false, false, fmt.Errorf("load pilot state: %w", err)
+	}
+	return isPilot, testActive, nil
+}
+
+// isolateGate is the isolation gate of one account without evaluating its
+// invoices or secrets (used before taking a router lock).
+func (e *Evaluator) isolateGate(ctx context.Context, scope coretenant.Scope, accountID string) (GateResult, error) {
+	ctl, err := e.control(ctx, scope)
+	if err != nil {
+		return GateResult{}, err
+	}
+	isPilot, _, err := e.pilotState(ctx, scope, accountID)
+	if err != nil {
+		return GateResult{}, err
+	}
+	return IsolateAllowed(e.mode(), ctl, isPilot), nil
+}
+
 // Decide is read-only: it never writes tasks or secrets.
 func (e *Evaluator) Decide(ctx context.Context, scope coretenant.Scope, accountID string) (Decision, error) {
+	ctl, err := e.control(ctx, scope)
+	if err != nil {
+		return Decision{}, err
+	}
+	return e.decide(ctx, scope, accountID, ctl)
+}
+
+// decide evaluates the account against one control snapshot. An account is
+// isolated when it has a trigger invoice past the grace cutoff, or when a
+// pilot test is running on it, unless it is effectively exempt.
+func (e *Evaluator) decide(ctx context.Context, scope coretenant.Scope, accountID string, ctl domain.ControlSettings) (Decision, error) {
 	today := businesstime.DayOf(e.d.Now())
-	invoices, err := e.d.Source.TriggerInvoices(ctx, scope, accountID, today)
+	invoices, err := e.d.Source.TriggerInvoices(ctx, scope, accountID, CandidateCutoff(today, ctl.GraceDays))
 	if err != nil {
 		return Decision{}, fmt.Errorf("load trigger invoices: %w", err)
 	}
@@ -82,9 +145,18 @@ func (e *Evaluator) Decide(ctx context.Context, scope coretenant.Scope, accountI
 	if err != nil {
 		return Decision{}, fmt.Errorf("list account secrets: %w", err)
 	}
+	isPilot, testActive, err := e.pilotState(ctx, scope, accountID)
+	if err != nil {
+		return Decision{}, err
+	}
 
-	dec := Decision{AccountID: accountID, Desired: domain.IsolationNormal, Exempt: policy.Exempt, Invoices: invoices}
-	if len(invoices) > 0 && !policy.Exempt {
+	exempt := EffectiveExempt(policy, today)
+	gate := IsolateAllowed(e.mode(), ctl, isPilot)
+	dec := Decision{
+		AccountID: accountID, Desired: domain.IsolationNormal, Exempt: exempt, Invoices: invoices,
+		IsolateAllowed: gate.Allowed, BlockedReason: gate.Reason,
+	}
+	if (len(invoices) > 0 || testActive) && !exempt {
 		dec.Desired = domain.IsolationIsolated
 	}
 	for _, s := range secrets {
@@ -117,38 +189,43 @@ func (e *Evaluator) ApplyRestoreOnly(ctx context.Context, scope coretenant.Scope
 }
 
 func (e *Evaluator) apply(ctx context.Context, scope coretenant.Scope, accountID, event string, restoreOnly bool) (Decision, error) {
+	if e.mode() == ModeOff {
+		return Decision{}, nil
+	}
+	ctl, err := e.control(ctx, scope)
+	if err != nil {
+		return Decision{}, err
+	}
+	return e.applyWith(ctx, scope, accountID, event, restoreOnly, ctl)
+}
+
+// applyWith is apply against a control snapshot read by the caller (the
+// reconciler reads it once per run so every account sees the same settings).
+// Restores are never gated by the tenant mode; isolates are dropped when
+// restoreOnly or when the gate blocks them.
+func (e *Evaluator) applyWith(ctx context.Context, scope coretenant.Scope, accountID, event string, restoreOnly bool, ctl domain.ControlSettings) (Decision, error) {
 	mode := e.mode()
 	if mode == ModeOff {
 		return Decision{}, nil
 	}
-	dec, err := e.Decide(ctx, scope, accountID)
+	dec, err := e.decide(ctx, scope, accountID, ctl)
 	if err != nil {
 		return Decision{}, err
 	}
 	if restoreOnly {
-		for i := range dec.Secrets {
-			if dec.Secrets[i].Action == actionIsolate {
-				dec.Secrets[i].Action = ""
-			}
-		}
+		dropIsolates(&dec)
 	}
 	if mode == ModeDryRun {
-		var ids []string
-		for _, a := range dec.Secrets {
-			if a.Action != "" {
-				ids = append(ids, a.SecretID+":"+a.Action)
-			}
-		}
-		// Info only when something would happen; a no-op decision is logged
-		// at Debug to keep the periodic reconcile quiet.
-		level := slog.LevelDebug
-		if len(ids) > 0 {
-			level = slog.LevelInfo
-		}
-		slog.Log(ctx, level, "mikrotik: dry-run decision",
-			"account_id", accountID, "desired", dec.Desired, "exempt", dec.Exempt,
-			"invoices", len(dec.Invoices), "secret_actions", ids, "event", event, "restore_only", restoreOnly)
+		logDecision(ctx, "mikrotik: dry-run decision", dec, event, restoreOnly)
 		return dec, nil
+	}
+	if ctl.Mode == domain.ModeSimulation {
+		// Logged before the gate drops the isolates: the would-be actions
+		// are what a simulation is for.
+		logDecision(ctx, "mikrotik: simulation decision", dec, event, restoreOnly)
+	}
+	if !dec.IsolateAllowed {
+		dropIsolates(&dec)
 	}
 	var errs []error
 	for _, a := range dec.Secrets {
@@ -167,4 +244,31 @@ func (e *Evaluator) apply(ctx context.Context, scope coretenant.Scope, accountID
 		}
 	}
 	return dec, errors.Join(errs...)
+}
+
+func dropIsolates(dec *Decision) {
+	for i := range dec.Secrets {
+		if dec.Secrets[i].Action == actionIsolate {
+			dec.Secrets[i].Action = ""
+		}
+	}
+}
+
+// logDecision logs a decision that is not executed. Info only when something
+// would happen; a no-op decision is logged at Debug to keep the periodic
+// reconcile quiet.
+func logDecision(ctx context.Context, msg string, dec Decision, event string, restoreOnly bool) {
+	var ids []string
+	for _, a := range dec.Secrets {
+		if a.Action != "" {
+			ids = append(ids, a.SecretID+":"+a.Action)
+		}
+	}
+	level := slog.LevelDebug
+	if len(ids) > 0 {
+		level = slog.LevelInfo
+	}
+	slog.Log(ctx, level, msg,
+		"account_id", dec.AccountID, "desired", dec.Desired, "exempt", dec.Exempt,
+		"invoices", len(dec.Invoices), "secret_actions", ids, "event", event, "restore_only", restoreOnly)
 }

@@ -268,8 +268,10 @@ func NewMikrotikIsolationRunner(cfg config.Config, db *database.Pool, log *slog.
 	source := newMikrotikReceivableReader(db)
 	routers := mikrotikservice.NewRouterService(routerRepo, mikrotikservice.NewPlatformClientFactory(),
 		cfg.App.Secret, cfg.Mikrotik.AllowedPrivateCIDRs)
+	controlRepo := mikrotikrepo.NewControlRepository(db)
 	eval := mikrotikservice.NewEvaluator(mikrotikservice.EvaluatorDeps{
 		Source: source, Policy: mikrotikrepo.NewPolicyRepository(db), Secrets: secretRepo, Tasks: taskRepo, Mode: mode,
+		Control: controlRepo,
 	})
 	members := receivableMembers{members: b.Members, perms: b.Permissions}
 	processor := mikrotikservice.NewTaskProcessor(mikrotikservice.TaskProcessorDeps{
@@ -287,6 +289,7 @@ func NewMikrotikIsolationRunner(cfg config.Config, db *database.Pool, log *slog.
 			frontendURL: cfg.App.FrontendURL, locale: cfg.Notification.DefaultLocale,
 		},
 		Audit: routerRepo,
+		Pilot: controlRepo,
 	})
 	return newMikrotikIsolationRunner(mikrotikIsolationRunnerDeps{
 		Mode:       mode,

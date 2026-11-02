@@ -71,6 +71,7 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 	if mode := mikrotikIsolationMode(cfg.Mikrotik.IsolationMode); mode != mikrotikservice.ModeOff {
 		eval := mikrotikservice.NewEvaluator(mikrotikservice.EvaluatorDeps{
 			Source: reader, Policy: policyRepo, Secrets: secretRepo, Tasks: mikrotikrepo.NewTaskRepository(db), Mode: mode,
+			Control: mikrotikrepo.NewControlRepository(db),
 		})
 		policyDeps.OnChange = mikrotikEvaluateHook(eval, "customer_policy_changed")
 		secrets.SetOnChange(mikrotikEvaluateHook(eval, "secret_pairing_changed"))
