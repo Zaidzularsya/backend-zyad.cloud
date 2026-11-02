@@ -15,12 +15,16 @@ import (
 
 // recSource serves AccountsWithTriggerInvoices from a sorted list with keyset paging.
 type recSource struct {
-	accounts []string
-	pages    int
-	limits   []int
+	accounts     []string
+	noInvoiceFor string // account with no trigger invoice
+	pages        int
+	limits       []int
 }
 
-func (s *recSource) TriggerInvoices(context.Context, coretenant.Scope, string, time.Time) ([]TriggerInvoice, error) {
+func (s *recSource) TriggerInvoices(_ context.Context, _ coretenant.Scope, accountID string, _ time.Time) ([]TriggerInvoice, error) {
+	if accountID != "" && accountID == s.noInvoiceFor {
+		return nil, nil
+	}
 	return oneInvoice, nil
 }
 

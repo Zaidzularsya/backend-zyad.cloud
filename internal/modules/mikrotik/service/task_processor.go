@@ -551,6 +551,12 @@ func (p *TaskProcessor) notifyCustomer(ctx context.Context, scope coretenant.Sco
 		slog.Debug("mikrotik: isolated notification skipped without trigger invoices", "task_id", task.ID)
 		return
 	}
+	// Undoes a partial isolate the customer was never told about, and the
+	// account is still overdue: a "service restored" notice would be false.
+	if task.Action == ActionRestore && task.CreatedByEvent == eventModeBlockedRestore {
+		slog.Debug("mikrotik: restored notification skipped for mode_blocked restore", "task_id", task.ID)
+		return
+	}
 	var err error
 	if task.Action == ActionIsolate {
 		err = p.d.Customer.NotifyIsolated(ctx, scope, accountID, dec.Invoices)

@@ -440,14 +440,49 @@ func TestReconciler_ControlReadFailure_StillRestoresIsolated(t *testing.T) {
 	ctl := newFakeControl(domain.ModeActive, 0)
 	ctl.getErr = errControlDown
 	tasks := &evalTasks{}
-	eval := NewEvaluator(EvaluatorDeps{Source: src, Policy: &fakePolicyRepo{}, Secrets: sec, Tasks: tasks, Mode: ModeOn, Now: now, Control: ctl})
-	rec := NewReconciler(src, sec, eval, now)
+	// "c" has an isolated secret and no invoice; "a" is overdue with a normal secret.
+	src.noInvoiceFor = "c"
+	secs := &stateSecrets{recSecrets: sec, rows: map[string][]domain.PPPSecret{
+		"c": {secretRow("s-c", domain.IsolationIsolated, true, false)},
+		"a": {secretRow("s-a", domain.IsolationNormal, true, false)},
+	}}
+	eval := NewEvaluator(EvaluatorDeps{Source: src, Policy: &fakePolicyRepo{}, Secrets: secs, Tasks: tasks, Mode: ModeOn, Now: now, Control: ctl})
+	rec := NewReconciler(src, secs, eval, now)
 	res, err := rec.RunOrganization(context.Background(), testScope(t))
 	if err != nil {
 		t.Fatalf("run must continue when the control read fails: %v", err)
 	}
 	if res.Accounts != 2 || res.Failed != 0 {
 		t.Fatalf("res = %+v, want isolated and trigger accounts visited", res)
+	}
+	if len(tasks.restore) != 1 || tasks.restore[0] != "s-c" || len(tasks.isolate) != 0 {
+		t.Fatalf("restore=%v isolate=%v, want the restore of s-c only", tasks.restore, tasks.isolate)
+	}
+}
+
+// stateSecrets serves per-account secrets on top of recSecrets.
+type stateSecrets struct {
+	*recSecrets
+	rows map[string][]domain.PPPSecret
+}
+
+func (s *stateSecrets) ListByAccount(_ context.Context, _ coretenant.Scope, accountID string) ([]domain.PPPSecret, error) {
+	return s.rows[accountID], nil
+}
+
+func TestProcessor_NormalRestoreStillNotifies(t *testing.T) {
+	for _, event := range []string{eventReconcile, "invoice_paid"} {
+		e, _ := newProcEnvWithControl(t, newFakeControl(domain.ModeActive, 0))
+		e.addSecret("s-1", e.routerA, "alice", domain.IsolationIsolated, isolirProfile)
+		if _, err := e.ev.Apply(context.Background(), e.scope, procAccount, event); err != nil {
+			t.Fatal(err)
+		}
+		if res := e.run(t); res != (ProcessResult{Done: 1}) {
+			t.Fatalf("%s: result = %+v", event, res)
+		}
+		if len(e.cust.calls) != 1 || e.cust.calls[0] != (customerCall{"restored", procAccount, 0}) {
+			t.Fatalf("%s: calls = %+v, want one restored notice", event, e.cust.calls)
+		}
 	}
 }
 
@@ -569,6 +604,9 @@ func TestProcessor_PartialIsolateBlockedByMode_EnqueuesRestore(t *testing.T) {
 			}
 			if got := routerProfile(e.clientA, "alice"); got != "paket-10m" || e.srepo.byID("s-1").IsolationState != domain.IsolationNormal {
 				t.Fatalf("router profile = %q, want original", got)
+			}
+			if len(e.cust.calls) != 0 {
+				t.Fatalf("mode_blocked restore must not notify the customer: %+v", e.cust.calls)
 			}
 			for _, tk := range e.tasks.forSecret("s-1") {
 				if tk.Action == domain.ActionIsolate && taskActive(&tk) {
