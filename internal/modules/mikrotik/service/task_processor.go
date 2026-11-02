@@ -357,7 +357,7 @@ func (p *TaskProcessor) failure(ctx context.Context, scope coretenant.Scope, tas
 		if err := p.d.Tasks.Fail(ctx, scope, task.ID, f.Code, f.Message); err != nil {
 			p.logLifecycleErr("fail", task, err)
 		} else {
-			p.audit(ctx, scope, "task.failed", secret.RouterID, task, attempts)
+			p.audit(ctx, scope, "task.failed", secret.RouterID, task, attempts, "error_code", f.Code)
 			p.alertTenant(ctx, scope, task, event)
 		}
 		// Independent of Fail: the router may already be changed.
@@ -483,7 +483,7 @@ func (p *TaskProcessor) unverifiable(ctx context.Context, scope coretenant.Scope
 			p.logLifecycleErr("fail", task, err)
 			return outcomeFailed
 		}
-		p.audit(ctx, scope, "task.failed", secret.RouterID, task, attempts)
+		p.audit(ctx, scope, "task.failed", secret.RouterID, task, attempts, "error_code", codeRouterUnverifiable)
 		p.alertTenant(ctx, scope, task, event)
 		return outcomeFailed
 	}

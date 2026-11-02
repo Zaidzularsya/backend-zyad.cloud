@@ -69,6 +69,7 @@ var controlRouteCases = []secretRouteCase{
 	{http.MethodGet, "/control/preview", ``, "mikrotik_control.read", false},
 	{http.MethodGet, "/control/preview/summary", ``, "mikrotik_control.read", false},
 	{http.MethodGet, "/control/preview/export", ``, "mikrotik_control.read", false},
+	{http.MethodGet, "/control/activity", ``, "mikrotik_control.read", false},
 }
 
 // countingPreviewService shares the control service call counter.
@@ -87,6 +88,14 @@ func (s countingPreviewService) ExportCSV(_ context.Context, _ coretenant.Scope,
 	begin(0)
 	_, err := io.WriteString(w, "Akun\n")
 	return err
+}
+
+// countingActivityService shares the control service call counter.
+type countingActivityService struct{ c *countingControlService }
+
+func (s countingActivityService) List(context.Context, coretenant.Scope, int, int) ([]mikrotikservice.ActivityItem, int64, error) {
+	s.c.calls++
+	return nil, 0, nil
 }
 
 // Grants of migrations 000175/000177: member reads, organization_owner all.
@@ -114,11 +123,12 @@ func newMikrotikControlEngine(t *testing.T, entitled bool, granted []string) (*g
 		},
 	)
 	registerMikrotikRoutes(protected, Dependencies{
-		CRMEntitlementChecker:  &recordingEntitlements{allow: entitled},
-		PermissionChecker:      permissionSetChecker{allowed: allowed},
-		MikrotikRouterHandler:  mikrotikhandler.NewRouterHandler(&countingRouterService{}),
-		MikrotikControlHandler: mikrotikhandler.NewControlHandler(svc),
-		MikrotikPreviewHandler: mikrotikhandler.NewPreviewHandler(countingPreviewService{c: svc}),
+		CRMEntitlementChecker:   &recordingEntitlements{allow: entitled},
+		PermissionChecker:       permissionSetChecker{allowed: allowed},
+		MikrotikRouterHandler:   mikrotikhandler.NewRouterHandler(&countingRouterService{}),
+		MikrotikControlHandler:  mikrotikhandler.NewControlHandler(svc),
+		MikrotikPreviewHandler:  mikrotikhandler.NewPreviewHandler(countingPreviewService{c: svc}),
+		MikrotikActivityHandler: mikrotikhandler.NewActivityHandler(countingActivityService{c: svc}),
 	})
 	return engine, svc
 }
@@ -165,5 +175,24 @@ func TestControlRoutes_Permissions(t *testing.T) {
 		if w := doControl(engine, rc); w.Code != http.StatusForbidden || svc.calls != 0 {
 			t.Errorf("unentitled %s %s: status %d", rc.method, rc.path, w.Code)
 		}
+	}
+}
+
+func TestActivityRoute_ReadPermission(t *testing.T) {
+	rc := secretRouteCase{http.MethodGet, "/control/activity", ``, "mikrotik_control.read", false}
+	engine, svc := newMikrotikControlEngine(t, true, memberControlPermissions)
+	if w := doControl(engine, rc); w.Code != http.StatusOK || svc.calls != 1 {
+		t.Errorf("member: status %d calls %d", w.Code, svc.calls)
+	}
+	engine, svc = newMikrotikControlEngine(t, true, nil)
+	if w := doControl(engine, rc); w.Code != http.StatusForbidden || svc.calls != 0 {
+		t.Errorf("no permission: status %d calls %d", w.Code, svc.calls)
+	}
+	engine, svc = newMikrotikControlEngine(t, true, memberControlPermissions)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/app/mikrotik/control/activity", nil)
+	nw := httptest.NewRecorder()
+	engine.ServeHTTP(nw, req)
+	if nw.Code != http.StatusUnauthorized || svc.calls != 0 {
+		t.Errorf("no token: status %d calls %d", nw.Code, svc.calls)
 	}
 }

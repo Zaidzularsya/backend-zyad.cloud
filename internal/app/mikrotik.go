@@ -29,6 +29,8 @@ type mikrotikModule struct {
 	Control *mikrotikhandler.ControlHandler
 	// Preview serves the isolation candidate preview and its CSV export.
 	Preview *mikrotikhandler.PreviewHandler
+	// Activity serves the control center activity log.
+	Activity *mikrotikhandler.ActivityHandler
 }
 
 // mikrotikBuild carries the cross-module services the adapters wrap.
@@ -106,6 +108,8 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 			Control: controlRepo, Secrets: secretRepo, Tasks: taskRepo, Accounts: accounts, Audit: repo, Evaluator: eval,
 		}, engineMode)),
 		Preview: mikrotikhandler.NewPreviewHandler(preview),
+		Activity: mikrotikhandler.NewActivityHandler(mikrotikservice.NewActivityService(
+			mikrotikrepo.NewActivityRepository(db), reader)),
 	}
 }
 
@@ -170,5 +174,8 @@ func registerMikrotikRoutes(protected *gin.RouterGroup, deps Dependencies) {
 	}
 	if deps.MikrotikPreviewHandler != nil {
 		deps.MikrotikPreviewHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
+	}
+	if deps.MikrotikActivityHandler != nil {
+		deps.MikrotikActivityHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
 	}
 }
