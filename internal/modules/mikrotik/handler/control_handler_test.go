@@ -143,7 +143,7 @@ func TestControlRoutes_Bodies(t *testing.T) {
 		t.Fatalf("test body = %s", w.Body)
 	}
 	w = performJSON(r, http.MethodPost, controlBase+"/restore-all", ``)
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || body.Data["enqueued"] != float64(3) || body.Data["skipped"] != float64(1) || body.Data["failed"] != float64(0) {
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil || body.Data["enqueued"] != float64(3) || body.Data["skipped"] != float64(1) || body.Data["failed"] != float64(0) || body.Data["aborted"] != false {
 		t.Fatalf("restore body = %s", w.Body)
 	}
 	w = performJSON(r, http.MethodGet, controlBase, ``)
@@ -188,6 +188,7 @@ func TestControlRoutes_ErrorMapping(t *testing.T) {
 		{mikrotik.ErrEngineOff, http.MethodPost, "/pilot/" + testAccountID + "/test", http.StatusConflict, "MIKROTIK_ENGINE_OFF"},
 		{mikrotik.ErrPilotModeRequired, http.MethodPost, "/pilot/" + testAccountID + "/test", http.StatusConflict, "MIKROTIK_PILOT_MODE_REQUIRED"},
 		{mikrotik.ErrNotPaused, http.MethodPost, "/restore-all", http.StatusConflict, "MIKROTIK_NOT_PAUSED"},
+		{&mikrotik.PilotTestNotRunnableError{Reason: mikrotik.PilotBlockedExempt}, http.MethodPost, "/pilot/" + testAccountID + "/test", http.StatusConflict, "MIKROTIK_PILOT_TEST_NOT_RUNNABLE"},
 	} {
 		body := ``
 		if tc.method == http.MethodPut {

@@ -5,6 +5,8 @@ package repository_test
 import (
 	"sort"
 	"testing"
+
+	coretenant "zyad.cloud/internal/core/tenant"
 )
 
 // ListIsolated pages only this organization's isolated secrets on routers
@@ -68,5 +70,17 @@ func TestSecretRepo_ListIsolated_KeysetScopedAndSkipsDeletedRouters(t *testing.T
 	b, err := repo.ListIsolated(e.ctx, other, "", 10)
 	if err != nil || len(b) != 1 || b[0].ID != foreign {
 		t.Fatalf("organization B: err=%v items=%+v", err, b)
+	}
+
+	// CountIsolated uses exactly the ListIsolated filters.
+	for _, tc := range []struct {
+		name string
+		n    int
+		sc   coretenant.Scope
+	}{{"A", len(want), scope}, {"B", len(b), other}} {
+		got, err := repo.CountIsolated(e.ctx, tc.sc)
+		if err != nil || got != tc.n {
+			t.Fatalf("CountIsolated %s = %d err=%v, want %d", tc.name, got, err, tc.n)
+		}
 	}
 }

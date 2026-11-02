@@ -23,8 +23,6 @@ const (
 	pilotTestWindow = 10 * time.Minute
 	// restoreAllPage is the ListIsolated page size of RestoreAll.
 	restoreAllPage = 200
-	// isolatedCountPage is the ListIsolated page size used to count isolated secrets.
-	isolatedCountPage = 500
 )
 
 // ControlDeps are the collaborators of ControlService. Evaluator may be nil
@@ -78,8 +76,12 @@ type PilotView struct {
 }
 
 // RestoreAllResult counts RestoreAll outcomes: Skipped = not eligible, an
-// active task or in cooldown; Failed = the enqueue itself errored.
-type RestoreAllResult struct{ Enqueued, Skipped, Failed int }
+// active task or in cooldown; Failed = the enqueue itself errored. Aborted:
+// the tenant left paused mode mid-run, so the remaining pages were not queued.
+type RestoreAllResult struct {
+	Enqueued, Skipped, Failed int
+	Aborted                   bool
+}
 
 // ControlService is the tenant-facing control surface of the isolation engine.
 type ControlService struct {
@@ -108,7 +110,7 @@ func (s *ControlService) State(ctx context.Context, scope coretenant.Scope) (Con
 	if err != nil {
 		return ControlState{}, err
 	}
-	isolated, err := s.countIsolated(ctx, scope)
+	isolated, err := s.d.Secrets.CountIsolated(ctx, scope)
 	if err != nil {
 		return ControlState{}, err
 	}
@@ -130,21 +132,6 @@ func (s *ControlService) State(ctx context.Context, scope coretenant.Scope) (Con
 
 func testActive(p domain.PilotAccount, now time.Time) bool {
 	return p.TestUntil != nil && p.TestUntil.After(now)
-}
-
-func (s *ControlService) countIsolated(ctx context.Context, scope coretenant.Scope) (int, error) {
-	n, after := 0, ""
-	for {
-		page, err := s.d.Secrets.ListIsolated(ctx, scope, after, isolatedCountPage)
-		if err != nil {
-			return 0, err
-		}
-		n += len(page)
-		if len(page) < isolatedCountPage {
-			return n, nil
-		}
-		after = page[len(page)-1].ID
-	}
 }
 
 func (s *ControlService) SetGraceDays(ctx context.Context, scope coretenant.Scope, days int, actor string) (ControlState, error) {
@@ -358,18 +345,68 @@ func (s *ControlService) StartPilotTest(ctx context.Context, scope coretenant.Sc
 		}
 		return time.Time{}, err
 	}
-	s.auditControl(ctx, scope, "pilot.test_started", actor, accountID,
-		map[string]any{"target": "pilot", "account_id": accountID, "test_until": until.UTC().Format(time.RFC3339)})
-	if _, err := s.d.Evaluator.Apply(ctx, scope, accountID, "pilot_test"); err != nil {
-		// The window is set; starting the test again rewrites it and retries the enqueue.
+	dec, err := s.d.Evaluator.Apply(ctx, scope, accountID, "pilot_test")
+	if err != nil {
+		s.abortPilotTest(ctx, scope, accountID, actor, "enqueue_failed")
 		return time.Time{}, fmt.Errorf("enqueue pilot isolation: %w", err)
 	}
+	if reason := pilotNotRunnableReason(dec, secrets); reason != "" {
+		s.abortPilotTest(ctx, scope, accountID, actor, reason)
+		return time.Time{}, &mikrotik.PilotTestNotRunnableError{Reason: reason}
+	}
+	s.auditControl(ctx, scope, "pilot.test_started", actor, accountID,
+		map[string]any{"target": "pilot", "account_id": accountID, "test_until": until.UTC().Format(time.RFC3339)})
 	return until, nil
 }
 
+// pilotNotRunnableReason is "" when the test isolates something (an isolate
+// was enqueued) or a secret of the account is already isolated; otherwise the
+// mikrotik.PilotBlocked* class explaining why nothing would happen.
+func pilotNotRunnableReason(dec Decision, secrets []domain.PPPSecret) string {
+	for _, a := range dec.Secrets {
+		if a.Action == actionIsolate {
+			return ""
+		}
+	}
+	for _, sec := range secrets {
+		if sec.IsolationState == domain.IsolationIsolated {
+			return ""
+		}
+	}
+	switch {
+	case dec.Exempt:
+		return mikrotik.PilotBlockedExempt
+	case !dec.IsolateAllowed:
+		return mikrotik.PilotBlockedByMode
+	default:
+		return mikrotik.PilotBlockedNoUsableSecret
+	}
+}
+
+// abortPilotTest ends a test window that will not isolate anything, so the UI
+// does not show a running test that can never be verified.
+func (s *ControlService) abortPilotTest(ctx context.Context, scope coretenant.Scope, accountID, actor, reason string) {
+	if err := s.d.Control.StopPilotTest(ctx, scope, accountID); err != nil {
+		slog.ErrorContext(ctx, "mikrotik: ending a failed pilot test window failed",
+			"account_id", accountID, "reason", reason, "error", scrub(err.Error()))
+	}
+	s.auditControl(ctx, scope, "pilot.test_failed", actor, accountID,
+		map[string]any{"target": "pilot", "account_id": accountID, "reason": reason})
+}
+
 // StopPilotTest ends the test window now and re-evaluates the account so the
-// restore is enqueued immediately.
+// restore is enqueued immediately. Without a running test it is a no-op.
 func (s *ControlService) StopPilotTest(ctx context.Context, scope coretenant.Scope, accountID, actor string) error {
+	isPilot, active, err := s.d.Control.PilotState(ctx, scope, accountID)
+	if err != nil {
+		return err
+	}
+	if !isPilot {
+		return errNotPilot()
+	}
+	if !active {
+		return nil
+	}
 	if err := s.d.Control.StopPilotTest(ctx, scope, accountID); err != nil {
 		if errors.Is(err, mikrotik.ErrAccountNotFound) {
 			return errNotPilot()
@@ -395,19 +432,29 @@ func (s *ControlService) reevaluate(ctx context.Context, scope coretenant.Scope,
 }
 
 // RestoreAll queues a restore for every isolated secret while the tenant is
-// paused. One failing enqueue is counted and does not stop the run; repeating
-// the call skips secrets that already have an active task.
+// paused. The mode is re-read before every page: when the tenant leaves
+// paused mid-run, the run stops with Aborted and a partial count. One failing
+// enqueue is counted and does not stop the run; repeating the call skips
+// secrets that already have an active task.
 func (s *ControlService) RestoreAll(ctx context.Context, scope coretenant.Scope, actor string) (RestoreAllResult, error) {
-	ctl, err := s.d.Control.Get(ctx, scope)
-	if err != nil {
-		return RestoreAllResult{}, err
-	}
-	if ctl.Mode != domain.ModePaused {
-		return RestoreAllResult{}, mikrotik.ErrNotPaused
-	}
 	var res RestoreAllResult
 	after := ""
-	for {
+	for first := true; ; first = false {
+		ctl, err := s.d.Control.Get(ctx, scope)
+		if first {
+			if err != nil {
+				return RestoreAllResult{}, err
+			}
+			if ctl.Mode != domain.ModePaused {
+				return RestoreAllResult{}, mikrotik.ErrNotPaused
+			}
+		} else if err != nil || ctl.Mode != domain.ModePaused {
+			if err != nil {
+				slog.ErrorContext(ctx, "mikrotik: restore-all mode re-read failed; stopping", "error", scrub(err.Error()))
+			}
+			res.Aborted = true
+			break
+		}
 		page, err := s.d.Secrets.ListIsolated(ctx, scope, after, restoreAllPage)
 		if err != nil {
 			return RestoreAllResult{}, err
@@ -430,7 +477,7 @@ func (s *ControlService) RestoreAll(ctx context.Context, scope coretenant.Scope,
 		after = page[len(page)-1].ID
 	}
 	s.auditControl(ctx, scope, "control.restore_all", actor, scope.OrganizationID(),
-		map[string]any{"target": "control", "enqueued": res.Enqueued, "skipped": res.Skipped, "failed": res.Failed})
+		map[string]any{"target": "control", "enqueued": res.Enqueued, "skipped": res.Skipped, "failed": res.Failed, "aborted": res.Aborted})
 	return res, nil
 }
 

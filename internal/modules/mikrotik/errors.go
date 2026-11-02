@@ -166,3 +166,30 @@ var (
 	// ErrNotPaused: restore-all is only allowed while the tenant mode is paused.
 	ErrNotPaused = errors.New("restore all is only allowed while isolation is paused")
 )
+
+// ErrPilotTestNotRunnable matches *PilotTestNotRunnableError.
+var ErrPilotTestNotRunnable = errors.New("the pilot test cannot isolate this account")
+
+// Reasons a pilot test cannot isolate the pilot account.
+const (
+	PilotBlockedExempt         = "exempt"
+	PilotBlockedNoUsableSecret = "no_usable_secret"
+	PilotBlockedByMode         = "blocked_by_mode"
+)
+
+// PilotTestNotRunnableError: the pilot test was started but nothing would be
+// isolated, so the test window was ended again. Reason is a PilotBlocked* value.
+type PilotTestNotRunnableError struct{ Reason string }
+
+func (e *PilotTestNotRunnableError) Error() string {
+	switch e.Reason {
+	case PilotBlockedExempt:
+		return "the pilot account is exempt from isolation; remove the exemption before testing"
+	case PilotBlockedNoUsableSecret:
+		return "the pilot account has no PPP secret that can be isolated (present on the router with a known original profile)"
+	default:
+		return "isolation of the pilot account is blocked by the current isolation mode"
+	}
+}
+
+func (e *PilotTestNotRunnableError) Is(target error) bool { return target == ErrPilotTestNotRunnable }

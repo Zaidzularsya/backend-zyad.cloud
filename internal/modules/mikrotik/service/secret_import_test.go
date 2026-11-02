@@ -458,3 +458,13 @@ func (f *fakeSecretRepo) ListIsolated(_ context.Context, _ coretenant.Scope, aft
 	}
 	return out, nil
 }
+
+func (f *fakeSecretRepo) CountIsolated(_ context.Context, _ coretenant.Scope) (int, error) {
+	n := 0
+	for _, r := range f.rows {
+		if r.IsolationState == domain.IsolationIsolated {
+			n++
+		}
+	}
+	return n, nil
+}

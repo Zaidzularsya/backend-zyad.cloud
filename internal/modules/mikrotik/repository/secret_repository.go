@@ -91,6 +91,8 @@ type SecretRepository interface {
 	// ListIsolated pages the organization's isolated secrets on routers that
 	// are not deleted, ordered by id (keyset; afterID "" = from the start).
 	ListIsolated(ctx context.Context, scope coretenant.Scope, afterID string, limit int) ([]domain.PPPSecret, error)
+	// CountIsolated counts what ListIsolated pages through (same filters).
+	CountIsolated(ctx context.Context, scope coretenant.Scope) (int, error)
 }
 
 type secretRepository struct {
@@ -563,9 +565,7 @@ func (r *secretRepository) ListIsolated(ctx context.Context, scope coretenant.Sc
 	}
 	items := []domain.PPPSecret{}
 	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT `+qualifiedSecretColumns+` FROM mikrotik_ppp_secrets s
-			JOIN mikrotik_routers rt ON rt.organization_id = s.organization_id AND rt.id = s.router_id
-			WHERE s.organization_id = $1 AND s.isolation_state = 'isolated' AND rt.deleted_at IS NULL
+		rows, err := tx.Query(ctx, `SELECT `+qualifiedSecretColumns+isolatedSecretsFrom+`
 			  AND ($2::text = '' OR s.id > NULLIF($2::text, '')::uuid)
 			ORDER BY s.id LIMIT $3`, scope.OrganizationID(), afterID, limit)
 		if err != nil {
@@ -585,4 +585,18 @@ func (r *secretRepository) ListIsolated(ctx context.Context, scope coretenant.Sc
 		return nil, err
 	}
 	return items, nil
+}
+
+// isolatedSecretsFrom is the FROM/WHERE shared by ListIsolated and
+// CountIsolated ($1 = organization id).
+const isolatedSecretsFrom = ` FROM mikrotik_ppp_secrets s
+			JOIN mikrotik_routers rt ON rt.organization_id = s.organization_id AND rt.id = s.router_id
+			WHERE s.organization_id = $1 AND s.isolation_state = 'isolated' AND rt.deleted_at IS NULL`
+
+func (r *secretRepository) CountIsolated(ctx context.Context, scope coretenant.Scope) (int, error) {
+	var n int
+	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*)`+isolatedSecretsFrom, scope.OrganizationID()).Scan(&n)
+	})
+	return n, err
 }

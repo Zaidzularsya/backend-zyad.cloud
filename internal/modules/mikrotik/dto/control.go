@@ -85,11 +85,12 @@ type PilotTestResponse struct {
 }
 
 type RestoreAllResponse struct {
-	Enqueued int `json:"enqueued"`
-	Skipped  int `json:"skipped"`
-	Failed   int `json:"failed"`
+	Enqueued int  `json:"enqueued"`
+	Skipped  int  `json:"skipped"`
+	Failed   int  `json:"failed"`
+	Aborted  bool `json:"aborted"`
 }
 
 func RestoreAllFromService(r service.RestoreAllResult) RestoreAllResponse {
-	return RestoreAllResponse{Enqueued: r.Enqueued, Skipped: r.Skipped, Failed: r.Failed}
+	return RestoreAllResponse{Enqueued: r.Enqueued, Skipped: r.Skipped, Failed: r.Failed, Aborted: r.Aborted}
 }

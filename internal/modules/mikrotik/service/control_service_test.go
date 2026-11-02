@@ -114,6 +114,14 @@ type ctlSecrets struct {
 	byAccount map[string][]domain.PPPSecret
 	isolated  []string
 	limits    []int
+	counts    int
+	// onList runs after each ListIsolated call (1-based call number).
+	onList func(call int)
+}
+
+func (s *ctlSecrets) CountIsolated(context.Context, coretenant.Scope) (int, error) {
+	s.counts++
+	return len(s.isolated), nil
 }
 
 func (s *ctlSecrets) ListByAccount(_ context.Context, _ coretenant.Scope, accountID string) ([]domain.PPPSecret, error) {
@@ -122,6 +130,9 @@ func (s *ctlSecrets) ListByAccount(_ context.Context, _ coretenant.Scope, accoun
 
 func (s *ctlSecrets) ListIsolated(_ context.Context, _ coretenant.Scope, afterID string, limit int) ([]domain.PPPSecret, error) {
 	s.limits = append(s.limits, limit)
+	if s.onList != nil {
+		defer s.onList(len(s.limits))
+	}
 	var out []domain.PPPSecret
 	for _, id := range s.isolated {
 		if id > afterID && len(out) < limit {
@@ -161,6 +172,9 @@ func (t *ctlTasks) EnqueueRestore(_ context.Context, _ coretenant.Scope, id, eve
 }
 
 func (t *ctlTasks) EnqueueIsolate(_ context.Context, _ coretenant.Scope, id, event string) (bool, error) {
+	if t.failFor[id] {
+		return false, errBoom
+	}
 	t.isolate = append(t.isolate, id)
 	t.events = append(t.events, event)
 	return true, nil
@@ -172,6 +186,7 @@ type ctlEnv struct {
 	sec   *ctlSecrets
 	tasks *ctlTasks
 	audit *captureAuditor
+	pol   *fakePolicyRepo
 	scope coretenant.Scope
 }
 
@@ -187,11 +202,12 @@ func newCtlEnv(t *testing.T, engine, mode string) *ctlEnv {
 	sec := &ctlSecrets{byAccount: map[string][]domain.PPPSecret{}}
 	tasks := newCtlTasks()
 	audit := &captureAuditor{}
+	pol := &fakePolicyRepo{}
 	now := func() time.Time { return ctlNow }
 	var eval *Evaluator
 	if engine != ModeOff {
 		eval = NewEvaluator(EvaluatorDeps{
-			Source: &evalSource{}, Policy: &fakePolicyRepo{}, Secrets: sec, Tasks: tasks,
+			Source: &evalSource{}, Policy: pol, Secrets: sec, Tasks: tasks,
 			Mode: engine, Now: now, Control: repo,
 		})
 	}
@@ -202,7 +218,7 @@ func newCtlEnv(t *testing.T, engine, mode string) *ctlEnv {
 	svc := NewControlService(ControlDeps{
 		Control: repo, Secrets: sec, Tasks: tasks, Accounts: accounts, Audit: audit, Evaluator: eval, Now: now,
 	}, engine)
-	return &ctlEnv{svc: svc, repo: repo, sec: sec, tasks: tasks, audit: audit, scope: testScope(t)}
+	return &ctlEnv{svc: svc, repo: repo, sec: sec, tasks: tasks, audit: audit, pol: pol, scope: testScope(t)}
 }
 
 func (e *ctlEnv) events() []string {
@@ -550,6 +566,9 @@ func TestControlState_EngineOff(t *testing.T) {
 		st.PilotCount != 2 || st.TestActiveCount != 1 || st.IsolatedSecrets != 2 {
 		t.Fatalf("state = %+v", st)
 	}
+	if e.sec.counts != 1 || len(e.sec.limits) != 0 {
+		t.Fatalf("state must use one CountIsolated and no ListIsolated: counts=%d pages=%v", e.sec.counts, e.sec.limits)
+	}
 	if st, _ := newCtlEnv(t, ModeDryRun, domain.ModeActive).svc.State(ctx, e.scope); st.EffectiveMode != ModeDryRun || st.Engine != ModeDryRun {
 		t.Fatalf("dry_run state = %+v", st)
 	}
@@ -573,5 +592,114 @@ func TestSetGraceDays(t *testing.T) {
 	}
 	if got := e.events(); len(got) != 1 || got[0] != "control.grace_days_changed" {
 		t.Fatalf("audit = %v", got)
+	}
+}
+
+func pilotEnv(t *testing.T, secrets ...domain.PPPSecret) *ctlEnv {
+	t.Helper()
+	e := newCtlEnv(t, ModeOn, domain.ModePilot)
+	e.repo.pilots[accPilot] = &domain.PilotAccount{AccountID: accPilot, AddedAt: ctlNow}
+	e.sec.byAccount[accPilot] = secrets
+	return e
+}
+
+func (e *ctlEnv) assertWindowEnded(t *testing.T) {
+	t.Helper()
+	if p := e.repo.pilots[accPilot]; p.TestUntil == nil || p.TestUntil.After(ctlNow) {
+		t.Fatalf("test window must be ended: %+v", p)
+	}
+	for _, ev := range e.events() {
+		if ev == "pilot.test_started" {
+			t.Fatalf("pilot.test_started must not be audited: %v", e.events())
+		}
+	}
+	if got := e.events(); len(got) != 1 || got[0] != "pilot.test_failed" {
+		t.Fatalf("audit = %v, want pilot.test_failed", got)
+	}
+}
+
+func TestStartPilotTest_ExemptAccountNotRunnable(t *testing.T) {
+	e := pilotEnv(t, pairedSecret("s-pilot", accPilot))
+	e.pol.rows = map[string]domain.CustomerPolicy{accPilot: {AccountID: accPilot, Exempt: true}}
+	_, err := e.svc.StartPilotTest(context.Background(), e.scope, accPilot, "u1")
+	var nr *mikrotik.PilotTestNotRunnableError
+	if !errors.Is(err, mikrotik.ErrPilotTestNotRunnable) || !errors.As(err, &nr) || nr.Reason != mikrotik.PilotBlockedExempt {
+		t.Fatalf("err = %v", err)
+	}
+	if len(e.tasks.isolate) != 0 {
+		t.Fatalf("isolate = %v", e.tasks.isolate)
+	}
+	e.assertWindowEnded(t)
+	if e.audit.entries[0].Metadata["reason"] != mikrotik.PilotBlockedExempt {
+		t.Fatalf("metadata = %v", e.audit.entries[0].Metadata)
+	}
+}
+
+func TestStartPilotTest_NoUsableSecretNotRunnable(t *testing.T) {
+	absent := pairedSecret("s-absent", accPilot)
+	absent.Present = false
+	needs := pairedSecret("s-needs", accPilot)
+	needs.NeedsOriginalProfile = true
+	e := pilotEnv(t, absent, needs)
+	_, err := e.svc.StartPilotTest(context.Background(), e.scope, accPilot, "u1")
+	var nr *mikrotik.PilotTestNotRunnableError
+	if !errors.As(err, &nr) || nr.Reason != mikrotik.PilotBlockedNoUsableSecret {
+		t.Fatalf("err = %v", err)
+	}
+	e.assertWindowEnded(t)
+}
+
+func TestStartPilotTest_ApplyFailureEndsWindow(t *testing.T) {
+	e := pilotEnv(t, pairedSecret("s-pilot", accPilot))
+	e.tasks.failFor["s-pilot"] = true
+	if _, err := e.svc.StartPilotTest(context.Background(), e.scope, accPilot, "u1"); err == nil || errors.Is(err, mikrotik.ErrPilotTestNotRunnable) {
+		t.Fatalf("err = %v, want the enqueue error", err)
+	}
+	e.assertWindowEnded(t)
+}
+
+func TestStartPilotTest_AlreadyIsolatedSecretRuns(t *testing.T) {
+	iso := pairedSecret("s-pilot", accPilot)
+	iso.IsolationState = domain.IsolationIsolated
+	e := pilotEnv(t, iso)
+	if _, err := e.svc.StartPilotTest(context.Background(), e.scope, accPilot, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.events(); len(got) != 1 || got[0] != "pilot.test_started" {
+		t.Fatalf("audit = %v", got)
+	}
+}
+
+func TestStopPilotTest_NoActiveTestIsNoop(t *testing.T) {
+	iso := pairedSecret("s-pilot", accPilot)
+	iso.IsolationState = domain.IsolationIsolated
+	e := pilotEnv(t, iso)
+	if err := e.svc.StopPilotTest(context.Background(), e.scope, accPilot, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if e.repo.pilots[accPilot].TestUntil != nil || len(e.audit.entries) != 0 || len(e.tasks.restore) != 0 {
+		t.Fatalf("no-op expected: pilot=%+v audit=%v restore=%v", e.repo.pilots[accPilot], e.events(), e.tasks.restore)
+	}
+}
+
+func TestRestoreAll_AbortsWhenModeChanges(t *testing.T) {
+	e := newCtlEnv(t, ModeOn, domain.ModePaused)
+	for i := 0; i < 450; i++ {
+		e.sec.isolated = append(e.sec.isolated, fmt.Sprintf("s%04d", i))
+	}
+	e.sec.onList = func(call int) {
+		if call == 1 {
+			e.repo.ctl.Mode = domain.ModeActive
+		}
+	}
+	res, err := e.svc.RestoreAll(context.Background(), e.scope, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Aborted || res.Enqueued != 200 || len(e.sec.limits) != 1 {
+		t.Fatalf("result = %+v pages = %d, want aborted after the first page", res, len(e.sec.limits))
+	}
+	if len(e.audit.entries) != 1 || e.audit.entries[0].Metadata["aborted"] != true {
+		t.Fatalf("audit = %+v", e.audit.entries)
 	}
 }
