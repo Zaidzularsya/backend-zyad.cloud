@@ -428,6 +428,33 @@ tidak punya sertifikat, handshake ditolak) dan butir 10 (user berhak minimum, pe
 butuh sesi PPPoE hidup: pada 2 Nov 2026 `/ppp active` = 0 sesi (CPE OpenWrt tidak tersambung, jalur kendali ke CPE tidak
 tersedia dari WSL).
 
+### 11.x Hasil uji lab pusat kendali (2 Nov 2026)
+
+Uji: `TestLabControlCenter` (`internal/modules/mikrotik/service/control_center_lab_test.go`, tag `mikrotiklab`), satu CPE
+nyata `10mbps@debug` (profile asal `10M-P8`) di router lab. Sisi router nyata (SetupService, Executor, RouterService); sisi
+DB memakai fake dalam memori yang dirangkai seperti produksi (ControlService -> Evaluator -> antrean -> TaskProcessor ->
+Executor, plus Reconciler). Jam fake dipakai untuk melewati jendela uji 10 menit (konstanta produksi tidak diubah); satu
+invoice kandidat menunggak dipasang pada akun. Satu kali jalan penuh lulus (320 dtk). Yang teramati:
+
+- Mode `simulation` + kandidat menunggak: keputusan `desired=isolated` tetapi `isolateAllowed=false`, alasan `simulation`;
+  0 tugas, sesi CPE tetap sama dan di luar pool isolir, profile secret tetap `10M-P8`.
+- Mode `pilot`, akun bukan pilot, menunggak: diblokir `not_in_pilot`, 0 tugas, sesi tidak berubah.
+- Akun pilot (tanpa invoice) + `StartPilotTest`: jendela = mulai + tepat 10 menit; `TestActiveCount=1`; satu tugas isolate
+  selesai, sesi CPE tersambung ulang di pool isolir (`10.255.254.2`) dan alamatnya ada di address-list; `pilot_verified_at`
+  masih kosong. Jam digeser +11 menit: `TestActiveCount=0`, `Reconciler` mengantre restore, restore selesai, CPE kembali ke
+  `10.10.8.0` (di luar pool), dan `pilot_verified_at` terisi tepat setelah restore.
+- Jalur `StopPilotTest` (verified direset dulu): isolate lalu stop; restore langsung diantre dan selesai, `pilot_verified_at`
+  terisi lagi.
+- Mode `paused` + kandidat menunggak: diblokir `paused`, 0 tugas baru, sesi normal. Setelah `active` (verified) akun terisolir
+  nyata; lalu `paused`: jeda saja tidak memulihkan siapa pun. `RestoreAll` (engine `on`) mengantre 1 restore, selesai, CPE
+  kembali di luar pool; evaluasi ulang selama `paused` tidak mengisolir lagi.
+- Temuan yang diperbaiki lewat uji ini: sebelum perbaikan, tugas restore `restore_all` untuk pelanggan yang MASIH menunggak
+  dibatalkan `superseded` oleh pemroses (evaluasi menganggap akun harus terisolir), sehingga `RestoreAll` tidak memulihkan
+  siapa pun. Sekarang tugas `restore_all` dijalankan selama gerbang isolir masih tertutup (sama seperti `mode_blocked_restore`),
+  dan tetap dibatalkan bila tenant sudah kembali `active`.
+- Kebersihan: `TestLabIsolirLeftovers` = 0 objek `zyad-*` sesudah uji; secret `10mbps@debug` kembali ke `10M-P8`, sesi CPE
+  naik di `10.10.8.0` (di luar pool isolir).
+
 ## 12. Operasional: timeout HTTP dan nginx
 
 Satu siklus lab preview + apply + preview + apply + cleanup makan ±70 dtk karena klien binary login ulang per
