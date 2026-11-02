@@ -27,6 +27,8 @@ type mikrotikModule struct {
 	Onboarding *mikrotikhandler.OnboardingHandler
 	// Control serves the tenant control center (mode, grace days, pilot, restore all).
 	Control *mikrotikhandler.ControlHandler
+	// Preview serves the isolation candidate preview and its CSV export.
+	Preview *mikrotikhandler.PreviewHandler
 }
 
 // mikrotikBuild carries the cross-module services the adapters wrap.
@@ -84,6 +86,10 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 		registerMikrotikInvoiceListener(engineMode, b.Listeners, mikrotikservice.NewInvoiceListener(reader, eval))
 	}
 	policy := mikrotikservice.NewPolicyService(policyDeps)
+	preview := mikrotikservice.NewPreviewService(reader, controlRepo, nil)
+	onboarding := mikrotikservice.NewOnboardingService(
+		mikrotikrepo.NewOnboardingRepository(db), mikrotikSenderSettings{settings: receivablerepo.NewSettingsRepository(db)})
+	onboarding.SetPendingReader(preview)
 	return mikrotikModule{
 		Router: mikrotikhandler.NewRouterHandler(svc),
 		Setup:  mikrotikhandler.NewSetupHandler(setup),
@@ -92,14 +98,14 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 			SuggestionService: mikrotikservice.NewSuggestionService(svc, secretRepo, accounts,
 				mikrotikrepo.NewSuggestionRepository(db), mikrotikrepo.NewAdvisoryLocker(db)),
 		}),
-		Policy: mikrotikhandler.NewPolicyHandler(policy),
-		Task:   mikrotikhandler.NewTaskHandler(mikrotikservice.NewTaskService(taskRepo, secretRepo, repo)),
-		Onboarding: mikrotikhandler.NewOnboardingHandler(mikrotikservice.NewOnboardingService(
-			mikrotikrepo.NewOnboardingRepository(db), mikrotikSenderSettings{settings: receivablerepo.NewSettingsRepository(db)})),
+		Policy:     mikrotikhandler.NewPolicyHandler(policy),
+		Task:       mikrotikhandler.NewTaskHandler(mikrotikservice.NewTaskService(taskRepo, secretRepo, repo)),
+		Onboarding: mikrotikhandler.NewOnboardingHandler(onboarding),
 		// eval is nil while the engine is off; the service then refuses pilot tests.
 		Control: mikrotikhandler.NewControlHandler(mikrotikservice.NewControlService(mikrotikservice.ControlDeps{
 			Control: controlRepo, Secrets: secretRepo, Tasks: taskRepo, Accounts: accounts, Audit: repo, Evaluator: eval,
 		}, engineMode)),
+		Preview: mikrotikhandler.NewPreviewHandler(preview),
 	}
 }
 
@@ -161,5 +167,8 @@ func registerMikrotikRoutes(protected *gin.RouterGroup, deps Dependencies) {
 	}
 	if deps.MikrotikControlHandler != nil {
 		deps.MikrotikControlHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
+	}
+	if deps.MikrotikPreviewHandler != nil {
+		deps.MikrotikPreviewHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
 	}
 }

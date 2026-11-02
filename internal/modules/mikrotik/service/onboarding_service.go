@@ -43,14 +43,25 @@ type CustomerStatus struct {
 	PendingIsolation bool
 }
 
+// PendingReader tells which accounts the engine would isolate today;
+// satisfied by *PreviewService.
+type PendingReader interface {
+	PendingIsolation(ctx context.Context, scope coretenant.Scope, accountIDs []string) (map[string]bool, error)
+}
+
 type OnboardingService struct {
-	repo   OnboardingReader
-	sender SenderSettings
+	repo    OnboardingReader
+	sender  SenderSettings
+	pending PendingReader
 }
 
 func NewOnboardingService(repo OnboardingReader, sender SenderSettings) *OnboardingService {
 	return &OnboardingService{repo: repo, sender: sender}
 }
+
+// SetPendingReader enables pending_isolation in CustomerStatuses. Without
+// one (nil), PendingIsolation stays false.
+func (s *OnboardingService) SetPendingReader(p PendingReader) { s.pending = p }
 
 // Summary computes the checklist. complete requires all five conditions.
 func (s *OnboardingService) Summary(ctx context.Context, scope coretenant.Scope) (OnboardingSummary, error) {
@@ -83,6 +94,12 @@ func (s *OnboardingService) CustomerStatuses(ctx context.Context, scope coretena
 	if err != nil {
 		return nil, err
 	}
+	var pending map[string]bool
+	if s.pending != nil {
+		if pending, err = s.pending.PendingIsolation(ctx, scope, accountIDs); err != nil {
+			return nil, err
+		}
+	}
 	out := make([]CustomerStatus, 0, len(accountIDs))
 	for _, id := range accountIDs {
 		st := found[id]
@@ -93,7 +110,7 @@ func (s *OnboardingService) CustomerStatuses(ctx context.Context, scope coretena
 		case st.Isolated:
 			state = CustomerIsolated
 		}
-		out = append(out, CustomerStatus{AccountID: id, IsolationState: state, Exempt: st.Exempt, Secrets: st.Secrets, ExemptedUntil: st.ExemptedUntil})
+		out = append(out, CustomerStatus{AccountID: id, IsolationState: state, Exempt: st.Exempt, Secrets: st.Secrets, ExemptedUntil: st.ExemptedUntil, PendingIsolation: pending[id]})
 	}
 	return out, nil
 }

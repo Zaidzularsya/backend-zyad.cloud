@@ -29,7 +29,7 @@ type CustomerStatusResponse struct {
 	// ExemptedUntil is the stored last exempt day (YYYY-MM-DD) or null. It is
 	// reported as stored even when already past; exempt is not recomputed.
 	ExemptedUntil *string `json:"exempted_until"`
-	// PendingIsolation is reserved; always false until the grace-period preview exists.
+	// PendingIsolation: the engine would isolate this customer today (preview status will_isolate).
 	PendingIsolation bool `json:"pending_isolation"`
 }
 

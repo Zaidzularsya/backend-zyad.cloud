@@ -102,3 +102,59 @@ type TaskFailureEvent struct{ TaskID, RouterName, SecretName, Action, Reason str
 type SenderSettings interface {
 	HasDefaultSender(ctx context.Context, scope coretenant.Scope) (bool, error)
 }
+
+// Candidate statuses of the isolation preview, in priority order (the first
+// matching one wins; see CandidateStatusOf).
+const (
+	CandidateExempt          = "exempt"
+	CandidateNoSecret        = "no_secret"
+	CandidateAlreadyIsolated = "already_isolated"
+	CandidateNeedsProfile    = "needs_profile"
+	CandidateSecretMissing   = "secret_missing"
+	CandidateRouterNotReady  = "router_not_ready"
+	CandidateWillIsolate     = "will_isolate"
+)
+
+// CandidateFilter narrows the candidate list. Status is one of the
+// Candidate* statuses ("" = all); Q is a case-insensitive substring of the
+// account name or phone; AccountIDs restricts to those accounts (nil = all).
+type CandidateFilter struct {
+	Status, Q  string
+	AccountIDs []string
+}
+
+// CandidateRow is one account with at least one candidate invoice.
+// OverdueDays is counted from the oldest candidate due date to today;
+// Balance is a decimal string (sum of grand_total - amount_paid); Products
+// lists the trigger product names of the candidate invoices (", "-joined);
+// RouterName is the router of the account's first paired secret.
+type CandidateRow struct {
+	AccountID, AccountName, Phone, Status, RouterName string
+	Products                                          string
+	OverdueDays, InvoiceCount                         int
+	OldestInvoiceNumber                               string
+	Balance                                           string
+	ExemptUntil                                       *time.Time
+	Pilot                                             bool
+}
+
+// CandidateSummary counts the preview. Blocked = no_secret + needs_profile +
+// secret_missing + router_not_ready; PairedAccounts are all accounts of the
+// organization with a paired secret on a non-deleted router; Safe =
+// PairedAccounts - Target.
+type CandidateSummary struct {
+	Target, Exempt, Blocked, AlreadyIsolated, PairedAccounts, Safe int
+	GraceDays                                                      int
+	Cutoff                                                         time.Time
+}
+
+// CandidateSource is the isolation candidate read model. today is the WIB
+// business day (UTC midnight) used for exemptions and overdue days; cutoff is
+// CandidateCutoff(today, graceDays) and decides which invoices are candidates.
+type CandidateSource interface {
+	// ListCandidates is ordered by oldest candidate due date, then account id;
+	// total counts every row matching f.
+	ListCandidates(ctx context.Context, scope coretenant.Scope, today, cutoff time.Time, f CandidateFilter, limit, offset int) ([]CandidateRow, int64, error)
+	// Summary fills every count except GraceDays, Cutoff and Safe.
+	Summary(ctx context.Context, scope coretenant.Scope, today, cutoff time.Time) (CandidateSummary, error)
+}

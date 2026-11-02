@@ -100,6 +100,7 @@ type Dependencies struct {
 	MikrotikTaskHandler              *mikrotikhandler.TaskHandler
 	MikrotikOnboardingHandler        *mikrotikhandler.OnboardingHandler
 	MikrotikControlHandler           *mikrotikhandler.ControlHandler
+	MikrotikPreviewHandler           *mikrotikhandler.PreviewHandler
 	// MikrotikRateCounter backs the per-organization limit on router-contacting
 	// mikrotik routes; nil disables it (fail open).
 	MikrotikRateCounter              middleware.RateCounter
