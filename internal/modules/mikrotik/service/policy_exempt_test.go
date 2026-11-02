@@ -56,7 +56,7 @@ func newPolicyEnv(t *testing.T) *policyEnv {
 func TestSetExempt_RequiresReason(t *testing.T) {
 	e := newPolicyEnv(t)
 	for _, reason := range []string{"", "   ", strings.Repeat("x", 501)} {
-		_, err := e.svc.SetExempt(context.Background(), e.scope, "acct-1", true, reason, testActor)
+		_, err := e.svc.SetExempt(context.Background(), e.scope, "acct-1", true, reason, nil, testActor)
 		var inv *mikrotik.InvalidInputError
 		if !errors.As(err, &inv) {
 			t.Fatalf("reason %d chars: err = %v", len(reason), err)
@@ -66,22 +66,22 @@ func TestSetExempt_RequiresReason(t *testing.T) {
 		t.Fatal("must not write or notify on invalid input")
 	}
 	// 500 multi-byte runes is allowed (count runes, not bytes).
-	if _, err := e.svc.SetExempt(context.Background(), e.scope, "acct-1", true, strings.Repeat("é", 500), testActor); err != nil {
+	if _, err := e.svc.SetExempt(context.Background(), e.scope, "acct-1", true, strings.Repeat("é", 500), nil, testActor); err != nil {
 		t.Fatalf("500 runes: %v", err)
 	}
 	// Reason optional when not exempt, stored when given.
-	p, err := e.svc.SetExempt(context.Background(), e.scope, "acct-1", false, " selesai ", testActor)
+	p, err := e.svc.SetExempt(context.Background(), e.scope, "acct-1", false, " selesai ", nil, testActor)
 	if err != nil || p.Exempt || p.Reason != "selesai" {
 		t.Fatalf("unexempt = %+v, %v", p, err)
 	}
-	if _, err := e.svc.SetExempt(context.Background(), e.scope, "acct-1", false, "", testActor); err != nil {
+	if _, err := e.svc.SetExempt(context.Background(), e.scope, "acct-1", false, "", nil, testActor); err != nil {
 		t.Fatalf("unexempt no reason: %v", err)
 	}
 }
 
 func TestSetExempt_AccountOfOtherOrg404(t *testing.T) {
 	e := newPolicyEnv(t)
-	_, err := e.svc.SetExempt(context.Background(), e.scope, "acct-other", true, "alasan", testActor)
+	_, err := e.svc.SetExempt(context.Background(), e.scope, "acct-other", true, "alasan", nil, testActor)
 	if !errors.Is(err, mikrotik.ErrAccountNotFound) {
 		t.Fatalf("err = %v", err)
 	}
@@ -93,7 +93,7 @@ func TestSetExempt_AccountOfOtherOrg404(t *testing.T) {
 func TestSetExempt_UpsertIdempotent(t *testing.T) {
 	e := newPolicyEnv(t)
 	for i := 0; i < 2; i++ {
-		if _, err := e.svc.SetExempt(context.Background(), e.scope, "acct-1", true, "VIP", testActor); err != nil {
+		if _, err := e.svc.SetExempt(context.Background(), e.scope, "acct-1", true, "VIP", nil, testActor); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -104,7 +104,7 @@ func TestSetExempt_UpsertIdempotent(t *testing.T) {
 
 func TestSetExempt_WritesAudit(t *testing.T) {
 	e := newPolicyEnv(t)
-	if _, err := e.svc.SetExempt(context.Background(), e.scope, "acct-1", true, "VIP", testActor); err != nil {
+	if _, err := e.svc.SetExempt(context.Background(), e.scope, "acct-1", true, "VIP", nil, testActor); err != nil {
 		t.Fatal(err)
 	}
 	if len(e.rrepo.audits) != 1 {
@@ -129,7 +129,7 @@ func TestGetPolicy_DefaultNotExempt(t *testing.T) {
 	if _, err := e.svc.GetPolicy(context.Background(), e.scope, "acct-other"); !errors.Is(err, mikrotik.ErrAccountNotFound) {
 		t.Fatalf("other org err = %v", err)
 	}
-	_, _ = e.svc.SetExempt(context.Background(), e.scope, "acct-1", true, "VIP", testActor)
+	_, _ = e.svc.SetExempt(context.Background(), e.scope, "acct-1", true, "VIP", nil, testActor)
 	if p, _ := e.svc.GetPolicy(context.Background(), e.scope, "acct-1"); !p.Exempt {
 		t.Fatalf("p = %+v", p)
 	}
@@ -137,7 +137,7 @@ func TestGetPolicy_DefaultNotExempt(t *testing.T) {
 
 func TestSetExempt_CallsOnChange(t *testing.T) {
 	e := newPolicyEnv(t)
-	if _, err := e.svc.SetExempt(context.Background(), e.scope, "acct-1", true, "VIP", testActor); err != nil {
+	if _, err := e.svc.SetExempt(context.Background(), e.scope, "acct-1", true, "VIP", nil, testActor); err != nil {
 		t.Fatal(err)
 	}
 	if len(e.changed) != 1 || e.changed[0] != "acct-1" {
@@ -145,7 +145,66 @@ func TestSetExempt_CallsOnChange(t *testing.T) {
 	}
 	// nil onChange is a no-op.
 	svc := NewPolicyService(PolicyDeps{Repo: e.repo, Accounts: fakeAccounts{known: map[string]AccountRef{"acct-1": {ID: "acct-1"}}}, Audit: e.rrepo})
-	if _, err := svc.SetExempt(context.Background(), e.scope, "acct-1", false, "", testActor); err != nil {
+	if _, err := svc.SetExempt(context.Background(), e.scope, "acct-1", false, "", nil, testActor); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// newClockedPolicyEnv pins the service clock to 2026-11-02 10:00 WIB.
+func newClockedPolicyEnv(t *testing.T) *policyEnv {
+	t.Helper()
+	e := newPolicyEnv(t)
+	e.svc.now = func() time.Time { return time.Date(2026, 11, 2, 3, 0, 0, 0, time.UTC) }
+	return e
+}
+
+func TestSetExempt_UntilStored(t *testing.T) {
+	e := newClockedPolicyEnv(t)
+	// A time-of-day component is normalized away; today (WIB) is allowed.
+	for _, until := range []time.Time{
+		time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 11, 30, 15, 45, 0, 0, time.UTC),
+	} {
+		u := until
+		p, err := e.svc.SetExempt(context.Background(), e.scope, "acct-1", true, "VIP", &u, testActor)
+		if err != nil {
+			t.Fatalf("until %v: %v", until, err)
+		}
+		want := time.Date(until.Year(), until.Month(), until.Day(), 0, 0, 0, 0, time.UTC)
+		got := e.repo.rows["acct-1"].ExemptedUntil
+		if got == nil || !got.Equal(want) || p.ExemptedUntil == nil || !p.ExemptedUntil.Equal(want) {
+			t.Fatalf("stored = %v, want %v", got, want)
+		}
+	}
+	m := e.rrepo.audits[1].Metadata
+	if m["exempted_until"] != "2026-11-30" {
+		t.Fatalf("audit meta = %+v", m)
+	}
+}
+
+func TestSetExempt_RejectsPastDate(t *testing.T) {
+	e := newClockedPolicyEnv(t)
+	past := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	_, err := e.svc.SetExempt(context.Background(), e.scope, "acct-1", true, "VIP", &past, testActor)
+	var inv *mikrotik.InvalidInputError
+	if !errors.As(err, &inv) {
+		t.Fatalf("err = %v", err)
+	}
+	if e.repo.calls != 0 || len(e.changed) != 0 || len(e.rrepo.audits) != 0 {
+		t.Fatal("must not write, audit or notify")
+	}
+}
+
+func TestSetExempt_UntilIgnoredWhenNotExempt(t *testing.T) {
+	e := newClockedPolicyEnv(t)
+	past := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC) // would be rejected if exempt
+	if _, err := e.svc.SetExempt(context.Background(), e.scope, "acct-1", false, "", &past, testActor); err != nil {
+		t.Fatal(err)
+	}
+	if e.repo.rows["acct-1"].ExemptedUntil != nil {
+		t.Fatalf("stored = %v, want nil", e.repo.rows["acct-1"].ExemptedUntil)
+	}
+	if v, ok := e.rrepo.audits[0].Metadata["exempted_until"]; !ok || v != nil {
+		t.Fatalf("audit exempted_until = %v (present %v)", v, ok)
 	}
 }

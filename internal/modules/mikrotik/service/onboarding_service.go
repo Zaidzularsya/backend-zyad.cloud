@@ -38,6 +38,9 @@ type CustomerStatus struct {
 	IsolationState string
 	Exempt         bool
 	Secrets        int
+	// ExemptedUntil is "YYYY-MM-DD" or "" when the exemption has no expiry.
+	ExemptedUntil    string
+	PendingIsolation bool
 }
 
 type OnboardingService struct {
@@ -90,7 +93,7 @@ func (s *OnboardingService) CustomerStatuses(ctx context.Context, scope coretena
 		case st.Isolated:
 			state = CustomerIsolated
 		}
-		out = append(out, CustomerStatus{AccountID: id, IsolationState: state, Exempt: st.Exempt, Secrets: st.Secrets})
+		out = append(out, CustomerStatus{AccountID: id, IsolationState: state, Exempt: st.Exempt, Secrets: st.Secrets, ExemptedUntil: st.ExemptedUntil})
 	}
 	return out, nil
 }

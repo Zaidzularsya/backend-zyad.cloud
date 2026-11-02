@@ -145,10 +145,11 @@ func TestOnboardingRepo_AccountStatuses(t *testing.T) {
 	pairTo(a, r.ID, "iso-2", isolatedAcct, true)
 	pairTo(a, r.ID, "norm-1", normalAcct, false)
 	pairTo(b, rb.ID, "foreign-1", foreignAcct, true)
+	until := time.Date(2026, 12, 5, 0, 0, 0, 0, time.UTC)
 	if _, err := policyRepo(e).UpsertCustomerPolicy(e.ctx, a, normalAcct, true, "VIP", nil, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := policyRepo(e).UpsertCustomerPolicy(e.ctx, a, exemptOnly, true, "VIP", nil, ""); err != nil {
+	if _, err := policyRepo(e).UpsertCustomerPolicy(e.ctx, a, exemptOnly, true, "VIP", &until, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -159,7 +160,7 @@ func TestOnboardingRepo_AccountStatuses(t *testing.T) {
 	want := map[string]repository.AccountStatus{
 		isolatedAcct: {Secrets: 2, Isolated: true},
 		normalAcct:   {Secrets: 1, Exempt: true},
-		exemptOnly:   {Exempt: true},
+		exemptOnly:   {Exempt: true, ExemptedUntil: "2026-12-05"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %+v", got)

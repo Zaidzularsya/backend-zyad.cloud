@@ -11140,7 +11140,7 @@ paths:
       - Mikrotik
       security:
       - BearerAuth: []
-      description: "Menetapkan atau mencabut pengecualian isolir. `reason` wajib (1-500 karakter) saat `exempt=true`. Audit: `customer_policy.exempt_set`. Hanya menyimpan kebijakan; belum ada efek ke router pada fase ini. Permission: `mikrotik_policy.update`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      description: "Menetapkan atau mencabut pengecualian isolir. `reason` wajib (1-500 karakter) saat `exempt=true`. Audit: `customer_policy.exempt_set`. `exempted_until` (opsional, `YYYY-MM-DD`) adalah hari bisnis WIB terakhir pengecualian berlaku (inklusif); hanya bermakna saat `exempt=true` (diabaikan dan disimpan NULL bila `exempt=false`); null/kosong = tanpa batas waktu. Tanggal sebelum hari ini (WIB) atau format salah: 422. Hanya menyimpan kebijakan; belum ada efek ke router pada fase ini. Permission: `mikrotik_policy.update`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
       parameters:
       - name: account_id
         in: path
@@ -16778,6 +16778,8 @@ components:
         isolation_state: {type: string, enum: [normal, isolated, none]}
         exempt: {type: boolean}
         secrets: {type: integer}
+        exempted_until: {type: string, format: date, nullable: true, description: "Nilai tersimpan `mikrotik_customer_policies.exempted_until`; hanya bermakna selagi `exempt=true`. Pengecualian yang sudah lewat tetap dilaporkan apa adanya (`exempt=true` sesuai data); klien membandingkan tanggalnya dengan hari ini (WIB)."}
+        pending_isolation: {type: boolean, description: "Dicadangkan; saat ini selalu false."}
     MikrotikCustomerStatusListEnvelope:
       type: object
       required: [success, message, data]
@@ -16816,12 +16818,14 @@ components:
         exempt: {type: boolean}
         reason: {type: string}
         set_at: {type: string, format: date-time, nullable: true}
+        exempted_until: {type: string, format: date, nullable: true, description: "Hari bisnis WIB terakhir pengecualian berlaku (inklusif); null = tanpa batas waktu."}
     MikrotikSetPolicyRequest:
       type: object
       required: [exempt]
       properties:
         exempt: {type: boolean}
         reason: {type: string, maxLength: 500, description: "Wajib (1-500 karakter) bila exempt=true."}
+        exempted_until: {type: string, format: date, nullable: true, description: "YYYY-MM-DD, hanya bermakna bila exempt=true; harus >= hari ini (WIB), selain itu 422. Null atau string kosong = tanpa batas waktu."}
     MikrotikPolicyEnvelope:
       type: object
       required: [success, message, data]

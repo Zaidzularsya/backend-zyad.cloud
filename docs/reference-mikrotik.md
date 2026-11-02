@@ -148,6 +148,9 @@ sehingga hanya keduanya memakai rate limit probe (20 per menit per organization,
 
 - `PUT /customers/{account_id}/policy` menyimpan `exempt` + `reason` (wajib 1-500 karakter saat `exempt=true`). Pelanggan
   tanpa baris kebijakan dibaca sebagai `exempt=false`. Pada Fase 2 hanya menyimpan data; belum ada efek ke router.
+  `exempted_until` (opsional, `YYYY-MM-DD`) membatasi pengecualian sampai akhir hari bisnis WIB itu (inklusif); hanya
+  bermakna saat `exempt=true` (disimpan NULL bila `exempt=false`), harus >= hari ini (WIB) atau 422, null/kosong = tanpa
+  batas. Audit `customer_policy.exempt_set` memuat `exempted_until`.
 - `PUT /products/{id}/trigger` menandai produk sebagai layanan PPPoE. `effective_from` adalah tanggal WIB (YYYY-MM-DD):
   menandai ulang produk yang sudah aktif mempertahankannya, mengaktifkan lagi setelah dinonaktifkan mengaturnya ke hari ini.
   `GET .../trigger/preview` menghitung dampak (kontrak aktif, pelanggan, invoice overdue) tanpa menulis.
@@ -338,6 +341,8 @@ Semua di bawah `/api/v1/app/mikrotik`, tunduk pada entitlement `mikrotik.enabled
   `original_profile` dan >= 1 produk ditandai dan pengirim default receivable terisi. Secret dihitung hanya yang present.
 - `customers/status`: `isolation_state` = `isolated` (ada secret terpasang yang terisolir), `normal` (ada secret terpasang,
   tidak ada yang terisolir), `none` (tanpa secret terpasang, walau `exempt`). `account_ids` kosong/bukan uuid/lebih dari 100: 422.
+  Setiap item juga memuat `exempted_until` (nilai tersimpan, `YYYY-MM-DD` atau null; pengecualian yang sudah lewat tetap
+  dilaporkan dengan `exempt` sesuai data, klien membandingkan tanggal) dan `pending_isolation` (dicadangkan, saat ini selalu false).
 - Peran `member` hanya memegang `mikrotik_task.read`, jadi di UI tenant ia hanya melihat dashboard tugas (read-only).
 - Kode error baru: `MIKROTIK_ANALYZE_IN_PROGRESS` (409).
 

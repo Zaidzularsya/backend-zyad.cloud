@@ -24,6 +24,8 @@ type AccountStatus struct {
 	Secrets  int
 	Isolated bool
 	Exempt   bool
+	// ExemptedUntil is "YYYY-MM-DD" or "" when unset.
+	ExemptedUntil string
 }
 
 // OnboardingRepository serves the read-only summary queries that span several
@@ -72,10 +74,10 @@ func (r *OnboardingRepository) AccountStatuses(ctx context.Context, scope corete
 				  AND EXISTS (SELECT 1 FROM mikrotik_routers r WHERE r.organization_id = s.organization_id AND r.id = s.router_id AND r.deleted_at IS NULL)
 				GROUP BY s.account_id
 			), pol AS (
-				SELECT account_id, exempt FROM mikrotik_customer_policies
+				SELECT account_id, exempt, COALESCE(to_char(exempted_until, 'YYYY-MM-DD'), '') AS until FROM mikrotik_customer_policies
 				WHERE organization_id = $1 AND account_id = ANY($2::uuid[])
 			)
-			SELECT COALESCE(sec.account_id, pol.account_id)::text, COALESCE(sec.n, 0), COALESCE(sec.isolated, false), COALESCE(pol.exempt, false)
+			SELECT COALESCE(sec.account_id, pol.account_id)::text, COALESCE(sec.n, 0), COALESCE(sec.isolated, false), COALESCE(pol.exempt, false), COALESCE(pol.until, '')
 			FROM sec FULL JOIN pol ON pol.account_id = sec.account_id`,
 			scope.OrganizationID(), accountIDs)
 		if err != nil {
@@ -85,7 +87,7 @@ func (r *OnboardingRepository) AccountStatuses(ctx context.Context, scope corete
 		for rows.Next() {
 			var id string
 			var st AccountStatus
-			if err := rows.Scan(&id, &st.Secrets, &st.Isolated, &st.Exempt); err != nil {
+			if err := rows.Scan(&id, &st.Secrets, &st.Isolated, &st.Exempt, &st.ExemptedUntil); err != nil {
 				return err
 			}
 			out[id] = st
