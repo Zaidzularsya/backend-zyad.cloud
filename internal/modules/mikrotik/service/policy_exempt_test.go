@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/mikrotik"
@@ -18,12 +19,12 @@ type fakePolicyRepo struct {
 	trCalls  int
 }
 
-func (f *fakePolicyRepo) UpsertCustomerPolicy(_ context.Context, scope coretenant.Scope, accountID string, exempt bool, reason, by string) (domain.CustomerPolicy, error) {
+func (f *fakePolicyRepo) UpsertCustomerPolicy(_ context.Context, scope coretenant.Scope, accountID string, exempt bool, reason string, until *time.Time, by string) (domain.CustomerPolicy, error) {
 	f.calls++
 	if f.rows == nil {
 		f.rows = map[string]domain.CustomerPolicy{}
 	}
-	p := domain.CustomerPolicy{OrganizationID: scope.OrganizationID(), AccountID: accountID, Exempt: exempt, Reason: reason}
+	p := domain.CustomerPolicy{OrganizationID: scope.OrganizationID(), AccountID: accountID, Exempt: exempt, Reason: reason, ExemptedUntil: until}
 	if by != "" {
 		p.SetBy = &by
 	}

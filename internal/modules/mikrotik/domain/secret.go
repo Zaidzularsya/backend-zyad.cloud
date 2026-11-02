@@ -58,8 +58,10 @@ type CustomerPolicy struct {
 	AccountID      string
 	Exempt         bool
 	Reason         string
-	SetBy          *string
-	SetAt          time.Time
+	// ExemptedUntil is a calendar date (UTC midnight); nil means no expiry.
+	ExemptedUntil *time.Time
+	SetBy         *string
+	SetAt         time.Time
 }
 
 // ProductTrigger marks a product as a PPPoE service whose overdue invoices

@@ -145,10 +145,10 @@ func TestOnboardingRepo_AccountStatuses(t *testing.T) {
 	pairTo(a, r.ID, "iso-2", isolatedAcct, true)
 	pairTo(a, r.ID, "norm-1", normalAcct, false)
 	pairTo(b, rb.ID, "foreign-1", foreignAcct, true)
-	if _, err := policyRepo(e).UpsertCustomerPolicy(e.ctx, a, normalAcct, true, "VIP", ""); err != nil {
+	if _, err := policyRepo(e).UpsertCustomerPolicy(e.ctx, a, normalAcct, true, "VIP", nil, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := policyRepo(e).UpsertCustomerPolicy(e.ctx, a, exemptOnly, true, "VIP", ""); err != nil {
+	if _, err := policyRepo(e).UpsertCustomerPolicy(e.ctx, a, exemptOnly, true, "VIP", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 

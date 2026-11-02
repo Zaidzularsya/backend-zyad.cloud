@@ -63,7 +63,7 @@ func (s *PolicyService) SetExempt(ctx context.Context, scope coretenant.Scope, a
 	if _, err := s.accounts.Get(ctx, scope, accountID); err != nil {
 		return domain.CustomerPolicy{}, err
 	}
-	p, err := s.repo.UpsertCustomerPolicy(ctx, scope, accountID, exempt, reason, actor)
+	p, err := s.repo.UpsertCustomerPolicy(ctx, scope, accountID, exempt, reason, nil, actor)
 	if err != nil {
 		return domain.CustomerPolicy{}, err
 	}

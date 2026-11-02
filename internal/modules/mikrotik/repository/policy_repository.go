@@ -17,7 +17,9 @@ import (
 type PolicyRepository interface {
 	// UpsertCustomerPolicy writes the exemption (ON CONFLICT organization_id, account_id).
 	// ErrAccountNotFound when the composite FK rejects a foreign account.
-	UpsertCustomerPolicy(ctx context.Context, scope coretenant.Scope, accountID string, exempt bool, reason, by string) (domain.CustomerPolicy, error)
+	// until is a calendar date (the caller passes UTC midnight, as businesstime.DayOf
+	// returns); only its Y-M-D is stored. nil clears the expiry.
+	UpsertCustomerPolicy(ctx context.Context, scope coretenant.Scope, accountID string, exempt bool, reason string, until *time.Time, by string) (domain.CustomerPolicy, error)
 	// GetCustomerPolicy reports found=false when no row exists.
 	GetCustomerPolicy(ctx context.Context, scope coretenant.Scope, accountID string) (domain.CustomerPolicy, bool, error)
 
@@ -37,24 +39,24 @@ func NewPolicyRepository(db *database.Pool) PolicyRepository {
 	return &policyRepository{db: db}
 }
 
-const policyColumns = `organization_id, account_id, exempt, reason, set_by, set_at`
+const policyColumns = `organization_id, account_id, exempt, reason, exempted_until, set_by, set_at`
 
 func scanPolicy(row pgx.Row) (domain.CustomerPolicy, error) {
 	var p domain.CustomerPolicy
-	err := row.Scan(&p.OrganizationID, &p.AccountID, &p.Exempt, &p.Reason, &p.SetBy, &p.SetAt)
+	err := row.Scan(&p.OrganizationID, &p.AccountID, &p.Exempt, &p.Reason, &p.ExemptedUntil, &p.SetBy, &p.SetAt)
 	return p, err
 }
 
-func (r *policyRepository) UpsertCustomerPolicy(ctx context.Context, scope coretenant.Scope, accountID string, exempt bool, reason, by string) (domain.CustomerPolicy, error) {
+func (r *policyRepository) UpsertCustomerPolicy(ctx context.Context, scope coretenant.Scope, accountID string, exempt bool, reason string, until *time.Time, by string) (domain.CustomerPolicy, error) {
 	var out domain.CustomerPolicy
 	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
 		p, err := scanPolicy(tx.QueryRow(ctx, `
-			INSERT INTO mikrotik_customer_policies (organization_id, account_id, exempt, reason, set_by, set_at)
-			VALUES ($1, $2, $3, $4, $5, now())
+			INSERT INTO mikrotik_customer_policies (organization_id, account_id, exempt, reason, exempted_until, set_by, set_at)
+			VALUES ($1, $2, $3, $4, $5::date, $6, now())
 			ON CONFLICT (organization_id, account_id) DO UPDATE
-			SET exempt = EXCLUDED.exempt, reason = EXCLUDED.reason, set_by = EXCLUDED.set_by, set_at = now()
+			SET exempt = EXCLUDED.exempt, reason = EXCLUDED.reason, exempted_until = EXCLUDED.exempted_until, set_by = EXCLUDED.set_by, set_at = now()
 			RETURNING `+policyColumns,
-			scope.OrganizationID(), accountID, exempt, reason, nullableString(by)))
+			scope.OrganizationID(), accountID, exempt, reason, dateOrNil(until), nullableString(by)))
 		out = p
 		return err
 	})
