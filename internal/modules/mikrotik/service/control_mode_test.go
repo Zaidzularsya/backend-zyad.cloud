@@ -648,3 +648,20 @@ func TestProcessor_RestoreAllRunsWhileOverduePaused(t *testing.T) {
 		t.Fatal("overdue customer must stay isolated when the tenant is active")
 	}
 }
+
+// Intended: pilot mode only gates isolating. A pilot account that is also
+// overdue stays isolated after its test window ends (it is not restored).
+func TestApply_PilotOverdueAccountStaysIsolatedAfterWindow(t *testing.T) {
+	ctl := newFakeControl(domain.ModePilot, 0)
+	ctl.pilot["acc-1"] = true // window already over: testActive stays false
+	e := newEvalEnvWithControl(t, ModeOn, ctl)
+	e.src.invoices = oneInvoice
+	e.sec.rows = []domain.PPPSecret{secretRow("s-1", domain.IsolationIsolated, true, false)}
+	dec, err := e.ev.Apply(context.Background(), e.scope, "acc-1", "reconcile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec.Desired != domain.IsolationIsolated || len(e.tasks.restore) != 0 || len(e.tasks.isolate) != 0 {
+		t.Fatalf("decision=%+v restore=%v isolate=%v, want stays isolated, no tasks", dec, e.tasks.restore, e.tasks.isolate)
+	}
+}

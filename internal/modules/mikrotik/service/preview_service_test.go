@@ -361,3 +361,22 @@ func TestOnboardingStatuses_PendingReadFailureDegrades(t *testing.T) {
 		t.Fatalf("degrade: %+v %v", got, err)
 	}
 }
+
+func TestCSVCell_PlainNegativeNumbersStayNumeric(t *testing.T) {
+	for in, want := range map[string]string{
+		"-150000.00": "-150000.00",
+		"-5":         "-5",
+		"-1+1":       "'-1+1",
+		"-cmd|x":     "'-cmd|x",
+		"-1.2.3":     "'-1.2.3",
+		"+6281234":   "'+6281234",
+		"=1":         "'=1",
+		" -5":        "' -5",
+		"150000.00":  "150000.00",
+		"-":          "'-",
+	} {
+		if got := csvCell(in); got != want {
+			t.Errorf("csvCell(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

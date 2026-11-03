@@ -140,8 +140,11 @@ func (r *controlRepository) ActivateWithExemptions(ctx context.Context, scope co
 				INSERT INTO mikrotik_customer_policies (organization_id, account_id, exempt, reason, exempted_until, set_by, set_at)
 				VALUES ($1, $2, true, $3, $4::date, $5, now())
 				ON CONFLICT (organization_id, account_id) DO UPDATE
-				SET exempt = true, reason = EXCLUDED.reason, exempted_until = EXCLUDED.exempted_until,
-				    set_by = EXCLUDED.set_by, set_at = now()`,
+				SET reason = CASE WHEN mikrotik_customer_policies.exempt AND mikrotik_customer_policies.exempted_until IS NULL
+				                  THEN mikrotik_customer_policies.reason ELSE EXCLUDED.reason END,
+				    exempted_until = CASE WHEN mikrotik_customer_policies.exempt AND mikrotik_customer_policies.exempted_until IS NULL
+				                          THEN NULL ELSE EXCLUDED.exempted_until END,
+				    exempt = true, set_by = EXCLUDED.set_by, set_at = now()`,
 				scope.OrganizationID(), e.AccountID, e.Reason, dateOrNil(e.Until), nullableString(by)); err != nil {
 				return err
 			}
@@ -236,7 +239,9 @@ func (r *controlRepository) updatePilot(ctx context.Context, scope coretenant.Sc
 
 func (r *controlRepository) StartPilotTest(ctx context.Context, scope coretenant.Scope, accountID string, until time.Time) error {
 	return r.updatePilot(ctx, scope, `
-		UPDATE mikrotik_pilot_accounts SET test_started_at = now(), test_until = $3
+		UPDATE mikrotik_pilot_accounts
+		SET test_started_at = CASE WHEN test_until > now() THEN COALESCE(test_started_at, now()) ELSE now() END,
+		    test_until = $3
 		WHERE organization_id = $1 AND account_id = $2`,
 		scope.OrganizationID(), accountID, until.UTC())
 }

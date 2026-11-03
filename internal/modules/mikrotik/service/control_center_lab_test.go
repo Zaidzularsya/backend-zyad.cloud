@@ -29,12 +29,14 @@ import (
 // by advancing the clock, not by waiting (the production constant is untouched).
 // Only the single named secret is touched; its profile is put back by cleanup.
 
-// labControlRepo adds the MarkPilotRoundTrip rule of the real repository
-// (isolate done by a pilot test, then a restore) to the in-memory control repo.
+// labControlRepo adds an APPROXIMATION of the MarkPilotRoundTrip rule to the
+// in-memory control repo. The real SQL needs test_started_at set and an isolate
+// task `done` with finished_at >= test_started_at; this wrapper only checks for
+// a done isolate task created by the pilot_test event. The real SQL is covered
+// by the integration test TestControlRepo_MarkPilotRoundTrip, not by this lab.
 type labControlRepo struct {
 	*fakeControlRepo
 	tasks *fakeTaskRepo
-	mu    sync.Mutex
 }
 
 func (r *labControlRepo) MarkPilotRoundTrip(_ context.Context, _ coretenant.Scope, accountID string) (bool, error) {

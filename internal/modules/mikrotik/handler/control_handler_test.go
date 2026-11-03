@@ -188,6 +188,7 @@ func TestControlRoutes_ErrorMapping(t *testing.T) {
 		{mikrotik.ErrEngineOff, http.MethodPost, "/pilot/" + testAccountID + "/test", http.StatusConflict, "MIKROTIK_ENGINE_OFF"},
 		{mikrotik.ErrPilotModeRequired, http.MethodPost, "/pilot/" + testAccountID + "/test", http.StatusConflict, "MIKROTIK_PILOT_MODE_REQUIRED"},
 		{mikrotik.ErrNotPaused, http.MethodPost, "/restore-all", http.StatusConflict, "MIKROTIK_NOT_PAUSED"},
+		{mikrotik.ErrEngineOff, http.MethodPost, "/restore-all", http.StatusConflict, "MIKROTIK_ENGINE_OFF"},
 		{&mikrotik.PilotTestNotRunnableError{Reason: mikrotik.PilotBlockedExempt}, http.MethodPost, "/pilot/" + testAccountID + "/test", http.StatusConflict, "MIKROTIK_PILOT_TEST_NOT_RUNNABLE"},
 	} {
 		body := ``

@@ -452,6 +452,9 @@ invoice kandidat menunggak dipasang pada akun. Satu kali jalan penuh lulus (320 
   dibatalkan `superseded` oleh pemroses (evaluasi menganggap akun harus terisolir), sehingga `RestoreAll` tidak memulihkan
   siapa pun. Sekarang tugas `restore_all` dijalankan selama gerbang isolir masih tertutup (sama seperti `mode_blocked_restore`),
   dan tetap dibatalkan bila tenant sudah kembali `active`.
+- Catatan: `pilot_verified_at` di uji ini dicek terhadap aturan yang diimplementasi ulang di test (pendekatan dari SQL
+  asli), bukan SQL repository sebenarnya; SQL nyata `MarkPilotRoundTrip` tidak dijalankan di lab hidup dan dicakup oleh
+  integration test `TestControlRepo_MarkPilotRoundTrip`.
 - Kebersihan: `TestLabIsolirLeftovers` = 0 objek `zyad-*` sesudah uji; secret `10mbps@debug` kembali ke `10M-P8`, sesi CPE
   naik di `10.10.8.0` (di luar pool isolir).
 
@@ -636,7 +639,9 @@ alasan teknis tidak ditampilkan di pesan. Tugas dibatalkan `mode_blocked`
 berarti gerbang menutup setelah tugas dibuat (mis. mode diubah ke `paused`); bila router sempat terisolir, restore
 `mode_blocked_restore` menyusul otomatis. Log hanya memuat event kendali dan tugas, bukan pengelolaan router/secret.
 
-### 15.4 Gerbang deploy
+### 15.4 Gerbang deploy (Catatan deploy)
+
+Semua catatan deploy pusat kendali dikumpulkan di blok ini: nginx, CIDR privat, kunci index `000178`, dan urutan migration.
 
 - **nginx** (alasan teknis, **belum diuji di nginx nyata**): `proxy_read_timeout` minimal **300s** untuk
   `location /api/v1/app/mikrotik/`, termasuk `/control/preview/export`: ekspor dialirkan bertahap (sampai 100.000 baris)
@@ -666,3 +671,20 @@ Mematikan env lebih dulu justru meninggalkan pelanggan terisolir.
 6. Migration `000176`-`000178` bersifat aditif (tabel/kolom/index baru; kode lama mengabaikannya). Bila harus di-down:
    urutan `000178` → `000177` → `000176`. Down `000176` menghapus tabel pengaturan dan pilot serta kolom `exempted_until`
    (pengaturan mode, grace, dan pilot hilang; tenant kembali ke default `simulation`).
+7. **Rollback ke binary lama setelah binary baru menulis `exempted_until`**: binary lama tidak mengenal kolom itu. Bila
+   operator mengecualikan ulang pelanggan lewat binary lama, tanggal lama di `exempted_until` tetap tersimpan (mungkin sudah
+   lewat atau masih berlaku), sehingga pengecualian bisa kedaluwarsa sendiri atau berhenti di tanggal yang tak terduga
+   begitu binary baru dijalankan lagi. Sebelum menjalankan binary baru lagi, periksa lalu kosongkan:
+   ```sql
+   SELECT organization_id, account_id, exempt, exempted_until, set_at
+   FROM mikrotik_customer_policies WHERE exempted_until IS NOT NULL ORDER BY set_at DESC;
+
+   -- hanya untuk baris yang memang harus tanpa batas waktu (sesuaikan WHERE; jalankan di dalam transaksi):
+   BEGIN;
+   UPDATE mikrotik_customer_policies SET exempted_until = NULL
+   WHERE exempt AND exempted_until IS NOT NULL AND set_at >= TIMESTAMPTZ '<waktu rollback>';
+   -- periksa jumlah baris, lalu COMMIT (atau ROLLBACK)
+   ```
+8. **Organisasi yang kehilangan entitlement `mikrotik.enabled`** tidak bisa menjangkau `/control` (tidak bisa `pause` atau
+   `restore-all`), dan pelanggannya yang menunggak tetap terisolir. Operator memulihkannya lewat runbook 14.6 (mode
+   restore-only atau manual per secret), bukan lewat UI tenant.

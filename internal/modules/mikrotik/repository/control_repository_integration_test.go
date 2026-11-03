@@ -213,3 +213,60 @@ func TestControlRepo_MarkPilotRoundTrip(t *testing.T) {
 		t.Fatal("pilot_verified_at must be set")
 	}
 }
+
+func TestControlRepo_ActivateKeepsIndefiniteExemption(t *testing.T) {
+	e := setupRouter(t)
+	a := e.tenants.A.Scope
+	acct := newAccount(t, e, a)
+	until := time.Date(2030, 1, 31, 0, 0, 0, 0, time.UTC)
+	if _, err := policyRepo(e).UpsertCustomerPolicy(e.ctx, a, acct, true, "VIP selamanya", nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := controlRepo(e).ActivateWithExemptions(e.ctx, a, domain.ModeActive, []repository.Exemption{
+		{AccountID: acct, Until: &until, Reason: "sementara"},
+	}, ""); err != nil {
+		t.Fatal(err)
+	}
+	p, found, err := policyRepo(e).GetCustomerPolicy(e.ctx, a, acct)
+	if err != nil || !found || !p.Exempt || p.ExemptedUntil != nil || p.Reason != "VIP selamanya" {
+		t.Fatalf("indefinite exemption was weakened: %+v found=%v err=%v", p, found, err)
+	}
+}
+
+func TestControlRepo_StartPilotTestKeepsStartWhileActive(t *testing.T) {
+	e := setupRouter(t)
+	a := e.tenants.A.Scope
+	acct := newAccount(t, e, a)
+	r := controlRepo(e)
+	if err := r.AddPilot(e.ctx, a, acct, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.StartPilotTest(e.ctx, a, acct, time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := r.ListPilot(e.ctx, a)
+	time.Sleep(50 * time.Millisecond)
+	later := time.Now().UTC().Add(2 * time.Hour)
+	if err := r.StartPilotTest(e.ctx, a, acct, later); err != nil {
+		t.Fatal(err)
+	}
+	second, _ := r.ListPilot(e.ctx, a)
+	if !second[0].TestStartedAt.Equal(*first[0].TestStartedAt) {
+		t.Fatalf("second start while active moved test_started_at %v -> %v", first[0].TestStartedAt, second[0].TestStartedAt)
+	}
+	if second[0].TestUntil.Sub(later).Abs() > time.Second {
+		t.Fatalf("test_until = %v, want ~%v", second[0].TestUntil, later)
+	}
+	// After the window is closed a new start is a new test.
+	if err := r.StopPilotTest(e.ctx, a, acct); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if err := r.StartPilotTest(e.ctx, a, acct, time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	third, _ := r.ListPilot(e.ctx, a)
+	if !third[0].TestStartedAt.After(*first[0].TestStartedAt) {
+		t.Fatalf("restart after stop must begin a new test: %v vs %v", third[0].TestStartedAt, first[0].TestStartedAt)
+	}
+}

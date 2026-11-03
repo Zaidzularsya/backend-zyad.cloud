@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -220,11 +221,15 @@ var candidateCSVHeader = []string{
 	"Akun", "Telepon", "Status", "Alasan", "Hari Terlambat", "Jumlah Invoice", "Saldo", "Router", "Produk", "Dikecualikan Sampai",
 }
 
+// plainNegativeNumber matches a negative decimal such as a credit balance; a
+// spreadsheet reads it as a number, never as a formula, so it keeps its sign.
+var plainNegativeNumber = regexp.MustCompile(`^-[0-9]+(\.[0-9]+)?$`)
+
 // csvCell neutralises spreadsheet formulas (CSV injection): a cell starting
 // with tab or CR, or whose first non-space character (Unicode spaces such as
 // U+3000 included) is = + - or @, gets a leading single quote.
 func csvCell(v string) string {
-	if v == "" {
+	if v == "" || plainNegativeNumber.MatchString(v) {
 		return v
 	}
 	if v[0] == '\t' || v[0] == '\r' {
