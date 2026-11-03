@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"zyad.cloud/internal/core/businesstime"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/mikrotik/domain"
 	"zyad.cloud/internal/modules/mikrotik/repository"
@@ -52,25 +53,40 @@ func NewPolicyService(d PolicyDeps) *PolicyService {
 // periodic evaluation job instead of per-account here.
 
 // SetExempt marks or unmarks a customer as exempt from isolir. The account is
+// until is an optional last exempt business day (inclusive); it only matters
+// when exempt=true and must not be before today (WIB). It is stored as a date
+// at UTC midnight. The account is
 // resolved through AccountDirectory first, so an account of another
 // organization yields ErrAccountNotFound without touching the policy table.
-func (s *PolicyService) SetExempt(ctx context.Context, scope coretenant.Scope, accountID string, exempt bool, reason, actor string) (domain.CustomerPolicy, error) {
+func (s *PolicyService) SetExempt(ctx context.Context, scope coretenant.Scope, accountID string, exempt bool, reason string, until *time.Time, actor string) (domain.CustomerPolicy, error) {
 	reason = strings.TrimSpace(reason)
 	n := utf8.RuneCountInString(reason)
 	if n > maxExemptReasonRunes || (exempt && n == 0) {
 		return domain.CustomerPolicy{}, invalid("reason is required (1-500 characters) when exempting a customer")
 	}
+	var untilDay *time.Time
+	if exempt && until != nil {
+		d := time.Date(until.Year(), until.Month(), until.Day(), 0, 0, 0, 0, time.UTC)
+		if d.Before(businesstime.DayOf(s.now())) {
+			return domain.CustomerPolicy{}, invalid("exempted_until must not be in the past")
+		}
+		untilDay = &d
+	}
 	if _, err := s.accounts.Get(ctx, scope, accountID); err != nil {
 		return domain.CustomerPolicy{}, err
 	}
-	p, err := s.repo.UpsertCustomerPolicy(ctx, scope, accountID, exempt, reason, actor)
+	p, err := s.repo.UpsertCustomerPolicy(ctx, scope, accountID, exempt, reason, untilDay, actor)
 	if err != nil {
 		return domain.CustomerPolicy{}, err
+	}
+	var auditUntil any
+	if untilDay != nil {
+		auditUntil = untilDay.Format("2006-01-02")
 	}
 	// The write is committed; a failed audit row must not fail it.
 	if err := s.audit.InsertAudit(ctx, scope, repository.AuditEntry{
 		Event: "customer_policy.exempt_set", ActorUserID: actor, TargetID: accountID,
-		Metadata: map[string]any{"target": "customer_policy", "account_id": accountID, "exempt": exempt, "reason": reason},
+		Metadata: map[string]any{"target": "customer_policy", "account_id": accountID, "exempt": exempt, "reason": reason, "exempted_until": auditUntil},
 	}); err != nil {
 		slog.Warn("mikrotik: audit insert failed", "account_id", accountID, "event", "customer_policy.exempt_set", "error", scrub(err.Error()))
 	}

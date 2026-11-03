@@ -44,6 +44,9 @@ func setupRouter(t *testing.T) routerEnv {
 			}
 			_, _ = tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", orgID)
 			_, _ = tx.Exec(ctx, "DELETE FROM mikrotik_routers WHERE organization_id = $1", orgID)
+			for _, table := range []string{"mikrotik_pilot_accounts", "mikrotik_org_settings", "mikrotik_customer_policies"} {
+				_, _ = tx.Exec(ctx, "DELETE FROM "+table+" WHERE organization_id = $1", orgID)
+			}
 			_, _ = tx.Exec(ctx, "DELETE FROM audit_logs WHERE module = 'mikrotik' AND organization_id = $1", orgID)
 			_ = tx.Commit(ctx)
 		}

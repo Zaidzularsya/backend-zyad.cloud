@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/mikrotik/repository"
@@ -38,16 +39,30 @@ type CustomerStatus struct {
 	IsolationState string
 	Exempt         bool
 	Secrets        int
+	// ExemptedUntil is "YYYY-MM-DD" or "" when the exemption has no expiry.
+	ExemptedUntil    string
+	PendingIsolation bool
+}
+
+// PendingReader tells which accounts the engine would isolate today;
+// satisfied by *PreviewService.
+type PendingReader interface {
+	PendingIsolation(ctx context.Context, scope coretenant.Scope, accountIDs []string) (map[string]bool, error)
 }
 
 type OnboardingService struct {
-	repo   OnboardingReader
-	sender SenderSettings
+	repo    OnboardingReader
+	sender  SenderSettings
+	pending PendingReader
 }
 
 func NewOnboardingService(repo OnboardingReader, sender SenderSettings) *OnboardingService {
 	return &OnboardingService{repo: repo, sender: sender}
 }
+
+// SetPendingReader enables pending_isolation in CustomerStatuses. Without
+// one (nil), or when its read fails, PendingIsolation stays false.
+func (s *OnboardingService) SetPendingReader(p PendingReader) { s.pending = p }
 
 // Summary computes the checklist. complete requires all five conditions.
 func (s *OnboardingService) Summary(ctx context.Context, scope coretenant.Scope) (OnboardingSummary, error) {
@@ -80,6 +95,15 @@ func (s *OnboardingService) CustomerStatuses(ctx context.Context, scope coretena
 	if err != nil {
 		return nil, err
 	}
+	var pending map[string]bool
+	if s.pending != nil {
+		// pending_isolation is advisory: a failed candidate read must not
+		// fail the status badges, so every account reports false.
+		if pending, err = s.pending.PendingIsolation(ctx, scope, accountIDs); err != nil {
+			slog.WarnContext(ctx, "mikrotik: pending isolation read failed; reporting false", "error", scrub(err.Error()))
+			pending = nil
+		}
+	}
 	out := make([]CustomerStatus, 0, len(accountIDs))
 	for _, id := range accountIDs {
 		st := found[id]
@@ -90,7 +114,7 @@ func (s *OnboardingService) CustomerStatuses(ctx context.Context, scope coretena
 		case st.Isolated:
 			state = CustomerIsolated
 		}
-		out = append(out, CustomerStatus{AccountID: id, IsolationState: state, Exempt: st.Exempt, Secrets: st.Secrets})
+		out = append(out, CustomerStatus{AccountID: id, IsolationState: state, Exempt: st.Exempt, Secrets: st.Secrets, ExemptedUntil: st.ExemptedUntil, PendingIsolation: pending[id]})
 	}
 	return out, nil
 }

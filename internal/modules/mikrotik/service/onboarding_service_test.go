@@ -27,7 +27,9 @@ type fakeSender struct {
 	err error
 }
 
-func (f fakeSender) HasDefaultSender(context.Context, coretenant.Scope) (bool, error) { return f.ok, f.err }
+func (f fakeSender) HasDefaultSender(context.Context, coretenant.Scope) (bool, error) {
+	return f.ok, f.err
+}
 
 func TestOnboarding_CompleteOnlyWhenAllFive(t *testing.T) {
 	good := repository.OnboardingCounts{Routers: 1, RoutersReady: 1, SecretsTotal: 3, SecretsPaired: 2, NeedsProfile: 0, ProductsMarked: 1}
@@ -76,7 +78,7 @@ func TestCustomerStatuses_NoneIsolatedNormal(t *testing.T) {
 	repo := &fakeOnboardingRepo{statuses: map[string]repository.AccountStatus{
 		"iso":    {Secrets: 2, Isolated: true},
 		"norm":   {Secrets: 1, Exempt: true},
-		"exonly": {Exempt: true},
+		"exonly": {Exempt: true, ExemptedUntil: "2026-12-01"},
 	}}
 	svc := NewOnboardingService(repo, fakeSender{})
 	got, err := svc.CustomerStatuses(context.Background(), coretenant.Scope{}, []string{"norm", "none", "iso", "exonly"})
@@ -84,10 +86,10 @@ func TestCustomerStatuses_NoneIsolatedNormal(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []CustomerStatus{
-		{"norm", "normal", true, 1},
-		{"none", "none", false, 0},
-		{"iso", "isolated", false, 2},
-		{"exonly", "none", true, 0},
+		{AccountID: "norm", IsolationState: "normal", Exempt: true, Secrets: 1},
+		{AccountID: "none", IsolationState: "none"},
+		{AccountID: "iso", IsolationState: "isolated", Secrets: 2},
+		{AccountID: "exonly", IsolationState: "none", Exempt: true, ExemptedUntil: "2026-12-01"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %+v", got)

@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"errors"
 	"time"
 
 	"zyad.cloud/internal/modules/mikrotik/domain"
@@ -12,6 +13,22 @@ const dateLayout = "2006-01-02"
 type SetPolicyRequest struct {
 	Exempt *bool  `json:"exempt" binding:"required"`
 	Reason string `json:"reason" binding:"max=500"`
+	// ExemptedUntil is the last exempt business day (YYYY-MM-DD); null or
+	// empty means no expiry. Only meaningful when exempt=true.
+	ExemptedUntil *string `json:"exempted_until"`
+}
+
+// ParseExemptedUntil converts ExemptedUntil to a date at UTC midnight. nil
+// means no expiry; an unparsable value returns an error.
+func (r SetPolicyRequest) ParseExemptedUntil() (*time.Time, error) {
+	if r.ExemptedUntil == nil || *r.ExemptedUntil == "" {
+		return nil, nil
+	}
+	t, err := time.Parse(dateLayout, *r.ExemptedUntil)
+	if err != nil {
+		return nil, errors.New("exempted_until must be a date in YYYY-MM-DD format")
+	}
+	return &t, nil
 }
 
 type SetTriggerRequest struct {
@@ -23,6 +40,8 @@ type PolicyResponse struct {
 	Exempt    bool       `json:"exempt"`
 	Reason    string     `json:"reason"`
 	SetAt     *time.Time `json:"set_at"`
+	// ExemptedUntil is the last exempt business day (YYYY-MM-DD) or null.
+	ExemptedUntil *string `json:"exempted_until"`
 }
 
 func PolicyFromDomain(p domain.CustomerPolicy) PolicyResponse {
@@ -30,6 +49,10 @@ func PolicyFromDomain(p domain.CustomerPolicy) PolicyResponse {
 	if !p.SetAt.IsZero() {
 		at := p.SetAt
 		out.SetAt = &at
+	}
+	if p.ExemptedUntil != nil {
+		d := p.ExemptedUntil.Format(dateLayout)
+		out.ExemptedUntil = &d
 	}
 	return out
 }

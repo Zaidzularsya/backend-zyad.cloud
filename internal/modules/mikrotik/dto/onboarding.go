@@ -26,12 +26,22 @@ type CustomerStatusResponse struct {
 	IsolationState string `json:"isolation_state"`
 	Exempt         bool   `json:"exempt"`
 	Secrets        int    `json:"secrets"`
+	// ExemptedUntil is the stored last exempt day (YYYY-MM-DD) or null. It is
+	// reported as stored even when already past; exempt is not recomputed.
+	ExemptedUntil *string `json:"exempted_until"`
+	// PendingIsolation: the engine would isolate this customer today (preview status will_isolate).
+	PendingIsolation bool `json:"pending_isolation"`
 }
 
 func CustomerStatusesFromService(items []service.CustomerStatus) []CustomerStatusResponse {
 	out := make([]CustomerStatusResponse, 0, len(items))
 	for _, it := range items {
-		out = append(out, CustomerStatusResponse{AccountID: it.AccountID, IsolationState: it.IsolationState, Exempt: it.Exempt, Secrets: it.Secrets})
+		r := CustomerStatusResponse{AccountID: it.AccountID, IsolationState: it.IsolationState, Exempt: it.Exempt, Secrets: it.Secrets, PendingIsolation: it.PendingIsolation}
+		if it.ExemptedUntil != "" {
+			d := it.ExemptedUntil
+			r.ExemptedUntil = &d
+		}
+		out = append(out, r)
 	}
 	return out
 }

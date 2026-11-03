@@ -23,14 +23,15 @@ type fakePolicyService struct {
 
 	exempt  bool
 	reason  string
+	until   *time.Time
 	enabled bool
 	calls   int
 }
 
-func (f *fakePolicyService) SetExempt(_ context.Context, _ coretenant.Scope, accountID string, exempt bool, reason, _ string) (domain.CustomerPolicy, error) {
+func (f *fakePolicyService) SetExempt(_ context.Context, _ coretenant.Scope, accountID string, exempt bool, reason string, until *time.Time, _ string) (domain.CustomerPolicy, error) {
 	f.calls++
-	f.exempt, f.reason = exempt, reason
-	return domain.CustomerPolicy{AccountID: accountID, Exempt: exempt, Reason: reason, SetAt: time.Now()}, f.err
+	f.exempt, f.reason, f.until = exempt, reason, until
+	return domain.CustomerPolicy{AccountID: accountID, Exempt: exempt, Reason: reason, ExemptedUntil: until, SetAt: time.Now()}, f.err
 }
 func (f *fakePolicyService) GetPolicy(_ context.Context, _ coretenant.Scope, accountID string) (domain.CustomerPolicy, error) {
 	f.calls++
@@ -218,4 +219,51 @@ func TestListTriggers_Shape(t *testing.T) {
 		t.Fatalf("item = %v", d)
 	}
 	assertNoCredentialKeys(t, w.Body.Bytes())
+}
+
+func TestPolicyPut_ExemptedUntilParsing(t *testing.T) {
+	const path = "/app/mikrotik/customers/" + testAccountID + "/policy"
+	for _, body := range []string{
+		`{"exempt":true,"reason":"VIP","exempted_until":"30-11-2026"}`,
+		`{"exempt":true,"reason":"VIP","exempted_until":"2026-13-01"}`,
+		`{"exempt":true,"reason":"VIP","exempted_until":"abc"}`,
+		`{"exempt":true,"reason":"VIP","exempted_until":5}`,
+	} {
+		svc := &fakePolicyService{}
+		w := performJSON(policyRouter(t, svc), http.MethodPut, path, body)
+		if w.Code != http.StatusUnprocessableEntity || svc.calls != 0 {
+			t.Errorf("%s: status = %d calls = %d, want 422/0", body, w.Code, svc.calls)
+		}
+	}
+
+	svc := &fakePolicyService{}
+	w := performJSON(policyRouter(t, svc), http.MethodPut, path, `{"exempt":true,"reason":"VIP","exempted_until":"2026-11-30"}`)
+	if w.Code != http.StatusOK || svc.until == nil || !svc.until.Equal(time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("valid: status = %d until = %v body = %s", w.Code, svc.until, w.Body)
+	}
+	var body struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Data["exempted_until"] != "2026-11-30" {
+		t.Fatalf("response exempted_until = %v", body.Data["exempted_until"])
+	}
+
+	for _, b := range []string{
+		`{"exempt":true,"reason":"VIP"}`,
+		`{"exempt":true,"reason":"VIP","exempted_until":null}`,
+		`{"exempt":true,"reason":"VIP","exempted_until":""}`,
+	} {
+		svc := &fakePolicyService{}
+		w := performJSON(policyRouter(t, svc), http.MethodPut, path, b)
+		if w.Code != http.StatusOK || svc.until != nil {
+			t.Errorf("%s: status = %d until = %v", b, w.Code, svc.until)
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		if v, ok := body.Data["exempted_until"]; !ok || v != nil {
+			t.Errorf("%s: response exempted_until = %v (present %v)", b, v, ok)
+		}
+	}
 }

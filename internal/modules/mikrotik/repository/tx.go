@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -51,4 +52,12 @@ func clampLimit(limit int) int {
 		return domain.MaxRouterPageSize
 	}
 	return limit
+}
+
+// dateOrNil formats t's calendar date for a ::date parameter (nil -> NULL).
+func dateOrNil(t *time.Time) interface{} {
+	if t == nil {
+		return nil
+	}
+	return t.Format("2006-01-02")
 }

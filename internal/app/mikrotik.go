@@ -25,6 +25,12 @@ type mikrotikModule struct {
 	Task   *mikrotikhandler.TaskHandler
 	// Onboarding serves the setup checklist and per-customer isolir status.
 	Onboarding *mikrotikhandler.OnboardingHandler
+	// Control serves the tenant control center (mode, grace days, pilot, restore all).
+	Control *mikrotikhandler.ControlHandler
+	// Preview serves the isolation candidate preview and its CSV export.
+	Preview *mikrotikhandler.PreviewHandler
+	// Activity serves the control center activity log.
+	Activity *mikrotikhandler.ActivityHandler
 }
 
 // mikrotikBuild carries the cross-module services the adapters wrap.
@@ -68,15 +74,24 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 	// happen here; the worker runs the reconciler and the task processor).
 	// Mode off wires nothing, so existing flows are unchanged. All hooks are
 	// set before serving.
-	if mode := mikrotikIsolationMode(cfg.Mikrotik.IsolationMode); mode != mikrotikservice.ModeOff {
-		eval := mikrotikservice.NewEvaluator(mikrotikservice.EvaluatorDeps{
-			Source: reader, Policy: policyRepo, Secrets: secretRepo, Tasks: mikrotikrepo.NewTaskRepository(db), Mode: mode,
+	engineMode := mikrotikIsolationMode(cfg.Mikrotik.IsolationMode)
+	controlRepo := mikrotikrepo.NewControlRepository(db)
+	taskRepo := mikrotikrepo.NewTaskRepository(db)
+	var eval *mikrotikservice.Evaluator
+	if engineMode != mikrotikservice.ModeOff {
+		eval = mikrotikservice.NewEvaluator(mikrotikservice.EvaluatorDeps{
+			Source: reader, Policy: policyRepo, Secrets: secretRepo, Tasks: taskRepo, Mode: engineMode,
+			Control: controlRepo,
 		})
 		policyDeps.OnChange = mikrotikEvaluateHook(eval, "customer_policy_changed")
 		secrets.SetOnChange(mikrotikEvaluateHook(eval, "secret_pairing_changed"))
-		registerMikrotikInvoiceListener(mode, b.Listeners, mikrotikservice.NewInvoiceListener(reader, eval))
+		registerMikrotikInvoiceListener(engineMode, b.Listeners, mikrotikservice.NewInvoiceListener(reader, eval))
 	}
 	policy := mikrotikservice.NewPolicyService(policyDeps)
+	preview := mikrotikservice.NewPreviewService(reader, controlRepo, nil)
+	onboarding := mikrotikservice.NewOnboardingService(
+		mikrotikrepo.NewOnboardingRepository(db), mikrotikSenderSettings{settings: receivablerepo.NewSettingsRepository(db)})
+	onboarding.SetPendingReader(preview)
 	return mikrotikModule{
 		Router: mikrotikhandler.NewRouterHandler(svc),
 		Setup:  mikrotikhandler.NewSetupHandler(setup),
@@ -85,10 +100,16 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 			SuggestionService: mikrotikservice.NewSuggestionService(svc, secretRepo, accounts,
 				mikrotikrepo.NewSuggestionRepository(db), mikrotikrepo.NewAdvisoryLocker(db)),
 		}),
-		Policy: mikrotikhandler.NewPolicyHandler(policy),
-		Task:   mikrotikhandler.NewTaskHandler(mikrotikservice.NewTaskService(mikrotikrepo.NewTaskRepository(db), secretRepo, repo)),
-		Onboarding: mikrotikhandler.NewOnboardingHandler(mikrotikservice.NewOnboardingService(
-			mikrotikrepo.NewOnboardingRepository(db), mikrotikSenderSettings{settings: receivablerepo.NewSettingsRepository(db)})),
+		Policy:     mikrotikhandler.NewPolicyHandler(policy),
+		Task:       mikrotikhandler.NewTaskHandler(mikrotikservice.NewTaskService(taskRepo, secretRepo, repo)),
+		Onboarding: mikrotikhandler.NewOnboardingHandler(onboarding),
+		// eval is nil while the engine is off; the service then refuses pilot tests.
+		Control: mikrotikhandler.NewControlHandler(mikrotikservice.NewControlService(mikrotikservice.ControlDeps{
+			Control: controlRepo, Secrets: secretRepo, Tasks: taskRepo, Accounts: accounts, Audit: repo, Evaluator: eval,
+		}, engineMode)),
+		Preview: mikrotikhandler.NewPreviewHandler(preview),
+		Activity: mikrotikhandler.NewActivityHandler(mikrotikservice.NewActivityService(
+			mikrotikrepo.NewActivityRepository(db), reader)),
 	}
 }
 
@@ -147,5 +168,14 @@ func registerMikrotikRoutes(protected *gin.RouterGroup, deps Dependencies) {
 	}
 	if deps.MikrotikOnboardingHandler != nil {
 		deps.MikrotikOnboardingHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
+	}
+	if deps.MikrotikControlHandler != nil {
+		deps.MikrotikControlHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
+	}
+	if deps.MikrotikPreviewHandler != nil {
+		deps.MikrotikPreviewHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
+	}
+	if deps.MikrotikActivityHandler != nil {
+		deps.MikrotikActivityHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
 	}
 }

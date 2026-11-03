@@ -444,3 +444,27 @@ func (f *fakeSecretRepo) ListByAccount(_ context.Context, _ coretenant.Scope, ac
 func (f *fakeSecretRepo) AccountsWithIsolatedSecrets(_ context.Context, _ coretenant.Scope) ([]string, error) {
 	return nil, nil
 }
+
+func (f *fakeSecretRepo) ListIsolated(_ context.Context, _ coretenant.Scope, afterID string, limit int) ([]domain.PPPSecret, error) {
+	var out []domain.PPPSecret
+	for _, r := range f.rows {
+		if r.IsolationState == domain.IsolationIsolated && r.ID > afterID {
+			out = append(out, *r)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (f *fakeSecretRepo) CountIsolated(_ context.Context, _ coretenant.Scope) (int, error) {
+	n := 0
+	for _, r := range f.rows {
+		if r.IsolationState == domain.IsolationIsolated {
+			n++
+		}
+	}
+	return n, nil
+}

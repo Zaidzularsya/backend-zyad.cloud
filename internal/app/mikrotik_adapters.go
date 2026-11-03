@@ -217,6 +217,34 @@ func (r mikrotikReceivableReader) scopedRead(ctx context.Context, scope coretena
 	return fn(tx)
 }
 
+// Names resolves account names in one query for the activity log. Deleted
+// accounts keep their name so history stays readable.
+func (r mikrotikReceivableReader) Names(ctx context.Context, scope coretenant.Scope, ids []string) (map[string]string, error) {
+	out := make(map[string]string, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	err := r.scopedRead(ctx, scope, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT id::text, name FROM receivable_accounts
+			WHERE organization_id = $1 AND id = ANY($2::uuid[])`,
+			scope.OrganizationID(), ids)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id, name string
+			if err := rows.Scan(&id, &name); err != nil {
+				return err
+			}
+			out[id] = name
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 // ActiveContractProductIDs returns distinct product ids on items of active contracts.
 func (r mikrotikReceivableReader) ActiveContractProductIDs(ctx context.Context, scope coretenant.Scope) ([]string, error) {
 	out := []string{}

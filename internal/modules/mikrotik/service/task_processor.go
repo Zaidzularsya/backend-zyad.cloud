@@ -30,7 +30,24 @@ const (
 	// cancelEntitlementDisabled: an isolate task claimed while the
 	// organization has no mikrotik.enabled entitlement (restore-only mode).
 	cancelEntitlementDisabled = "entitlement_disabled"
+	// cancelModeBlocked: an isolate task claimed while the isolation gate
+	// (env mode, tenant mode, pilot membership) does not allow isolating.
+	cancelModeBlocked = "mode_blocked"
+	// eventModeBlockedRestore: the restore enqueued after a mode_blocked
+	// cancel found the router already on the isolir profile (a partial
+	// isolate). It runs even though the account is still overdue.
+	eventModeBlockedRestore = "mode_blocked_restore"
+	// eventRestoreAll: the restore queued by ControlService.RestoreAll while
+	// the tenant is paused. The customer is usually still overdue, so like a
+	// mode_blocked restore it runs while the gate stays closed.
+	eventRestoreAll = "restore_all"
 )
+
+// PilotRecorder records a successful pilot round trip; satisfied by
+// repository.ControlRepository.
+type PilotRecorder interface {
+	MarkPilotRoundTrip(ctx context.Context, scope coretenant.Scope, accountID string) (verified bool, err error)
+}
 
 // TaskExecutor performs the router-side steps; satisfied by *Executor.
 type TaskExecutor interface {
@@ -50,6 +67,7 @@ type TaskProcessorDeps struct {
 	Customer  CustomerNotifier // optional
 	Alert     TenantAlerter    // optional
 	Audit     Auditor          // optional
+	Pilot     PilotRecorder    // optional
 	Now       func() time.Time
 }
 
@@ -150,13 +168,15 @@ func (p *TaskProcessor) process(ctx context.Context, scope coretenant.Scope, tas
 	if err != nil {
 		return p.release(ctx, scope, task, "load secret", err)
 	}
-	restoreOnlyIsolate := p.restoreOnly && task.Action == ActionIsolate
-	if restoreOnlyIsolate && !taskMayHaveRun(task) {
+	// blockReason != "": this isolate task must not run (restore tasks are
+	// never blocked). Never-started tasks are cancelled before locking.
+	blockReason := p.isolateBlockReason(ctx, scope, task, secret)
+	if blockReason != "" && !taskMayHaveRun(task) {
 		accountID := ""
 		if secret.AccountID != nil {
 			accountID = *secret.AccountID
 		}
-		return p.cancel(ctx, scope, task, secret.RouterID, accountID, cancelEntitlementDisabled)
+		return p.cancel(ctx, scope, task, secret.RouterID, accountID, blockReason)
 	}
 
 	unlock, ok, err := p.d.Locker.TryLock(ctx, "mikrotik:router:"+secret.RouterID)
@@ -186,13 +206,25 @@ func (p *TaskProcessor) process(ctx context.Context, scope coretenant.Scope, tas
 	if secret.AccountID != nil {
 		accountID = *secret.AccountID
 	}
-	if restoreOnlyIsolate {
-		return p.cancelIsolate(ctx, scope, task, secret, router, routerMissing, accountID, cancelEntitlementDisabled)
+	if blockReason != "" {
+		return p.cancelIsolate(ctx, scope, task, secret, router, routerMissing, accountID, blockReason)
 	}
 
 	want, dec, err := p.wantedAction(ctx, scope, secret)
 	if err != nil {
 		return p.release(ctx, scope, task, "re-evaluate", err)
+	}
+	// A mode_blocked or restore_all restore undoes an isolation the tenant's
+	// mode does not allow (a partial isolate, or paused + "restore all"); the
+	// account is still overdue, so the evaluation alone would supersede it.
+	// It is honoured only while the gate stays closed.
+	if task.Action == ActionRestore && (task.CreatedByEvent == eventModeBlockedRestore || task.CreatedByEvent == eventRestoreAll) && want == "" &&
+		secret.IsolationState == domain.IsolationIsolated && dec.Desired == domain.IsolationIsolated && !dec.IsolateAllowed {
+		want = ActionRestore
+	}
+	// The gate may have closed since the pre-lock check.
+	if task.Action == ActionIsolate && want == ActionIsolate && !dec.IsolateAllowed {
+		return p.cancelIsolate(ctx, scope, task, secret, router, routerMissing, accountID, cancelModeBlocked)
 	}
 	// Isolating needs a live, isolir-ready router. A restore never waits on
 	// isolir_ready; a restore on a deleted router fails and alerts instead.
@@ -221,6 +253,27 @@ func (p *TaskProcessor) process(ctx context.Context, scope coretenant.Scope, tas
 		changed, err := p.d.Secrets.MarkNormal(ctx, scope, secret.ID)
 		return p.succeeded(ctx, scope, task, secret, router.Name, accountID, dec, changed, err)
 	}
+}
+
+// isolateBlockReason returns the cancel reason of an isolate task that must
+// not run: cancelEntitlementDisabled in restore-only mode, cancelModeBlocked
+// when the isolation gate is closed for the account. "" for restore tasks,
+// for unpaired secrets (re-evaluation supersedes those) and when allowed.
+func (p *TaskProcessor) isolateBlockReason(ctx context.Context, scope coretenant.Scope, task domain.IsolationTask, secret domain.PPPSecret) string {
+	if task.Action != ActionIsolate {
+		return ""
+	}
+	if p.restoreOnly {
+		return cancelEntitlementDisabled
+	}
+	if secret.AccountID == nil || p.d.Evaluator == nil {
+		return ""
+	}
+	// An unreadable control yields a closed gate: blocked, never run.
+	if !p.d.Evaluator.isolateGate(ctx, scope, *secret.AccountID).Allowed {
+		return cancelModeBlocked
+	}
+	return ""
 }
 
 // wantedAction is the action the secret needs right now. An unpaired secret is
@@ -266,8 +319,28 @@ func (p *TaskProcessor) succeeded(ctx context.Context, scope coretenant.Scope, t
 	}
 	p.audit(ctx, scope, event, secret.RouterID, task, task.Attempts+1)
 	p.notifyCustomer(ctx, scope, task, secret.RouterID, accountID, dec)
+	if task.Action == ActionRestore {
+		p.markPilotRoundTrip(ctx, scope, accountID)
+	}
 	p.followUp(ctx, scope, accountID)
 	return outcomeDone
+}
+
+// markPilotRoundTrip records a verified pilot (isolate then restore) after a
+// restore. Best effort: the repository decides whether the account had a
+// pilot isolate in the current test; failures are only logged.
+func (p *TaskProcessor) markPilotRoundTrip(ctx context.Context, scope coretenant.Scope, accountID string) {
+	if p.d.Pilot == nil || accountID == "" {
+		return
+	}
+	verified, err := p.d.Pilot.MarkPilotRoundTrip(ctx, scope, accountID)
+	if err != nil {
+		slog.Warn("mikrotik: mark pilot round trip failed", "account_id", accountID, "error", err)
+		return
+	}
+	if verified {
+		slog.Info("mikrotik: pilot round trip verified", "account_id", accountID)
+	}
 }
 
 func (p *TaskProcessor) failure(ctx context.Context, scope coretenant.Scope, task domain.IsolationTask, secret domain.PPPSecret, routerName string, cause error) outcome {
@@ -289,7 +362,7 @@ func (p *TaskProcessor) failure(ctx context.Context, scope coretenant.Scope, tas
 		if err := p.d.Tasks.Fail(ctx, scope, task.ID, f.Code, f.Message); err != nil {
 			p.logLifecycleErr("fail", task, err)
 		} else {
-			p.audit(ctx, scope, "task.failed", secret.RouterID, task, attempts)
+			p.audit(ctx, scope, "task.failed", secret.RouterID, task, attempts, "error_code", f.Code)
 			p.alertTenant(ctx, scope, task, event)
 		}
 		// Independent of Fail: the router may already be changed.
@@ -376,7 +449,15 @@ func (p *TaskProcessor) cancelIsolate(ctx context.Context, scope coretenant.Scop
 		slog.Error("mikrotik: router is on the isolir profile but the secret could not be marked isolated",
 			"task_id", task.ID, "secret_id", secret.ID)
 	}
-	return p.cancel(ctx, scope, task, secret.RouterID, accountID, reason)
+	out := p.cancel(ctx, scope, task, secret.RouterID, accountID, reason)
+	if changed && reason == cancelModeBlocked {
+		// The tenant's mode says "do not cut": undo the partial isolate. After
+		// the cancel, so this task no longer blocks the enqueue.
+		if _, err := p.d.Tasks.EnqueueRestore(ctx, scope, secret.ID, eventModeBlockedRestore); err != nil {
+			slog.Error("mikrotik: enqueue restore after mode_blocked cancel failed", "task_id", task.ID, "secret_id", secret.ID, "error", err)
+		}
+	}
+	return out
 }
 
 // Terminal failure of an isolate task that is no longer wanted but whose router
@@ -407,7 +488,7 @@ func (p *TaskProcessor) unverifiable(ctx context.Context, scope coretenant.Scope
 			p.logLifecycleErr("fail", task, err)
 			return outcomeFailed
 		}
-		p.audit(ctx, scope, "task.failed", secret.RouterID, task, attempts)
+		p.audit(ctx, scope, "task.failed", secret.RouterID, task, attempts, "error_code", codeRouterUnverifiable)
 		p.alertTenant(ctx, scope, task, event)
 		return outcomeFailed
 	}
@@ -464,6 +545,21 @@ func (p *TaskProcessor) followUp(ctx context.Context, scope coretenant.Scope, ac
 
 func (p *TaskProcessor) notifyCustomer(ctx context.Context, scope coretenant.Scope, task domain.IsolationTask, routerID, accountID string, dec Decision) {
 	if p.d.Customer == nil || accountID == "" || task.CustomerNotifiedAt != nil {
+		return
+	}
+	// Pilot accounts are the tenant's own test accounts: no customer notice.
+	if dec.IsPilot {
+		slog.Debug("mikrotik: customer notification skipped for pilot account", "task_id", task.ID, "action", task.Action)
+		return
+	}
+	if task.Action == ActionIsolate && len(dec.Invoices) == 0 {
+		slog.Debug("mikrotik: isolated notification skipped without trigger invoices", "task_id", task.ID)
+		return
+	}
+	// Undoes a partial isolate the customer was never told about, and the
+	// account is still overdue: a "service restored" notice would be false.
+	if task.Action == ActionRestore && task.CreatedByEvent == eventModeBlockedRestore {
+		slog.Debug("mikrotik: restored notification skipped for mode_blocked restore", "task_id", task.ID)
 		return
 	}
 	var err error

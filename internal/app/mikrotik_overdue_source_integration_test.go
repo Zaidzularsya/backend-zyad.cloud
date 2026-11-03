@@ -206,3 +206,17 @@ func TestTriggerInvoices_AccountOfInvoice(t *testing.T) {
 		t.Fatalf("foreign invoice: %v", err)
 	}
 }
+
+func TestMikrotikActivityNames_OwnOrgOnly(t *testing.T) {
+	f := setupUsageFixture(t)
+	a, b := f.tenants.A.OrganizationID, f.tenants.B.OrganizationID
+	accA, accB := f.account(t, a, "Budi Santoso"), f.account(t, b, "Orang Lain")
+
+	got, err := f.reader.Names(f.ctx, f.tenants.A.Scope, []string{accA, accB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[accA] != "Budi Santoso" {
+		t.Fatalf("names = %v", got)
+	}
+}

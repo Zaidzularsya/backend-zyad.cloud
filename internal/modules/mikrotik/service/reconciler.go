@@ -72,6 +72,11 @@ func (r *Reconciler) run(ctx context.Context, scope coretenant.Scope, restoreOnl
 	if err := ctx.Err(); err != nil {
 		return res, err
 	}
+	// One control snapshot per run: every account is evaluated against the
+	// same mode and grace, and the trigger listing uses the same cutoff.
+	// A failed read yields a snapshot that blocks isolation only, so the
+	// isolated accounts below are still visited and restored.
+	ctl := r.eval.control(ctx, scope)
 	seen := map[string]struct{}{}
 	visit := func(accountID string) error {
 		if err := ctx.Err(); err != nil {
@@ -82,11 +87,7 @@ func (r *Reconciler) run(ctx context.Context, scope coretenant.Scope, restoreOnl
 		}
 		seen[accountID] = struct{}{}
 		res.Accounts++
-		apply := r.eval.Apply
-		if restoreOnly {
-			apply = r.eval.ApplyRestoreOnly
-		}
-		if _, err := apply(ctx, scope, accountID, eventReconcile); err != nil {
+		if _, err := r.eval.applyWith(ctx, scope, accountID, eventReconcile, restoreOnly, ctl); err != nil {
 			res.Failed++
 			slog.WarnContext(ctx, "mikrotik: reconcile account failed", "account_id", accountID, "error", err)
 		}
@@ -107,13 +108,13 @@ func (r *Reconciler) run(ctx context.Context, scope coretenant.Scope, restoreOnl
 		return res, nil
 	}
 
-	today := businesstime.DayOf(r.now())
+	cutoff := CandidateCutoff(businesstime.DayOf(r.now()), ctl.GraceDays)
 	after := ""
 	for {
 		if err := ctx.Err(); err != nil {
 			return res, err
 		}
-		page, err := r.source.AccountsWithTriggerInvoices(ctx, scope, today, after, reconcilePageSize)
+		page, err := r.source.AccountsWithTriggerInvoices(ctx, scope, cutoff, after, reconcilePageSize)
 		if err != nil {
 			return res, fmt.Errorf("list accounts with trigger invoices: %w", err)
 		}

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -16,7 +17,7 @@ import (
 
 // PolicyService is the subset of service.PolicyService used by the handler.
 type PolicyService interface {
-	SetExempt(ctx context.Context, scope coretenant.Scope, accountID string, exempt bool, reason, actor string) (domain.CustomerPolicy, error)
+	SetExempt(ctx context.Context, scope coretenant.Scope, accountID string, exempt bool, reason string, until *time.Time, actor string) (domain.CustomerPolicy, error)
 	GetPolicy(ctx context.Context, scope coretenant.Scope, accountID string) (domain.CustomerPolicy, error)
 	PreviewTrigger(ctx context.Context, scope coretenant.Scope, productID string) (service.TriggerPreview, error)
 	SetTrigger(ctx context.Context, scope coretenant.Scope, productID string, enabled bool, actor string) (domain.ProductTrigger, error)
@@ -70,12 +71,17 @@ func (h *PolicyHandler) SetPolicy(c *gin.Context) {
 		validationFail(c, err)
 		return
 	}
+	until, err := req.ParseExemptedUntil()
+	if err != nil {
+		validationFail(c, err)
+		return
+	}
 	accountID := c.Param("account_id")
 	if !validUUID(accountID) {
 		failRouter(c, mikrotik.ErrAccountNotFound)
 		return
 	}
-	p, err := h.svc.SetExempt(c.Request.Context(), scope, accountID, *req.Exempt, req.Reason, permissionmiddleware.UserID(c))
+	p, err := h.svc.SetExempt(c.Request.Context(), scope, accountID, *req.Exempt, req.Reason, until, permissionmiddleware.UserID(c))
 	if err != nil {
 		failRouter(c, err)
 		return

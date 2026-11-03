@@ -221,6 +221,19 @@ func failRouter(c *gin.Context, err error) {
 		response.Error(c, http.StatusConflict, "MIKROTIK_SECRET_NOT_PAIRABLE", err.Error())
 	case errors.Is(err, mikrotik.ErrRouterNameTaken):
 		response.Error(c, http.StatusConflict, "MIKROTIK_ROUTER_NAME_TAKEN", "router name is already used")
+	case errors.Is(err, mikrotik.ErrModeInvalid):
+		response.Error(c, http.StatusUnprocessableEntity, "MIKROTIK_MODE_INVALID", err.Error())
+	case errors.Is(err, mikrotik.ErrPilotRequired):
+		response.Error(c, http.StatusConflict, "MIKROTIK_PILOT_REQUIRED", mikrotik.ErrPilotRequired.Error())
+	case errors.Is(err, mikrotik.ErrPilotModeRequired):
+		response.Error(c, http.StatusConflict, "MIKROTIK_PILOT_MODE_REQUIRED", mikrotik.ErrPilotModeRequired.Error())
+	case errors.Is(err, mikrotik.ErrEngineOff):
+		response.Error(c, http.StatusConflict, "MIKROTIK_ENGINE_OFF", mikrotik.ErrEngineOff.Error())
+	case errors.Is(err, mikrotik.ErrPilotTestNotRunnable):
+		// The message is one of the fixed PilotTestNotRunnableError texts.
+		response.Error(c, http.StatusConflict, "MIKROTIK_PILOT_TEST_NOT_RUNNABLE", err.Error())
+	case errors.Is(err, mikrotik.ErrNotPaused):
+		response.Error(c, http.StatusConflict, "MIKROTIK_NOT_PAUSED", mikrotik.ErrNotPaused.Error())
 	case errors.As(err, &invalidErr):
 		response.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", invalidErr.Message)
 	case errors.Is(err, mikrotik.ErrPlanChanged):

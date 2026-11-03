@@ -31,7 +31,11 @@ func (f *fakeOnboardingService) CustomerStatuses(_ context.Context, _ coretenant
 	out := make([]service.CustomerStatus, 0, len(ids))
 	for i, id := range ids {
 		state := []string{"normal", "isolated", "none"}[i%3]
-		out = append(out, service.CustomerStatus{AccountID: id, IsolationState: state, Exempt: i == 0, Secrets: i})
+		st := service.CustomerStatus{AccountID: id, IsolationState: state, Exempt: i == 0, Secrets: i}
+		if i == 0 {
+			st.ExemptedUntil = "2026-11-30"
+		}
+		out = append(out, st)
 	}
 	return out, nil
 }
@@ -91,11 +95,17 @@ func TestCustomersStatus_NoneIsolatedNormal(t *testing.T) {
 		t.Fatalf("data = %v", body.Data)
 	}
 	wantStates := []string{"normal", "isolated", "none"}
+	if body.Data[0]["exempted_until"] != "2026-11-30" || body.Data[1]["exempted_until"] != nil {
+		t.Errorf("exempted_until = %v / %v", body.Data[0]["exempted_until"], body.Data[1]["exempted_until"])
+	}
 	for i, row := range body.Data {
+		if row["pending_isolation"] != false {
+			t.Errorf("row %d pending_isolation = %v", i, row["pending_isolation"])
+		}
 		if row["isolation_state"] != wantStates[i] {
 			t.Errorf("row %d state = %v", i, row["isolation_state"])
 		}
-		for _, k := range []string{"account_id", "exempt", "secrets"} {
+		for _, k := range []string{"account_id", "exempt", "secrets", "exempted_until", "pending_isolation"} {
 			if _, ok := row[k]; !ok {
 				t.Errorf("row %d missing %s", i, k)
 			}

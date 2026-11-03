@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -69,7 +70,7 @@ func (s *countingSecretService) SearchAccounts(context.Context, coretenant.Scope
 
 type countingPolicyService struct{ calls int }
 
-func (s *countingPolicyService) SetExempt(context.Context, coretenant.Scope, string, bool, string, string) (mikrotikdomain.CustomerPolicy, error) {
+func (s *countingPolicyService) SetExempt(context.Context, coretenant.Scope, string, bool, string, *time.Time, string) (mikrotikdomain.CustomerPolicy, error) {
 	s.calls++
 	return mikrotikdomain.CustomerPolicy{}, nil
 }
