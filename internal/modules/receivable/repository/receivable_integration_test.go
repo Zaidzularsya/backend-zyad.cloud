@@ -5,6 +5,7 @@ package repository_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -417,7 +418,7 @@ func TestReceivableIsolation(t *testing.T) {
 	if list, total, _ := e.payments.ListAll(e.ctx, b, 10, 0); total != 0 || len(list) != 0 {
 		t.Fatalf("payment list leak = %+v", list)
 	}
-	if list, total, _ := e.accounts.List(e.ctx, b, "", 10, 0); total != 0 || len(list) != 0 {
+	if list, total, _ := e.accounts.List(e.ctx, b, "", "", 10, 0); total != 0 || len(list) != 0 {
 		t.Fatalf("account list leak = %+v", list)
 	}
 	na, _ := e.counters.Next(e.ctx, a, "invoice", 2026)
@@ -451,8 +452,54 @@ func TestAccountSourceAndUpdate(t *testing.T) {
 	if manual.ContactID() != "" {
 		t.Fatalf("manual account must have no contact: %+v", manual)
 	}
-	if _, total, _ := e.accounts.List(e.ctx, scope, "maju", 10, 0); total != 1 {
+	if _, total, _ := e.accounts.List(e.ctx, scope, "maju", "", 10, 0); total != 1 {
 		t.Fatalf("search total = %d", total)
+	}
+}
+
+func TestAccountListContactFilter(t *testing.T) {
+	e := setup(t)
+	a, b := e.tenants.A.Scope, e.tenants.B.Scope
+	c1 := "cccccccc-0000-0000-0000-0000000000a1"
+	c2 := "cccccccc-0000-0000-0000-0000000000a2"
+	mk := func(scope coretenant.Scope, name, contact string) domain.Account {
+		p := repository.AccountParams{Name: name}
+		if contact != "" {
+			p.SourceType, p.SourceID = "crm_contact", contact
+		}
+		acc, err := e.accounts.Create(e.ctx, scope, p, "")
+		if err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+		return acc
+	}
+	one := mk(a, "CF Satu", c1)
+	two := mk(a, "CF Dua", c2)
+	mk(a, "CF Manual", "")
+	mk(b, "CF Org B", c1) // kontak sama, organisasi lain
+
+	list, total, err := e.accounts.List(e.ctx, a, "", c1, 10, 0)
+	if err != nil || total != 1 || len(list) != 1 || list[0].ID != one.ID {
+		t.Fatalf("filter c1 = %+v total=%d err=%v", list, total, err)
+	}
+	// An uppercase UUID passes request validation and must match the same contact.
+	if list, total, err := e.accounts.List(e.ctx, a, "", strings.ToUpper(c1), 10, 0); err != nil || total != 1 || len(list) != 1 || list[0].ID != one.ID {
+		t.Fatalf("uppercase filter = %+v total=%d err=%v", list, total, err)
+	}
+	if _, total, _ := e.accounts.List(e.ctx, a, "", "", 10, 0); total != 3 {
+		t.Fatalf("no filter total = %d, want 3", total)
+	}
+	if list, total, _ := e.accounts.List(e.ctx, a, "dua", c2, 10, 0); total != 1 || len(list) != 1 || list[0].ID != two.ID {
+		t.Fatalf("search+c2 = %+v total=%d", list, total)
+	}
+	if list, total, _ := e.accounts.List(e.ctx, a, "dua", c1, 10, 0); total != 0 || len(list) != 0 {
+		t.Fatalf("search dua + c1 must be empty: %+v", list)
+	}
+	if list, total, _ := e.accounts.List(e.ctx, b, "", c2, 10, 0); total != 0 || len(list) != 0 {
+		t.Fatalf("org B must not see org A contact: %+v", list)
+	}
+	if list, total, _ := e.accounts.List(e.ctx, b, "", c1, 10, 0); total != 1 || len(list) != 1 || list[0].Name != "CF Org B" {
+		t.Fatalf("org B own = %+v total=%d", list, total)
 	}
 }
 
@@ -799,5 +846,35 @@ func TestInvoiceListDueBefore(t *testing.T) {
 	}
 	if total != 1 || !ids[old.ID] || ids[edge.ID] || ids[recent.ID] || ids[notYet.ID] {
 		t.Fatalf("due before = %d %+v", total, ids)
+	}
+}
+
+func TestAccountListAfterID_KeysetAndIsolation(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	for i := 0; i < 3; i++ {
+		e.account(t, scope, "Keyset")
+	}
+	e.account(t, e.tenants.B.Scope, "OtherOrg")
+	seen := map[string]bool{}
+	prev, after := "", ""
+	for {
+		page, err := e.accounts.ListAfterID(e.ctx, scope, after, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page) == 0 {
+			break
+		}
+		for _, a := range page {
+			if a.ID <= prev || seen[a.ID] {
+				t.Fatalf("not strictly ascending/unique: %s after %s", a.ID, prev)
+			}
+			seen[a.ID], prev = true, a.ID
+		}
+		after = page[len(page)-1].ID
+	}
+	if len(seen) < 3 {
+		t.Fatalf("saw %d accounts", len(seen))
 	}
 }

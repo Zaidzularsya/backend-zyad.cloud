@@ -46,9 +46,19 @@ func NewReceivableBillingRunner(cfg config.Config, db *database.Pool, log *slog.
 
 // newWorkerReceivableModule merakit modul receivable untuk worker (lihat NewReceivableBillingRunner).
 func newWorkerReceivableModule(cfg config.Config, db *database.Pool, log *slog.Logger) (receivableModule, error) {
+	b, err := newWorkerReceivableBuild(cfg, db, log)
+	if err != nil {
+		return receivableModule{}, err
+	}
+	return buildReceivable(b), nil
+}
+
+// newWorkerReceivableBuild merakit dependensi modul receivable untuk worker. Dipisah dari
+// newWorkerReceivableModule supaya job lain (isolir Mikrotik) memakai kanal kirim yang sama.
+func newWorkerReceivableBuild(cfg config.Config, db *database.Pool, log *slog.Logger) (receivableBuild, error) {
 	assetSvc, err := NewAssetService(cfg, db, log)
 	if err != nil {
-		return receivableModule{}, fmt.Errorf("receivable worker: asset storage: %w", err)
+		return receivableBuild{}, fmt.Errorf("receivable worker: asset storage: %w", err)
 	}
 
 	leadRepo, contactRepo, activityRepo := crmrepo.NewLeadRepository(db), crmrepo.NewContactRepository(db), crmrepo.NewActivityRepository(db)
@@ -66,7 +76,7 @@ func newWorkerReceivableModule(cfg config.Config, db *database.Pool, log *slog.L
 		organizationservice.WithOrganizationTypeResolver(organizationrepo.NewOrganizationRepository(db)),
 	)
 
-	module := buildReceivable(receivableBuild{
+	return receivableBuild{
 		DB: db, Assets: assetSvc, Links: publiclink.NewService(publiclink.NewRepository(db), cfg.App.Secret),
 		Mailboxes: mailboxSvc, Messages: messageSvc,
 		WhatsApp:     NewWhatsAppConversationService(cfg, db, nil, nil, log),
@@ -76,9 +86,7 @@ func newWorkerReceivableModule(cfg config.Config, db *database.Pool, log *slog.L
 		Members:      crmrepo.NewMemberRepository(db), Issuers: crmrepo.NewQuotationIssuerRepository(db),
 		AppName: cfg.App.Name, FrontendURL: cfg.App.FrontendURL, NotificationLocale: cfg.Notification.DefaultLocale,
 		ActivationInvoices: activationInvoiceChecker{activations: landingrepo.NewActivationRepository(db)},
-	})
-
-	return module, nil
+	}, nil
 }
 
 // workerDefaultAccess mengembalikan paket gratis saat contract berakhir lewat billing run.

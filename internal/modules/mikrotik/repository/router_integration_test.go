@@ -44,6 +44,9 @@ func setupRouter(t *testing.T) routerEnv {
 			}
 			_, _ = tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", orgID)
 			_, _ = tx.Exec(ctx, "DELETE FROM mikrotik_routers WHERE organization_id = $1", orgID)
+			for _, table := range []string{"mikrotik_pilot_accounts", "mikrotik_org_settings", "mikrotik_customer_policies"} {
+				_, _ = tx.Exec(ctx, "DELETE FROM "+table+" WHERE organization_id = $1", orgID)
+			}
 			_, _ = tx.Exec(ctx, "DELETE FROM audit_logs WHERE module = 'mikrotik' AND organization_id = $1", orgID)
 			_ = tx.Commit(ctx)
 		}
@@ -236,5 +239,39 @@ func TestInsertAuditPersistsWithOrganization(t *testing.T) {
 	}
 	if module != "mikrotik" || targetType != "mikrotik_router" || metaOrg != e.tenants.A.OrganizationID || !actorNull {
 		t.Fatalf("unexpected audit row: %s %s %s actorNull=%v", module, targetType, metaOrg, actorNull)
+	}
+}
+
+func TestHasReadyRouter(t *testing.T) {
+	e := setupRouter(t)
+	ready := func(scope coretenant.Scope) bool {
+		t.Helper()
+		ok, err := e.repo.HasReadyRouter(e.ctx, scope)
+		if err != nil {
+			t.Fatalf("has ready router: %v", err)
+		}
+		return ok
+	}
+	if ready(e.tenants.A.Scope) {
+		t.Fatal("no routers: want false")
+	}
+	a := e.create(t, e.tenants.A.Scope, "Core Router")
+	if ready(e.tenants.A.Scope) {
+		t.Fatal("router not ready: want false")
+	}
+	if err := e.repo.MarkSetup(e.ctx, e.tenants.A.Scope, a.ID, true, "isolir", ""); err != nil {
+		t.Fatalf("mark setup: %v", err)
+	}
+	if !ready(e.tenants.A.Scope) {
+		t.Fatal("ready router: want true")
+	}
+	if ready(e.tenants.B.Scope) {
+		t.Fatal("other organization's ready router must not count")
+	}
+	if err := e.repo.SoftDelete(e.ctx, e.tenants.A.Scope, a.ID, ""); err != nil {
+		t.Fatalf("soft delete: %v", err)
+	}
+	if ready(e.tenants.A.Scope) {
+		t.Fatal("deleted router must not count")
 	}
 }

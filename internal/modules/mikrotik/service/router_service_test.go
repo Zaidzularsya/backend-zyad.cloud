@@ -35,7 +35,7 @@ type fakeRepo struct {
 	finds   int
 
 	// Error injection.
-	auditErr, checkErr, createErr, updateErr error
+	auditErr, checkErr, createErr, updateErr, deleteErr error
 }
 
 func newFakeRepo() *fakeRepo { return &fakeRepo{routers: map[string]domain.Router{}} }
@@ -153,8 +153,20 @@ func (f *fakeRepo) SoftDelete(_ context.Context, _ coretenant.Scope, id, _ strin
 	if _, ok := f.routers[id]; !ok {
 		return mikrotik.ErrRouterNotFound
 	}
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
 	delete(f.routers, id)
 	return nil
+}
+
+func (f *fakeRepo) HasReadyRouter(_ context.Context, scope coretenant.Scope) (bool, error) {
+	for _, r := range f.routers {
+		if r.OrganizationID == scope.OrganizationID() && r.IsolirReady {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (f *fakeRepo) InsertAudit(_ context.Context, _ coretenant.Scope, e repository.AuditEntry) error {
@@ -606,5 +618,22 @@ func TestErrorsNeverContainPassword(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "***") {
 		t.Fatal("expected scrubbed original in log")
+	}
+}
+
+func TestDelete_RefusedWithIsolationActivity_NoAudit(t *testing.T) {
+	svc, repo, _ := newTestService(t)
+	ctx, scope := context.Background(), testScope(t)
+	r, err := svc.Register(ctx, scope, validInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.deleteErr = mikrotik.ErrRouterHasIsolatedSecrets
+	audits := len(repo.audits)
+	if err := svc.Delete(ctx, scope, r.ID, testActor); !errors.Is(err, mikrotik.ErrRouterHasIsolatedSecrets) {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, ok := repo.routers[r.ID]; !ok || len(repo.audits) != audits {
+		t.Fatalf("router must stay and no audit: audits %d -> %d", audits, len(repo.audits))
 	}
 }

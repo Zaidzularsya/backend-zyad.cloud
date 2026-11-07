@@ -45,6 +45,7 @@ func TestVariableRegistryCodes(t *testing.T) {
 		"crm.quotation_revision_requested",
 		"landing.activation_paid",
 		"lead.created",
+		"mikrotik.isolation_task_failed",
 		"payment.paid",
 		"permission.updated",
 		"receivable.invoice_send_failed",

@@ -246,6 +246,8 @@ TEST_DB_CONNECT_TIMEOUT_SECONDS=5
 
 Database test wajib mengandung kata `test` pada `TEST_DB_NAME`. Helper test akan menjalankan migration dan melakukan cleanup table notification dengan `TRUNCATE ... CASCADE`.
 
+Test yang menjalankan DDL transaksional (mis. `TestSecretRepo_ListAccountNameIsTenantScoped` di modul mikrotik: DROP CONSTRAINT, DISABLE RLS) di-skip kecuali `TEST_DB_ALLOW_DDL=1`. Aktifkan hanya pada database test privat dan jalankan dengan `-p 1`, karena DDL mengambil ACCESS EXCLUSIVE lock dan butuh hak owner tabel.
+
 Jalankan semua integration test notification repository:
 
 ```bash

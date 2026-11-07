@@ -26,6 +26,8 @@ diakses lewat IP WireGuard.
 | REST port 443 (`www-ssl`) | connection refused (`www-ssl` disabled di router lab) | teramati di log lab (7.8), bukan assertion otomatis |
 | `Detect` dengan `Port=0` | REST dulu (404) → fallback binary: `api_type=binary`, ±1,1 dtk | teramati di log lab (7.8), bukan assertion otomatis |
 | `Detect` dengan `Port=8728` | binary dulu: `api_type=binary`, ±1,1 dtk | teramati di log lab (7.8), bukan assertion otomatis |
+| Impor Fase 2 (binary API): `Print /ppp/secret` dan `/ppp/profile` | 31 Okt 2026, CHR 7.8: 85 secret, 10 profile terbaca; semua baris punya key `name`, `profile`, `disabled`; `service` = `pppoe` (85/85), `disabled` = `false` (85/85), `.id`/`comment`/`password` ada. Hanya jumlah dan nilai non-sensitif yang dicatat | terbukti di lab (7.8), assertion otomatis (`TestLab_ImportListsPPPSecretsAndProfiles/binary`); distribusi nilai teramati lewat pembacaan sekali jalan, bukan assertion |
+| Impor Fase 2 lewat REST | `GET /rest/ppp/secret` membalas 404 (REST port 80 tidak aktif sebagai REST di lab; subtest di-skip) | **belum terbukti** |
 | Transport REST secara fungsional (v7) | tidak bisa diuji: `www-ssl` mati dan `/ip service` tidak boleh diubah di router lab | **belum terbukti** |
 | RouterOS v6 (transport apa pun) | tidak ada router v6 di lab | **belum terbukti** |
 | Binary API TLS (8729) | TCP 8729 terbuka menurut probe TCP koordinator dari shell sebelum Task 8 (bukan oleh helper); `/ip service` mencatat `api-ssl` aktif (log discovery); koneksi TLS API tidak pernah dicoba | **belum terbukti** |
@@ -298,20 +300,20 @@ Status: **belum terbukti** dengan user berhak minimum (membuat user/grup di rout
 
 ## 10. Daftar "belum terbukti" (wajib diuji dengan CPE nyata sebelum fase 3 aktif di produksi)
 
-1. Sesi PPPoE dengan profile isolir mendapat IP dari `zyad-isolir-pool` dan masuk address-list `zyad-isolir`.
-2. DNS dari sesi terisolir: ke resolver router (rantai `input`, hanya inspeksi read-only) dan ke resolver eksternal (F1/F2).
-3. Sesi terisolir hanya bisa DNS + host allowlist; trafik lain ter-drop (termasuk pada router dengan FastTrack aktif).
-4. Halaman platform/tenant dan checkout DOKU bisa dibuka dari sesi terisolir; daftar `{DOKU_HOSTS}` final.
-5. `Set profile` + `/ppp active remove` memutus sesi lama dan CPE tersambung ulang dengan profile baru; begitu juga restore.
-6. Galat `Remove` pada id sesi yang tidak ada.
-7. Secret dengan `remote-address` sendiri: tetap terisolir lewat address-list.
+1. Sesi PPPoE dengan profile isolir mendapat IP dari `zyad-isolir-pool` dan masuk address-list `zyad-isolir`. **Terbukti di lab 2 Nov 2026** dengan CPE nyata (bagian 11).
+2. DNS dari sesi terisolir: ke resolver router (rantai `input`, hanya inspeksi read-only) dan ke resolver eksternal (F1/F2). **Terbukti di lab 2 Nov 2026** (bagian 11).
+3. Sesi terisolir hanya bisa DNS + host allowlist; trafik lain ter-drop (termasuk pada router dengan FastTrack aktif). **Terbukti di lab 2 Nov 2026** tanpa FastTrack (bagian 11); FastTrack aktif belum.
+4. Halaman platform/tenant dan checkout DOKU bisa dibuka dari sesi terisolir; daftar `{DOKU_HOSTS}` final. **Sebagian terbukti 2 Nov 2026**: platform `zyad.online` dan host sandbox DOKU terjangkau; domain checkout DOKU nyata belum diuji (bagian 11).
+5. `Set profile` + `/ppp active remove` memutus sesi lama dan CPE tersambung ulang dengan profile baru; begitu juga restore. **Terbukti di lab 2 Nov 2026** (bagian 11).
+6. Galat `Remove` pada id sesi yang tidak ada. **Terbukti 2 Nov 2026**: `no such item (4)`.
+7. Secret dengan `remote-address` sendiri: tetap terisolir lewat address-list. **Terbukti sekali, manual, 2 Nov 2026** (bagian 11); tidak ada tes otomatis.
 8. Pengalihan HTTP (opsi A atau B) mengantar browser ke halaman isolir tenant.
 9. Semua hal di atas pada RouterOS v6 (binary API) dan v7 lewat REST; binary API TLS (8729).
    Selama REST belum terbukti, backend menolak setup `apply`/`cleanup` untuk router `api_type=rest`
    (422 `MIKROTIK_SETUP_REST_UNVERIFIED`) kecuali env `MIKROTIK_SETUP_ALLOW_REST=true`; `preview` tetap jalan.
 10. User API berhak minimum cukup untuk penyiapan, isolir, restore, dan pembersihan.
-11. Hapus profile isolir yang masih dipakai secret.
-12. Penyiapan idempoten dengan kondisi "sebagian ada" (bagian 5).
+11. Hapus profile isolir yang masih dipakai secret. **Terbukti di lab 2 Nov 2026** (RouterOS 7.8, binary): RouterOS mengizinkan penghapusan dan secret menunjuk `*D`; penjaga `Cleanup` aplikasi menolak lebih dulu (bagian 11).
+12. Penyiapan idempoten dengan kondisi "sebagian ada" (bagian 5). **Terbukti di lab 2 Nov 2026** (RouterOS 7.8, binary), 7 skenario kerusakan (bagian 11).
 13. Router dengan FastTrack aktif: RouterOS menambah aturan dinamis "special dummy rule" di puncak daftar filter;
     penyiapan mengabaikan baris `dynamic=true` saat memilih `{FIRST_FORWARD_ID}` dan saat memeriksa urutan. Hanya diuji
     dengan fake client; **belum terbukti di router asli** (FastTrack disabled di lab).
@@ -337,10 +339,352 @@ MIKROTIK_LAB_WRITE=1 go test -tags mikrotiklab -run 'TestLabIsolirTransports|Tes
 go test -tags mikrotiklab -run 'TestLabIsolirLeftovers' -v ./internal/platform/mikrotik/
 ```
 
+### Hasil uji lab Fase 3 (1 Nov 2026)
+
+`TestLab_IsolateRestoreRoundTrip` (`internal/modules/mikrotik/service/isolation_lab_test.go`) dijalankan terhadap CHR
+RouterOS 7.8 di `192.168.56.106` dengan `MIKROTIK_LAB_WRITE=1`. Alamat `10.0.12.5` (WireGuard) tidak terjangkau dari
+WSL saat itu, jadi `MIKROTIK_LAB_HOST` di-override ke `192.168.56.106` dengan kredensial yang sama.
+
+| Transport | Hasil | Catatan |
+|---|---|---|
+| binary (API 8728), RouterOS 7.8 | **PASS** | isolate -> isolate (idempoten, `original_profile` tetap `default`) -> restore (profile kembali `default`); `/ppp/active` per nama = 0 baris tanpa galat |
+| rest, RouterOS 7.8 | SKIP | port 80 membalas 404 (REST tidak tersedia di lab); **belum terbukti** |
+| binary, RouterOS v6 | tidak diuji | tidak ada router v6 di lab |
+
+Persiapan dan pembersihan: profile `zyad-isolir` tidak ada di lab (pembersihan Fase 1 menghapusnya), jadi dibuat
+sementara (comment `zyad-tmp-roundtrip`) dan dihapus setelah tes; `TestLabIsolirLeftovers` melaporkan 0 objek
+`zyad-*` tersisa.
+
+Belum terbukti oleh uji ini: penghapusan sesi aktif yang benar-benar online (secret uji **disabled**, jadi tidak ada
+sesi; filter `?name=` dan format `.id` pada sesi nyata belum teruji), pelanggan tersambung ulang ke profile isolir dan
+dapat menjangkau halaman bayar (butuh CPE nyata dan Fase 4), RouterOS v6, dan transport REST.
+
+### Hasil uji lab butir 11 dan 12 (2 Nov 2026)
+
+Dijalankan terhadap CHR RouterOS 7.8 di `192.168.56.106` (binary API 8728; kredensial dari `~/.mikrotik-lab.env`,
+`MIKROTIK_LAB_WRITE=1`, backup `pre-zyad-isolir*` sudah ada). Hanya objek `zyad-*` yang dibuat dan dihapus;
+`TestLabIsolirLeftovers` melaporkan 0 objek tersisa sesudahnya. Kode uji: `service/setup_partial_lab_test.go` dan
+`platform/mikrotik/section10_lab_test.go`.
+
+| Uji | Hasil | Catatan |
+|---|---|---|
+| `TestLabSetupPartialRepair` (butir 12) | **PASS**, 7 skenario | Setelah setup penuh, satu bagian dihapus dari router: entri allowlist, aturan forward ke-2 (dns tcp), ke-1 (dns udp), terakhir (drop), keempat aturan forward sekaligus, profile isolir, pool+profile. Di tiap skenario preview merencanakan tepat `create` untuk objek yang hilang (sisanya `exists`, tanpa `update`), apply menulis tepat sejumlah itu, urutan 4 aturan forward kembali identik di puncak daftar forward statis (`accept udp 53`, `accept tcp 53`, `accept allowlist`, `drop`), preview berikutnya semua `exists`, dan `isolir_ready` tetap. |
+| `TestLabSetupCleanupRefusesWhileProfileInUse` (butir 11, sisi aplikasi) | **PASS** | Dengan secret uji (disabled, `zyad-labtest-inuse`) memakai profile isolir, `Cleanup` mengembalikan `SetupConflictError` ("1 PPP secret(s) still use the isolir profile; restore them first"), tidak menghapus satu objek pun, dan `isolir_ready` tetap true. Setelah secret dihapus, `Cleanup` berhasil dan 0 objek `zyad-*` tersisa. |
+| `TestLabSection10_ProbeProfileInUseDelete` (butir 11, sisi RouterOS) | probe | RouterOS 7.8 **mengizinkan** menghapus profile yang dipakai secret; secret lalu menampilkan `profile="*D"` (referensi menggantung). Artinya penjaga di `Cleanup` adalah satu-satunya pencegah; tanpa itu pelanggan terisolir kehilangan profile-nya diam-diam. |
+
+Temuan turunan (belum ditangani dan **belum diuji**): secret dengan referensi menggantung (`profile` berbentuk
+`*<hex>`) yang masuk lewat impor tersimpan apa adanya sebagai `profile`; saat dipasangkan, `Pair` mengisi
+`original_profile` dari profile saat ini bila kosong (kode `secret_repository.go`), sehingga `original_profile` bisa berisi
+`*D`. Bagaimana RouterOS menanggapi `Set profile=*D` saat restore belum dicoba. Perlu diputuskan apakah impor menandai
+secret itu `needs_original_profile`.
+
+### Hasil uji hidup dengan CPE nyata (2 Nov 2026)
+
+CPE OpenWrt `10mbps@debug` (profile asli `10M-P8`, alamat normal `10.10.8.255`) tersambung PPPoE ke `ether6` lab. Kode
+uji: `service/isolation_live_lab_test.go` (`TestLabLiveIsolateRestore`, butuh `MIKROTIK_LAB_WRITE=1` dan
+`MIKROTIK_LAB_LIVE_USER=<user PPPoE CPE>`). Setup penuh dipasang lewat `SetupService`, lalu `Executor.Isolate` dan
+`Executor.Restore` dijalankan pada secret itu; profile asli dikembalikan oleh cleanup tes. Dijalankan dua kali: PASS
+(186 dtk pada run bersih). `5mbps@debug` tidak disentuh. Setelah uji: 0 objek `zyad-*`, profile secret kembali `10M-P8`.
+
+| Butir | Hasil | Bukti |
+|---|---|---|
+| 1. IP dari pool isolir + address-list | **Terbukti** | Setelah `Isolate`, CPE tersambung ulang sendiri dengan alamat `10.255.254.254` (di dalam `10.255.254.0/24`); address-list `zyad-isolir` memuat alamat itu sebagai entri dinamis. Setelah `Restore` alamat kembali `10.10.8.255` dan entri hilang. |
+| 5. Sesi lama diputus, CPE tersambung ulang dengan profile baru / lama | **Terbukti** | Sesi lama (`*80000008`) hilang pada `Isolate`; sesi baru muncul dengan profile isolir (dan lagi setelah `Restore`) dalam jendela tunggu 150 dtk tanpa tindakan manual di CPE. |
+| 6. `Remove` pada id sesi yang sudah tidak ada | **Terbukti** | `mikrotik: router error: no such item (4)`. Executor tidak terpengaruh karena mencari sesi berdasarkan nama. |
+| 7. Secret dengan `remote-address` sendiri | **Terbukti sekali (manual)** | Dengan `remote-address=10.10.8.77` pada secret, sesi mendapat alamat itu (di luar pool); setelah `Isolate` sesi baru tetap masuk address-list `zyad-isolir`, jadi isolir lewat address-list tetap berlaku. Bagian ini tidak dimasukkan ke tes otomatis: `RouterClient` tidak punya `unset`, dan RouterOS API menolak nilai kosong (`invalid value for argument remote-address`); mengosongkan `remote-address` butuh `/ppp/secret/unset`. |
+| (pengamatan) filter forward | lihat uji lalu lintas di bawah | Pada uji pertama (tanpa lalu lintas dari sisi CPE) hanya aturan `drop` yang menghitung (2 paket / 152 byte). Uji lalu lintas di bawah mengisi kekosongan itu. |
+
+#### Uji lalu lintas dari sisi CPE (2 Nov 2026)
+
+CPE punya jalur manajemen SSH di `192.168.56.50` (alamat tambahan di `br-lan`, eth1 ke Cloud host-only; tidak lewat
+sesi PPPoE; DHCP LAN OpenWrt dimatikan). Kode uji: `service/isolation_traffic_lab_test.go`
+(`TestLabLiveIsolatedTraffic`, butuh `MIKROTIK_LAB_CPE_SSH` dan `MIKROTIK_LAB_CPE_KEY` selain env uji hidup). Probe
+read-only (`nslookup`, `wget` ke `/dev/null`, `ping`) dijalankan di tiga fase: kontrol sebelum isolir, saat terisolir,
+dan sesudah restore. PASS (182 dtk). Alamat sesi terisolir `10.255.254.2` dari `zyad-isolir-pool`; resolver CPE berganti
+ke `10.255.254.1` (dns-server profile isolir).
+
+| Probe | Normal | Terisolir | Setelah restore |
+|---|---|---|---|
+| DNS ke resolver router (`10.255.254.1` / `10.255.5.1`) | berhasil | **berhasil** (juga `10.255.5.1`) | berhasil |
+| DNS ke resolver eksternal `8.8.8.8` | berhasil | **berhasil** | berhasil |
+| HTTP dan HTTPS `zyad.online` (allowlist platform) | berhasil | **berhasil** | berhasil |
+| HTTPS `sandbox.doku.com`, `api-sandbox.doku.com` (allowlist DOKU) | HTTP 503 pada `/` (terjangkau) | **HTTP 503 (terjangkau)** | HTTP 503 |
+| HTTP dan HTTPS `example.com` (di luar allowlist) | berhasil | **diblokir** (`Failed to send request: Operation not permitted`) | berhasil |
+| ICMP ke `8.8.8.8` | berhasil | **diblokir** (100% loss) | berhasil |
+
+Penghitung aturan forward `zyad-managed` sesudah fase terisolir: `accept udp 53` = 2 paket, `accept allowlist` = 58 paket
+(4,2 KB), `drop` = 30 paket (1,9 KB), `accept tcp 53` = 0. Jadi DNS eksternal lewat aturan `accept udp 53`, trafik ke
+platform dan DOKU lewat allowlist, dan sisanya kena `drop`.
+
+Catatan: (a) DOKU sandbox menjawab 503 pada `/` di semua fase; itu dianggap "terjangkau" karena sambungan TCP/TLS dan
+balasan HTTP sampai, sedangkan alur yang di-drop berakhir sebagai galat sambungan. (b) Resolver router menjawab nama apa
+pun untuk sesi terisolir (termasuk `10.255.5.1`); itu perilaku yang diharapkan karena DNS ke router memakai rantai `input`,
+bukan `forward`. (c) Domain checkout DOKU yang sebenarnya (bukan host sandbox) belum diuji; daftar `{DOKU_HOSTS}` final
+tetap menunggu uji checkout nyata. (d) Pengalihan HTTP (butir 8) tidak diuji: setup uji tidak memakai `RedirectURL`, dan
+halaman isolir tenant (Fase 4) belum ada.
+
+Tidak dijalankan karena dilarang di router lab (lihat bagian 9 dan catatan `/ip service`): butir 9 TLS 8729 (`api-ssl`
+tidak punya sertifikat, handshake ditolak) dan butir 10 (user berhak minimum, perlu membuat user/grup). Butir 1-5, 7, 8
+butuh sesi PPPoE hidup: pada 2 Nov 2026 `/ppp active` = 0 sesi (CPE OpenWrt tidak tersambung, jalur kendali ke CPE tidak
+tersedia dari WSL).
+
+### 11.x Hasil uji lab pusat kendali (2 Nov 2026)
+
+Uji: `TestLabControlCenter` (`internal/modules/mikrotik/service/control_center_lab_test.go`, tag `mikrotiklab`), satu CPE
+nyata `10mbps@debug` (profile asal `10M-P8`) di router lab. Sisi router nyata (SetupService, Executor, RouterService); sisi
+DB memakai fake dalam memori yang dirangkai seperti produksi (ControlService -> Evaluator -> antrean -> TaskProcessor ->
+Executor, plus Reconciler). Jam fake dipakai untuk melewati jendela uji 10 menit (konstanta produksi tidak diubah); satu
+invoice kandidat menunggak dipasang pada akun. Satu kali jalan penuh lulus (320 dtk). Yang teramati:
+
+- Mode `simulation` + kandidat menunggak: keputusan `desired=isolated` tetapi `isolateAllowed=false`, alasan `simulation`;
+  0 tugas, sesi CPE tetap sama dan di luar pool isolir, profile secret tetap `10M-P8`.
+- Mode `pilot`, akun bukan pilot, menunggak: diblokir `not_in_pilot`, 0 tugas, sesi tidak berubah.
+- Akun pilot (tanpa invoice) + `StartPilotTest`: jendela = mulai + tepat 10 menit; `TestActiveCount=1`; satu tugas isolate
+  selesai, sesi CPE tersambung ulang di pool isolir (`10.255.254.2`) dan alamatnya ada di address-list; `pilot_verified_at`
+  masih kosong. Jam digeser +11 menit: `TestActiveCount=0`, `Reconciler` mengantre restore, restore selesai, CPE kembali ke
+  `10.10.8.0` (di luar pool), dan `pilot_verified_at` terisi tepat setelah restore.
+- Jalur `StopPilotTest` (verified direset dulu): isolate lalu stop; restore langsung diantre dan selesai, `pilot_verified_at`
+  terisi lagi.
+- Mode `paused` + kandidat menunggak: diblokir `paused`, 0 tugas baru, sesi normal. Setelah `active` (verified) akun terisolir
+  nyata; lalu `paused`: jeda saja tidak memulihkan siapa pun. `RestoreAll` (engine `on`) mengantre 1 restore, selesai, CPE
+  kembali di luar pool; evaluasi ulang selama `paused` tidak mengisolir lagi.
+- Temuan yang diperbaiki lewat uji ini: sebelum perbaikan, tugas restore `restore_all` untuk pelanggan yang MASIH menunggak
+  dibatalkan `superseded` oleh pemroses (evaluasi menganggap akun harus terisolir), sehingga `RestoreAll` tidak memulihkan
+  siapa pun. Sekarang tugas `restore_all` dijalankan selama gerbang isolir masih tertutup (sama seperti `mode_blocked_restore`),
+  dan tetap dibatalkan bila tenant sudah kembali `active`.
+- Catatan: `pilot_verified_at` di uji ini dicek terhadap aturan yang diimplementasi ulang di test (pendekatan dari SQL
+  asli), bukan SQL repository sebenarnya; SQL nyata `MarkPilotRoundTrip` tidak dijalankan di lab hidup dan dicakup oleh
+  integration test `TestControlRepo_MarkPilotRoundTrip`.
+- Kebersihan: `TestLabIsolirLeftovers` = 0 objek `zyad-*` sesudah uji; secret `10mbps@debug` kembali ke `10M-P8`, sesi CPE
+  naik di `10.10.8.0` (di luar pool isolir).
+
 ## 12. Operasional: timeout HTTP dan nginx
 
 Satu siklus lab preview + apply + preview + apply + cleanup makan ±70 dtk karena klien binary login ulang per
 panggilan. Handler mikrotik memperpanjang write deadline koneksi (apply/cleanup 4 menit, preview 90 dtk,
 registrasi/PATCH/check 45 dtk), tetapi reverse proxy punya batasnya sendiri: di DEV/prod set
-`proxy_read_timeout 300s;` untuk `location /api/v1/app/mikrotik/`. Tanpa itu klien bisa melihat 502 sementara
+`proxy_read_timeout 300s;` untuk `location /api/v1/app/mikrotik/`. Tanpa itu klien bisa melihat 504 sementara
 operasi di backend tetap selesai. Detail: `docs/reference-mikrotik.md` bagian "Timeout dan nginx".
+
+## 13. Impor PPP secret (Fase 2)
+
+Dijalankan setelah router terdaftar (bagian 1-3); setup isolir tidak wajib untuk impor.
+
+1. `POST /api/v1/app/mikrotik/routers/{id}/secrets/import` (permission `mikrotik_secret.import`). Aman diulang: impor ulang
+   hanya memperbarui profile/disabled/comment dan menandai `present=false` untuk secret yang sudah hilang di router;
+   pairing dan `original_profile` tidak berubah.
+2. Cek hasil lewat `GET /api/v1/app/mikrotik/secrets?router_id={id}&paired=false`.
+3. Secret ber-`needs_original_profile=true` (sedang di profile isolir) harus diberi profile asli lewat
+   `PUT /secrets/{id}/original-profile` sebelum bisa dipasangkan. Profile harus ada di router.
+4. Pasangkan ke pelanggan: `POST /secrets/{id}/pair` (akun yang ada) atau `/pair-new-customer` (buat kontak CRM baru;
+   bisa 409 `QUOTA_EXCEEDED` bila kuota kontak penuh).
+5. Tandai produk layanan PPPoE: `GET /products/unmarked`, lihat `GET /products/{id}/trigger/preview`, lalu
+   `PUT /products/{id}/trigger`. Fase 2 belum mengubah apa pun di router.
+
+Impor dan `original-profile` login ke router, dibatasi 20 panggilan per menit per organization. Referensi:
+`docs/reference-mikrotik.md` bagian "Pemetaan PPP secret".
+
+## 14. Mengaktifkan mesin isolir (Fase 3)
+
+Referensi perilaku: `docs/reference-mikrotik.md` bagian "Mesin isolir (Fase 3)". **Status uji:** uji lab Fase 3
+(bagian 14.5) dijalankan 1 Nov 2026 dan **lulus hanya untuk transport binary di RouterOS 7.8** (CHR); RouterOS v6,
+transport REST, dan penghapusan sesi aktif yang benar-benar online belum terbukti. Jangan menyalakan `on` di
+produksi sebelum gerbang deploy di rencana Fase 3 terpenuhi (uji lab v6 dan v7, nginx `proxy_read_timeout` diterapkan,
+persetujuan eksplisit).
+
+### 14.1 Prasyarat
+
+1. Setup router selesai (bagian 4 / `setup/apply`): `isolir_ready=true`, profile isolir ada.
+2. Secret sudah diimpor dan **dipasangkan** ke pelanggan (bagian 13), `original_profile` terisi dan bukan profile isolir.
+3. Produk layanan PPPoE sudah **ditandai** (`PUT /products/{id}/trigger`); tanpa penanda tidak ada invoice kandidat.
+4. Pengirim notifikasi (`default sender`) sudah diatur di pengaturan receivable tenant, agar pelanggan menerima email/WhatsApp.
+5. Entitlement `mikrotik.enabled` aktif untuk organisasi (default mati).
+6. Worker punya tenant storage terkonfigurasi (wajib untuk mode selain `off`, termasuk `dry_run`).
+
+### 14.2 Rollout bertahap
+
+> **Langkah 3 diganti oleh bagian 15.** Sejak Gelombang 2 env `on` saja tidak mengisolir siapa pun: tenant baru berada di mode
+> `simulation`; isolir baru jalan setelah mode `pilot` (hanya akun pilot) atau `active` (butuh `pilot_verified_at`). Ikuti 15.2.
+
+1. **`off`** (default): tidak ada efek. Pastikan migration sampai 000178 sudah jalan.
+2. **`dry_run`**: set `MIKROTIK_ISOLATION_MODE=dry_run` di env API **dan** worker, restart keduanya. Amati log worker/API
+   untuk `mikrotik: dry-run decision` (kolom `desired`, `invoices`, `secret_actions`). Tidak ada tugas dan tidak ada
+   perubahan router. Periksa bahwa daftar akun yang akan diisolir sesuai harapan (jangan ada yang tak terduga).
+3. **`on`**, **entitlement hanya untuk SATU organisasi uji dulu**: set `MIKROTIK_ISOLATION_MODE=on`, restart API dan
+   worker. Organisasi lain tanpa entitlement hanya diproses restore-only (tidak pernah diisolir). Jalankan E2E manual:
+   invoice lewat jatuh tempo -> isolir -> bayar -> buka. Baru setelah itu aktifkan organisasi berikutnya.
+
+### 14.3 Membaca dashboard tugas
+
+- `GET /api/v1/app/mikrotik/tasks/summary`: jumlah per status; `oldest_pending_restore_at` yang tua berarti ada pelanggan
+  yang sudah bayar tetapi belum dibuka.
+- `GET /api/v1/app/mikrotik/tasks?status=failed` (opsional `router_id`): lihat `last_error_code` dan `last_error`.
+- Tugas `failed` tidak diulang otomatis oleh processor; reconciler (tiap 2 menit) membuat tugas baru bila akun masih
+  perlu aksi, tetapi **baru setelah masa jeda**: selama tugas `failed` terakhir untuk secret dan aksi yang sama selesai
+  kurang dari **1 jam** (isolate) atau **15 menit** (restore) yang lalu, tidak ada tugas baru untuk aksi itu (aksi
+  lawannya tidak terhalang). Ini mencegah kegagalan permanen dibuat ulang dan dikirim alert tiap tick. Setelah penyebab
+  diperbaiki, `POST /tasks/{id}/retry` mengulang langsung (reset `attempts`) tanpa menunggu masa jeda.
+- Pemilik organisasi juga menerima notifikasi `mikrotik.isolation_task_failed` (email).
+
+### 14.3a Hal yang perlu diketahui operator
+
+- **Hanya organisasi berstatus aktif yang diproses** worker. Pelanggan terisolir milik organisasi yang disuspend **tidak
+  dibuka otomatis** oleh worker selama organisasi itu tidak aktif; pulihkan manual (14.6) bila perlu.
+- **Entitlement `mikrotik.enabled` dicabut**: seluruh grup UI/API `/app/mikrotik` (termasuk dashboard tugas, retry, dan
+  pengecualian pelanggan) tidak bisa diakses lagi, tetapi worker tetap berjalan restore-only dan **membuka isolir secara
+  otomatis** ketika pelanggan lunas. Tidak ada yang diisolir dalam mode itu.
+- **Router tidak bisa dihapus** (`DELETE /routers/{id}` -> 409 `MIKROTIK_ROUTER_HAS_ISOLATED_SECRETS`) selama masih ada
+  secret terisolir atau tugas `pending`/`running` di router itu. Buka isolir pelanggan dan tunggu tugas selesai dulu.
+- **Unpair ditolak** (409 `MIKROTIK_SECRET_HAS_ACTIVE_TASK`) selama secret punya tugas `pending`/`running`; coba lagi
+  setelah tugas selesai. Unpair secret terisolir tetap ditolak (409 `MIKROTIK_SECRET_ISOLATED`).
+- Mengubah host/kredensial router (`PATCH /routers/{id}`) agar menunjuk ke **perangkat fisik lain** saat masih ada
+  pelanggan terisolir **tidak dicegah**: restore akan dijalankan ke perangkat baru (biasanya gagal `secret_missing`) dan
+  pelanggan tetap terisolir di perangkat lama. Pulihkan dulu, baru pindahkan router. Hal yang sama berlaku untuk setup
+  ulang/cleanup isolir (nama profile isolir dikosongkan saat `isolir_ready` dicabut).
+- **Batas yang diketahui:** satu tenant dengan router lambat/tak terjangkau dapat menunda tenant lain dalam satu tick
+  worker (belum ada anggaran waktu per tick per tenant).
+
+### 14.4 Tindakan per kode kegagalan
+
+| `last_error_code` | Arti | Tindakan |
+|---|---|---|
+| `auth_failed` | Router menolak kredensial | Perbarui username/password router (`PATCH /routers/{id}`), lalu retry. |
+| `tls_untrusted` | Sertifikat TLS router tidak dipercaya | Periksa sertifikat; set/ubah `tls_fingerprint` (`PATCH /routers/{id}`), lalu retry. |
+| `host_not_allowed` | Host router ditolak kebijakan host | Periksa host dan `MIKROTIK_ALLOWED_PRIVATE_CIDRS`; perbaiki lalu retry. |
+| `secret_missing` | PPP secret tidak ada di router (secret ditandai `present=false`) | Impor ulang (`secrets/import`); bila secret memang dihapus, putuskan pairing atau buat ulang secret lalu impor. |
+| `profile_missing` | Profile asal (restore) tidak ada di router | Buat profile itu di router atau tetapkan profile lain lewat `PUT /secrets/{id}/original-profile`, lalu retry. |
+| `restore_target_invalid` | `original_profile` kosong atau sama dengan profile isolir | Tetapkan profile asli lewat `PUT /secrets/{id}/original-profile`, lalu retry. |
+| `router_not_found` | Router sudah dihapus | Untuk restore: daftarkan router lagi atau pulihkan manual (14.6). Isolate tidak relevan lagi. |
+| `router_not_ready` | `isolir_ready` hilang | Jalankan ulang setup router (`setup/preview` + `apply`), lalu retry. |
+| `router_unverifiable` | Tugas `isolate` sudah tidak diperlukan (pelanggan lunas atau entitlement dicabut), tetapi router tidak dapat dibaca untuk memastikan profile isolir tidak tertinggal (router mati/dicabut, kredensial ditolak, router dihapus). Tidak ada perubahan di DB maupun router. | Periksa profile secret di router secara manual (`/ppp secret print where name=X`). Bila masih profile isolir, kembalikan ke `original_profile` (14.6) atau perbaiki akses router lalu `POST /tasks/{id}/retry` (processor akan membaca ulang dan menjadwalkan restore bila perlu). Tugas `failed` tidak lagi menghalangi hapus router atau unpair. |
+| `unreachable` | Router tidak terjangkau (sementara) | Cek jaringan/WireGuard, port API, firewall router. Diulang otomatis dengan backoff; retry manual bila sudah habis. |
+
+`unknown` berarti kegagalan tak terduga yang sudah diulang otomatis; periksa log worker (`mikrotik: isolation task attempt failed`).
+
+### 14.5 Menjalankan uji lab (dijalankan 1 Nov 2026, binary 7.8 lulus)
+
+Uji kontrak Executor ke router nyata. Ia membuat secret uji **disabled** `zyad-labtest-user` di profile `default`
+(dibersihkan di `t.Cleanup`), lalu `Isolate` -> `Isolate` lagi (idempoten) -> `Restore`, dan mengecek filter
+`/ppp/active` per nama mengembalikan 0 baris. Subtest `binary` gagal keras; `rest` hanya di-skip bila request pertama
+gagal terhubung atau mendapat 404 (REST tidak tersedia), kegagalan berikutnya gagal keras. Dengan `MIKROTIK_LAB_WRITE=1`,
+prasyarat yang hilang (profile isolir, profile `default`, atau secret uji sisa dari run sebelumnya) membuat tes **gagal**,
+bukan di-skip. Profile isolir harus sudah ada di router (dari setup Fase 1).
+
+```
+cd backend
+MIKROTIK_LAB_HOST=<ip-lab> MIKROTIK_LAB_USER=<user> MIKROTIK_LAB_PASS=<password> \
+MIKROTIK_LAB_WRITE=1 \
+go test -tags mikrotiklab -run TestLab_IsolateRestoreRoundTrip -v -count=1 ./internal/modules/mikrotik/service/
+```
+
+Opsional: `MIKROTIK_LAB_PORT` (port API binary, default 8728), `MIKROTIK_LAB_REST_PORT` (default 80),
+`MIKROTIK_LAB_ISOLIR_PROFILE` (default `zyad-isolir`). Tanpa env atau tanpa `MIKROTIK_LAB_WRITE=1` tes di-skip.
+Hanya jumlah baris dan nama profile yang dicatat, tidak pernah kredensial. Catat hasil (PASS/FAIL per transport dan
+versi RouterOS) di bagian 11 setelah dijalankan (hasil 1 Nov 2026 tercatat di sana).
+
+Catatan menjalankan ulang: profile isolir hasil setup Fase 1 sudah dihapus oleh pembersihan lab (bagian 11), jadi
+sebelum tes buat profile PPP `zyad-isolir` sementara (atau jalankan setup Fase 1) dan hapus lagi sesudahnya; pastikan
+yang dihapus hanya profile buatan sendiri.
+
+### 14.6 Rollback
+
+1. Set `MIKROTIK_ISOLATION_MODE=off` di API dan worker, restart. Tidak ada tugas baru dan tidak ada yang diproses; tugas
+   `pending` dan pelanggan yang sudah terisolir **tetap apa adanya**.
+2. Memulihkan pelanggan yang sudah terisolir, pilih salah satu:
+   - Kembalikan mode ke `on` lalu cabut entitlement `mikrotik.enabled` organisasi: mode restore-only hanya membuka isolir
+     (tidak pernah mengisolir) dan membatalkan tugas isolate; atau
+   - manual di RouterOS per secret (ganti `X` dengan nama secret dan `Y` dengan profile asalnya, lihat `original_profile`
+     di `GET /secrets`):
+     ```
+     /ppp secret set [find name=X] profile=Y
+     /ppp active remove [find name=X]
+     ```
+     `isolation_state` di database tetap `isolated` sampai tugas restore berjalan. Bila mesin dinyalakan lagi, restore
+     itu idempoten (profile sudah benar) dan hanya menyelaraskan status.
+
+## 15. Pusat kendali: peluncuran bertahap dan pemulihan
+
+Referensi perilaku dan tabel aturan: `docs/reference-mikrotik.md` bagian "Pusat Kendali (Gelombang 2)". Bagian ini
+adalah urutan kerja operator.
+
+### 15.1 Gerbang yang ada
+
+- **Env `MIKROTIK_ISOLATION_MODE`** (API dan worker, restart keduanya): `off` | `dry_run` | `on`. Env selalu menang atas
+  mode tenant; hanya `on` yang membiarkan tenant benar-benar mengisolir.
+- **Mode tenant** (`PUT /control/mode`): `simulation` (default), `pilot`, `active`, `paused`. Tenant baru dengan env `on`
+  tidak mengisolir siapa pun sampai memilih `pilot` atau `active`.
+- Entitlement `mikrotik.enabled` per organisasi; `active` menuntut pilot terverifikasi.
+
+### 15.2 Urutan peluncuran yang aman
+
+1. Env `dry_run`: periksa log `mikrotik: dry-run decision`. Tidak ada tugas dibuat.
+2. Env `on` dengan entitlement hanya untuk satu organisasi uji. Tenant masih `simulation`: engine hanya mencatat
+   keputusan (`mikrotik: simulation decision`). Tinjau **pratinjau** (`GET /control/preview/summary`, daftar, dan ekspor CSV):
+   periksa `target`, `blocked` dan alasan tiap status (`needs_profile`, `secret_missing`, `router_not_ready`).
+   Atur `grace_days` dan pengecualian sesuai kebutuhan.
+3. Mode `pilot`, tambahkan **akun milik sendiri** ke daftar pilot (`PUT /control/pilot/{account_id}`), jalankan
+   **uji pilot** (`POST .../test`, jendela 10 menit). Pastikan koneksi akun uji benar-benar terputus lalu pulih; setelah
+   isolir dan restore selesai, `pilot_verified_at` terisi. Akun pilot tidak menerima notifikasi pelanggan.
+4. Mode `active` (boleh sekaligus dengan `exemptions` untuk akun yang harus dilindungi). Pantau log aktivitas dan dashboard
+   tugas (14.3) beberapa siklus reconcile pertama.
+5. **Jeda**: mode `paused` menghentikan isolir baru; pemulihan tetap berjalan. **Pulihkan semua** (`POST /control/restore-all`,
+   hanya saat `paused` dan env `on`; env `off`/`dry_run` ditolak 409 `MIKROTIK_ENGINE_OFF`) mengantrekan restore untuk setiap secret terisolir; ulangi bila `skipped` > 0 dan tugas lama sudah
+   selesai. Pairing tidak pernah dilepas.
+
+### 15.3 Membaca log aktivitas
+
+`GET /control/activity` (terbaru dulu, `limit` maks 100, `offset`) memuat isolir/pemulihan, tugas gagal/dibatalkan/diulang,
+perubahan mode dan grace, restore-all, aktivitas pilot, dan perubahan pengecualian. Kalimatnya berbahasa Indonesia; kode
+alasan teknis tidak ditampilkan di pesan. Tugas dibatalkan `mode_blocked`
+berarti gerbang menutup setelah tugas dibuat (mis. mode diubah ke `paused`); bila router sempat terisolir, restore
+`mode_blocked_restore` menyusul otomatis. Log hanya memuat event kendali dan tugas, bukan pengelolaan router/secret.
+
+### 15.4 Gerbang deploy (Catatan deploy)
+
+Semua catatan deploy pusat kendali dikumpulkan di blok ini: nginx, CIDR privat, kunci index `000178`, dan urutan migration.
+
+- **nginx** (alasan teknis, **belum diuji di nginx nyata**): `proxy_read_timeout` minimal **300s** untuk
+  `location /api/v1/app/mikrotik/`, termasuk `/control/preview/export`: ekspor dialirkan bertahap (sampai 100.000 baris)
+  sehingga durasinya bisa lama; nilai 300s juga menutup setup/apply (bagian 12). Vhost sebaiknya memakai
+  `proxy_http_version 1.1;` agar ekspor yang diputus di tengah jalan (backend sengaja memutus koneksi saat gagal setelah
+  respons dimulai) tidak tampak sebagai berkas lengkap bagi klien: chunked encoding membutuhkan HTTP/1.1 ke upstream.
+  Verifikasi setelah deploy dengan mengekspor dan membandingkan jumlah baris dengan header `X-Total-Count`.
+- **`MIKROTIK_ALLOWED_PRIVATE_CIDRS`** harus mencakup subnet WireGuard tenant yang routernya dijangkau lewat tunnel.
+- **Migration `000178`** membuat index pada `audit_logs` (`idx_audit_logs_mikrotik_org_created`) tanpa `CONCURRENTLY`,
+  sehingga mengambil kunci SHARE singkat (menahan tulis ke `audit_logs` selama pembuatan). Jalankan pada jam sepi.
+- Migration `000176` (tabel pengaturan, pilot, kolom `exempted_until`) dan `000177` (permission) harus sudah jalan sebelum
+  API baru dinyalakan.
+
+### 15.5 Rollback
+
+Prinsip: **jaga env `on` selama memulihkan pelanggan.** Tugas restore hanya diproses worker bila env `on` (pada `off` tidak
+ada job, pada `dry_run` processor tidak jalan), dan `restore-all` menolak env selain `on` (409 `MIKROTIK_ENGINE_OFF`).
+Mematikan env lebih dulu justru meninggalkan pelanggan terisolir.
+
+1. Hentikan isolir baru: set mode tenant ke `paused` (`PUT /control/mode`). Restore tetap berjalan.
+2. Pulihkan: `POST /control/restore-all` (env `on` dan mode `paused`). Ulangi bila `skipped` > 0 setelah tugas lama selesai.
+3. Verifikasi: `GET /control` (`isolated_secrets` = 0), `GET /tasks/summary` (tidak ada `pending`/`running`, tidak ada
+   `oldest_pending_restore_at`), dan log aktivitas (tugas `failed` ditangani dulu dengan tabel 14.4).
+4. Baru sesudah tidak ada yang terisolir, bila perlu set env `MIKROTIK_ISOLATION_MODE=off` di API dan worker, restart.
+5. Bila env sudah `off`/`dry_run` dan masih ada pelanggan terisolir: `restore-all` tidak tersedia. Pilih: kembalikan env ke
+   `on` (mode tenant `paused`) lalu langkah 2, atau pulihkan manual per secret seperti 14.6.
+6. Migration `000176`-`000178` bersifat aditif (tabel/kolom/index baru; kode lama mengabaikannya). Bila harus di-down:
+   urutan `000178` → `000177` → `000176`. Down `000176` menghapus tabel pengaturan dan pilot serta kolom `exempted_until`
+   (pengaturan mode, grace, dan pilot hilang; tenant kembali ke default `simulation`).
+7. **Rollback ke binary lama setelah binary baru menulis `exempted_until`**: binary lama tidak mengenal kolom itu. Bila
+   operator mengecualikan ulang pelanggan lewat binary lama, tanggal lama di `exempted_until` tetap tersimpan (mungkin sudah
+   lewat atau masih berlaku), sehingga pengecualian bisa kedaluwarsa sendiri atau berhenti di tanggal yang tak terduga
+   begitu binary baru dijalankan lagi. Sebelum menjalankan binary baru lagi, periksa lalu kosongkan:
+   ```sql
+   SELECT organization_id, account_id, exempt, exempted_until, set_at
+   FROM mikrotik_customer_policies WHERE exempted_until IS NOT NULL ORDER BY set_at DESC;
+
+   -- hanya untuk baris yang memang harus tanpa batas waktu (sesuaikan WHERE; jalankan di dalam transaksi):
+   BEGIN;
+   UPDATE mikrotik_customer_policies SET exempted_until = NULL
+   WHERE exempt AND exempted_until IS NOT NULL AND set_at >= TIMESTAMPTZ '<waktu rollback>';
+   -- periksa jumlah baris, lalu COMMIT (atau ROLLBACK)
+   ```
+8. **Organisasi yang kehilangan entitlement `mikrotik.enabled`** tidak bisa menjangkau `/control` (tidak bisa `pause` atau
+   `restore-all`), dan pelanggannya yang menunggak tetap terisolir. Operator memulihkannya lewat runbook 14.6 (mode
+   restore-only atau manual per secret), bukan lewat UI tenant.

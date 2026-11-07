@@ -121,6 +121,15 @@ func defaultVariables() map[string][]domain.NotificationVariable {
 			{Key: "reason", Description: "Failure reason (no provider internals)", Required: true, Example: "Belum ada pengirim."},
 			{Key: "invoice_url", Description: "Invoice page URL", Required: true, Example: "https://app.example.test/app/billing/invoices/1"},
 		},
+		"mikrotik.isolation_task_failed": {
+			{Key: "app_name", Description: "Application name", Required: true, Example: "Zyad Cloud"},
+			{Key: "user_name", Description: "Recipient user name", Required: true, Example: "Sari"},
+			{Key: "router_name", Description: "Router name", Required: true, Example: "Router Pusat"},
+			{Key: "secret_name", Description: "PPP secret name", Required: true, Example: "budi-001"},
+			{Key: "action", Description: "Task action label (isolir or pulihkan)", Required: true, Example: "isolir"},
+			{Key: "reason", Description: "Failure reason (no provider internals)", Required: true, Example: "Router tidak dapat dijangkau."},
+			{Key: "tasks_url", Description: "Isolation tasks page URL", Required: true, Example: "https://app.example.test/app/mikrotik/tasks"},
+		},
 		"landing.activation_paid": {
 			{Key: "app_name", Description: "Application name", Required: true, Example: "Zyad Cloud"},
 			{Key: "buyer_name", Description: "Buyer name", Required: true, Example: "Budi"},

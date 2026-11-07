@@ -101,3 +101,95 @@ type InvalidInputError struct {
 func (e *InvalidInputError) Error() string { return e.Message }
 
 func (e *InvalidInputError) Is(target error) bool { return target == ErrInvalidInput }
+
+// Fase 2: pemetaan PPP secret ke pelanggan.
+var (
+	// ErrAccountNotFound: the receivable account does not exist in this organization.
+	ErrAccountNotFound = errors.New("account not found")
+	// ErrProductNotFound: the product does not exist in this organization.
+	ErrProductNotFound = errors.New("product not found")
+	// ErrSecretNotFound: the PPP secret does not exist in this organization.
+	ErrSecretNotFound = errors.New("ppp secret not found")
+	// ErrSecretNotPairable: the PPP secret cannot be paired to a customer yet.
+	ErrSecretNotPairable = errors.New("ppp secret cannot be paired")
+	// ErrSecretAlreadyPaired: the PPP secret is already paired to a customer.
+	ErrSecretAlreadyPaired = errors.New("ppp secret is already paired")
+	// ErrSecretIsolated: the PPP secret is currently isolated and cannot be unpaired.
+	ErrSecretIsolated = errors.New("ppp secret is isolated")
+)
+
+// Fase 3: mesin isolir.
+var (
+	// ErrTaskNotFound: the isolation task does not exist in this organization.
+	ErrTaskNotFound = errors.New("isolation task not found")
+	// ErrTaskNotRetryable: only a failed isolation task can be retried.
+	ErrTaskNotRetryable = errors.New("isolation task is not in a retryable state")
+	// ErrTaskActiveExists: another pending/running task already exists for the secret.
+	ErrTaskActiveExists = errors.New("an active task already exists for this secret")
+	// ErrRouterHasIsolatedSecrets: the router still has isolated secrets or
+	// secrets with a pending/running isolation task, so it cannot be deleted
+	// (nothing could restore those customers afterwards).
+	ErrRouterHasIsolatedSecrets = errors.New("router has isolated secrets or active isolation tasks")
+	// ErrSecretHasActiveTask: the PPP secret has a pending/running isolation
+	// task and cannot be unpaired until it finishes.
+	ErrSecretHasActiveTask = errors.New("ppp secret has an active isolation task")
+)
+
+// Fase 3: langkah router pada eksekutor isolir.
+var (
+	// ErrSecretMissingOnRouter: the PPP secret no longer exists on the router.
+	ErrSecretMissingOnRouter = errors.New("ppp secret is missing on the router")
+	// ErrRestoreProfileMissing: the profile to restore to does not exist on the router.
+	ErrRestoreProfileMissing = errors.New("restore profile does not exist on the router")
+	// ErrRestoreTargetInvalid: no usable original profile is known (empty or the isolir profile).
+	ErrRestoreTargetInvalid = errors.New("no valid original profile to restore to")
+	// ErrRouterNotIsolirReady: the router has no completed isolir setup.
+	ErrRouterNotIsolirReady = errors.New("router is not isolir ready")
+)
+
+// Gelombang 1 UI: usulan pairing otomatis.
+var (
+	// ErrAnalyzeInProgress: another analysis holds this router's lock; nothing was changed.
+	ErrAnalyzeInProgress = errors.New("another suggestion analysis is running for this router; try again when it finishes")
+)
+
+// Gelombang 2: control center.
+var (
+	// ErrModeInvalid: unknown isolation mode, or exemptions sent with a mode other than active.
+	ErrModeInvalid = errors.New("invalid isolation mode change")
+	// ErrPilotRequired: active needs at least one successful pilot test (pilot_verified_at).
+	ErrPilotRequired = errors.New("complete at least one successful pilot test before activating automatic isolation")
+	// ErrPilotModeRequired: a pilot test can only run while the tenant mode is pilot.
+	ErrPilotModeRequired = errors.New("a pilot test can only run in pilot mode")
+	// ErrEngineOff: the isolation engine is not switched on for this deployment.
+	ErrEngineOff = errors.New("the isolation engine is not switched on")
+	// ErrNotPaused: restore-all is only allowed while the tenant mode is paused.
+	ErrNotPaused = errors.New("restore all is only allowed while isolation is paused")
+)
+
+// ErrPilotTestNotRunnable matches *PilotTestNotRunnableError.
+var ErrPilotTestNotRunnable = errors.New("the pilot test cannot isolate this account")
+
+// Reasons a pilot test cannot isolate the pilot account.
+const (
+	PilotBlockedExempt         = "exempt"
+	PilotBlockedNoUsableSecret = "no_usable_secret"
+	PilotBlockedByMode         = "blocked_by_mode"
+)
+
+// PilotTestNotRunnableError: the pilot test was started but nothing would be
+// isolated, so the test window was ended again. Reason is a PilotBlocked* value.
+type PilotTestNotRunnableError struct{ Reason string }
+
+func (e *PilotTestNotRunnableError) Error() string {
+	switch e.Reason {
+	case PilotBlockedExempt:
+		return "the pilot account is exempt from isolation; remove the exemption before testing"
+	case PilotBlockedNoUsableSecret:
+		return "the pilot account has no PPP secret that can be isolated (present on the router with a known original profile)"
+	default:
+		return "isolation of the pilot account is blocked by the current isolation mode"
+	}
+}
+
+func (e *PilotTestNotRunnableError) Is(target error) bool { return target == ErrPilotTestNotRunnable }

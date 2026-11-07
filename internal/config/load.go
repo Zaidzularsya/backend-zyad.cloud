@@ -202,6 +202,7 @@ func LoadMikrotik() MikrotikConfig {
 
 		AllowedPrivateCIDRs: parseAllowedPrivateCIDRs(getEnv("MIKROTIK_ALLOWED_PRIVATE_CIDRS", "")),
 		SetupAllowREST:      getEnvBool("MIKROTIK_SETUP_ALLOW_REST", false),
+		IsolationMode:       parseIsolationMode(getEnv("MIKROTIK_ISOLATION_MODE", "")),
 	}
 }
 
@@ -459,4 +460,15 @@ func parseDotEnvLine(line string) (string, string, bool) {
 	}
 
 	return key, value, true
+}
+
+// parseIsolationMode normalizes MIKROTIK_ISOLATION_MODE; anything other than
+// "on" or "dry_run" (case-insensitive) is treated as "off" so a typo never enables the engine.
+func parseIsolationMode(raw string) string {
+	switch mode := strings.ToLower(strings.TrimSpace(raw)); mode {
+	case "on", "dry_run":
+		return mode
+	default:
+		return "off"
+	}
 }

@@ -78,6 +78,12 @@ func main() {
 		log.Warn("self-serve suspend job disabled", "error", err)
 	}
 
+	// nil when MIKROTIK_ISOLATION_MODE is off (the default).
+	mikrotikIsolation, err := app.NewMikrotikIsolationRunner(cfg, db, log)
+	if err != nil {
+		log.Warn("mikrotik isolation job disabled", "error", err)
+	}
+
 	if *once {
 		if err := runBatch(ctx, log, worker, notificationService, batchSize); err != nil && !errors.Is(err, context.Canceled) {
 			log.Error("worker batch failed", "error", err)
@@ -98,6 +104,9 @@ func main() {
 		}
 		if selfServeSuspend != nil {
 			runSelfServeSuspend(ctx, log, selfServeSuspend)
+		}
+		if mikrotikIsolation != nil {
+			runMikrotikIsolation(ctx, log, mikrotikIsolation)
 		}
 		return
 	}
@@ -140,6 +149,11 @@ func main() {
 	if selfServeSuspend != nil {
 		log.Info("starting self-serve suspend job", "interval", selfServeSuspendInterval.String())
 		go runEvery(ctx, selfServeSuspendInterval, func() { runSelfServeSuspend(ctx, log, selfServeSuspend) })
+	}
+
+	if mikrotikIsolation != nil {
+		log.Info("starting mikrotik isolation job", "interval", mikrotikIsolationInterval.String(), "mode", cfg.Mikrotik.IsolationMode)
+		go runEvery(ctx, mikrotikIsolationInterval, func() { runMikrotikIsolation(ctx, log, mikrotikIsolation) })
 	}
 
 	interval := time.Duration(cfg.Notification.WorkerIntervalSeconds) * time.Second
@@ -296,6 +310,27 @@ func runSelfServeSuspend(ctx context.Context, log *slog.Logger, runner *app.Self
 		log.Error("self-serve suspend run failed", "error", err)
 	}
 	log.Info("self-serve suspend", "checked", result.Checked, "suspended", result.Suspended, "skipped", result.Skipped)
+}
+
+// mikrotikIsolationInterval: due tasks (restore backoff starts at 30s) are only
+// claimed on a tick, and the reconciler is the retry path after a failed task,
+// so the tick is short; it is also the floor of every task backoff.
+const mikrotikIsolationInterval = 2 * time.Minute
+
+// runMikrotikIsolation logs counts only (never customer data), and only when
+// something happened.
+func runMikrotikIsolation(ctx context.Context, log *slog.Logger, runner *app.MikrotikIsolationRunner) {
+	result, err := runner.RunOnce(ctx)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		log.Error("mikrotik isolation run failed", "error", err)
+		return
+	}
+	if result.Active() {
+		log.Info("mikrotik isolation run", "organizations", result.Organizations, "skipped", result.Skipped,
+			"failed", result.Failed, "accounts", result.Accounts, "accounts_failed", result.AccountsFailed,
+			"tasks_done", result.Tasks.Done, "tasks_retried", result.Tasks.Retried, "tasks_failed", result.Tasks.Failed,
+			"tasks_cancelled", result.Tasks.Cancelled, "tasks_skipped", result.Tasks.Skipped)
+	}
 }
 
 func runMailSync(ctx context.Context, log *slog.Logger, sync *mailboxservice.SyncService) {

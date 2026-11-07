@@ -145,7 +145,9 @@ type AccountService interface {
 	EnsureForSource(ctx context.Context, scope coretenant.Scope, in AccountInput, userID string) (domain.Account, error)
 	Update(ctx context.Context, scope coretenant.Scope, id string, in AccountInput) (domain.Account, error)
 	Get(ctx context.Context, scope coretenant.Scope, id string) (domain.Account, error)
-	List(ctx context.Context, scope coretenant.Scope, search string, limit, offset int) ([]domain.Account, int64, error)
+	List(ctx context.Context, scope coretenant.Scope, search, contactID string, limit, offset int) ([]domain.Account, int64, error)
+	// ListAfterID: keyset page ordered by id ascending (afterID "" = from the start).
+	ListAfterID(ctx context.Context, scope coretenant.Scope, afterID string, limit int) ([]domain.Account, error)
 }
 
 // Listener: modul lain (CRM, S4) mendaftar; dipanggil SETELAH commit, error hanya di-log.
@@ -173,6 +175,12 @@ type Listener interface {
 // mengirim notifikasi kedua.
 type ReplayableListener interface {
 	InvoicePaidReplay(ctx context.Context, scope coretenant.Scope, inv InvoiceRef)
+}
+
+// VoidedListener: opt-in untuk listener yang perlu tahu invoice dibatalkan (void).
+// Sengaja tidak ditambahkan ke Listener supaya listener lama tidak berubah.
+type VoidedListener interface {
+	InvoiceVoided(ctx context.Context, scope coretenant.Scope, inv InvoiceRef)
 }
 
 // SettingsService mengelola pengaturan penagihan organisasi.

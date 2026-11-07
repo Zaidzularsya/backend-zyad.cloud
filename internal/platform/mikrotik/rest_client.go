@@ -125,9 +125,14 @@ func (c *restClient) do(ctx context.Context, method, path string, query url.Valu
 		return nil, c.classify(err)
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	// Read one byte past the cap so an oversize body is reported, not
+	// silently truncated into a JSON parse failure.
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxAPIResponseBytes+1))
 	if err != nil {
 		return nil, c.classify(err)
+	}
+	if len(data) > maxAPIResponseBytes {
+		return nil, ErrResponseTooLarge
 	}
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:

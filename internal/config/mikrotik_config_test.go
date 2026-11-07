@@ -57,3 +57,14 @@ func TestLoadMikrotikSetupAllowREST(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadMikrotikIsolationMode(t *testing.T) {
+	for _, tc := range []struct{ env, want string }{
+		{"", "off"}, {"on", "on"}, {"dry_run", "dry_run"}, {"ON", "on"}, {"x", "off"},
+	} {
+		t.Setenv("MIKROTIK_ISOLATION_MODE", tc.env)
+		if got := LoadMikrotik().IsolationMode; got != tc.want {
+			t.Fatalf("MIKROTIK_ISOLATION_MODE=%q: IsolationMode = %q, want %q", tc.env, got, tc.want)
+		}
+	}
+}

@@ -34,7 +34,9 @@ type AccountRepository interface {
 	// FindByID / FindBySource mengembalikan pgx.ErrNoRows bila tidak ada.
 	FindByID(ctx context.Context, scope coretenant.Scope, id string) (domain.Account, error)
 	FindBySource(ctx context.Context, scope coretenant.Scope, sourceType, sourceID string) (domain.Account, error)
-	List(ctx context.Context, scope coretenant.Scope, search string, limit, offset int) ([]domain.Account, int64, error)
+	List(ctx context.Context, scope coretenant.Scope, search, contactID string, limit, offset int) ([]domain.Account, int64, error)
+	// ListAfterID: keyset page ordered by id ascending (afterID "" = from the start), for bulk readers.
+	ListAfterID(ctx context.Context, scope coretenant.Scope, afterID string, limit int) ([]domain.Account, error)
 }
 
 type InvoiceItemParams struct {

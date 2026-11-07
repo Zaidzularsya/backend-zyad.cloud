@@ -195,11 +195,45 @@ func failRouter(c *gin.Context, err error) {
 	var tlsErr *mikrotik.TLSUntrustedError
 	var conflictErr *mikrotik.SetupConflictError
 	var stepErr *mikrotik.SetupStepError
+	var appErr *coreerrors.AppError
 	switch {
 	case errors.Is(err, mikrotik.ErrRouterNotFound):
 		response.Error(c, http.StatusNotFound, "MIKROTIK_ROUTER_NOT_FOUND", "router not found")
+	case errors.Is(err, mikrotik.ErrSecretNotFound):
+		response.Error(c, http.StatusNotFound, "MIKROTIK_SECRET_NOT_FOUND", "ppp secret not found")
+	case errors.Is(err, mikrotik.ErrAccountNotFound):
+		response.Error(c, http.StatusNotFound, "MIKROTIK_ACCOUNT_NOT_FOUND", "customer account not found")
+	case errors.Is(err, mikrotik.ErrProductNotFound):
+		response.Error(c, http.StatusNotFound, "MIKROTIK_PRODUCT_NOT_FOUND", "product not found")
+	case errors.Is(err, mikrotik.ErrSecretAlreadyPaired):
+		response.Error(c, http.StatusConflict, "MIKROTIK_SECRET_ALREADY_PAIRED", "ppp secret is already paired to a customer")
+	case errors.Is(err, mikrotik.ErrAnalyzeInProgress):
+		response.Error(c, http.StatusConflict, "MIKROTIK_ANALYZE_IN_PROGRESS", "another suggestion analysis is running for this router; try again when it finishes")
+	case errors.Is(err, mikrotik.ErrSecretIsolated):
+		response.Error(c, http.StatusConflict, "MIKROTIK_SECRET_ISOLATED", "ppp secret is isolated; restore its profile before unpairing")
+	case errors.Is(err, mikrotik.ErrSecretHasActiveTask):
+		response.Error(c, http.StatusConflict, "MIKROTIK_SECRET_HAS_ACTIVE_TASK",
+			"PPP secret tidak dapat dilepas karena masih ada tugas isolir/pemulihan yang menunggu atau sedang berjalan. Coba lagi setelah tugas selesai.")
+	case errors.Is(err, mikrotik.ErrRouterHasIsolatedSecrets):
+		response.Error(c, http.StatusConflict, "MIKROTIK_ROUTER_HAS_ISOLATED_SECRETS",
+			"Router tidak dapat dihapus karena masih ada pelanggan yang terisolir atau tugas isolir/pemulihan yang belum selesai. Pulihkan pelanggan dan tunggu tugas selesai terlebih dahulu.")
+	case errors.Is(err, mikrotik.ErrSecretNotPairable):
+		response.Error(c, http.StatusConflict, "MIKROTIK_SECRET_NOT_PAIRABLE", err.Error())
 	case errors.Is(err, mikrotik.ErrRouterNameTaken):
 		response.Error(c, http.StatusConflict, "MIKROTIK_ROUTER_NAME_TAKEN", "router name is already used")
+	case errors.Is(err, mikrotik.ErrModeInvalid):
+		response.Error(c, http.StatusUnprocessableEntity, "MIKROTIK_MODE_INVALID", err.Error())
+	case errors.Is(err, mikrotik.ErrPilotRequired):
+		response.Error(c, http.StatusConflict, "MIKROTIK_PILOT_REQUIRED", mikrotik.ErrPilotRequired.Error())
+	case errors.Is(err, mikrotik.ErrPilotModeRequired):
+		response.Error(c, http.StatusConflict, "MIKROTIK_PILOT_MODE_REQUIRED", mikrotik.ErrPilotModeRequired.Error())
+	case errors.Is(err, mikrotik.ErrEngineOff):
+		response.Error(c, http.StatusConflict, "MIKROTIK_ENGINE_OFF", mikrotik.ErrEngineOff.Error())
+	case errors.Is(err, mikrotik.ErrPilotTestNotRunnable):
+		// The message is one of the fixed PilotTestNotRunnableError texts.
+		response.Error(c, http.StatusConflict, "MIKROTIK_PILOT_TEST_NOT_RUNNABLE", err.Error())
+	case errors.Is(err, mikrotik.ErrNotPaused):
+		response.Error(c, http.StatusConflict, "MIKROTIK_NOT_PAUSED", mikrotik.ErrNotPaused.Error())
 	case errors.As(err, &invalidErr):
 		response.Error(c, http.StatusUnprocessableEntity, "VALIDATION_ERROR", invalidErr.Message)
 	case errors.Is(err, mikrotik.ErrPlanChanged):
@@ -236,6 +270,10 @@ func failRouter(c *gin.Context, err error) {
 			msg = "router rejected setup step (" + stepErr.Step + "); cleanup is incomplete and can be retried"
 		}
 		response.Error(c, http.StatusBadGateway, "MIKROTIK_SETUP_FAILED", msg)
+	case errors.As(err, &appErr) && appErr.Status >= 400 && appErr.Status < 500:
+		// Deliberate client-facing refusals from other modules reached through
+		// the app adapters (e.g. 409 QUOTA_EXCEEDED when creating a CRM contact).
+		response.Error(c, appErr.Status, appErr.Code, appErr.Message)
 	default:
 		c.Error(err) // logged by middleware, not exposed
 		response.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")

@@ -657,7 +657,12 @@ func New(ctx context.Context) (*App, error) {
 		Locker:         crmrepo.NewAdvisoryLocker(db),
 	}), redisClient)
 
-	mikrotikRouterHandler, mikrotikSetupHandler := buildMikrotik(cfg, db)
+	mikrotikModule := buildMikrotik(cfg, db, mikrotikBuild{
+		Accounts:  receivableModule.Accounts,
+		Contacts:  crmContactSvc,
+		Products:  catalogProductService,
+		Listeners: receivableModule.Listeners,
+	})
 
 	router, err := newRouter(Dependencies{
 		Config:                           cfg,
@@ -728,8 +733,15 @@ func New(ctx context.Context) (*App, error) {
 		CRMSelfServeHandler:              crmSelfServeHandler,
 		CRMTenantCheckoutHandler:         crmTenantCheckoutHandler,
 		ReceivableAccountHandler:         receivableModule.AccountHandler,
-		MikrotikRouterHandler:            mikrotikRouterHandler,
-		MikrotikSetupHandler:             mikrotikSetupHandler,
+		MikrotikRouterHandler:            mikrotikModule.Router,
+		MikrotikSetupHandler:             mikrotikModule.Setup,
+		MikrotikSecretHandler:            mikrotikModule.Secret,
+		MikrotikPolicyHandler:            mikrotikModule.Policy,
+		MikrotikTaskHandler:              mikrotikModule.Task,
+		MikrotikOnboardingHandler:        mikrotikModule.Onboarding,
+		MikrotikControlHandler:           mikrotikModule.Control,
+		MikrotikPreviewHandler:           mikrotikModule.Preview,
+		MikrotikActivityHandler:          mikrotikModule.Activity,
 		MikrotikRateCounter:              redisClient,
 		ReceivableInvoiceHandler:         receivableModule.InvoiceHandler,
 		ReceivablePaymentHandler:         receivableModule.PaymentHandler,

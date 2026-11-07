@@ -385,3 +385,15 @@ func TestRESTClientScrubsPasswordAcrossTruncation(t *testing.T) {
 		}
 	}
 }
+
+func TestRESTClientResponseTooLarge(t *testing.T) {
+	big := strings.Repeat(" ", maxAPIResponseBytes+1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("[" + big + "]"))
+	}))
+	defer srv.Close()
+	_, err := newREST(t, endpointFor(t, srv, false)).Print(context.Background(), "ppp/secret", nil)
+	if !errors.Is(err, ErrResponseTooLarge) {
+		t.Fatalf("err = %v, want ErrResponseTooLarge", err)
+	}
+}
