@@ -36,7 +36,7 @@ func (profileIssuer) OrganizationProfile(context.Context, coretenant.Scope) (doc
 
 func TestPayLink_NoDefaultSenderReturnsEmpty(t *testing.T) {
 	pl := &fakePayLinker{}
-	a := mikrotikPublicAdapter{settings: fakeNotifSettings{sender: "  "}, links: pl}
+	a := mikrotikPublicAdapter{settings: fakeNotifSettings{sender: "  "}, links: pl, features: &recFeatures{}}
 	link, err := a.PayLink(context.Background(), mkScope("o1"), "inv1")
 	if err != nil || link != "" || len(pl.calls) != 0 {
 		t.Fatalf("link=%q err=%v calls=%v", link, err, pl.calls)
@@ -45,15 +45,35 @@ func TestPayLink_NoDefaultSenderReturnsEmpty(t *testing.T) {
 
 func TestPayLink_UsesDefaultSenderAndPropagatesError(t *testing.T) {
 	pl := &fakePayLinker{}
-	a := mikrotikPublicAdapter{settings: fakeNotifSettings{sender: "u1"}, links: pl}
+	f := &recFeatures{}
+	a := mikrotikPublicAdapter{settings: fakeNotifSettings{sender: "u1"}, links: pl, features: f}
 	link, err := a.PayLink(context.Background(), mkScope("o1"), "inv1")
 	if err != nil || link != "https://pay.example/inv1" {
 		t.Fatalf("link=%q err=%v", link, err)
+	}
+	if len(f.keys) != 1 || f.keys[0] != "receivable.online_payment" {
+		t.Fatalf("feature keys=%v", f.keys)
 	}
 	boom := errors.New("boom")
 	a.links = failLinker{err: boom}
 	if _, err := a.PayLink(context.Background(), mkScope("o1"), "inv1"); !errors.Is(err, boom) {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+// Without receivable.online_payment the public invoice page cannot take the
+// payment, so the isolir page must not offer a Bayar link.
+func TestPayLink_NoOnlinePaymentEntitlementReturnsEmpty(t *testing.T) {
+	pl := &fakePayLinker{}
+	a := mikrotikPublicAdapter{settings: fakeNotifSettings{sender: "u1"}, links: pl,
+		features: &recFeatures{err: organization.FeatureNotEnabledError()}}
+	link, err := a.PayLink(context.Background(), mkScope("o1"), "inv1")
+	if err != nil || link != "" || len(pl.calls) != 0 {
+		t.Fatalf("link=%q err=%v calls=%v", link, err, pl.calls)
+	}
+	a.features = &recFeatures{err: errors.New("store down")}
+	if _, err := a.PayLink(context.Background(), mkScope("o1"), "inv1"); err == nil {
+		t.Fatal("infrastructure error must be returned")
 	}
 }
 

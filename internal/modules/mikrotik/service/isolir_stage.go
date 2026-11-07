@@ -52,7 +52,9 @@ func (s *PublicService) Stage(ctx context.Context, scope coretenant.Scope, invoi
 	if len(isolated) == 0 {
 		return StageActive, true, nil
 	}
-	remaining, err := s.d.Overdue.TriggerInvoices(ctx, scope, accountID, today)
+	// Same candidate rule as the evaluator: an invoice still in its grace
+	// period, or any invoice of an exempt account, does not keep it isolated.
+	remaining, err := s.candidates(ctx, scope, accountID, today)
 	if err != nil {
 		return "", false, err
 	}

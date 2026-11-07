@@ -21,17 +21,26 @@ import (
 	"zyad.cloud/internal/shared/response"
 )
 
-// Public isolir page limits. The per-query bucket stops one identifier from
-// being enumerated from many IPs; the per-tenant bucket caps total load.
+// Public isolir page limits. Isolated customers of one ISP usually share a
+// single public NAT IP, so the per-IP buckets are generous and info has its
+// own bucket (it is loaded on every page view). The per-query bucket stops
+// one identifier from being enumerated from many IPs; the per-tenant bucket
+// caps total load.
 const (
-	isolirIPLimit     = 20
+	isolirIPLimit     = 120
+	isolirInfoIPLimit = 300
 	isolirQueryLimit  = 5
 	isolirTenantLimit = 300
 	isolirWindow      = time.Minute
+	// lookupFloor: every 200 lookup answer (uniform or found) leaves no
+	// earlier than this after the request started, so response time does not
+	// tell the cases apart (spec 5.1).
+	lookupFloor = 300 * time.Millisecond
 	// isolirMaxBodyBytes bounds the read; the service enforces the 100 char query cap.
 	isolirMaxBodyBytes = 2048
 
 	isolirQueryCtxKey = "mikrotik.isolir.query"
+	isolirStartCtxKey = "mikrotik.isolir.start"
 )
 
 // PublicService is the public isolir page use case (service.PublicService).
@@ -46,15 +55,27 @@ type IsolirPublicHandler struct {
 	svc     PublicService
 	counter middleware.RateCounter
 	now     func() time.Time
+	sleep   func(ctx context.Context, d time.Duration)
 }
 
 func NewIsolirPublicHandler(svc PublicService, counter middleware.RateCounter) *IsolirPublicHandler {
-	return &IsolirPublicHandler{svc: svc, counter: counter, now: time.Now}
+	return &IsolirPublicHandler{svc: svc, counter: counter, now: time.Now, sleep: sleepCtx}
+}
+
+// sleepCtx waits for d or until ctx is done, whichever comes first.
+func sleepCtx(ctx context.Context, d time.Duration) {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+	case <-ctx.Done():
+	}
 }
 
 func (h *IsolirPublicHandler) RegisterRoutes(router gin.IRoutes) {
-	byIP := middleware.RateLimit(h.counter, "rl:isolir:ip:", isolirIPLimit, isolirWindow,
-		func(c *gin.Context) string { return c.ClientIP() })
+	clientIP := func(c *gin.Context) string { return c.ClientIP() }
+	byIP := middleware.RateLimit(h.counter, "rl:isolir:ip:", isolirIPLimit, isolirWindow, clientIP)
+	infoByIP := middleware.RateLimit(h.counter, "rl:isolir:info:ip:", isolirInfoIPLimit, isolirWindow, clientIP)
 	byTenant := middleware.RateLimit(h.counter, "rl:isolir:org:", isolirTenantLimit, isolirWindow, isolirTenantKey)
 	byQuery := middleware.RateLimit(h.counter, "rl:isolir:q:", isolirQueryLimit, isolirWindow, func(c *gin.Context) string {
 		q, _ := c.Get(isolirQueryCtxKey)
@@ -63,8 +84,29 @@ func (h *IsolirPublicHandler) RegisterRoutes(router gin.IRoutes) {
 		sum := sha256.Sum256([]byte(service.LookupKey(s)))
 		return isolirTenantKey(c) + ":" + hex.EncodeToString(sum[:16])
 	})
-	router.GET("/public/isolir/info", noStoreNoIndex, byIP, byTenant, h.Info)
-	router.POST("/public/isolir/lookup", noStoreNoIndex, readLookupQuery, byIP, byQuery, byTenant, h.Lookup)
+	router.GET("/public/isolir/info", noStoreNoIndex, infoByIP, byTenant, h.Info)
+	router.POST("/public/isolir/lookup", h.markStart, noStoreNoIndex, readLookupQuery, byIP, byQuery, byTenant, h.Lookup)
+}
+
+// markStart records when the lookup request started (before the limiters,
+// which may call Redis) for the response floor.
+func (h *IsolirPublicHandler) markStart(c *gin.Context) {
+	c.Set(isolirStartCtxKey, h.now())
+	c.Next()
+}
+
+// holdUntilFloor delays a 200 lookup answer until lookupFloor has passed since
+// the request started; an already slow answer is not delayed further and a
+// cancelled request returns at once.
+func (h *IsolirPublicHandler) holdUntilFloor(c *gin.Context) {
+	v, _ := c.Get(isolirStartCtxKey)
+	start, ok := v.(time.Time)
+	if !ok {
+		return
+	}
+	if wait := lookupFloor - h.now().Sub(start); wait > 0 {
+		h.sleep(c.Request.Context(), wait)
+	}
 }
 
 func isolirTenantKey(c *gin.Context) string {
@@ -97,7 +139,7 @@ func readLookupQuery(c *gin.Context) {
 
 func isolirFail(c *gin.Context, op string, err error) {
 	// Never log the query or token; the cause class is enough to debug.
-	slog.Error("public isolir failed", "op", op, "error", err)
+	slog.ErrorContext(c.Request.Context(), "public isolir failed", "op", op, "error", err)
 	response.Error(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
 }
 
@@ -128,6 +170,7 @@ func (h *IsolirPublicHandler) Lookup(c *gin.Context) {
 		isolirFail(c, "lookup", err)
 		return
 	}
+	h.holdUntilFloor(c)
 	corehttp.OK(c, "ok", dto.IsolirLookupFromService(res))
 }
 

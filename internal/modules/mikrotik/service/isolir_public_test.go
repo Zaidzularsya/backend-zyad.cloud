@@ -34,8 +34,15 @@ func (f fakePublicSecrets) ListByAccount(_ context.Context, _ coretenant.Scope, 
 
 type fakePublicOverdue struct{ byAcc map[string][]TriggerInvoice }
 
-func (f fakePublicOverdue) TriggerInvoices(_ context.Context, _ coretenant.Scope, id string, _ time.Time) ([]TriggerInvoice, error) {
-	return f.byAcc[id], nil
+// TriggerInvoices applies the real candidate rule: due_date strictly before cutoff.
+func (f fakePublicOverdue) TriggerInvoices(_ context.Context, _ coretenant.Scope, id string, cutoff time.Time) ([]TriggerInvoice, error) {
+	var out []TriggerInvoice
+	for _, inv := range f.byAcc[id] {
+		if inv.DueDate.Before(cutoff) {
+			out = append(out, inv)
+		}
+	}
+	return out, nil
 }
 func (fakePublicOverdue) AccountsWithTriggerInvoices(context.Context, coretenant.Scope, time.Time, string, int) ([]string, error) {
 	return nil, nil
@@ -63,6 +70,21 @@ type fakePublicGate struct{ on bool }
 
 func (f fakePublicGate) Enabled(context.Context, coretenant.Scope) (bool, error) { return f.on, nil }
 
+type fakePublicControl struct{ grace int }
+
+func (f fakePublicControl) Get(_ context.Context, scope coretenant.Scope) (domain.ControlSettings, error) {
+	return domain.ControlSettings{OrganizationID: scope.OrganizationID(), Mode: domain.ModeActive, GraceDays: f.grace}, nil
+}
+
+type fakePublicPolicy struct {
+	byAcc map[string]domain.CustomerPolicy
+}
+
+func (f fakePublicPolicy) GetCustomerPolicy(_ context.Context, _ coretenant.Scope, id string) (domain.CustomerPolicy, bool, error) {
+	p, ok := f.byAcc[id]
+	return p, ok, nil
+}
+
 type publicEnv struct {
 	dir *fakePublicDir
 	svc *PublicService
@@ -70,6 +92,11 @@ type publicEnv struct {
 
 func newPublicEnv(on, noLink bool, accs map[string][]AccountRef, phones map[string][]AccountRef,
 	secrets map[string][]domain.PPPSecret, inv map[string][]TriggerInvoice) publicEnv {
+	return newPublicEnvWith(on, noLink, accs, phones, secrets, inv, fakePublicControl{}, fakePublicPolicy{})
+}
+
+func newPublicEnvWith(on, noLink bool, accs map[string][]AccountRef, phones map[string][]AccountRef,
+	secrets map[string][]domain.PPPSecret, inv map[string][]TriggerInvoice, ctl fakePublicControl, pol fakePublicPolicy) publicEnv {
 	dir := &fakePublicDir{byUser: accs, byPhone: phones}
 	return publicEnv{dir: dir, svc: NewPublicService(PublicServiceDeps{
 		Directory: dir,
@@ -78,6 +105,8 @@ func newPublicEnv(on, noLink bool, accs map[string][]AccountRef, phones map[stri
 		PayLinks:  fakePublicLinks{empty: noLink},
 		Profile:   fakePublicProfile{},
 		Gate:      fakePublicGate{on: on},
+		Control:   ctl,
+		Policy:    pol,
 	})}
 }
 
@@ -129,8 +158,9 @@ func TestLookup_PhoneFormatsEquivalent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !reflect.DeepEqual(e.dir.phoneCalls, []string{norm}) || len(e.dir.userCalls) != 0 {
-			t.Errorf("query %q: phoneCalls=%v userCalls=%v want [%s]", q, e.dir.phoneCalls, e.dir.userCalls, norm)
+		// phone-shaped queries are also tried as a username (all-digit PPPoE names).
+		if !reflect.DeepEqual(e.dir.phoneCalls, []string{norm}) || !reflect.DeepEqual(e.dir.userCalls, []string{q}) {
+			t.Errorf("query %q: phoneCalls=%v userCalls=%v want [%s] [%s]", q, e.dir.phoneCalls, e.dir.userCalls, norm, q)
 		}
 		if !res.Found {
 			t.Errorf("query %q: not found", q)
@@ -232,5 +262,103 @@ func TestInfo_Disabled(t *testing.T) {
 	info, _ = e.svc.Info(context.Background(), coretenant.Scope{})
 	if !info.Enabled || info.Tenant == nil || info.Tenant.Name != "ISP" {
 		t.Fatalf("%+v", info)
+	}
+}
+
+func budiUser() map[string][]AccountRef {
+	return map[string][]AccountRef{"budi": {{ID: "a1", Name: "Budi"}}}
+}
+
+func TestLookup_GraceDaysShiftCutoff(t *testing.T) {
+	// INV-1 is 20 days overdue, INV-2 5 days.
+	cases := []struct {
+		grace int
+		want  []string
+	}{{0, []string{"INV-1", "INV-2"}}, {7, []string{"INV-1"}}, {30, nil}}
+	for _, c := range cases {
+		e := newPublicEnvWith(true, false, budiUser(), nil, nil, twoInvoices(), fakePublicControl{grace: c.grace}, fakePublicPolicy{})
+		res, err := e.svc.Lookup(context.Background(), coretenant.Scope{}, "budi", pubToday)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, it := range res.Invoices {
+			got = append(got, it.Number)
+		}
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("grace %d: invoices %v want %v", c.grace, got, c.want)
+		}
+		if c.want == nil && !reflect.DeepEqual(res, PublicLookupResult{}) {
+			t.Errorf("grace %d: not uniform: %+v", c.grace, res)
+		}
+	}
+}
+
+func TestLookup_ExemptAccountUniform(t *testing.T) {
+	yesterday := pubToday.AddDate(0, 0, -1)
+	tomorrow := pubToday.AddDate(0, 0, 1)
+	for name, p := range map[string]domain.CustomerPolicy{
+		"no expiry":      {AccountID: "a1", Exempt: true},
+		"until tomorrow": {AccountID: "a1", Exempt: true, ExemptedUntil: &tomorrow},
+		"until today":    {AccountID: "a1", Exempt: true, ExemptedUntil: &pubToday},
+	} {
+		e := newPublicEnvWith(true, false, budiUser(), nil, nil, twoInvoices(), fakePublicControl{},
+			fakePublicPolicy{map[string]domain.CustomerPolicy{"a1": p}})
+		res, err := e.svc.Lookup(context.Background(), coretenant.Scope{}, "budi", pubToday)
+		if err != nil || !reflect.DeepEqual(res, PublicLookupResult{}) {
+			t.Errorf("%s: res=%+v err=%v", name, res, err)
+		}
+	}
+	// an expired exemption no longer protects the account.
+	e := newPublicEnvWith(true, false, budiUser(), nil, nil, twoInvoices(), fakePublicControl{},
+		fakePublicPolicy{map[string]domain.CustomerPolicy{"a1": {AccountID: "a1", Exempt: true, ExemptedUntil: &yesterday}}})
+	if res, _ := e.svc.Lookup(context.Background(), coretenant.Scope{}, "budi", pubToday); !res.Found || len(res.Invoices) != 2 {
+		t.Errorf("expired exemption: %+v", res)
+	}
+}
+
+func TestLookup_AllDigitUsernameFound(t *testing.T) {
+	e := newPublicEnv(true, false,
+		map[string][]AccountRef{"20231101": {{ID: "a1", Name: "Budi"}}}, nil, nil, twoInvoices())
+	res, err := e.svc.Lookup(context.Background(), coretenant.Scope{}, " 20231101 ", pubToday)
+	if err != nil || !res.Found || len(res.Invoices) != 2 {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if !reflect.DeepEqual(e.dir.userCalls, []string{"20231101"}) {
+		t.Fatalf("userCalls=%v", e.dir.userCalls)
+	}
+}
+
+// bothOwe: a1 and a3 each have a candidate invoice, so only ambiguity can hide them.
+func bothOwe() map[string][]TriggerInvoice {
+	inv := twoInvoices()
+	inv["a3"] = []TriggerInvoice{{ID: "i3", Number: "INV-3", DueDate: pubToday.AddDate(0, 0, -9), Balance: "1"}}
+	return inv
+}
+
+func TestLookup_NumericUsernameAndPhoneOfOtherAccountAmbiguous(t *testing.T) {
+	q := "081234567890"
+	norm := NormalizePhone(q)
+	e := newPublicEnv(true, false,
+		map[string][]AccountRef{q: {{ID: "a1", Name: "Budi"}}},
+		map[string][]AccountRef{norm: {{ID: "a3", Name: "Siti"}}}, nil, bothOwe())
+	res, err := e.svc.Lookup(context.Background(), coretenant.Scope{}, q, pubToday)
+	if err != nil || !reflect.DeepEqual(res, PublicLookupResult{}) {
+		t.Fatalf("two accounts must be uniform: res=%+v err=%v", res, err)
+	}
+	// the same account matched both ways counts once.
+	e = newPublicEnv(true, false,
+		map[string][]AccountRef{q: {{ID: "a1", Name: "Budi"}}},
+		map[string][]AccountRef{norm: {{ID: "a1", Name: "Budi"}}}, nil, twoInvoices())
+	if res, _ := e.svc.Lookup(context.Background(), coretenant.Scope{}, q, pubToday); !res.Found {
+		t.Fatalf("same account via phone and username must be found: %+v", res)
+	}
+}
+
+func TestLookup_PhoneOnlyMatchStillWorks(t *testing.T) {
+	norm := NormalizePhone("081234567890")
+	e := newPublicEnv(true, false, nil, map[string][]AccountRef{norm: {{ID: "a1", Name: "Budi"}}}, nil, twoInvoices())
+	if res, _ := e.svc.Lookup(context.Background(), coretenant.Scope{}, "081234567890", pubToday); !res.Found {
+		t.Fatalf("phone-only match: %+v", res)
 	}
 }

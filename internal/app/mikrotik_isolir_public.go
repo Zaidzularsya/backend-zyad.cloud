@@ -98,8 +98,20 @@ func (a mikrotikPublicAdapter) AccountsByPhone(ctx context.Context, scope corete
 	return a.phones.AccountsByPhone(ctx, scope, normalizedPhone)
 }
 
-// PayLink returns "" when the tenant has no default sender (no link can be built).
+// onlinePaymentFeatureKey gates online payment on the public invoice page
+// (receivable's onlinePaymentAllowed, plain-invoice case).
+const onlinePaymentFeatureKey = "receivable.online_payment"
+
+// PayLink returns "" without error when the tenant cannot take the payment
+// online (no receivable.online_payment) or has no default sender (no link can
+// be built); the page then shows the tenant contact instead of Bayar.
 func (a mikrotikPublicAdapter) PayLink(ctx context.Context, scope coretenant.Scope, invoiceID string) (string, error) {
+	if err := a.features.RequireFeature(ctx, scope.OrganizationID(), onlinePaymentFeatureKey); err != nil {
+		if isFeatureNotEnabled(err) {
+			return "", nil
+		}
+		return "", err
+	}
 	settings, err := a.settings.Get(ctx, scope)
 	if err != nil {
 		return "", err

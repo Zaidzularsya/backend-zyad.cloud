@@ -183,7 +183,8 @@ type PublicDirectory interface {
 
 // PublicPayLinks builds the payment link of an invoice.
 type PublicPayLinks interface {
-	// PayLink returns "" without error when the tenant has no default sender.
+	// PayLink returns "" without error when the tenant has no online payment
+	// (receivable.online_payment) or no default sender.
 	PayLink(ctx context.Context, scope coretenant.Scope, invoiceID string) (string, error)
 }
 
@@ -211,4 +212,16 @@ type RestoreTaskReader interface {
 	// LatestRestoreBySecret returns the newest restore task per secret id of
 	// the organization; secrets without a restore task are absent from the map.
 	LatestRestoreBySecret(ctx context.Context, scope coretenant.Scope, secretIDs []string) (map[string]domain.IsolationTask, error)
+}
+
+// PublicControlReader reads the tenant isolation control (grace days) for the
+// public page; satisfied by repository.ControlRepository.
+type PublicControlReader interface {
+	Get(ctx context.Context, scope coretenant.Scope) (domain.ControlSettings, error)
+}
+
+// PublicPolicyReader reads a customer's isolation policy (exemption) for the
+// public page; satisfied by repository.PolicyRepository.
+type PublicPolicyReader interface {
+	GetCustomerPolicy(ctx context.Context, scope coretenant.Scope, accountID string) (domain.CustomerPolicy, bool, error)
 }

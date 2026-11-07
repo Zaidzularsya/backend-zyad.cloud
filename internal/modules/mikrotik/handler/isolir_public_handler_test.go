@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -56,6 +58,19 @@ func (f *isolirCounter) Incr(ctx context.Context, key string) *goredis.IntCmd {
 	return cmd
 }
 
+// sumPrefix totals the counters whose key starts with prefix (keys carry a window suffix).
+func (f *isolirCounter) sumPrefix(prefix string) int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var n int64
+	for k, v := range f.counts {
+		if strings.HasPrefix(k, prefix) {
+			n += v
+		}
+	}
+	return n
+}
+
 func (f *isolirCounter) Expire(ctx context.Context, _ string, _ time.Duration) *goredis.BoolCmd {
 	return goredis.NewBoolCmd(ctx)
 }
@@ -86,7 +101,9 @@ func isolirRouter(t *testing.T, svc PublicService, counter middleware.RateCounte
 		t.Fatal(err)
 	}
 	r := gin.New()
-	NewIsolirPublicHandler(svc, counter).RegisterRoutes(r.Group("", mw, middleware.RequireActiveTenant()))
+	h := NewIsolirPublicHandler(svc, counter)
+	h.sleep = func(context.Context, time.Duration) {} // the response floor has its own tests
+	h.RegisterRoutes(r.Group("", mw, middleware.RequireActiveTenant()))
 	return r
 }
 
@@ -227,15 +244,172 @@ func TestLookup_RateLimitPerIPAndQuery(t *testing.T) {
 			t.Fatalf("raw query in key %q", k)
 		}
 	}
-	// per IP: 21st distinct query from one IP.
-	counter = &isolirCounter{}
-	r = isolirRouter(t, svc, counter)
-	var ipLast *httptest.ResponseRecorder
-	for i := 0; i < 21; i++ {
-		ipLast = lookup(r, "192.0.2.9", `{"query":"q`+strings.Repeat("x", i)+`"}`)
+}
+
+// Isolated customers of one ISP share a NAT IP: the per-IP lookup bucket
+// allows 120/min and info has its own 300/min bucket.
+func TestLookup_PerIPLimitFitsSharedNAT(t *testing.T) {
+	counter := &isolirCounter{}
+	r := isolirRouter(t, &fakePublicSvc{}, counter)
+	for i := 0; i < 120; i++ {
+		if w := lookup(r, "192.0.2.9", `{"query":"user`+strconv.Itoa(i)+`"}`); w.Code != http.StatusOK {
+			t.Fatalf("lookup %d: code=%d", i+1, w.Code)
+		}
 	}
-	if ipLast.Code != http.StatusTooManyRequests {
-		t.Fatalf("per-IP limit: %d", ipLast.Code)
+	if w := lookup(r, "192.0.2.9", `{"query":"user-last"}`); w.Code != http.StatusTooManyRequests {
+		t.Fatalf("121st lookup from one IP: code=%d", w.Code)
+	}
+	// the exhausted lookup bucket does not block the info endpoint.
+	if w := isolirReq(r, http.MethodGet, "/public/isolir/info", "192.0.2.9", "", nil); w.Code != http.StatusOK {
+		t.Fatalf("info after lookup limit: code=%d", w.Code)
+	}
+	if n := counter.sumPrefix("rl:isolir:ip:192.0.2.9:"); n != 121 {
+		t.Fatalf("lookup IP bucket=%d", n)
+	}
+	if n := counter.sumPrefix("rl:isolir:info:ip:192.0.2.9:"); n != 1 {
+		t.Fatalf("info IP bucket=%d", n)
+	}
+}
+
+func TestInfo_OwnPerIPBucket300(t *testing.T) {
+	counter := &isolirCounter{}
+	r := isolirRouter(t, &fakePublicSvc{}, counter)
+	for i := 0; i < 300; i++ {
+		if w := isolirReq(r, http.MethodGet, "/public/isolir/info", "192.0.2.10", "", nil); w.Code != http.StatusOK {
+			t.Fatalf("info %d: code=%d", i+1, w.Code)
+		}
+	}
+	if w := isolirReq(r, http.MethodGet, "/public/isolir/info", "192.0.2.10", "", nil); w.Code != http.StatusTooManyRequests {
+		t.Fatalf("301st info: code=%d", w.Code)
+	}
+	if n := counter.sumPrefix("rl:isolir:ip:"); n != 0 {
+		t.Fatalf("info must not use the lookup IP bucket: %d", n)
+	}
+	if n := counter.sumPrefix("rl:isolir:info:ip:192.0.2.10:"); n != 301 {
+		t.Fatalf("info IP bucket=%d", n)
+	}
+	if isolirInfoIPLimit != 300 || isolirIPLimit != 120 || isolirQueryLimit != 5 || isolirTenantLimit != 300 {
+		t.Fatal("limit values changed")
+	}
+}
+
+// fakeClock advances only when the service "works" or the handler sleeps.
+type fakeClock struct {
+	mu    sync.Mutex
+	t     time.Time
+	slept []time.Duration
+}
+
+func (c *fakeClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *fakeClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = c.t.Add(d)
+}
+
+func (c *fakeClock) sleep(_ context.Context, d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.slept = append(c.slept, d)
+	c.t = c.t.Add(d)
+}
+
+type slowPublicSvc struct {
+	fakePublicSvc
+	clock *fakeClock
+	took  time.Duration
+}
+
+func (s *slowPublicSvc) Lookup(ctx context.Context, sc coretenant.Scope, q string, today time.Time) (service.PublicLookupResult, error) {
+	s.clock.advance(s.took)
+	return s.fakePublicSvc.Lookup(ctx, sc, q, today)
+}
+
+func floorRouter(t *testing.T, svc PublicService, clock *fakeClock) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	mw, err := middleware.ResolvePublicOrganization(isolirHostResolver{t}, middleware.PublicHostOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := gin.New()
+	h := NewIsolirPublicHandler(svc, nil)
+	h.now, h.sleep = clock.now, clock.sleep
+	h.RegisterRoutes(r.Group("", mw, middleware.RequireActiveTenant()))
+	return r
+}
+
+func TestLookup_ResponseFloor(t *testing.T) {
+	found := service.PublicLookupResult{Found: true, MaskedName: "B***"}
+	cases := []struct {
+		name   string
+		took   time.Duration
+		result service.PublicLookupResult
+		want   []time.Duration
+	}{
+		{"fast uniform is delayed to the floor", 20 * time.Millisecond, service.PublicLookupResult{}, []time.Duration{280 * time.Millisecond}},
+		{"fast found is delayed to the floor", 50 * time.Millisecond, found, []time.Duration{250 * time.Millisecond}},
+		{"slow result is not delayed further", 450 * time.Millisecond, found, nil},
+		{"exactly the floor is not delayed", lookupFloor, service.PublicLookupResult{}, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			clock := &fakeClock{t: time.Date(2026, 11, 8, 3, 0, 0, 0, time.UTC)}
+			svc := &slowPublicSvc{fakePublicSvc: fakePublicSvc{result: c.result}, clock: clock, took: c.took}
+			w := lookup(floorRouter(t, svc, clock), "203.0.113.5", `{"query":"budi"}`)
+			if w.Code != http.StatusOK {
+				t.Fatalf("code=%d", w.Code)
+			}
+			if !reflect.DeepEqual(clock.slept, c.want) {
+				t.Fatalf("slept %v want %v", clock.slept, c.want)
+			}
+		})
+	}
+}
+
+func TestLookup_ResponseFloorNotOnErrors(t *testing.T) {
+	clock := &fakeClock{t: time.Date(2026, 11, 8, 3, 0, 0, 0, time.UTC)}
+	svc := &slowPublicSvc{fakePublicSvc: fakePublicSvc{err: errors.New("boom")}, clock: clock}
+	if w := lookup(floorRouter(t, svc, clock), "203.0.113.5", `{"query":"budi"}`); w.Code != http.StatusInternalServerError {
+		t.Fatalf("code=%d", w.Code)
+	}
+	if len(clock.slept) != 0 {
+		t.Fatalf("500 must not be delayed: %v", clock.slept)
+	}
+	// 429 comes from the limiter before the handler: never delayed.
+	counter := &isolirCounter{}
+	gin.SetMode(gin.TestMode)
+	mw, _ := middleware.ResolvePublicOrganization(isolirHostResolver{t}, middleware.PublicHostOptions{})
+	r := gin.New()
+	h := NewIsolirPublicHandler(&fakePublicSvc{}, counter)
+	h.now, h.sleep = clock.now, clock.sleep
+	h.RegisterRoutes(r.Group("", mw, middleware.RequireActiveTenant()))
+	var last *httptest.ResponseRecorder
+	for i := 0; i < 6; i++ {
+		last = lookup(r, "203.0.113."+strconv.Itoa(i+1), `{"query":"same"}`)
+	}
+	if last.Code != http.StatusTooManyRequests || len(clock.slept) != 5 {
+		t.Fatalf("code=%d slept=%v (only the five 200s may sleep)", last.Code, clock.slept)
+	}
+}
+
+func TestSleepCtx_ReturnsOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := time.Now()
+	sleepCtx(ctx, time.Hour)
+	if time.Since(start) > time.Second {
+		t.Fatal("sleepCtx must return promptly when the context is cancelled")
+	}
+	start = time.Now()
+	sleepCtx(context.Background(), 5*time.Millisecond)
+	if time.Since(start) < 5*time.Millisecond {
+		t.Fatal("sleepCtx returned before the duration")
 	}
 }
 

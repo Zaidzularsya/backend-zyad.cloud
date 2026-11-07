@@ -9,9 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"zyad.cloud/internal/config"
 	coretenant "zyad.cloud/internal/core/tenant"
 	mikrotikhandler "zyad.cloud/internal/modules/mikrotik/handler"
 	mikrotikservice "zyad.cloud/internal/modules/mikrotik/service"
+	receivablehandler "zyad.cloud/internal/modules/receivable/handler"
+	receivableservice "zyad.cloud/internal/modules/receivable/service"
 )
 
 type routesPublicSvc struct{ lookups, infos int }
@@ -99,5 +102,54 @@ func TestMikrotikPublicRoutesUnderHostResolver(t *testing.T) {
 	if w := do(http.MethodPost, "/api/v1/public/isolir/lookup", "isp.example.com",
 		map[string]string{"X-Organization-ID": "22222222-2222-4222-8222-222222222222"}); w.Code != http.StatusBadRequest || svc.lookups != 1 {
 		t.Fatalf("selector code=%d lookups=%d", w.Code, svc.lookups)
+	}
+}
+
+type routesInvoiceSvc struct{}
+
+func (routesInvoiceSvc) View(context.Context, string) (receivableservice.PublicInvoiceView, error) {
+	return receivableservice.PublicInvoiceView{}, receivableservice.ErrLinkInvalid
+}
+
+func (routesInvoiceSvc) PDF(context.Context, string) (receivableservice.InvoicePDF, error) {
+	return receivableservice.InvoicePDF{}, receivableservice.ErrLinkInvalid
+}
+
+func (routesInvoiceSvc) Resolve(context.Context, string) (receivableservice.ResolvedInvoice, error) {
+	return receivableservice.ResolvedInvoice{}, receivableservice.ErrLinkInvalid
+}
+
+// The provisioning endpoint exists on the fully built router only when the
+// mikrotik adapter is wired into the receivable handler (as app.go does).
+func TestPublicInvoiceProvisioningRouteWiring(t *testing.T) {
+	m := buildMikrotik(config.Config{}, nil, mikrotikBuild{
+		Accounts: &fakeAccounts{}, Contacts: &fakeContacts{}, Products: fakeProducts{},
+	})
+	const route = "GET /api/v1/public/invoices/:token/provisioning"
+	for _, wired := range []bool{true, false} {
+		h := receivablehandler.NewPublicInvoiceHandler(routesInvoiceSvc{}, nil)
+		if wired {
+			h.WithProvisioning(m.Provisioning)
+		}
+		engine, err := newRouter(Dependencies{Logger: slog.Default(), ReceivablePublicInvoiceHandler: h})
+		if err != nil {
+			t.Fatalf("newRouter: %v", err)
+		}
+		found := false
+		for _, r := range engine.Routes() {
+			if r.Method+" "+r.Path == route {
+				found = true
+			}
+		}
+		if found != wired {
+			t.Fatalf("wired=%v: route registered=%v", wired, found)
+		}
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/public/invoices/tok/provisioning", nil))
+		// Wired: the handler runs and the unknown token is the generic 404 LINK_INVALID.
+		// Not wired: gin's own 404 (no route).
+		if w.Code != http.StatusNotFound || strings.Contains(w.Body.String(), "LINK_INVALID") != wired {
+			t.Fatalf("wired=%v: code=%d body=%s", wired, w.Code, w.Body.String())
+		}
 	}
 }

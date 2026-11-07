@@ -37,6 +37,9 @@ type mikrotikModule struct {
 	// Provisioning adapts the public service's recovery stage for the public
 	// invoice page (wired into the receivable handler in app.go).
 	Provisioning mikrotikProvisioningAdapter
+	// publicDeps are the collaborators of the public service (kept so the
+	// wiring test can assert none is nil).
+	publicDeps mikrotikservice.PublicServiceDeps
 }
 
 // mikrotikBuild carries the cross-module services the adapters wrap.
@@ -105,11 +108,15 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 	onboarding.SetPendingReader(preview)
 	publicAdapter := newMikrotikPublicAdapter(secretRepo, reader, b.Accounts,
 		receivablerepo.NewSettingsRepository(db), b.PayLinks, b.Issuer, b.Features)
-	publicSvc := mikrotikservice.NewPublicService(mikrotikservice.PublicServiceDeps{
+	publicDeps := mikrotikservice.PublicServiceDeps{
 		Directory: publicAdapter, Secrets: secretRepo, Overdue: reader, PayLinks: publicAdapter,
 		Profile: publicAdapter, Gate: publicAdapter, Tasks: taskRepo,
-	})
+		// Read directly (not via eval, which is nil while the engine is off).
+		Control: controlRepo, Policy: policyRepo,
+	}
+	publicSvc := mikrotikservice.NewPublicService(publicDeps)
 	return mikrotikModule{
+		publicDeps:   publicDeps,
 		Provisioning: newMikrotikProvisioningAdapter(publicSvc, publicAdapter, publicAdapter, time.Now),
 		Public:       mikrotikhandler.NewIsolirPublicHandler(publicSvc, b.RateCounter),
 		Router:       mikrotikhandler.NewRouterHandler(svc),

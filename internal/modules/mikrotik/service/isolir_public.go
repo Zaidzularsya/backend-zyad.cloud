@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 	"unicode"
@@ -48,6 +49,12 @@ type PublicServiceDeps struct {
 	Profile   PublicTenantProfile
 	Gate      PublicFeatureGate
 	Tasks     RestoreTaskReader
+	// Control and Policy make the candidate rule match the evaluator: the
+	// tenant's grace days shift the cutoff and an effectively exempt account
+	// has no candidates. Both are required (the evaluator itself is nil while
+	// the engine is off, so it cannot be used here).
+	Control PublicControlReader
+	Policy  PublicPolicyReader
 }
 
 // PublicService backs the unauthenticated isolir page.
@@ -72,7 +79,7 @@ func (s *PublicService) Info(ctx context.Context, scope coretenant.Scope) (Publi
 }
 
 // Lookup finds the debt of the customer identified by a secret username or a
-// phone number. Username matching (case/space-insensitive) is the
+// phone number (a phone-shaped query is tried both ways). Username matching (case/space-insensitive) is the
 // PublicDirectory's job; the service passes the trimmed query. Anything that
 // is not exactly one account with candidate invoices yields the zero result.
 func (s *PublicService) Lookup(ctx context.Context, scope coretenant.Scope, query string, today time.Time) (PublicLookupResult, error) {
@@ -88,12 +95,7 @@ func (s *PublicService) Lookup(ctx context.Context, scope coretenant.Scope, quer
 		return PublicLookupResult{}, nil
 	}
 
-	var accounts []AccountRef
-	if phone := phoneQuery(q); phone != "" {
-		accounts, err = s.d.Directory.AccountsByPhone(ctx, scope, phone)
-	} else {
-		accounts, err = s.d.Directory.AccountsByUsername(ctx, scope, q)
-	}
+	accounts, err := s.findAccounts(ctx, scope, q)
 	if err != nil {
 		return PublicLookupResult{}, err
 	}
@@ -102,7 +104,7 @@ func (s *PublicService) Lookup(ctx context.Context, scope coretenant.Scope, quer
 	}
 	acc := accounts[0]
 
-	invoices, err := s.d.Overdue.TriggerInvoices(ctx, scope, acc.ID, today)
+	invoices, err := s.candidates(ctx, scope, acc.ID, today)
 	if err != nil {
 		return PublicLookupResult{}, err
 	}
@@ -129,6 +131,54 @@ func (s *PublicService) Lookup(ctx context.Context, scope coretenant.Scope, quer
 		res.Invoices = append(res.Invoices, PublicInvoiceItem{Number: inv.Number, DueDate: inv.DueDate, Balance: inv.Balance, PayURL: url})
 	}
 	return res, nil
+}
+
+// findAccounts matches the query as a secret username and, when it is
+// phone-shaped, also as a phone: PPPoE usernames are often all digits. The
+// union is deduplicated by account id so the same account matched both ways
+// counts once; two different accounts stay ambiguous.
+func (s *PublicService) findAccounts(ctx context.Context, scope coretenant.Scope, q string) ([]AccountRef, error) {
+	accounts, err := s.d.Directory.AccountsByUsername(ctx, scope, q)
+	if err != nil {
+		return nil, err
+	}
+	phone := phoneQuery(q)
+	if phone == "" {
+		return accounts, nil
+	}
+	byPhone, err := s.d.Directory.AccountsByPhone(ctx, scope, phone)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(accounts))
+	for _, a := range accounts {
+		seen[a.ID] = true
+	}
+	for _, a := range byPhone {
+		if !seen[a.ID] {
+			seen[a.ID] = true
+			accounts = append(accounts, a)
+		}
+	}
+	return accounts, nil
+}
+
+// candidates applies the evaluator's candidate rule (Evaluator.decide): an
+// effectively exempt account has none, otherwise the tenant's grace days
+// shift the cutoff passed to OverdueSource.
+func (s *PublicService) candidates(ctx context.Context, scope coretenant.Scope, accountID string, today time.Time) ([]TriggerInvoice, error) {
+	policy, _, err := s.d.Policy.GetCustomerPolicy(ctx, scope, accountID)
+	if err != nil {
+		return nil, fmt.Errorf("load customer policy: %w", err)
+	}
+	if EffectiveExempt(policy, today) {
+		return nil, nil
+	}
+	ctl, err := s.d.Control.Get(ctx, scope)
+	if err != nil {
+		return nil, fmt.Errorf("load isolation control: %w", err)
+	}
+	return s.d.Overdue.TriggerInvoices(ctx, scope, accountID, CandidateCutoff(today, ctl.GraceDays))
 }
 
 // MaskName keeps the first letter of each word and hides the rest

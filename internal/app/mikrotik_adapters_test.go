@@ -227,6 +227,15 @@ func TestBuildMikrotik_WiresAllHandlers(t *testing.T) {
 	if m.Router == nil || m.Setup == nil || m.Secret == nil || m.Policy == nil || m.Onboarding == nil || m.Public == nil {
 		t.Fatalf("handlers must all be built: %+v", m)
 	}
+	d := m.publicDeps
+	if d.Directory == nil || d.Secrets == nil || d.Overdue == nil || d.PayLinks == nil || d.Profile == nil ||
+		d.Gate == nil || d.Tasks == nil || d.Control == nil || d.Policy == nil {
+		t.Fatalf("public service deps must all be wired: %+v", d)
+	}
+	p := m.Provisioning
+	if p.stager == nil || p.gate == nil || p.prof == nil || p.now == nil {
+		t.Fatalf("provisioning adapter must be wired: %+v", p)
+	}
 }
 
 func TestAccountDirectory_ListKeyset(t *testing.T) {

@@ -19,7 +19,9 @@ import (
 	"zyad.cloud/internal/modules/receivable/service"
 )
 
-const publicIPLimitPerMinute = 30
+// publicIPLimitPerMinute is per client IP. Customers of one ISP often share a
+// NAT IP and the paid page polls the provisioning stage, so the bucket is wide.
+const publicIPLimitPerMinute = 120
 
 // PublicInvoiceService adalah subset service yang dipakai halaman publik.
 type PublicInvoiceService interface {
@@ -151,8 +153,10 @@ func (h *PublicInvoiceHandler) Status(c *gin.Context) {
 	corehttp.OK(c, "success", gin.H{"status": string(status)})
 }
 
-// Provisioning: tahap pemulihan untuk invoice lunas. Invoice belum lunas atau
-// akun tanpa PPPoE → applicable=false tanpa memanggil port.
+// Provisioning: tahap pemulihan untuk invoice lunas. Invoice belum lunas →
+// applicable=false tanpa memanggil port. Untuk invoice lunas port selalu
+// dipanggil; akun tanpa PPPoE (atau tenant tanpa mikrotik.enabled) dijawab
+// adapter dengan applicable=false.
 func (h *PublicInvoiceHandler) Provisioning(c *gin.Context) {
 	r, err := h.svc.Resolve(c.Request.Context(), c.Param("token"))
 	if err != nil {

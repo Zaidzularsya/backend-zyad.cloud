@@ -6,8 +6,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	goredis "github.com/redis/go-redis/v9"
+
 	coreerrors "zyad.cloud/internal/core/errors"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/receivable/repository"
@@ -322,5 +326,42 @@ func TestProvisioning_ContactAbsentForOtherStages(t *testing.T) {
 	w := get(provisioningRouter(paidView(), &fakeProvisioning{applicable: false, contact: contact}), "/api/v1/public/invoices/good/provisioning")
 	if strings.Contains(w.Body.String(), "contact") {
 		t.Fatalf("not applicable = %s", w.Body)
+	}
+}
+
+type pubCounter struct {
+	mu     sync.Mutex
+	counts map[string]int64
+}
+
+func (f *pubCounter) Incr(ctx context.Context, key string) *goredis.IntCmd {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.counts == nil {
+		f.counts = map[string]int64{}
+	}
+	f.counts[key]++
+	cmd := goredis.NewIntCmd(ctx)
+	cmd.SetVal(f.counts[key])
+	return cmd
+}
+
+func (f *pubCounter) Expire(ctx context.Context, _ string, _ time.Duration) *goredis.BoolCmd {
+	return goredis.NewBoolCmd(ctx)
+}
+
+// The public invoice page polls the provisioning stage; customers of one ISP
+// share a NAT IP, so the per-IP bucket allows 120 requests a minute.
+func TestPublicInvoice_PerIPLimitFitsSharedNAT(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	NewPublicInvoiceHandler(&fakePublicInvoices{view: openView()}, &pubCounter{}).RegisterRoutes(r.Group("/api/v1"))
+	for i := 0; i < 120; i++ {
+		if w := get(r, "/api/v1/public/invoices/good"); w.Code != http.StatusOK {
+			t.Fatalf("request %d: code=%d", i+1, w.Code)
+		}
+	}
+	if w := get(r, "/api/v1/public/invoices/good"); w.Code != http.StatusTooManyRequests {
+		t.Fatalf("121st request: code=%d", w.Code)
 	}
 }

@@ -50,6 +50,9 @@ func stageTask(status string, age time.Duration) domain.IsolationTask {
 func TestStage(t *testing.T) {
 	iso, norm := domain.IsolationIsolated, domain.IsolationNormal
 	other := []TriggerInvoice{{ID: "i9"}}
+	// due 3 days ago: a candidate only while grace < 3.
+	recent := []TriggerInvoice{{ID: "i8", DueDate: pubToday.AddDate(0, 0, -3)}}
+	exempt := &domain.CustomerPolicy{AccountID: "a1", Exempt: true}
 	cases := []struct {
 		name       string
 		secrets    []domain.PPPSecret
@@ -57,6 +60,8 @@ func TestStage(t *testing.T) {
 		tasks      map[string]domain.IsolationTask
 		paidAgo    time.Duration
 		unknownInv bool
+		grace      int
+		policy     *domain.CustomerPolicy
 		want       Stage
 		applicable bool
 	}{
@@ -74,6 +79,12 @@ func TestStage(t *testing.T) {
 		{name: "candidates but all normal", secrets: []domain.PPPSecret{stageSec("s1", norm)}, candidates: other, paidAgo: time.Minute, want: StageActive, applicable: true},
 		{name: "multi: one isolated no task fresh", secrets: []domain.PPPSecret{stageSec("s1", norm), stageSec("s2", iso)}, paidAgo: time.Minute, want: StageReceived, applicable: true},
 		{name: "multi: restoring + failed", secrets: []domain.PPPSecret{stageSec("s1", iso), stageSec("s2", iso)}, tasks: map[string]domain.IsolationTask{"s1": stageTask(domain.TaskRunning, time.Minute), "s2": stageTask(domain.TaskFailed, time.Minute)}, paidAgo: time.Minute, want: StageNeedsHelp, applicable: true},
+		{name: "other invoice within grace is not other_invoices", secrets: []domain.PPPSecret{stageSec("s1", iso)}, candidates: recent, grace: 7, paidAgo: time.Minute, want: StageReceived, applicable: true},
+		{name: "other invoice past grace", secrets: []domain.PPPSecret{stageSec("s1", iso)}, candidates: recent, grace: 2, paidAgo: time.Minute, want: StageOtherInvoices, applicable: true},
+		{name: "grace 0 as before", secrets: []domain.PPPSecret{stageSec("s1", iso)}, candidates: recent, paidAgo: time.Minute, want: StageOtherInvoices, applicable: true},
+		{name: "exempt account never other_invoices", secrets: []domain.PPPSecret{stageSec("s1", iso)}, candidates: other, policy: exempt, tasks: map[string]domain.IsolationTask{"s1": stageTask(domain.TaskPending, time.Minute)}, paidAgo: time.Minute, want: StageRestoring, applicable: true},
+		{name: "restore done but still isolated, 5m since paid", secrets: []domain.PPPSecret{stageSec("s1", iso)}, tasks: map[string]domain.IsolationTask{"s1": stageTask(domain.TaskDone, 4*time.Minute)}, paidAgo: 5 * time.Minute, want: StageReceived, applicable: true},
+		{name: "cancelled and isolated, 11m since paid", secrets: []domain.PPPSecret{stageSec("s1", iso)}, tasks: map[string]domain.IsolationTask{"s1": stageTask(domain.TaskCancelled, 10*time.Minute)}, paidAgo: 11 * time.Minute, want: StageNeedsHelp, applicable: true},
 		{name: "multi: restoring + received", secrets: []domain.PPPSecret{stageSec("s1", iso), stageSec("s2", iso)}, tasks: map[string]domain.IsolationTask{"s1": stageTask(domain.TaskRunning, time.Minute)}, paidAgo: time.Minute, want: StageRestoring, applicable: true},
 	}
 	for _, c := range cases {
@@ -89,7 +100,14 @@ func TestStage(t *testing.T) {
 						return map[string]string{"inv": "a1"}
 					}(),
 				},
-				Tasks: fakeRestoreTasks{c.tasks},
+				Tasks:   fakeRestoreTasks{c.tasks},
+				Control: fakePublicControl{grace: c.grace},
+				Policy: func() fakePublicPolicy {
+					if c.policy == nil {
+						return fakePublicPolicy{}
+					}
+					return fakePublicPolicy{map[string]domain.CustomerPolicy{"a1": *c.policy}}
+				}(),
 			})
 			got, ok, err := svc.Stage(context.Background(), coretenant.Scope{}, "inv", stageNow.Add(-c.paidAgo), stageNow, pubToday)
 			if err != nil {

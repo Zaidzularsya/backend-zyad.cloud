@@ -492,7 +492,8 @@ hanya pada grup publik yang me-resolve tenant dari host (bukan grup terautentika
 - `info` -> `{"enabled": bool, "tenant": {"name","phone","email"}}`; `tenant` hilang bila `enabled=false`
   (entitlement `mikrotik.enabled` mati).
 - `lookup` body `{"query": "<username PPPoE atau telepon>"}` -> `{"found","masked_name","isolated","invoices":[{"number","due_date","balance","pay_url"}]}`.
-  `pay_url` kosong bila tenant belum punya pengirim default.
+  `pay_url` kosong bila tenant tidak punya pembayaran online (`receivable.online_payment`) atau pengirim default;
+  halaman lalu menyembunyikan tombol Bayar dan menampilkan kontak CS.
 
 Aturan keamanan:
 
@@ -500,19 +501,26 @@ Aturan keamanan:
   karakter, karakter kontrol, body rusak/tanpa `query`/lebih dari 2 KiB: semuanya HTTP 200 dengan body identik
   `{"found":false,"masked_name":"","isolated":false,"invoices":[]}`. Endpoint tidak boleh menjadi oracle enumerasi.
 - Respons tidak memuat telepon/email pelanggan atau nama router/secret/profile/host; nama pelanggan disamarkan.
-- Rate limit (Redis, fail open): per IP 20/menit, per query ternormalisasi 5/menit (kunci memakai hash, bukan nilai
+- Pencarian: query berbentuk telepon dicari sebagai telepon **dan** username (username PPPoE sering berupa angka);
+  hasilnya digabung per id akun, lebih dari satu akun dijawab seragam.
+- Tagihan yang dihitung sama dengan mesin isolir: `grace_days` tenant menggeser batas (`CandidateCutoff`) dan pelanggan
+  yang dikecualikan efektif dijawab seragam. Hal yang sama berlaku untuk tahap pemulihan (`other_invoices`).
+- Waktu respons: setiap jawaban 200 lookup (seragam maupun ditemukan) dikirim paling cepat 300 ms sejak request dimulai;
+  429/500 tidak ditahan.
+- Rate limit (Redis, fail open): lookup per IP 120/menit, info per IP 300/menit (bucket sendiri `rl:isolir:info:ip:`;
+  pelanggan satu ISP sering berbagi satu IP NAT), per query ternormalisasi 5/menit (kunci memakai hash, bukan nilai
   mentah), per tenant 300/menit. Melebihi batas: 429 `RATE_LIMITED` dengan body yang sama untuk akun ada maupun tidak.
 - Galat service/port: satu body 500 `INTERNAL_ERROR` untuk semua penyebab; log server tidak memuat query.
 - Setiap respons membawa `Cache-Control: no-store` dan `X-Robots-Tag: noindex`.
 - `today` untuk penentuan tunggakan adalah hari bisnis WIB (`businesstime`).
 
-Kode error: `PUBLIC_ORGANIZATION_SELECTOR_FORBIDDEN` (400), `PUBLIC_HOST_NOT_FOUND` (404), `RATE_LIMITED` (429),
+Kode error: `PUBLIC_ORGANIZATION_SELECTOR_FORBIDDEN` (400), `ORGANIZATION_NOT_ACTIVE` (403), `PUBLIC_HOST_NOT_FOUND` (404), `RATE_LIMITED` (429),
 `INTERNAL_ERROR` (500).
 
 ### Tahap pemulihan setelah bayar
 
 `GET /api/v1/public/invoices/:token/provisioning` (halaman invoice publik, token yang sama dengan `GET /public/invoices/:token`;
-rate limit 30/menit/IP, `no-store`, `noindex`) -> `{"applicable": bool, "stage": "..."}`; `stage` hilang bila
+rate limit 120/menit/IP, `no-store`, `noindex`) -> `{"applicable": bool, "stage": "..."}`; `stage` hilang bila
 `applicable=false`. Token tak dikenal/kedaluwarsa/bukan invoice -> 404 `LINK_INVALID` dengan body sama seperti view invoice.
 `applicable=false` bila invoice belum lunas, pelanggan tidak punya secret PPPoE, atau tenant tanpa `mikrotik.enabled`.
 
