@@ -2,11 +2,13 @@ package app
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"zyad.cloud/internal/core/businesstime"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/mikrotik/service"
+	receivablehandler "zyad.cloud/internal/modules/receivable/handler"
 )
 
 type mikrotikStager interface {
@@ -18,25 +20,25 @@ type mikrotikStager interface {
 type mikrotikProvisioningAdapter struct {
 	stager mikrotikStager
 	gate   service.PublicFeatureGate
+	prof   service.PublicTenantProfile
 	now    func() time.Time
 }
 
-func newMikrotikProvisioningAdapter(stager mikrotikStager, gate service.PublicFeatureGate, now func() time.Time) mikrotikProvisioningAdapter {
+func newMikrotikProvisioningAdapter(stager mikrotikStager, gate service.PublicFeatureGate, prof service.PublicTenantProfile, now func() time.Time) mikrotikProvisioningAdapter {
 	if now == nil {
 		now = time.Now
 	}
-	return mikrotikProvisioningAdapter{stager: stager, gate: gate, now: now}
+	return mikrotikProvisioningAdapter{stager: stager, gate: gate, prof: prof, now: now}
 }
 
-// Stage returns applicable=false (no error) when the tenant lacks mikrotik.enabled.
+// Stage returns Applicable=false (no error) when the tenant lacks mikrotik.enabled.
 // A nil paidAt falls back to now, which keeps the stage at the conservative "received".
-func (a mikrotikProvisioningAdapter) Stage(ctx context.Context, scope coretenant.Scope, invoiceID string, paidAt *time.Time) (string, bool, error) {
+// For needs_help it also attaches the tenant contact; a profile failure only drops
+// the contact, never the stage.
+func (a mikrotikProvisioningAdapter) Stage(ctx context.Context, scope coretenant.Scope, invoiceID string, paidAt *time.Time) (receivablehandler.ProvisioningResult, error) {
 	enabled, err := a.gate.Enabled(ctx, scope)
-	if err != nil {
-		return "", false, err
-	}
-	if !enabled {
-		return "", false, nil
+	if err != nil || !enabled {
+		return receivablehandler.ProvisioningResult{}, err
 	}
 	now := a.now()
 	paid := now
@@ -45,7 +47,16 @@ func (a mikrotikProvisioningAdapter) Stage(ctx context.Context, scope coretenant
 	}
 	stage, applicable, err := a.stager.Stage(ctx, scope, invoiceID, paid, now, businesstime.DayOf(now))
 	if err != nil || !applicable {
-		return "", false, err
+		return receivablehandler.ProvisioningResult{}, err
 	}
-	return string(stage), true, nil
+	res := receivablehandler.ProvisioningResult{Stage: string(stage), Applicable: true}
+	if stage == service.StageNeedsHelp {
+		c, perr := a.prof.Profile(ctx, scope)
+		if perr != nil {
+			slog.WarnContext(ctx, "mikrotik: tenant profile unavailable for needs_help contact", "error", perr)
+		} else {
+			res.Contact = &receivablehandler.PublicContact{Name: c.Name, Phone: c.Phone, Email: c.Email}
+		}
+	}
+	return res, nil
 }

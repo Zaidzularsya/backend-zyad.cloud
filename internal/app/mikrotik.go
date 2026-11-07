@@ -110,7 +110,7 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 		Profile: publicAdapter, Gate: publicAdapter, Tasks: taskRepo,
 	})
 	return mikrotikModule{
-		Provisioning: newMikrotikProvisioningAdapter(publicSvc, publicAdapter, time.Now),
+		Provisioning: newMikrotikProvisioningAdapter(publicSvc, publicAdapter, publicAdapter, time.Now),
 		Public:       mikrotikhandler.NewIsolirPublicHandler(publicSvc, b.RateCounter),
 		Router:       mikrotikhandler.NewRouterHandler(svc),
 		Setup:        mikrotikhandler.NewSetupHandler(setup),

@@ -516,6 +516,13 @@ rate limit 30/menit/IP, `no-store`, `noindex`) -> `{"applicable": bool, "stage":
 `applicable=false`. Token tak dikenal/kedaluwarsa/bukan invoice -> 404 `LINK_INVALID` dengan body sama seperti view invoice.
 `applicable=false` bila invoice belum lunas, pelanggan tidak punya secret PPPoE, atau tenant tanpa `mikrotik.enabled`.
 
+Hanya saat `stage=needs_help`, `data` juga memuat `contact: {name, phone, email}` (profil organisasi tenant; field kosong
+dihilangkan) agar pelanggan bisa menghubungi CS. Untuk stage lain dan `applicable=false` key `contact` tidak ada. Bila profil
+gagal dibaca, `needs_help` tetap dijawab tanpa `contact` (dilog, request tidak gagal).
+
+Rate limit per-query `POST /public/isolir/lookup` memakai `service.LookupKey(q)`: format nomor telepon yang berbeda
+(`0812 3456 789`, `0812-3456-789`, `+62812…`) berbagi satu bucket; username memakai trim+lower-case. Hanya hash yang masuk key Redis.
+
 | stage | arti |
 |---|---|
 | `received` | pembayaran diterima, pemulihan belum dimulai |

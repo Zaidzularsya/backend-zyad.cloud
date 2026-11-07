@@ -89,7 +89,7 @@ func (s *PublicService) Lookup(ctx context.Context, scope coretenant.Scope, quer
 	}
 
 	var accounts []AccountRef
-	if phone := NormalizePhone(q); phone != "" && looksLikePhone(q) {
+	if phone := phoneQuery(q); phone != "" {
 		accounts, err = s.d.Directory.AccountsByPhone(ctx, scope, phone)
 	} else {
 		accounts, err = s.d.Directory.AccountsByUsername(ctx, scope, q)
@@ -152,6 +152,25 @@ func hasControlChar(s string) bool {
 		}
 	}
 	return false
+}
+
+// phoneQuery returns the normalized phone when q is a phone-shaped query, else "".
+func phoneQuery(q string) string {
+	if !looksLikePhone(q) {
+		return ""
+	}
+	return NormalizePhone(q)
+}
+
+// LookupKey is the canonical form of a public lookup query, for rate-limit
+// bucketing: phone formats of the same number collapse to one value, anything
+// else is the trimmed lower-cased query. Same phone rule as Lookup.
+func LookupKey(q string) string {
+	q = strings.TrimSpace(q)
+	if p := phoneQuery(q); p != "" {
+		return p
+	}
+	return strings.ToLower(q)
 }
 
 // looksLikePhone is true when s has only digits, + - ( ) and spaces.

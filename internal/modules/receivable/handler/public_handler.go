@@ -31,7 +31,22 @@ type PublicInvoiceService interface {
 // PublicProvisioning reports the service-recovery stage after a paid invoice.
 // It is a port so receivable does not import the mikrotik module.
 type PublicProvisioning interface {
-	Stage(ctx context.Context, scope coretenant.Scope, invoiceID string, paidAt *time.Time) (stage string, applicable bool, err error)
+	Stage(ctx context.Context, scope coretenant.Scope, invoiceID string, paidAt *time.Time) (ProvisioningResult, error)
+}
+
+// ProvisioningResult is what the port reports. Contact is only meaningful for
+// the "needs_help" stage; the handler drops it for every other stage.
+type ProvisioningResult struct {
+	Stage      string
+	Applicable bool
+	Contact    *PublicContact
+}
+
+// PublicContact is the tenant's customer-service contact. Empty fields are omitted.
+type PublicContact struct {
+	Name  string `json:"name,omitempty"`
+	Phone string `json:"phone,omitempty"`
+	Email string `json:"email,omitempty"`
 }
 
 // PublicPayments: pembayaran online dari halaman publik (hanya org dengan receivable.online_payment).
@@ -149,16 +164,21 @@ func (h *PublicInvoiceHandler) Provisioning(c *gin.Context) {
 		corehttp.OK(c, "success", gin.H{"applicable": false})
 		return
 	}
-	stage, applicable, err := h.prov.Stage(c.Request.Context(), r.Scope, r.Invoice.ID, r.Invoice.PaidAt)
+	res, err := h.prov.Stage(c.Request.Context(), r.Scope, r.Invoice.ID, r.Invoice.PaidAt)
 	if err != nil {
 		failPublicInvoice(c, err)
 		return
 	}
-	if !applicable {
+	if !res.Applicable {
 		corehttp.OK(c, "success", gin.H{"applicable": false})
 		return
 	}
-	corehttp.OK(c, "success", gin.H{"applicable": true, "stage": stage})
+	data := gin.H{"applicable": true, "stage": res.Stage}
+	// The CS contact is only useful (and only exposed) when the customer needs help.
+	if res.Stage == "needs_help" && res.Contact != nil {
+		data["contact"] = res.Contact
+	}
+	corehttp.OK(c, "success", data)
 }
 
 func (h *PublicInvoiceHandler) PDF(c *gin.Context) {

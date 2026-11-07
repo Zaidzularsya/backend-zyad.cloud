@@ -266,3 +266,27 @@ func TestLookup_ServiceErrorGeneric500(t *testing.T) {
 		t.Fatalf("500 bodies must be identical and generic: %v", bodies)
 	}
 }
+
+func TestLookup_RateLimitKeySharedAcrossPhoneFormats(t *testing.T) {
+	counter := &isolirCounter{}
+	r := isolirRouter(t, &fakePublicSvc{}, counter)
+	for i, q := range []string{"0812 3456 789", "0812-3456-789", "+62812 3456 789"} {
+		lookup(r, "203.0.113."+string(rune('1'+i)), `{"query":"`+q+`"}`)
+	}
+	lookup(r, "203.0.113.9", `{"query":"budi"}`)
+	var queryKeys []string
+	for k, n := range counter.counts {
+		if strings.HasPrefix(k, "rl:isolir:q:") {
+			queryKeys = append(queryKeys, k)
+			if strings.Contains(k, "0812") || strings.Contains(k, "62812") || strings.Contains(k, "budi") {
+				t.Fatalf("raw value in key %q", k)
+			}
+			if n != 3 && n != 1 {
+				t.Fatalf("key %q count=%d", k, n)
+			}
+		}
+	}
+	if len(queryKeys) != 2 {
+		t.Fatalf("want 2 query buckets (phone, username), got %v", queryKeys)
+	}
+}

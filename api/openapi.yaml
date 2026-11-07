@@ -9296,7 +9296,7 @@ paths:
       operationId: getPublicInvoiceProvisioning
       tags:
       - Receivable
-      description: "Public endpoint (no bearer token), same token and rate limit (30 requests/minute per IP) as the invoice view; `Cache-Control: no-store`. Unknown, expired or non-invoice tokens return the same `404 LINK_INVALID`. `applicable=false` (and no `stage`) when the invoice is not paid, the customer has no PPPoE secret, or the organization lacks `mikrotik.enabled`. Stages: `received` (payment received, restore not started), `restoring` (restore task in progress), `active` (service restored), `needs_help` (restore not finished 10 minutes after payment; customer should contact the ISP), `other_invoices` (restore withheld because other overdue invoices remain). Only registered when the mikrotik module is wired."
+      description: "Public endpoint (no bearer token), same token and rate limit (30 requests/minute per IP) as the invoice view; `Cache-Control: no-store`. Unknown, expired or non-invoice tokens return the same `404 LINK_INVALID`. `applicable=false` (and no `stage`) when the invoice is not paid, the customer has no PPPoE secret, or the organization lacks `mikrotik.enabled`. Stages: `received` (payment received, restore not started), `restoring` (restore task in progress), `active` (service restored), `needs_help` (restore not finished 10 minutes after payment; customer should contact the ISP, see `contact`), `other_invoices` (restore withheld because other overdue invoices remain). `contact` (tenant customer-service name/phone/email; empty fields omitted) is present only when `stage=needs_help` and the tenant profile could be read; the key is absent for every other stage. Only registered when the mikrotik module is wired."
       parameters:
       - name: token
         in: path
@@ -9319,6 +9319,13 @@ paths:
                     properties:
                       applicable: {type: boolean}
                       stage: {type: string, enum: [received, restoring, active, needs_help, other_invoices]}
+                      contact:
+                        type: object
+                        description: "Only when stage=needs_help."
+                        properties:
+                          name: {type: string}
+                          phone: {type: string}
+                          email: {type: string}
         '404':
           description: "Link invalid (LINK_INVALID)"
           content:

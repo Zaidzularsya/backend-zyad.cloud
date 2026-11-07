@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -61,7 +60,7 @@ func (h *IsolirPublicHandler) RegisterRoutes(router gin.IRoutes) {
 		q, _ := c.Get(isolirQueryCtxKey)
 		s, _ := q.(string)
 		// Hash only: the raw identifier (phone/username) never reaches Redis keys or logs.
-		sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(s))))
+		sum := sha256.Sum256([]byte(service.LookupKey(s)))
 		return isolirTenantKey(c) + ":" + hex.EncodeToString(sum[:16])
 	})
 	router.GET("/public/isolir/info", noStoreNoIndex, byIP, byTenant, h.Info)

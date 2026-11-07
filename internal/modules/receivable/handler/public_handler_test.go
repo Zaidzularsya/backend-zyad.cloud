@@ -209,15 +209,16 @@ func TestPublicInvoiceStatus(t *testing.T) {
 type fakeProvisioning struct {
 	stage      string
 	applicable bool
+	contact    *PublicContact
 	err        error
 	calls      int
 	gotPaidAt  *time.Time
 }
 
-func (f *fakeProvisioning) Stage(_ context.Context, _ coretenant.Scope, _ string, paidAt *time.Time) (string, bool, error) {
+func (f *fakeProvisioning) Stage(_ context.Context, _ coretenant.Scope, _ string, paidAt *time.Time) (ProvisioningResult, error) {
 	f.calls++
 	f.gotPaidAt = paidAt
-	return f.stage, f.applicable, f.err
+	return ProvisioningResult{Stage: f.stage, Applicable: f.applicable, Contact: f.contact}, f.err
 }
 
 func provisioningRouter(view service.PublicInvoiceView, p PublicProvisioning) *gin.Engine {
@@ -288,5 +289,38 @@ func TestProvisioning_NotRegisteredWhenNil(t *testing.T) {
 	w := get(provisioningRouter(paidView(), nil), "/api/v1/public/invoices/good/provisioning")
 	if w.Code != http.StatusNotFound || strings.Contains(w.Body.String(), "applicable") {
 		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+}
+
+func TestProvisioning_ContactOnlyOnNeedsHelp(t *testing.T) {
+	contact := &PublicContact{Name: "ISP Maju", Phone: "0811", Email: "cs@isp.id"}
+	w := get(provisioningRouter(paidView(), &fakeProvisioning{stage: "needs_help", applicable: true, contact: contact}), "/api/v1/public/invoices/good/provisioning")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"contact":{"name":"ISP Maju","phone":"0811","email":"cs@isp.id"}`) {
+		t.Fatalf("needs_help = %d %s", w.Code, w.Body)
+	}
+	// empty fields are omitted
+	w = get(provisioningRouter(paidView(), &fakeProvisioning{stage: "needs_help", applicable: true, contact: &PublicContact{Phone: "0811"}}), "/api/v1/public/invoices/good/provisioning")
+	if !strings.Contains(w.Body.String(), `"contact":{"phone":"0811"}`) {
+		t.Fatalf("omitempty = %s", w.Body)
+	}
+	// needs_help without a resolvable profile: no contact key, request still OK
+	w = get(provisioningRouter(paidView(), &fakeProvisioning{stage: "needs_help", applicable: true}), "/api/v1/public/invoices/good/provisioning")
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), "contact") || !strings.Contains(w.Body.String(), `"stage":"needs_help"`) {
+		t.Fatalf("no profile = %s", w.Body)
+	}
+}
+
+func TestProvisioning_ContactAbsentForOtherStages(t *testing.T) {
+	contact := &PublicContact{Name: "ISP Maju", Phone: "0811", Email: "cs@isp.id"}
+	for _, stage := range []string{"received", "restoring", "active", "other_invoices"} {
+		// even if a (buggy) port returns a contact, the handler must not leak it
+		w := get(provisioningRouter(paidView(), &fakeProvisioning{stage: stage, applicable: true, contact: contact}), "/api/v1/public/invoices/good/provisioning")
+		if w.Code != http.StatusOK || strings.Contains(w.Body.String(), "contact") || strings.Contains(w.Body.String(), "cs@isp.id") {
+			t.Fatalf("%s = %s", stage, w.Body)
+		}
+	}
+	w := get(provisioningRouter(paidView(), &fakeProvisioning{applicable: false, contact: contact}), "/api/v1/public/invoices/good/provisioning")
+	if strings.Contains(w.Body.String(), "contact") {
+		t.Fatalf("not applicable = %s", w.Body)
 	}
 }
