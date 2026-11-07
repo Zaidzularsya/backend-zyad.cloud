@@ -224,7 +224,7 @@ func TestBuildMikrotik_WiresAllHandlers(t *testing.T) {
 	m := buildMikrotik(config.Config{}, nil, mikrotikBuild{
 		Accounts: &fakeAccounts{}, Contacts: &fakeContacts{}, Products: fakeProducts{},
 	})
-	if m.Router == nil || m.Setup == nil || m.Secret == nil || m.Policy == nil || m.Onboarding == nil {
+	if m.Router == nil || m.Setup == nil || m.Secret == nil || m.Policy == nil || m.Onboarding == nil || m.Public == nil {
 		t.Fatalf("handlers must all be built: %+v", m)
 	}
 }

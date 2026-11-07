@@ -31,6 +31,9 @@ type mikrotikModule struct {
 	Preview *mikrotikhandler.PreviewHandler
 	// Activity serves the control center activity log.
 	Activity *mikrotikhandler.ActivityHandler
+	// Public serves the unauthenticated /public/isolir/* page; mount it ONLY on
+	// the host-resolved public group.
+	Public *mikrotikhandler.IsolirPublicHandler
 }
 
 // mikrotikBuild carries the cross-module services the adapters wrap.
@@ -41,6 +44,11 @@ type mikrotikBuild struct {
 	// Listeners is the receivable registry; the isolation engine registers
 	// its invoice listener there when IsolationMode is not off.
 	Listeners *receivableservice.Registry
+	// Public isolir page collaborators (nil-safe until the page is hit).
+	PayLinks    payLinker
+	Issuer      mikrotikNotifIssuer
+	Features    mikrotikPublicFeatures
+	RateCounter middleware.RateCounter
 }
 
 // buildMikrotik assembles the Mikrotik module: repositories, production
@@ -92,7 +100,14 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 	onboarding := mikrotikservice.NewOnboardingService(
 		mikrotikrepo.NewOnboardingRepository(db), mikrotikSenderSettings{settings: receivablerepo.NewSettingsRepository(db)})
 	onboarding.SetPendingReader(preview)
+	publicAdapter := newMikrotikPublicAdapter(secretRepo, reader, b.Accounts,
+		receivablerepo.NewSettingsRepository(db), b.PayLinks, b.Issuer, b.Features)
+	publicSvc := mikrotikservice.NewPublicService(mikrotikservice.PublicServiceDeps{
+		Directory: publicAdapter, Secrets: secretRepo, Overdue: reader, PayLinks: publicAdapter,
+		Profile: publicAdapter, Gate: publicAdapter, Tasks: taskRepo,
+	})
 	return mikrotikModule{
+		Public: mikrotikhandler.NewIsolirPublicHandler(publicSvc, b.RateCounter),
 		Router: mikrotikhandler.NewRouterHandler(svc),
 		Setup:  mikrotikhandler.NewSetupHandler(setup),
 		Secret: mikrotikhandler.NewSecretHandler(mikrotikSecretFacade{

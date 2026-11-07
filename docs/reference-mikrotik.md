@@ -6,7 +6,7 @@ Runbook penyiapan router (hasil uji lab): `docs/runbook-mikrotik-isolir-setup.md
 ## Tujuan
 
 Tenant mendaftarkan router MikroTik miliknya, menguji koneksi, lalu menyiapkan objek isolir PPPoE di router
-lewat alur preview, apply, cleanup. Fase 1 hanya fondasi; belum ada isolir otomatis.
+lewat alur preview, apply, cleanup. Fase 1 hanya fondasi; isolir otomatis ada di Fase 3 dan halaman publik di Fase 4.
 
 ## Endpoint
 
@@ -482,9 +482,36 @@ ditampilkan. `message` berbahasa Indonesia dan hanya memuat nilai berbentuk kode
 pusat kendali: `control.mode_changed`, `control.grace_days_changed`, `control.restore_all`, `pilot.added`, `pilot.removed`,
 `pilot.test_started`, `pilot.test_stopped`, `pilot.test_failed`, `customer_policy.exempt_set`.
 
+## Halaman Isolir Publik
+
+Fase 4 menyediakan halaman publik tempat pelanggan terisolir melihat tagihan dan membayar. Backend:
+`GET /api/v1/public/isolir/info` dan `POST /api/v1/public/isolir/lookup`, keduanya **tanpa autentikasi** dan terdaftar
+hanya pada grup publik yang me-resolve tenant dari host (bukan grup terautentikasi). Header pemilih organisasi ditolak
+400 `PUBLIC_ORGANIZATION_SELECTOR_FORBIDDEN`; host tak terdaftar 404 `PUBLIC_HOST_NOT_FOUND`.
+
+- `info` -> `{"enabled": bool, "tenant": {"name","phone","email"}}`; `tenant` hilang bila `enabled=false`
+  (entitlement `mikrotik.enabled` mati).
+- `lookup` body `{"query": "<username PPPoE atau telepon>"}` -> `{"found","masked_name","isolated","invoices":[{"number","due_date","balance","pay_url"}]}`.
+  `pay_url` kosong bila tenant belum punya pengirim default.
+
+Aturan keamanan:
+
+- **Jawaban seragam**: tidak ada kecocokan, tanpa tunggakan, kecocokan ganda, fitur mati, query kosong, lebih dari 100
+  karakter, karakter kontrol, body rusak/tanpa `query`/lebih dari 2 KiB: semuanya HTTP 200 dengan body identik
+  `{"found":false,"masked_name":"","isolated":false,"invoices":[]}`. Endpoint tidak boleh menjadi oracle enumerasi.
+- Respons tidak memuat telepon/email pelanggan atau nama router/secret/profile/host; nama pelanggan disamarkan.
+- Rate limit (Redis, fail open): per IP 20/menit, per query ternormalisasi 5/menit (kunci memakai hash, bukan nilai
+  mentah), per tenant 300/menit. Melebihi batas: 429 `RATE_LIMITED` dengan body yang sama untuk akun ada maupun tidak.
+- Galat service/port: satu body 500 `INTERNAL_ERROR` untuk semua penyebab; log server tidak memuat query.
+- Setiap respons membawa `Cache-Control: no-store` dan `X-Robots-Tag: noindex`.
+- `today` untuk penentuan tunggakan adalah hari bisnis WIB (`businesstime`).
+
+Kode error: `PUBLIC_ORGANIZATION_SELECTOR_FORBIDDEN` (400), `PUBLIC_HOST_NOT_FOUND` (404), `RATE_LIMITED` (429),
+`INTERNAL_ERROR` (500).
+
 ## Tidak termasuk Fase 1
 
-Halaman isolir publik dan wizard/UI frontend (mesin isolir ada di Fase 3 di atas). Lihat spec di atas (fase 2 sampai 4).
+Wizard/UI frontend halaman isolir (mesin isolir ada di Fase 3 di atas). Lihat spec di atas (fase 2 sampai 4).
 
 ## Belum terbukti
 

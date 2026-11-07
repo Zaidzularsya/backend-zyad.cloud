@@ -102,6 +102,8 @@ type Dependencies struct {
 	MikrotikControlHandler           *mikrotikhandler.ControlHandler
 	MikrotikPreviewHandler           *mikrotikhandler.PreviewHandler
 	MikrotikActivityHandler          *mikrotikhandler.ActivityHandler
+	// MikrotikPublicHandler serves /public/isolir/*, mounted on the host-resolved public group.
+	MikrotikPublicHandler *mikrotikhandler.IsolirPublicHandler
 	// MikrotikRateCounter backs the per-organization limit on router-contacting
 	// mikrotik routes; nil disables it (fail open).
 	MikrotikRateCounter              middleware.RateCounter
