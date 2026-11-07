@@ -47,6 +47,7 @@ type PublicServiceDeps struct {
 	PayLinks  PublicPayLinks
 	Profile   PublicTenantProfile
 	Gate      PublicFeatureGate
+	Tasks     RestoreTaskReader
 }
 
 // PublicService backs the unauthenticated isolir page.

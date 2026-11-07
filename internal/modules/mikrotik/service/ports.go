@@ -204,3 +204,11 @@ type PublicFeatureGate interface {
 type PublicSecrets interface {
 	ListByAccount(ctx context.Context, scope coretenant.Scope, accountID string) ([]domain.PPPSecret, error)
 }
+
+// RestoreTaskReader reads restore tasks for the public recovery stage;
+// satisfied by repository.TaskRepository.
+type RestoreTaskReader interface {
+	// LatestRestoreBySecret returns the newest restore task per secret id of
+	// the organization; secrets without a restore task are absent from the map.
+	LatestRestoreBySecret(ctx context.Context, scope coretenant.Scope, secretIDs []string) (map[string]domain.IsolationTask, error)
+}
