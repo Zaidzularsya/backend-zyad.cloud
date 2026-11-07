@@ -2,12 +2,14 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 	coreerrors "zyad.cloud/internal/core/errors"
+	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/receivable/repository"
 
 	"github.com/gin-gonic/gin"
@@ -23,6 +25,13 @@ func (f *fakePublicInvoices) View(_ context.Context, token string) (service.Publ
 		return service.PublicInvoiceView{}, service.ErrLinkInvalid
 	}
 	return f.view, nil
+}
+
+func (f *fakePublicInvoices) Resolve(_ context.Context, token string) (service.ResolvedInvoice, error) {
+	if token != "good" {
+		return service.ResolvedInvoice{}, service.ErrLinkInvalid
+	}
+	return service.ResolvedInvoice{Invoice: f.view.Invoice, State: f.view.State}, nil
 }
 
 func (f *fakePublicInvoices) PDF(_ context.Context, token string) (service.InvoicePDF, error) {
@@ -194,5 +203,90 @@ func TestPublicInvoiceStatus(t *testing.T) {
 	}
 	if w := get(paymentRouter(&fakePublicPayments{}), "/api/v1/public/invoices/bad/status"); w.Code != http.StatusNotFound {
 		t.Fatalf("bad token status=%d", w.Code)
+	}
+}
+
+type fakeProvisioning struct {
+	stage      string
+	applicable bool
+	err        error
+	calls      int
+	gotPaidAt  *time.Time
+}
+
+func (f *fakeProvisioning) Stage(_ context.Context, _ coretenant.Scope, _ string, paidAt *time.Time) (string, bool, error) {
+	f.calls++
+	f.gotPaidAt = paidAt
+	return f.stage, f.applicable, f.err
+}
+
+func provisioningRouter(view service.PublicInvoiceView, p PublicProvisioning) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := NewPublicInvoiceHandler(&fakePublicInvoices{view: view}, nil)
+	if p != nil {
+		h.WithProvisioning(p)
+	}
+	h.RegisterRoutes(r.Group("/api/v1"))
+	return r
+}
+
+func paidView() service.PublicInvoiceView {
+	v := openView()
+	v.State, v.Invoice.Status = service.PublicInvoiceStatePaid, domain.InvoicePaid
+	v.Invoice.PaidAt = date("2026-10-06")
+	return v
+}
+
+func TestProvisioning_TokenInvalid404(t *testing.T) {
+	r := provisioningRouter(paidView(), &fakeProvisioning{})
+	view := get(r, "/api/v1/public/invoices/nope")
+	prov := get(r, "/api/v1/public/invoices/nope/provisioning")
+	if prov.Code != http.StatusNotFound || !strings.Contains(prov.Body.String(), "LINK_INVALID") || prov.Body.String() != view.Body.String() {
+		t.Fatalf("prov=%d %s view=%s", prov.Code, prov.Body, view.Body)
+	}
+}
+
+func TestProvisioning_UnpaidNotApplicable(t *testing.T) {
+	fp := &fakeProvisioning{stage: "active", applicable: true}
+	w := get(provisioningRouter(openView(), fp), "/api/v1/public/invoices/good/provisioning")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"applicable":false`) || strings.Contains(w.Body.String(), `"stage"`) || fp.calls != 0 {
+		t.Fatalf("%d %s calls=%d", w.Code, w.Body, fp.calls)
+	}
+}
+
+func TestProvisioning_PaidReturnsStage(t *testing.T) {
+	fp := &fakeProvisioning{stage: "restoring", applicable: true}
+	w := get(provisioningRouter(paidView(), fp), "/api/v1/public/invoices/good/provisioning")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"applicable":true`) || !strings.Contains(w.Body.String(), `"stage":"restoring"`) ||
+		fp.gotPaidAt == nil {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	fp2 := &fakeProvisioning{applicable: false}
+	w = get(provisioningRouter(paidView(), fp2), "/api/v1/public/invoices/good/provisioning")
+	if !strings.Contains(w.Body.String(), `"applicable":false`) || strings.Contains(w.Body.String(), `"stage"`) {
+		t.Fatalf("not applicable = %s", w.Body)
+	}
+}
+
+func TestProvisioning_ErrorIsGeneric500(t *testing.T) {
+	fp := &fakeProvisioning{err: errors.New("pg: secret detail")}
+	w := get(provisioningRouter(paidView(), fp), "/api/v1/public/invoices/good/provisioning")
+	if w.Code != http.StatusInternalServerError || strings.Contains(w.Body.String(), "secret detail") {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+}
+
+func TestProvisioning_NoStoreHeader(t *testing.T) {
+	w := get(provisioningRouter(paidView(), &fakeProvisioning{stage: "active", applicable: true}), "/api/v1/public/invoices/good/provisioning")
+	if w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("X-Robots-Tag") != "noindex" {
+		t.Fatalf("headers=%v", w.Header())
+	}
+}
+
+func TestProvisioning_NotRegisteredWhenNil(t *testing.T) {
+	w := get(provisioningRouter(paidView(), nil), "/api/v1/public/invoices/good/provisioning")
+	if w.Code != http.StatusNotFound || strings.Contains(w.Body.String(), "applicable") {
+		t.Fatalf("%d %s", w.Code, w.Body)
 	}
 }

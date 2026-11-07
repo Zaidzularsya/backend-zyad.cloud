@@ -509,6 +509,24 @@ Aturan keamanan:
 Kode error: `PUBLIC_ORGANIZATION_SELECTOR_FORBIDDEN` (400), `PUBLIC_HOST_NOT_FOUND` (404), `RATE_LIMITED` (429),
 `INTERNAL_ERROR` (500).
 
+### Tahap pemulihan setelah bayar
+
+`GET /api/v1/public/invoices/:token/provisioning` (halaman invoice publik, token yang sama dengan `GET /public/invoices/:token`;
+rate limit 30/menit/IP, `no-store`, `noindex`) -> `{"applicable": bool, "stage": "..."}`; `stage` hilang bila
+`applicable=false`. Token tak dikenal/kedaluwarsa/bukan invoice -> 404 `LINK_INVALID` dengan body sama seperti view invoice.
+`applicable=false` bila invoice belum lunas, pelanggan tidak punya secret PPPoE, atau tenant tanpa `mikrotik.enabled`.
+
+| stage | arti |
+|---|---|
+| `received` | pembayaran diterima, pemulihan belum dimulai |
+| `restoring` | task pemulihan sedang berjalan |
+| `active` | layanan sudah pulih |
+| `needs_help` | pemulihan belum selesai 10 menit setelah pembayaran; pelanggan diminta menghubungi ISP |
+| `other_invoices` | pemulihan ditahan karena masih ada tagihan jatuh tempo lain |
+
+Galat internal dijawab 500 `INTERNAL_ERROR` generik. Modul receivable tidak mengimpor mikrotik: portnya
+`PublicProvisioning` di handler receivable, adaptor di `internal/app/mikrotik_provisioning_adapter.go`.
+
 ## Tidak termasuk Fase 1
 
 Wizard/UI frontend halaman isolir (mesin isolir ada di Fase 3 di atas). Lihat spec di atas (fase 2 sampai 4).

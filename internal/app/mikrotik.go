@@ -34,6 +34,9 @@ type mikrotikModule struct {
 	// Public serves the unauthenticated /public/isolir/* page; mount it ONLY on
 	// the host-resolved public group.
 	Public *mikrotikhandler.IsolirPublicHandler
+	// Provisioning adapts the public service's recovery stage for the public
+	// invoice page (wired into the receivable handler in app.go).
+	Provisioning mikrotikProvisioningAdapter
 }
 
 // mikrotikBuild carries the cross-module services the adapters wrap.
@@ -107,9 +110,10 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 		Profile: publicAdapter, Gate: publicAdapter, Tasks: taskRepo,
 	})
 	return mikrotikModule{
-		Public: mikrotikhandler.NewIsolirPublicHandler(publicSvc, b.RateCounter),
-		Router: mikrotikhandler.NewRouterHandler(svc),
-		Setup:  mikrotikhandler.NewSetupHandler(setup),
+		Provisioning: newMikrotikProvisioningAdapter(publicSvc, publicAdapter, time.Now),
+		Public:       mikrotikhandler.NewIsolirPublicHandler(publicSvc, b.RateCounter),
+		Router:       mikrotikhandler.NewRouterHandler(svc),
+		Setup:        mikrotikhandler.NewSetupHandler(setup),
 		Secret: mikrotikhandler.NewSecretHandler(mikrotikSecretFacade{
 			SecretService: secrets,
 			SuggestionService: mikrotikservice.NewSuggestionService(svc, secretRepo, accounts,

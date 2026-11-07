@@ -12,6 +12,7 @@ import (
 	coreerrors "zyad.cloud/internal/core/errors"
 	corehttp "zyad.cloud/internal/core/http"
 	"zyad.cloud/internal/core/middleware"
+	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/receivable/domain"
 	"zyad.cloud/internal/modules/receivable/dto"
 	"zyad.cloud/internal/modules/receivable/repository"
@@ -24,6 +25,13 @@ const publicIPLimitPerMinute = 30
 type PublicInvoiceService interface {
 	View(ctx context.Context, token string) (service.PublicInvoiceView, error)
 	PDF(ctx context.Context, token string) (service.InvoicePDF, error)
+	Resolve(ctx context.Context, token string) (service.ResolvedInvoice, error)
+}
+
+// PublicProvisioning reports the service-recovery stage after a paid invoice.
+// It is a port so receivable does not import the mikrotik module.
+type PublicProvisioning interface {
+	Stage(ctx context.Context, scope coretenant.Scope, invoiceID string, paidAt *time.Time) (stage string, applicable bool, err error)
 }
 
 // PublicPayments: pembayaran online dari halaman publik (hanya org dengan receivable.online_payment).
@@ -37,6 +45,7 @@ type PublicPayments interface {
 type PublicInvoiceHandler struct {
 	svc      PublicInvoiceService
 	payments PublicPayments
+	prov     PublicProvisioning
 	counter  middleware.RateCounter
 }
 
@@ -50,6 +59,12 @@ func (h *PublicInvoiceHandler) WithPayments(p PublicPayments) *PublicInvoiceHand
 	return h
 }
 
+// WithProvisioning mengaktifkan endpoint tahap pemulihan layanan.
+func (h *PublicInvoiceHandler) WithProvisioning(p PublicProvisioning) *PublicInvoiceHandler {
+	h.prov = p
+	return h
+}
+
 // RegisterRoutes dipasang langsung pada api (di luar grup auth & tenant).
 func (h *PublicInvoiceHandler) RegisterRoutes(api *gin.RouterGroup) {
 	group := api.Group("/public/invoices")
@@ -59,6 +74,9 @@ func (h *PublicInvoiceHandler) RegisterRoutes(api *gin.RouterGroup) {
 	)
 	group.GET("/:token", h.View)
 	group.GET("/:token/pdf", h.PDF)
+	if h.prov != nil {
+		group.GET("/:token/provisioning", h.Provisioning)
+	}
 	if h.payments != nil {
 		group.POST("/:token/checkout", h.Checkout)
 		group.GET("/:token/status", h.Status)
@@ -116,6 +134,31 @@ func (h *PublicInvoiceHandler) Status(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	corehttp.OK(c, "success", gin.H{"status": string(status)})
+}
+
+// Provisioning: tahap pemulihan untuk invoice lunas. Invoice belum lunas atau
+// akun tanpa PPPoE → applicable=false tanpa memanggil port.
+func (h *PublicInvoiceHandler) Provisioning(c *gin.Context) {
+	r, err := h.svc.Resolve(c.Request.Context(), c.Param("token"))
+	if err != nil {
+		failPublicInvoice(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	if r.State != service.PublicInvoiceStatePaid {
+		corehttp.OK(c, "success", gin.H{"applicable": false})
+		return
+	}
+	stage, applicable, err := h.prov.Stage(c.Request.Context(), r.Scope, r.Invoice.ID, r.Invoice.PaidAt)
+	if err != nil {
+		failPublicInvoice(c, err)
+		return
+	}
+	if !applicable {
+		corehttp.OK(c, "success", gin.H{"applicable": false})
+		return
+	}
+	corehttp.OK(c, "success", gin.H{"applicable": true, "stage": stage})
 }
 
 func (h *PublicInvoiceHandler) PDF(c *gin.Context) {

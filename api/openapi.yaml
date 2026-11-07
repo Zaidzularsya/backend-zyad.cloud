@@ -9290,6 +9290,45 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/public/invoices/{token}/provisioning:
+    get:
+      summary: Service recovery stage after a paid invoice
+      operationId: getPublicInvoiceProvisioning
+      tags:
+      - Receivable
+      description: "Public endpoint (no bearer token), same token and rate limit (30 requests/minute per IP) as the invoice view; `Cache-Control: no-store`. Unknown, expired or non-invoice tokens return the same `404 LINK_INVALID`. `applicable=false` (and no `stage`) when the invoice is not paid, the customer has no PPPoE secret, or the organization lacks `mikrotik.enabled`. Stages: `received` (payment received, restore not started), `restoring` (restore task in progress), `active` (service restored), `needs_help` (restore not finished 10 minutes after payment; customer should contact the ISP), `other_invoices` (restore withheld because other overdue invoices remain). Only registered when the mikrotik module is wired."
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema: {type: string, minLength: 43, maxLength: 43}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, message, data]
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  data:
+                    type: object
+                    required: [applicable]
+                    properties:
+                      applicable: {type: boolean}
+                      stage: {type: string, enum: [received, restoring, active, needs_help, other_invoices]}
+        '404':
+          description: "Link invalid (LINK_INVALID)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429':
+          description: "Rate limited (RATE_LIMITED)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /api/v1/public/invoices/{token}/pdf:
     get:
       summary: Public invoice PDF (inline)

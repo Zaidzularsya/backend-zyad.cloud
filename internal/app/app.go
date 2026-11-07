@@ -668,6 +668,10 @@ func New(ctx context.Context) (*App, error) {
 		RateCounter: redisClient,
 	})
 
+	// Receivable must not import mikrotik: the public invoice page gets the
+	// recovery stage through this port.
+	receivableModule.PublicHandler.WithProvisioning(mikrotikModule.Provisioning)
+
 	router, err := newRouter(Dependencies{
 		Config:                           cfg,
 		Logger:                           log,
