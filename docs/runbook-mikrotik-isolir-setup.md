@@ -201,6 +201,11 @@ v7 < 7.9 tanpa `www-ssl` terdeteksi sebagai `binary`; itu benar karena binary AP
 tautan di notifikasi WhatsApp/email dan halaman isolir yang dibuka langsung. Opsi B boleh menjadi langkah opsional
 ber-persetujuan setelah terbukti dengan CPE nyata. HTTPS tidak bisa dialihkan bersih di kedua opsi.
 
+**Fase 4**: backend menyediakan halaman isolir publik di `{TENANT_ISOLIR_HOST}/isolir` (endpoint
+`/api/v1/public/isolir/*`, lihat `reference-mikrotik.md`). Itu hanya target yang bisa dibuka langsung atau ditautkan;
+pengalihan HTTP otomatis tetap opsional dan belum terbukti dengan CPE nyata. Gerbang aktivasi (mode, pilot, entitlement)
+tidak berubah.
+
 ## 5. Kunci pencocokan dan idempotensi (untuk Task 9)
 
 Aturan umum: `Print` path terkait, saring `comment=zyad-managed`, cocokkan dengan tuple di bawah. Bandingkan
@@ -421,7 +426,7 @@ balasan HTTP sampai, sedangkan alur yang di-drop berakhir sebagai galat sambunga
 pun untuk sesi terisolir (termasuk `10.255.5.1`); itu perilaku yang diharapkan karena DNS ke router memakai rantai `input`,
 bukan `forward`. (c) Domain checkout DOKU yang sebenarnya (bukan host sandbox) belum diuji; daftar `{DOKU_HOSTS}` final
 tetap menunggu uji checkout nyata. (d) Pengalihan HTTP (butir 8) tidak diuji: setup uji tidak memakai `RedirectURL`, dan
-halaman isolir tenant (Fase 4) belum ada.
+halaman isolir tenant (Fase 4) baru disediakan di sisi backend dan belum diuji dengan pengalihan nyata.
 
 Tidak dijalankan karena dilarang di router lab (lihat bagian 9 dan catatan `/ip service`): butir 9 TLS 8729 (`api-ssl`
 tidak punya sertifikat, handshake ditolak) dan butir 10 (user berhak minimum, perlu membuat user/grup). Butir 1-5, 7, 8

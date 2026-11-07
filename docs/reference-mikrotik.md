@@ -6,7 +6,7 @@ Runbook penyiapan router (hasil uji lab): `docs/runbook-mikrotik-isolir-setup.md
 ## Tujuan
 
 Tenant mendaftarkan router MikroTik miliknya, menguji koneksi, lalu menyiapkan objek isolir PPPoE di router
-lewat alur preview, apply, cleanup. Fase 1 hanya fondasi; belum ada isolir otomatis.
+lewat alur preview, apply, cleanup. Fase 1 hanya fondasi; isolir otomatis ada di Fase 3 dan halaman publik di Fase 4.
 
 ## Endpoint
 
@@ -482,9 +482,69 @@ ditampilkan. `message` berbahasa Indonesia dan hanya memuat nilai berbentuk kode
 pusat kendali: `control.mode_changed`, `control.grace_days_changed`, `control.restore_all`, `pilot.added`, `pilot.removed`,
 `pilot.test_started`, `pilot.test_stopped`, `pilot.test_failed`, `customer_policy.exempt_set`.
 
+## Halaman Isolir Publik
+
+Fase 4 menyediakan halaman publik tempat pelanggan terisolir melihat tagihan dan membayar. Backend:
+`GET /api/v1/public/isolir/info` dan `POST /api/v1/public/isolir/lookup`, keduanya **tanpa autentikasi** dan terdaftar
+hanya pada grup publik yang me-resolve tenant dari host (bukan grup terautentikasi). Header pemilih organisasi ditolak
+400 `PUBLIC_ORGANIZATION_SELECTOR_FORBIDDEN`; host tak terdaftar 404 `PUBLIC_HOST_NOT_FOUND`.
+
+- `info` -> `{"enabled": bool, "tenant": {"name","phone","email"}}`; `tenant` hilang bila `enabled=false`
+  (entitlement `mikrotik.enabled` mati).
+- `lookup` body `{"query": "<username PPPoE atau telepon>"}` -> `{"found","masked_name","isolated","invoices":[{"number","due_date","balance","pay_url"}]}`.
+  `pay_url` kosong bila tenant tidak punya pembayaran online (`receivable.online_payment`) atau pengirim default;
+  halaman lalu menyembunyikan tombol Bayar dan menampilkan kontak CS.
+
+Aturan keamanan:
+
+- **Jawaban seragam**: tidak ada kecocokan, tanpa tunggakan, kecocokan ganda, fitur mati, query kosong, lebih dari 100
+  karakter, karakter kontrol, body rusak/tanpa `query`/lebih dari 2 KiB: semuanya HTTP 200 dengan body identik
+  `{"found":false,"masked_name":"","isolated":false,"invoices":[]}`. Endpoint tidak boleh menjadi oracle enumerasi.
+- Respons tidak memuat telepon/email pelanggan atau nama router/secret/profile/host; nama pelanggan disamarkan.
+- Pencarian: query berbentuk telepon dicari sebagai telepon **dan** username (username PPPoE sering berupa angka);
+  hasilnya digabung per id akun, lebih dari satu akun dijawab seragam.
+- Tagihan yang dihitung sama dengan mesin isolir: `grace_days` tenant menggeser batas (`CandidateCutoff`) dan pelanggan
+  yang dikecualikan efektif dijawab seragam. Hal yang sama berlaku untuk tahap pemulihan (`other_invoices`).
+- Waktu respons: setiap jawaban 200 lookup (seragam maupun ditemukan) dikirim paling cepat 300 ms sejak request dimulai;
+  429/500 tidak ditahan.
+- Rate limit (Redis, fail open): lookup per IP 120/menit, info per IP 300/menit (bucket sendiri `rl:isolir:info:ip:`;
+  pelanggan satu ISP sering berbagi satu IP NAT), per query ternormalisasi 5/menit (kunci memakai hash, bukan nilai
+  mentah), per tenant 300/menit. Melebihi batas: 429 `RATE_LIMITED` dengan body yang sama untuk akun ada maupun tidak.
+- Galat service/port: satu body 500 `INTERNAL_ERROR` untuk semua penyebab; log server tidak memuat query.
+- Setiap respons membawa `Cache-Control: no-store` dan `X-Robots-Tag: noindex`.
+- `today` untuk penentuan tunggakan adalah hari bisnis WIB (`businesstime`).
+
+Kode error: `PUBLIC_ORGANIZATION_SELECTOR_FORBIDDEN` (400), `ORGANIZATION_NOT_ACTIVE` (403), `PUBLIC_HOST_NOT_FOUND` (404), `RATE_LIMITED` (429),
+`INTERNAL_ERROR` (500).
+
+### Tahap pemulihan setelah bayar
+
+`GET /api/v1/public/invoices/:token/provisioning` (halaman invoice publik, token yang sama dengan `GET /public/invoices/:token`;
+rate limit 120/menit/IP, `no-store`, `noindex`) -> `{"applicable": bool, "stage": "..."}`; `stage` hilang bila
+`applicable=false`. Token tak dikenal/kedaluwarsa/bukan invoice -> 404 `LINK_INVALID` dengan body sama seperti view invoice.
+`applicable=false` bila invoice belum lunas, pelanggan tidak punya secret PPPoE, atau tenant tanpa `mikrotik.enabled`.
+
+Hanya saat `stage=needs_help`, `data` juga memuat `contact: {name, phone, email}` (profil organisasi tenant; field kosong
+dihilangkan) agar pelanggan bisa menghubungi CS. Untuk stage lain dan `applicable=false` key `contact` tidak ada. Bila profil
+gagal dibaca, `needs_help` tetap dijawab tanpa `contact` (dilog, request tidak gagal).
+
+Rate limit per-query `POST /public/isolir/lookup` memakai `service.LookupKey(q)`: format nomor telepon yang berbeda
+(`0812 3456 789`, `0812-3456-789`, `+62812…`) berbagi satu bucket; username memakai trim+lower-case. Hanya hash yang masuk key Redis.
+
+| stage | arti |
+|---|---|
+| `received` | pembayaran diterima, pemulihan belum dimulai |
+| `restoring` | task pemulihan sedang berjalan |
+| `active` | layanan sudah pulih |
+| `needs_help` | pemulihan belum selesai 10 menit setelah pembayaran; pelanggan diminta menghubungi ISP |
+| `other_invoices` | pemulihan ditahan karena masih ada tagihan jatuh tempo lain |
+
+Galat internal dijawab 500 `INTERNAL_ERROR` generik. Modul receivable tidak mengimpor mikrotik: portnya
+`PublicProvisioning` di handler receivable, adaptor di `internal/app/mikrotik_provisioning_adapter.go`.
+
 ## Tidak termasuk Fase 1
 
-Halaman isolir publik dan wizard/UI frontend (mesin isolir ada di Fase 3 di atas). Lihat spec di atas (fase 2 sampai 4).
+Wizard/UI frontend halaman isolir (mesin isolir ada di Fase 3 di atas). Lihat spec di atas (fase 2 sampai 4).
 
 ## Belum terbukti
 

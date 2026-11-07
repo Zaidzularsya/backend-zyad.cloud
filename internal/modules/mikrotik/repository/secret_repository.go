@@ -62,6 +62,10 @@ type SecretRepository interface {
 	MarkMissing(ctx context.Context, scope coretenant.Scope, routerID string, seenAt time.Time) (int, error)
 	// FindByID returns mikrotik.ErrSecretNotFound when absent in the organization.
 	FindByID(ctx context.Context, scope coretenant.Scope, id string) (domain.PPPSecret, error)
+	// AccountIDsByName returns the distinct, live account ids paired to a secret
+	// named name (lower(trim) comparison) on a live router, at most
+	// publicLookupMax rows (enough for the caller to detect ambiguity).
+	AccountIDsByName(ctx context.Context, scope coretenant.Scope, name string) ([]string, error)
 	List(ctx context.Context, scope coretenant.Scope, f SecretFilter, limit, offset int) ([]domain.PPPSecret, int64, error)
 	// SetOriginalProfile stores the profile to restore and clears needs_original_profile.
 	SetOriginalProfile(ctx context.Context, scope coretenant.Scope, id, profile string) error
@@ -258,6 +262,40 @@ func (r *secretRepository) FindByID(ctx context.Context, scope coretenant.Scope,
 		return domain.PPPSecret{}, mapSecretError(err)
 	}
 	return out, nil
+}
+
+// publicLookupMax caps AccountIDsByName; callers only need to tell 0, 1 and "more".
+const publicLookupMax = 5
+
+func (r *secretRepository) AccountIDsByName(ctx context.Context, scope coretenant.Scope, name string) ([]string, error) {
+	ids := []string{}
+	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT DISTINCT s.account_id::text
+			FROM mikrotik_ppp_secrets s
+			JOIN receivable_accounts a ON a.organization_id = s.organization_id AND a.id = s.account_id AND a.deleted_at IS NULL
+			WHERE s.organization_id = $1 AND s.account_id IS NOT NULL
+			  AND lower(btrim(s.name)) = lower(btrim($2::text))
+			  AND `+liveRouterOnly+`
+			ORDER BY 1
+			LIMIT $3`, scope.OrganizationID(), name, publicLookupMax)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			ids = append(ids, id)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 // likeEscaper escapes LIKE wildcards so a search term is matched literally.

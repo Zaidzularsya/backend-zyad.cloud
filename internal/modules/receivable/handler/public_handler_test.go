@@ -2,12 +2,18 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	goredis "github.com/redis/go-redis/v9"
+
 	coreerrors "zyad.cloud/internal/core/errors"
+	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/receivable/repository"
 
 	"github.com/gin-gonic/gin"
@@ -23,6 +29,13 @@ func (f *fakePublicInvoices) View(_ context.Context, token string) (service.Publ
 		return service.PublicInvoiceView{}, service.ErrLinkInvalid
 	}
 	return f.view, nil
+}
+
+func (f *fakePublicInvoices) Resolve(_ context.Context, token string) (service.ResolvedInvoice, error) {
+	if token != "good" {
+		return service.ResolvedInvoice{}, service.ErrLinkInvalid
+	}
+	return service.ResolvedInvoice{Invoice: f.view.Invoice, State: f.view.State}, nil
 }
 
 func (f *fakePublicInvoices) PDF(_ context.Context, token string) (service.InvoicePDF, error) {
@@ -194,5 +207,161 @@ func TestPublicInvoiceStatus(t *testing.T) {
 	}
 	if w := get(paymentRouter(&fakePublicPayments{}), "/api/v1/public/invoices/bad/status"); w.Code != http.StatusNotFound {
 		t.Fatalf("bad token status=%d", w.Code)
+	}
+}
+
+type fakeProvisioning struct {
+	stage      string
+	applicable bool
+	contact    *PublicContact
+	err        error
+	calls      int
+	gotPaidAt  *time.Time
+}
+
+func (f *fakeProvisioning) Stage(_ context.Context, _ coretenant.Scope, _ string, paidAt *time.Time) (ProvisioningResult, error) {
+	f.calls++
+	f.gotPaidAt = paidAt
+	return ProvisioningResult{Stage: f.stage, Applicable: f.applicable, Contact: f.contact}, f.err
+}
+
+func provisioningRouter(view service.PublicInvoiceView, p PublicProvisioning) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := NewPublicInvoiceHandler(&fakePublicInvoices{view: view}, nil)
+	if p != nil {
+		h.WithProvisioning(p)
+	}
+	h.RegisterRoutes(r.Group("/api/v1"))
+	return r
+}
+
+func paidView() service.PublicInvoiceView {
+	v := openView()
+	v.State, v.Invoice.Status = service.PublicInvoiceStatePaid, domain.InvoicePaid
+	v.Invoice.PaidAt = date("2026-10-06")
+	return v
+}
+
+func TestProvisioning_TokenInvalid404(t *testing.T) {
+	r := provisioningRouter(paidView(), &fakeProvisioning{})
+	view := get(r, "/api/v1/public/invoices/nope")
+	prov := get(r, "/api/v1/public/invoices/nope/provisioning")
+	if prov.Code != http.StatusNotFound || !strings.Contains(prov.Body.String(), "LINK_INVALID") || prov.Body.String() != view.Body.String() {
+		t.Fatalf("prov=%d %s view=%s", prov.Code, prov.Body, view.Body)
+	}
+}
+
+func TestProvisioning_UnpaidNotApplicable(t *testing.T) {
+	fp := &fakeProvisioning{stage: "active", applicable: true}
+	w := get(provisioningRouter(openView(), fp), "/api/v1/public/invoices/good/provisioning")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"applicable":false`) || strings.Contains(w.Body.String(), `"stage"`) || fp.calls != 0 {
+		t.Fatalf("%d %s calls=%d", w.Code, w.Body, fp.calls)
+	}
+}
+
+func TestProvisioning_PaidReturnsStage(t *testing.T) {
+	fp := &fakeProvisioning{stage: "restoring", applicable: true}
+	w := get(provisioningRouter(paidView(), fp), "/api/v1/public/invoices/good/provisioning")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"applicable":true`) || !strings.Contains(w.Body.String(), `"stage":"restoring"`) ||
+		fp.gotPaidAt == nil {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	fp2 := &fakeProvisioning{applicable: false}
+	w = get(provisioningRouter(paidView(), fp2), "/api/v1/public/invoices/good/provisioning")
+	if !strings.Contains(w.Body.String(), `"applicable":false`) || strings.Contains(w.Body.String(), `"stage"`) {
+		t.Fatalf("not applicable = %s", w.Body)
+	}
+}
+
+func TestProvisioning_ErrorIsGeneric500(t *testing.T) {
+	fp := &fakeProvisioning{err: errors.New("pg: secret detail")}
+	w := get(provisioningRouter(paidView(), fp), "/api/v1/public/invoices/good/provisioning")
+	if w.Code != http.StatusInternalServerError || strings.Contains(w.Body.String(), "secret detail") {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+}
+
+func TestProvisioning_NoStoreHeader(t *testing.T) {
+	w := get(provisioningRouter(paidView(), &fakeProvisioning{stage: "active", applicable: true}), "/api/v1/public/invoices/good/provisioning")
+	if w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("X-Robots-Tag") != "noindex" {
+		t.Fatalf("headers=%v", w.Header())
+	}
+}
+
+func TestProvisioning_NotRegisteredWhenNil(t *testing.T) {
+	w := get(provisioningRouter(paidView(), nil), "/api/v1/public/invoices/good/provisioning")
+	if w.Code != http.StatusNotFound || strings.Contains(w.Body.String(), "applicable") {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+}
+
+func TestProvisioning_ContactOnlyOnNeedsHelp(t *testing.T) {
+	contact := &PublicContact{Name: "ISP Maju", Phone: "0811", Email: "cs@isp.id"}
+	w := get(provisioningRouter(paidView(), &fakeProvisioning{stage: "needs_help", applicable: true, contact: contact}), "/api/v1/public/invoices/good/provisioning")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"contact":{"name":"ISP Maju","phone":"0811","email":"cs@isp.id"}`) {
+		t.Fatalf("needs_help = %d %s", w.Code, w.Body)
+	}
+	// empty fields are omitted
+	w = get(provisioningRouter(paidView(), &fakeProvisioning{stage: "needs_help", applicable: true, contact: &PublicContact{Phone: "0811"}}), "/api/v1/public/invoices/good/provisioning")
+	if !strings.Contains(w.Body.String(), `"contact":{"phone":"0811"}`) {
+		t.Fatalf("omitempty = %s", w.Body)
+	}
+	// needs_help without a resolvable profile: no contact key, request still OK
+	w = get(provisioningRouter(paidView(), &fakeProvisioning{stage: "needs_help", applicable: true}), "/api/v1/public/invoices/good/provisioning")
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), "contact") || !strings.Contains(w.Body.String(), `"stage":"needs_help"`) {
+		t.Fatalf("no profile = %s", w.Body)
+	}
+}
+
+func TestProvisioning_ContactAbsentForOtherStages(t *testing.T) {
+	contact := &PublicContact{Name: "ISP Maju", Phone: "0811", Email: "cs@isp.id"}
+	for _, stage := range []string{"received", "restoring", "active", "other_invoices"} {
+		// even if a (buggy) port returns a contact, the handler must not leak it
+		w := get(provisioningRouter(paidView(), &fakeProvisioning{stage: stage, applicable: true, contact: contact}), "/api/v1/public/invoices/good/provisioning")
+		if w.Code != http.StatusOK || strings.Contains(w.Body.String(), "contact") || strings.Contains(w.Body.String(), "cs@isp.id") {
+			t.Fatalf("%s = %s", stage, w.Body)
+		}
+	}
+	w := get(provisioningRouter(paidView(), &fakeProvisioning{applicable: false, contact: contact}), "/api/v1/public/invoices/good/provisioning")
+	if strings.Contains(w.Body.String(), "contact") {
+		t.Fatalf("not applicable = %s", w.Body)
+	}
+}
+
+type pubCounter struct {
+	mu     sync.Mutex
+	counts map[string]int64
+}
+
+func (f *pubCounter) Incr(ctx context.Context, key string) *goredis.IntCmd {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.counts == nil {
+		f.counts = map[string]int64{}
+	}
+	f.counts[key]++
+	cmd := goredis.NewIntCmd(ctx)
+	cmd.SetVal(f.counts[key])
+	return cmd
+}
+
+func (f *pubCounter) Expire(ctx context.Context, _ string, _ time.Duration) *goredis.BoolCmd {
+	return goredis.NewBoolCmd(ctx)
+}
+
+// The public invoice page polls the provisioning stage; customers of one ISP
+// share a NAT IP, so the per-IP bucket allows 120 requests a minute.
+func TestPublicInvoice_PerIPLimitFitsSharedNAT(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	NewPublicInvoiceHandler(&fakePublicInvoices{view: openView()}, &pubCounter{}).RegisterRoutes(r.Group("/api/v1"))
+	for i := 0; i < 120; i++ {
+		if w := get(r, "/api/v1/public/invoices/good"); w.Code != http.StatusOK {
+			t.Fatalf("request %d: code=%d", i+1, w.Code)
+		}
+	}
+	if w := get(r, "/api/v1/public/invoices/good"); w.Code != http.StatusTooManyRequests {
+		t.Fatalf("121st request: code=%d", w.Code)
 	}
 }

@@ -9268,7 +9268,7 @@ paths:
       operationId: getPublicInvoice
       tags:
       - Receivable
-      description: "Public endpoint (no bearer token, no tenant host): the tenant is derived from the link row. Rate limited to 30 requests/minute per IP. Unknown, expired or non-invoice tokens all return the same `404 LINK_INVALID`. `state`: `open` (issued/overdue), `paid`, `void` (a voided invoice stays viewable as cancelled even though its link is revoked). `can_pay` is true only for `open` invoices of organizations with `receivable.online_payment`, or for landing page activation invoices of organizations with `landing.page_activation` (resellers; no `receivable.online_payment` needed); see `POST .../checkout`."
+      description: "Public endpoint (no bearer token, no tenant host): the tenant is derived from the link row. Rate limited to 120 requests/minute per IP (customers of one ISP often share a NAT IP). Unknown, expired or non-invoice tokens all return the same `404 LINK_INVALID`. `state`: `open` (issued/overdue), `paid`, `void` (a voided invoice stays viewable as cancelled even though its link is revoked). `can_pay` is true only for `open` invoices of organizations with `receivable.online_payment`, or for landing page activation invoices of organizations with `landing.page_activation` (resellers; no `receivable.online_payment` needed); see `POST .../checkout`."
       parameters:
       - name: token
         in: path
@@ -9290,13 +9290,59 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/public/invoices/{token}/provisioning:
+    get:
+      summary: Service recovery stage after a paid invoice
+      operationId: getPublicInvoiceProvisioning
+      tags:
+      - Receivable
+      description: "Public endpoint (no bearer token), same token and rate limit (120 requests/minute per IP (customers of one ISP often share a NAT IP)) as the invoice view; `Cache-Control: no-store`. Unknown, expired or non-invoice tokens return the same `404 LINK_INVALID`. `applicable=false` (and no `stage`) when the invoice is not paid, the customer has no PPPoE secret, or the organization lacks `mikrotik.enabled`. Stages: `received` (payment received, restore not started), `restoring` (restore task in progress), `active` (service restored), `needs_help` (restore not finished 10 minutes after payment; customer should contact the ISP, see `contact`), `other_invoices` (restore withheld because other overdue invoices remain). `contact` (tenant customer-service name/phone/email; empty fields omitted) is present only when `stage=needs_help` and the tenant profile could be read; the key is absent for every other stage. Only registered when the mikrotik module is wired."
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema: {type: string, minLength: 43, maxLength: 43}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, message, data]
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  data:
+                    type: object
+                    required: [applicable]
+                    properties:
+                      applicable: {type: boolean}
+                      stage: {type: string, enum: [received, restoring, active, needs_help, other_invoices]}
+                      contact:
+                        type: object
+                        description: "Only when stage=needs_help."
+                        properties:
+                          name: {type: string}
+                          phone: {type: string}
+                          email: {type: string}
+        '404':
+          description: "Link invalid (LINK_INVALID)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429':
+          description: "Rate limited (RATE_LIMITED)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /api/v1/public/invoices/{token}/pdf:
     get:
       summary: Public invoice PDF (inline)
       operationId: getPublicInvoicePdf
       tags:
       - Receivable
-      description: "Public endpoint (no bearer token, no tenant host): the tenant is derived from the link row. Rate limited to 30 requests/minute per IP. Unknown, expired or non-invoice tokens all return the same `404 LINK_INVALID`. Served inline with `Cache-Control: no-store` and `X-Robots-Tag: noindex`."
+      description: "Public endpoint (no bearer token, no tenant host): the tenant is derived from the link row. Rate limited to 120 requests/minute per IP (customers of one ISP often share a NAT IP). Unknown, expired or non-invoice tokens all return the same `404 LINK_INVALID`. Served inline with `Cache-Control: no-store` and `X-Robots-Tag: noindex`."
       parameters:
       - name: token
         in: path
@@ -12052,6 +12098,95 @@ paths:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '500':
           description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/public/isolir/info:
+    get:
+      summary: Public isolir page state
+      operationId: getMikrotikPublicIsolirInfo
+      tags:
+      - Mikrotik
+      security: []
+      description: "Tanpa autentikasi. Tenant diambil dari host request (sama dengan `/public/tenant-catalog`); header pemilih organisasi ditolak 400 `PUBLIC_ORGANIZATION_SELECTOR_FORBIDDEN`. `enabled=false` bila entitlement `mikrotik.enabled` tenant mati; `tenant` hanya ada bila `enabled=true` (kontak publik tenant). Rate limit per IP 300/menit (bucket sendiri, terpisah dari lookup; pelanggan satu ISP sering berbagi satu IP NAT) dan per tenant 300/menit (429 `RATE_LIMITED`). Setiap respons membawa `Cache-Control: no-store` dan `X-Robots-Tag: noindex`."
+      responses:
+        '200':
+          description: "Success"
+          headers:
+            Cache-Control: {schema: {type: string, example: no-store}}
+            X-Robots-Tag: {schema: {type: string, example: noindex}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikPublicIsolirInfoEnvelope'}
+        '400':
+          description: "PUBLIC_ORGANIZATION_SELECTOR_FORBIDDEN"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "ORGANIZATION_NOT_ACTIVE (organisasi tenant tidak aktif; dari middleware RequireActiveTenant)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "PUBLIC_HOST_NOT_FOUND (host tidak terdaftar)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '429':
+          description: "RATE_LIMITED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR (satu body generik untuk semua penyebab)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/public/isolir/lookup:
+    post:
+      summary: Public isolir lookup by username or phone
+      operationId: lookupMikrotikPublicIsolir
+      tags:
+      - Mikrotik
+      security: []
+      description: "Tanpa autentikasi; tenant dari host. Pelanggan memasukkan username PPPoE atau nomor telepon. Anti-enumerasi: tidak ada kecocokan, tidak ada tunggakan, kecocokan ganda, fitur mati, query kosong, lebih dari 100 karakter, berisi karakter kontrol, body rusak/tanpa field `query`/terlalu besar (>2 KiB) semuanya menghasilkan HTTP 200 dengan body identik `{found:false, masked_name:\"\", isolated:false, invoices:[]}` (`invoices` selalu array). Respons tidak pernah memuat telepon/email pelanggan maupun nama router/secret/profile/host. Pencarian telepon juga dicoba sebagai username (username PPPoE sering berupa angka); akun hasil keduanya digabung per id dan lebih dari satu akun dijawab seragam. Tagihan yang dihitung mengikuti mesin isolir: masa tenggang (`grace_days`) tenant menggeser batas, dan pelanggan yang dikecualikan (exempt) dijawab seragam. Setiap jawaban 200 (seragam maupun ditemukan) dikirim paling cepat 300 ms setelah request dimulai agar waktu respons tidak membedakan kasus (429/500 tidak ditahan). Rate limit: per IP 120/menit, per query ternormalisasi (di-hash) 5/menit, per tenant 300/menit; lebih dari batas -> 429 `RATE_LIMITED` dengan body sama apa pun akunnya. Galat service/port -> satu body 500 `INTERNAL_ERROR`. Header `Cache-Control: no-store` dan `X-Robots-Tag: noindex` pada setiap respons."
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MikrotikPublicIsolirLookupRequest'}
+      responses:
+        '200':
+          description: "Success (termasuk jawaban seragam)"
+          headers:
+            Cache-Control: {schema: {type: string, example: no-store}}
+            X-Robots-Tag: {schema: {type: string, example: noindex}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikPublicIsolirLookupEnvelope'}
+        '400':
+          description: "PUBLIC_ORGANIZATION_SELECTOR_FORBIDDEN"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "ORGANIZATION_NOT_ACTIVE (organisasi tenant tidak aktif; dari middleware RequireActiveTenant)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "PUBLIC_HOST_NOT_FOUND (host tidak terdaftar)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '429':
+          description: "RATE_LIMITED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR (satu body generik untuk semua penyebab)"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -17170,6 +17305,55 @@ components:
         code: {type: string}
         message: {type: string}
         data: {type: object, description: "Detail terstruktur opsional."}
+    MikrotikPublicIsolirLookupRequest:
+      type: object
+      properties:
+        query: {type: string, maxLength: 100, description: "Username PPPoE atau nomor telepon. Nilai tidak valid diperlakukan sebagai query kosong (jawaban seragam), bukan 4xx."}
+    MikrotikPublicIsolirTenant:
+      type: object
+      required: [name, phone, email]
+      properties:
+        name: {type: string}
+        phone: {type: string}
+        email: {type: string}
+    MikrotikPublicIsolirInfo:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: {type: boolean}
+        tenant: {$ref: '#/components/schemas/MikrotikPublicIsolirTenant'}
+    MikrotikPublicIsolirInfoEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, example: true}
+        message: {type: string, example: ok}
+        data: {$ref: '#/components/schemas/MikrotikPublicIsolirInfo'}
+    MikrotikPublicIsolirInvoice:
+      type: object
+      required: [number, due_date, balance, pay_url]
+      properties:
+        number: {type: string}
+        due_date: {type: string, format: date}
+        balance: {type: string, description: "Desimal sebagai string, mis. `150000.00`."}
+        pay_url: {type: string, description: "Kosong bila tenant tidak punya pembayaran online (`receivable.online_payment`) atau pengirim default (tautan bayar tidak bisa dibuat)."}
+    MikrotikPublicIsolirLookup:
+      type: object
+      required: [found, masked_name, isolated, invoices]
+      properties:
+        found: {type: boolean}
+        masked_name: {type: string, description: "Nama disamarkan, mis. `B*** S******`. Kosong pada jawaban seragam."}
+        isolated: {type: boolean}
+        invoices:
+          type: array
+          items: {$ref: '#/components/schemas/MikrotikPublicIsolirInvoice'}
+    MikrotikPublicIsolirLookupEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, example: true}
+        message: {type: string, example: ok}
+        data: {$ref: '#/components/schemas/MikrotikPublicIsolirLookup'}
     MikrotikPPPSecret:
       type: object
       description: "Salinan cache secret `/ppp/secret`. Tidak pernah memuat password PPP atau kredensial."

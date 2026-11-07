@@ -170,3 +170,58 @@ type CandidateSource interface {
 	// Summary fills every count except GraceDays, Cutoff and Safe.
 	Summary(ctx context.Context, scope coretenant.Scope, today, cutoff time.Time) (CandidateSummary, error)
 }
+
+// PublicDirectory finds customer accounts for the public isolir page. Matching
+// (case-insensitive, trimmed) is the implementation's job; the service passes
+// the trimmed query.
+type PublicDirectory interface {
+	// AccountsByUsername returns accounts having a secret named username in the scope's organization.
+	AccountsByUsername(ctx context.Context, scope coretenant.Scope, username string) ([]AccountRef, error)
+	// AccountsByPhone returns accounts whose normalized phone equals normalizedPhone.
+	AccountsByPhone(ctx context.Context, scope coretenant.Scope, normalizedPhone string) ([]AccountRef, error)
+}
+
+// PublicPayLinks builds the payment link of an invoice.
+type PublicPayLinks interface {
+	// PayLink returns "" without error when the tenant has no online payment
+	// (receivable.online_payment) or no default sender.
+	PayLink(ctx context.Context, scope coretenant.Scope, invoiceID string) (string, error)
+}
+
+// TenantContact is the tenant contact shown on the public page.
+type TenantContact struct{ Name, Phone, Email string }
+
+// PublicTenantProfile reads the tenant contact.
+type PublicTenantProfile interface {
+	Profile(ctx context.Context, scope coretenant.Scope) (TenantContact, error)
+}
+
+// PublicFeatureGate tells whether the public isolir page is enabled for the tenant.
+type PublicFeatureGate interface {
+	Enabled(ctx context.Context, scope coretenant.Scope) (bool, error)
+}
+
+// PublicSecrets is the SecretRepository subset the public page needs.
+type PublicSecrets interface {
+	ListByAccount(ctx context.Context, scope coretenant.Scope, accountID string) ([]domain.PPPSecret, error)
+}
+
+// RestoreTaskReader reads restore tasks for the public recovery stage;
+// satisfied by repository.TaskRepository.
+type RestoreTaskReader interface {
+	// LatestRestoreBySecret returns the newest restore task per secret id of
+	// the organization; secrets without a restore task are absent from the map.
+	LatestRestoreBySecret(ctx context.Context, scope coretenant.Scope, secretIDs []string) (map[string]domain.IsolationTask, error)
+}
+
+// PublicControlReader reads the tenant isolation control (grace days) for the
+// public page; satisfied by repository.ControlRepository.
+type PublicControlReader interface {
+	Get(ctx context.Context, scope coretenant.Scope) (domain.ControlSettings, error)
+}
+
+// PublicPolicyReader reads a customer's isolation policy (exemption) for the
+// public page; satisfied by repository.PolicyRepository.
+type PublicPolicyReader interface {
+	GetCustomerPolicy(ctx context.Context, scope coretenant.Scope, accountID string) (domain.CustomerPolicy, bool, error)
+}

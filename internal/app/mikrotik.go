@@ -31,6 +31,15 @@ type mikrotikModule struct {
 	Preview *mikrotikhandler.PreviewHandler
 	// Activity serves the control center activity log.
 	Activity *mikrotikhandler.ActivityHandler
+	// Public serves the unauthenticated /public/isolir/* page; mount it ONLY on
+	// the host-resolved public group.
+	Public *mikrotikhandler.IsolirPublicHandler
+	// Provisioning adapts the public service's recovery stage for the public
+	// invoice page (wired into the receivable handler in app.go).
+	Provisioning mikrotikProvisioningAdapter
+	// publicDeps are the collaborators of the public service (kept so the
+	// wiring test can assert none is nil).
+	publicDeps mikrotikservice.PublicServiceDeps
 }
 
 // mikrotikBuild carries the cross-module services the adapters wrap.
@@ -41,6 +50,11 @@ type mikrotikBuild struct {
 	// Listeners is the receivable registry; the isolation engine registers
 	// its invoice listener there when IsolationMode is not off.
 	Listeners *receivableservice.Registry
+	// Public isolir page collaborators (nil-safe until the page is hit).
+	PayLinks    payLinker
+	Issuer      mikrotikNotifIssuer
+	Features    mikrotikPublicFeatures
+	RateCounter middleware.RateCounter
 }
 
 // buildMikrotik assembles the Mikrotik module: repositories, production
@@ -92,9 +106,21 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 	onboarding := mikrotikservice.NewOnboardingService(
 		mikrotikrepo.NewOnboardingRepository(db), mikrotikSenderSettings{settings: receivablerepo.NewSettingsRepository(db)})
 	onboarding.SetPendingReader(preview)
+	publicAdapter := newMikrotikPublicAdapter(secretRepo, reader, b.Accounts,
+		receivablerepo.NewSettingsRepository(db), b.PayLinks, b.Issuer, b.Features)
+	publicDeps := mikrotikservice.PublicServiceDeps{
+		Directory: publicAdapter, Secrets: secretRepo, Overdue: reader, PayLinks: publicAdapter,
+		Profile: publicAdapter, Gate: publicAdapter, Tasks: taskRepo,
+		// Read directly (not via eval, which is nil while the engine is off).
+		Control: controlRepo, Policy: policyRepo,
+	}
+	publicSvc := mikrotikservice.NewPublicService(publicDeps)
 	return mikrotikModule{
-		Router: mikrotikhandler.NewRouterHandler(svc),
-		Setup:  mikrotikhandler.NewSetupHandler(setup),
+		publicDeps:   publicDeps,
+		Provisioning: newMikrotikProvisioningAdapter(publicSvc, publicAdapter, publicAdapter, time.Now),
+		Public:       mikrotikhandler.NewIsolirPublicHandler(publicSvc, b.RateCounter),
+		Router:       mikrotikhandler.NewRouterHandler(svc),
+		Setup:        mikrotikhandler.NewSetupHandler(setup),
 		Secret: mikrotikhandler.NewSecretHandler(mikrotikSecretFacade{
 			SecretService: secrets,
 			SuggestionService: mikrotikservice.NewSuggestionService(svc, secretRepo, accounts,

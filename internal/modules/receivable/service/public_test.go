@@ -145,3 +145,18 @@ func TestPublicPDF(t *testing.T) {
 		t.Fatalf("pdf = %+v err=%v", pdf, err)
 	}
 }
+
+func TestPublicResolveReturnsScopeAndSharesInvalidLinkRules(t *testing.T) {
+	h := newPublicHarness(domain.InvoicePaid, false)
+	r, err := h.svc.Resolve(ctx, "tok1")
+	if err != nil || r.Invoice.ID != "inv-1" || r.State != PublicInvoiceStatePaid || r.Scope.OrganizationID() == "" {
+		t.Fatalf("resolve = %+v err=%v", r, err)
+	}
+	if _, err := h.svc.Resolve(ctx, "nope"); !errors.Is(err, ErrLinkInvalid) {
+		t.Fatalf("unknown token err = %v", err)
+	}
+	h.links.link.DocumentType = publiclink.DocumentQuotation
+	if _, err := h.svc.Resolve(ctx, "tok1"); !errors.Is(err, ErrLinkInvalid) {
+		t.Fatalf("wrong document err = %v", err)
+	}
+}

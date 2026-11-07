@@ -429,6 +429,10 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		// Checkout publik tenant: tenant dari host (organization_id klien diabaikan), rate limit per IP & tenant.
 		deps.CRMTenantCheckoutHandler.RegisterRoutes(publicModules)
 	}
+	if deps.MikrotikPublicHandler != nil {
+		// Halaman isolir publik: tenant dari host, rate limit per IP/query/tenant.
+		deps.MikrotikPublicHandler.RegisterRoutes(publicModules)
+	}
 	registerModuleRoutes(publicModules)
 	return router, nil
 }

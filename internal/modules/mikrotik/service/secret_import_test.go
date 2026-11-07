@@ -66,6 +66,10 @@ func (f *fakeSecretRepo) MarkMissing(_ context.Context, _ coretenant.Scope, rout
 	return n, nil
 }
 
+func (f *fakeSecretRepo) AccountIDsByName(context.Context, coretenant.Scope, string) ([]string, error) {
+	return nil, nil
+}
+
 func (f *fakeSecretRepo) FindByID(_ context.Context, scope coretenant.Scope, id string) (domain.PPPSecret, error) {
 	for _, r := range f.rows {
 		if r.ID == id && r.OrganizationID == scope.OrganizationID() {
