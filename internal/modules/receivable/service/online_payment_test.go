@@ -451,3 +451,46 @@ func TestNotificationSkipsLedgerForNonIDR(t *testing.T) {
 		})
 	}
 }
+
+func TestSyncInvoice_NoPendingCheckoutSkipsDoku(t *testing.T) {
+	h := newOnlineHarness(t)
+	// Tanpa checkout sama sekali.
+	if st, err := h.svc.SyncInvoice(ctx, scope, "inv-1"); err != nil || st != domain.InvoiceIssued || h.doku.statusCalls != 0 {
+		t.Fatalf("no checkout: st=%s err=%v calls=%d", st, err, h.doku.statusCalls)
+	}
+	// Checkout non-pending.
+	_, _, _ = h.svc.Checkout(ctx, "tok")
+	h.checkout.rows[0].Status = "paid"
+	if st, err := h.svc.SyncInvoice(ctx, scope, "inv-1"); err != nil || st != domain.InvoiceIssued || h.doku.statusCalls != 0 {
+		t.Fatalf("non-pending: st=%s err=%v calls=%d", st, err, h.doku.statusCalls)
+	}
+	// Checkout pending tetapi kedaluwarsa.
+	h.checkout.rows[0].Status = "pending"
+	h.checkout.rows[0].ExpiresAt = nowWIB.Add(-time.Minute)
+	if st, err := h.svc.SyncInvoice(ctx, scope, "inv-1"); err != nil || st != domain.InvoiceIssued || h.doku.statusCalls != 0 {
+		t.Fatalf("expired: st=%s err=%v calls=%d", st, err, h.doku.statusCalls)
+	}
+}
+
+func TestSyncInvoice_PaidMarksInvoicePaidOnce(t *testing.T) {
+	h := newOnlineHarness(t)
+	_, _, _ = h.svc.Checkout(ctx, "tok")
+	h.doku.status = doku.TransactionStatus{Status: "SUCCESS", Amount: "833000", OriginalRequestID: "req-1"}
+	if st, err := h.svc.SyncInvoice(ctx, scope, "inv-1"); err != nil || st != domain.InvoicePaid {
+		t.Fatalf("st=%s err=%v", st, err)
+	}
+	if len(h.store.payments) != 1 || len(h.listener.paid) != 1 {
+		t.Fatalf("payments=%d paid events=%d", len(h.store.payments), len(h.listener.paid))
+	}
+	// Webhook yang datang terlambat dan polling berikutnya tidak menambah pembayaran.
+	if _, err := h.notify("SUCCESS"); err != nil {
+		t.Fatal(err)
+	}
+	h.svc.lastSync = map[string]time.Time{}
+	if _, err := h.svc.SyncInvoice(ctx, scope, "inv-1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.store.payments) != 1 || len(h.listener.paid) != 1 {
+		t.Fatalf("duplicate: payments=%d paid events=%d", len(h.store.payments), len(h.listener.paid))
+	}
+}

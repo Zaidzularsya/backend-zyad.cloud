@@ -270,23 +270,43 @@ func (p *OnlinePayment) SyncStatus(ctx context.Context, token string) (domain.In
 	if err != nil {
 		return "", err
 	}
-	if !payable(d.inv) || !p.allowSync(d.inv.ID) {
-		return d.inv.Status, nil
+	return p.syncCheckout(ctx, d.scope, d.inv, false)
+}
+
+// SyncInvoice dipakai worker isolir: pelanggan terisolir tidak bisa diandalkan
+// membuka halaman bayar, jadi status DOKU ditanyakan berkala. Invoice yang tidak
+// payable, tanpa checkout pending, atau yang checkout-nya sudah kedaluwarsa dilewati
+// tanpa memanggil DOKU. Idempoten dengan webhook: pembayaran dicatat lewat
+// HandleNotification yang sama dan checkout hanya diproses selagi berstatus pending.
+func (p *OnlinePayment) SyncInvoice(ctx context.Context, scope coretenant.Scope, invoiceID string) (domain.InvoiceStatus, error) {
+	inv, err := p.invoices.Get(ctx, scope, invoiceID)
+	if err != nil {
+		return "", err
 	}
-	number := DokuNumberPrefix + d.inv.ID
+	return p.syncCheckout(ctx, scope, inv, true)
+}
+
+func (p *OnlinePayment) syncCheckout(ctx context.Context, scope coretenant.Scope, inv domain.Invoice, skipExpired bool) (domain.InvoiceStatus, error) {
+	if !payable(inv) || !p.allowSync(inv.ID) {
+		return inv.Status, nil
+	}
+	number := DokuNumberPrefix + inv.ID
 	checkout, err := p.checkouts.FindByDokuNumber(ctx, number)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && checkout.Status != checkoutStatusPending) {
-		return d.inv.Status, nil
+		return inv.Status, nil
 	}
 	if err != nil {
 		return "", err
+	}
+	if skipExpired && !checkout.ExpiresAt.IsZero() && checkout.ExpiresAt.Before(p.now()) {
+		return inv.Status, nil
 	}
 	st, err := p.client.CheckStatus(ctx, number)
 	if err != nil {
 		return "", coreerrors.Wrap("PAYMENT_STATUS_FAILED", "failed to check payment status", http.StatusBadGateway, err)
 	}
 	if !st.IsFinalSuccess() {
-		return d.inv.Status, nil
+		return inv.Status, nil
 	}
 	if _, err := p.HandleNotification(ctx, DokuNotification{
 		InvoiceNumber: number, Status: st.Status, Amount: st.Amount, ProviderReference: st.OriginalRequestID,
@@ -294,11 +314,11 @@ func (p *OnlinePayment) SyncStatus(ctx context.Context, token string) (domain.In
 	}); err != nil {
 		return "", err
 	}
-	inv, err := p.invoices.Get(ctx, d.scope, d.inv.ID)
+	fresh, err := p.invoices.Get(ctx, scope, inv.ID)
 	if err != nil {
 		return "", err
 	}
-	return inv.Status, nil
+	return fresh.Status, nil
 }
 
 func (p *OnlinePayment) allowSync(invoiceID string) bool {
