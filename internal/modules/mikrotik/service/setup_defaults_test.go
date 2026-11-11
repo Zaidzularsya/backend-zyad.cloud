@@ -71,3 +71,33 @@ func TestSetupPreview_OverlapReturns422(t *testing.T) {
 		t.Fatal("wrote")
 	}
 }
+
+func TestApply_SavesSetupSnapshot(t *testing.T) {
+	f := newSetupFixture(t)
+	in := validSetup()
+	in.PoolCIDR = "10.99.0.0/24"
+	in.RateLimit = "512k/512k"
+	plan := f.preview(t, in)
+	if _, err := f.svc.Apply(context.Background(), testScope(t), f.routerID, in, plan.Hash, testActor); err != nil {
+		t.Fatal(err)
+	}
+	got, err := f.repo.FindByID(context.Background(), testScope(t), f.routerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Setup == nil || got.Setup.PoolCIDR != "10.99.0.0/24" || got.Setup.RateLimit != "512k/512k" || got.Setup.ProfileName != "zyad-isolir" {
+		t.Fatalf("snapshot = %+v", got.Setup)
+	}
+}
+
+func TestApply_FailureDoesNotSaveSnapshot(t *testing.T) {
+	f := newSetupFixture(t)
+	plan := f.preview(t, validSetup())
+	if _, err := f.svc.Apply(context.Background(), testScope(t), f.routerID, validSetup(), "stale-"+plan.Hash, testActor); err == nil {
+		t.Fatal("want ErrPlanChanged")
+	}
+	got, _ := f.repo.FindByID(context.Background(), testScope(t), f.routerID)
+	if got.Setup != nil {
+		t.Fatalf("snapshot saved on failure: %+v", got.Setup)
+	}
+}

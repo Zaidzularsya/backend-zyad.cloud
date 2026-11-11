@@ -138,6 +138,9 @@ func (s *storeRepo) FindByID(context.Context, coretenant.Scope, string) (domain.
 func (s *storeRepo) MarkSetup(context.Context, coretenant.Scope, string, bool, string, string) error {
 	return nil
 }
+func (s *storeRepo) SaveSetupSnapshot(context.Context, coretenant.Scope, string, domain.SetupSnapshot) error {
+	return nil
+}
 func (s *storeRepo) InsertAudit(context.Context, coretenant.Scope, repository.AuditEntry) error {
 	return nil
 }

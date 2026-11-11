@@ -35,11 +35,22 @@ type Router struct {
 	IsolirReadyAt     *time.Time
 	IsolirProfileName string
 	IsolirRedirectURL string
-	LastCheckAt       *time.Time
-	LastCheckStatus   string
-	RouterOSVersion   string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	// Setup is the last successfully applied setup input, nil before the first apply.
+	Setup           *SetupSnapshot
+	LastCheckAt     *time.Time
+	LastCheckStatus string
+	RouterOSVersion string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// SetupSnapshot is the operator-visible part of the last applied setup. Hosts
+// are excluded on purpose: the allowlist is derived from platform config.
+type SetupSnapshot struct {
+	ProfileName string `json:"profile_name"`
+	PoolCIDR    string `json:"pool_cidr"`
+	RateLimit   string `json:"rate_limit"`
+	RedirectURL string `json:"redirect_url"`
 }
 
 // Setup action kinds.

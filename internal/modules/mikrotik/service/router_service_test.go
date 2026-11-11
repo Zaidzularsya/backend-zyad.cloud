@@ -149,6 +149,16 @@ func (f *fakeRepo) MarkSetup(_ context.Context, _ coretenant.Scope, id string, r
 	return nil
 }
 
+func (f *fakeRepo) SaveSetupSnapshot(_ context.Context, _ coretenant.Scope, id string, s domain.SetupSnapshot) error {
+	r, ok := f.routers[id]
+	if !ok {
+		return mikrotik.ErrRouterNotFound
+	}
+	r.Setup = &s
+	f.routers[id] = r
+	return nil
+}
+
 func (f *fakeRepo) SoftDelete(_ context.Context, _ coretenant.Scope, id, _ string) error {
 	if _, ok := f.routers[id]; !ok {
 		return mikrotik.ErrRouterNotFound

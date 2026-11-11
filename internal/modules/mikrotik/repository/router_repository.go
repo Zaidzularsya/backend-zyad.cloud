@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -71,6 +72,8 @@ type RouterRepository interface {
 	RecordCheck(ctx context.Context, scope coretenant.Scope, id, status, version string) error
 	// MarkSetup stores the isolir setup result; isolir_ready_at is set only when ready is true.
 	MarkSetup(ctx context.Context, scope coretenant.Scope, id string, ready bool, profile, redirectURL string) error
+	// SaveSetupSnapshot remembers the last applied setup input for the wizard.
+	SaveSetupSnapshot(ctx context.Context, scope coretenant.Scope, id string, s domain.SetupSnapshot) error
 	// SoftDelete: ErrRouterHasIsolatedSecrets while the router has isolated
 	// secrets or secrets with a pending/running isolation task.
 	SoftDelete(ctx context.Context, scope coretenant.Scope, id string, by string) error
@@ -90,7 +93,7 @@ func NewRouterRepository(db *database.Pool) RouterRepository {
 
 const routerColumns = `
 	id, organization_id, name, host, port, api_type, use_tls, tls_fingerprint, username, password_encrypted,
-	isolir_ready, isolir_ready_at, isolir_profile_name, isolir_redirect_url,
+	isolir_ready, isolir_ready_at, isolir_profile_name, isolir_redirect_url, isolir_setup,
 	last_check_at, last_check_status, routeros_version, created_at, updated_at
 `
 
@@ -98,9 +101,10 @@ func scanRouter(row pgx.Row) (domain.Router, error) {
 	var r domain.Router
 	var apiType string
 	var fingerprint, profile, redirectURL, checkStatus, version *string
+	var setupJSON []byte
 	err := row.Scan(
 		&r.ID, &r.OrganizationID, &r.Name, &r.Host, &r.Port, &apiType, &r.UseTLS, &fingerprint, &r.Username, &r.PasswordEncrypted,
-		&r.IsolirReady, &r.IsolirReadyAt, &profile, &redirectURL,
+		&r.IsolirReady, &r.IsolirReadyAt, &profile, &redirectURL, &setupJSON,
 		&r.LastCheckAt, &checkStatus, &version, &r.CreatedAt, &r.UpdatedAt,
 	)
 	if err != nil {
@@ -110,6 +114,12 @@ func scanRouter(row pgx.Row) (domain.Router, error) {
 	r.TLSFingerprint = derefString(fingerprint)
 	r.IsolirProfileName = derefString(profile)
 	r.IsolirRedirectURL = derefString(redirectURL)
+	if len(setupJSON) > 0 {
+		var snap domain.SetupSnapshot
+		if json.Unmarshal(setupJSON, &snap) == nil {
+			r.Setup = &snap
+		}
+	}
 	r.LastCheckStatus = derefString(checkStatus)
 	r.RouterOSVersion = derefString(version)
 	return r, nil
@@ -304,6 +314,17 @@ func (r *routerRepository) MarkSetup(ctx context.Context, scope coretenant.Scope
 			isolir_profile_name = $2, isolir_redirect_url = $3, updated_at = now()
 		WHERE id = $4 AND organization_id = $5 AND deleted_at IS NULL`,
 		ready, nullableString(profile), nullableString(redirectURL), id, scope.OrganizationID())
+}
+
+func (r *routerRepository) SaveSetupSnapshot(ctx context.Context, scope coretenant.Scope, id string, s domain.SetupSnapshot) error {
+	raw, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	return r.execOne(ctx, scope, `
+		UPDATE mikrotik_routers SET isolir_setup = $1::jsonb, updated_at = now()
+		WHERE id = $2 AND organization_id = $3 AND deleted_at IS NULL`,
+		string(raw), id, scope.OrganizationID())
 }
 
 // routerHasNoIsolationActivity ($3 = organization) is true when no secret of

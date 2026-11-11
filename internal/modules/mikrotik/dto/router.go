@@ -34,28 +34,43 @@ type RouterListQuery struct {
 
 // RouterResponse never carries the password: only whether one is stored.
 type RouterResponse struct {
-	ID                string     `json:"id"`
-	Name              string     `json:"name"`
-	Host              string     `json:"host"`
-	Port              int        `json:"port"`
-	APIType           string     `json:"api_type"`
-	UseTLS            bool       `json:"use_tls"`
-	TLSFingerprint    string     `json:"tls_fingerprint,omitempty"`
-	Username          string     `json:"username"`
-	HasPassword       bool       `json:"has_password"`
-	IsolirReady       bool       `json:"isolir_ready"`
-	IsolirReadyAt     *time.Time `json:"isolir_ready_at,omitempty"`
-	IsolirProfileName string     `json:"isolir_profile_name,omitempty"`
-	IsolirRedirectURL string     `json:"isolir_redirect_url,omitempty"`
-	LastCheckAt       *time.Time `json:"last_check_at,omitempty"`
-	LastCheckStatus   string     `json:"last_check_status,omitempty"`
-	RouterOSVersion   string     `json:"routeros_version,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
+	ID                string                 `json:"id"`
+	Name              string                 `json:"name"`
+	Host              string                 `json:"host"`
+	Port              int                    `json:"port"`
+	APIType           string                 `json:"api_type"`
+	UseTLS            bool                   `json:"use_tls"`
+	TLSFingerprint    string                 `json:"tls_fingerprint,omitempty"`
+	Username          string                 `json:"username"`
+	HasPassword       bool                   `json:"has_password"`
+	IsolirReady       bool                   `json:"isolir_ready"`
+	IsolirReadyAt     *time.Time             `json:"isolir_ready_at,omitempty"`
+	IsolirProfileName string                 `json:"isolir_profile_name,omitempty"`
+	IsolirRedirectURL string                 `json:"isolir_redirect_url,omitempty"`
+	Setup             *SetupSnapshotResponse `json:"setup"`
+	LastCheckAt       *time.Time             `json:"last_check_at,omitempty"`
+	LastCheckStatus   string                 `json:"last_check_status,omitempty"`
+	RouterOSVersion   string                 `json:"routeros_version,omitempty"`
+	CreatedAt         time.Time              `json:"created_at"`
+	UpdatedAt         time.Time              `json:"updated_at"`
+}
+
+// SetupSnapshotResponse is the last applied setup input (no hosts), or null.
+type SetupSnapshotResponse struct {
+	ProfileName string `json:"profile_name"`
+	PoolCIDR    string `json:"pool_cidr"`
+	RateLimit   string `json:"rate_limit"`
+	RedirectURL string `json:"redirect_url"`
 }
 
 func RouterFromDomain(r domain.Router) RouterResponse {
-	return RouterResponse{
+	var snap *SetupSnapshotResponse
+	if r.Setup != nil {
+		v := SetupSnapshotResponse(*r.Setup)
+		snap = &v
+	}
+	return RouterResponse{Setup: snap,
+
 		ID: r.ID, Name: r.Name, Host: r.Host, Port: r.Port, APIType: string(r.APIType),
 		UseTLS: r.UseTLS, TLSFingerprint: r.TLSFingerprint, Username: r.Username,
 		HasPassword: r.PasswordEncrypted != "",

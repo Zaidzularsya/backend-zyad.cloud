@@ -863,6 +863,13 @@ func (s *SetupService) Apply(ctx context.Context, scope coretenant.Scope, router
 		slog.Warn("mikrotik: mark setup failed after apply", "router_id", routerID, "error", scrub(err.Error(), secrets...))
 		return domain.Router{}, mikrotik.ErrSetupStateNotSaved
 	}
+	// The snapshot only pre-fills the wizard next time; losing it is not worth
+	// failing an apply that already verified and marked the router ready.
+	if err := s.repo.SaveSetupSnapshot(ctx, scope, routerID, domain.SetupSnapshot{
+		ProfileName: n.profile, PoolCIDR: n.subnet.String(), RateLimit: n.rateLimit, RedirectURL: n.redirectURL,
+	}); err != nil {
+		slog.Warn("mikrotik: save setup snapshot failed", "router_id", routerID, "error", scrub(err.Error(), secrets...))
+	}
 	s.audit(ctx, scope, "router.setup_applied", actor, router, map[string]any{
 		"profile": n.profile, "created": created, "updated": updated, "unchanged": unchanged, "redirect": n.redirectURL != "",
 	})
