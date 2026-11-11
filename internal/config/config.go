@@ -196,6 +196,14 @@ type MikrotikConfig struct {
 	// IsolationMode controls the isolation engine: "off" (default), "dry_run"
 	// or "on". Unknown values fall back to "off". Parsed from MIKROTIK_ISOLATION_MODE.
 	IsolationMode string
+	// SetupPlatformHost / SetupPayHost / SetupExtraHosts feed the isolir
+	// allowlist so operators never type hosts. They accept a bare host or a
+	// URL. Parsed from MIKROTIK_SETUP_PLATFORM_HOST (default APP_URL),
+	// MIKROTIK_SETUP_PAY_HOST (default APP_FRONTEND_URL) and
+	// MIKROTIK_SETUP_EXTRA_HOSTS (comma list; change without a code deploy).
+	SetupPlatformHost string
+	SetupPayHost      string
+	SetupExtraHosts   []string
 }
 
 // DokuConfig holds DOKU Checkout API credentials. ClientID + SecretKey drive

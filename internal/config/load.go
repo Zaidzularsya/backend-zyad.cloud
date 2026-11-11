@@ -203,6 +203,10 @@ func LoadMikrotik() MikrotikConfig {
 		AllowedPrivateCIDRs: parseAllowedPrivateCIDRs(getEnv("MIKROTIK_ALLOWED_PRIVATE_CIDRS", "")),
 		SetupAllowREST:      getEnvBool("MIKROTIK_SETUP_ALLOW_REST", false),
 		IsolationMode:       parseIsolationMode(getEnv("MIKROTIK_ISOLATION_MODE", "")),
+
+		SetupPlatformHost: getEnv("MIKROTIK_SETUP_PLATFORM_HOST", getEnv("APP_URL", "")),
+		SetupPayHost:      getEnv("MIKROTIK_SETUP_PAY_HOST", getEnv("APP_FRONTEND_URL", "")),
+		SetupExtraHosts:   getEnvList("MIKROTIK_SETUP_EXTRA_HOSTS", nil),
 	}
 }
 

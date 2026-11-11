@@ -68,7 +68,15 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 		cfg.Mikrotik.AllowedPrivateCIDRs,
 	)
 	setup := mikrotikservice.NewSetupService(svc, repo, mikrotikrepo.NewAdvisoryLocker(db),
-		mikrotikservice.SetupOptions{AllowREST: cfg.Mikrotik.SetupAllowREST})
+		mikrotikservice.SetupOptions{
+			AllowREST: cfg.Mikrotik.SetupAllowREST,
+			Defaults: mikrotikservice.SetupDefaults{
+				PlatformHost: cfg.Mikrotik.SetupPlatformHost,
+				PayHost:      cfg.Mikrotik.SetupPayHost,
+				DokuBaseURL:  cfg.Doku.BaseURL,
+				ExtraHosts:   cfg.Mikrotik.SetupExtraHosts,
+			},
+		})
 
 	reader := newMikrotikReceivableReader(db)
 	accounts := mikrotikAccountDirectory{accounts: b.Accounts}
