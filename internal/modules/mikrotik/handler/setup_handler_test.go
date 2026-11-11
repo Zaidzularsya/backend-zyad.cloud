@@ -43,6 +43,10 @@ func (f *fakeSetupService) Cleanup(context.Context, coretenant.Scope, string, st
 	return f.cleanupFn()
 }
 
+func (f *fakeSetupService) AllowlistHealth(context.Context, coretenant.Scope, string) (service.AllowlistHealth, error) {
+	return service.AllowlistHealth{Total: 4, Unresolved: 1}, nil
+}
+
 func setupRouterFor(t *testing.T, svc SetupService) *gin.Engine {
 	r := newTestRouter(t)
 	NewSetupHandler(svc).RegisterRoutes(r.Group("/app/mikrotik"), nil, nil)
@@ -239,6 +243,7 @@ func TestSetupRoutesRequireSetupPermission(t *testing.T) {
 		{http.MethodPost, "/app/mikrotik/routers/:id/setup/preview"},
 		{http.MethodPost, "/app/mikrotik/routers/:id/setup/apply"},
 		{http.MethodPost, "/app/mikrotik/routers/:id/setup/cleanup"},
+		{http.MethodGet, "/app/mikrotik/routers/:id/setup/allowlist-health"},
 	}
 	engine := newTestRouter(t)
 	NewSetupHandler(&fakeSetupService{}).RegisterRoutes(engine.Group("/app/mikrotik"), nil, nil)
@@ -287,5 +292,26 @@ func TestSetupFailedMessageIsOperationSpecific(t *testing.T) {
 	}})
 	if w := performJSON(r, http.MethodPost, setupBase+"/cleanup", ""); w.Code != 500 || !strings.Contains(w.Body.String(), "nothing was changed") {
 		t.Errorf("mark failed: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestAllowlistHealthEndpointReturnsCountsOnly(t *testing.T) {
+	client := pmk.NewFakeClient()
+	client.Seed("/ip/firewall/address-list", pmk.Row{"list": "zyad-isolir-allow", "address": "secret-host.example.com", "comment": "zyad-managed"})
+	r := realSetupEngine(t, client)
+	w := performJSON(r, http.MethodGet, setupBase+"/allowlist-health", "")
+	if w.Code != 200 {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body)
+	}
+	for _, want := range []string{`"total":1`, `"unresolved":1`} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Errorf("body missing %s: %s", want, w.Body)
+		}
+	}
+	if strings.Contains(w.Body.String(), "secret-host") {
+		t.Fatal("allowlist host leaked to operator")
+	}
+	if client.WriteCalls() != 0 {
+		t.Fatal("wrote")
 	}
 }

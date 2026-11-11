@@ -10687,6 +10687,43 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/routers/{id}/setup/allowlist-health:
+    get:
+      summary: Check whether the router resolved the isolir allowlist names
+      operationId: getMikrotikAllowlistHealth
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Read-only. Menghitung entri allowlist berbasis nama (FQDN) yang belum ter-resolve oleh DNS router; hanya angka, tanpa nama host. `unresolved > 0` berarti pelanggan terisolir mungkin tidak bisa membuka halaman bayar. Heuristik: bila baris dinamis membawa nama asal di `comment`, tiap nama dinilai sendiri; bila tidak, hanya kegagalan total (tanpa baris dinamis sama sekali) yang terdeteksi. Permission: `mikrotik_router.setup`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      total: {type: integer}
+                      unresolved: {type: integer}
+        '404':
+          description: "MIKROTIK_ROUTER_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '502':
+          description: "MIKROTIK_AUTH_FAILED | MIKROTIK_UNREACHABLE"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
   /api/v1/app/mikrotik/routers/{id}/secrets/import:
     post:
       summary: Import PPP secrets from a router
@@ -17202,6 +17239,15 @@ components:
         isolir_ready_at: {type: string, format: date-time, nullable: true}
         isolir_profile_name: {type: string}
         isolir_redirect_url: {type: string}
+        setup:
+          type: object
+          nullable: true
+          description: "Isian setup terakhir yang berhasil diterapkan (tanpa host; allowlist diturunkan dari konfigurasi platform), atau null."
+          properties:
+            profile_name: {type: string}
+            pool_cidr: {type: string}
+            rate_limit: {type: string}
+            redirect_url: {type: string}
         last_check_at: {type: string, format: date-time, nullable: true}
         last_check_status: {type: string, enum: [ok, unreachable, auth_failed, tls_untrusted, host_not_allowed]}
         routeros_version: {type: string}

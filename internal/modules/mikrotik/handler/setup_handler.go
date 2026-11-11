@@ -18,6 +18,7 @@ type SetupService interface {
 	Preview(ctx context.Context, scope coretenant.Scope, routerID string, in service.SetupInput) (domain.SetupPlan, error)
 	Apply(ctx context.Context, scope coretenant.Scope, routerID string, in service.SetupInput, planHash, actor string) (domain.Router, error)
 	Cleanup(ctx context.Context, scope coretenant.Scope, routerID, actor string) (domain.Router, error)
+	AllowlistHealth(ctx context.Context, scope coretenant.Scope, routerID string) (service.AllowlistHealth, error)
 }
 
 type SetupHandler struct {
@@ -34,6 +35,7 @@ func (h *SetupHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddl
 	group.POST("/preview", h.Preview)
 	group.POST("/apply", h.Apply)
 	group.POST("/cleanup", h.Cleanup)
+	group.GET("/allowlist-health", h.AllowlistHealth)
 }
 
 func setupInput(r dto.SetupRequest) service.SetupInput {
@@ -94,4 +96,19 @@ func (h *SetupHandler) Cleanup(c *gin.Context) {
 		return
 	}
 	corehttp.OK(c, "success", dto.RouterFromDomain(router))
+}
+
+// AllowlistHealth reports how many name-based allowlist entries the router
+// could not resolve. Read-only; the counts carry no host names.
+func (h *SetupHandler) AllowlistHealth(c *gin.Context) {
+	scope, ok := scopeOrFail(c)
+	if !ok {
+		return
+	}
+	res, err := h.svc.AllowlistHealth(c.Request.Context(), scope, c.Param("id"))
+	if err != nil {
+		failRouter(c, err)
+		return
+	}
+	corehttp.OK(c, "success", dto.AllowlistHealthResponse{Total: res.Total, Unresolved: res.Unresolved})
 }

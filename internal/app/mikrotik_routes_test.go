@@ -124,6 +124,11 @@ func (s *countingSetupService) Cleanup(context.Context, coretenant.Scope, string
 	return mikrotikdomain.Router{}, nil
 }
 
+func (s *countingSetupService) AllowlistHealth(context.Context, coretenant.Scope, string) (mikrotikservice.AllowlistHealth, error) {
+	s.calls++
+	return mikrotikservice.AllowlistHealth{}, nil
+}
+
 func TestMikrotikSetupRoutesAreGatedByEntitlement(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tenantContext, err := coretenant.NewVerifiedContext(coretenant.VerifiedContextInput{
