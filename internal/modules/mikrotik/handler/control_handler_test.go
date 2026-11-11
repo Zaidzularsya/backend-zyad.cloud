@@ -183,6 +183,7 @@ func TestControlRoutes_ErrorMapping(t *testing.T) {
 	}{
 		{mikrotik.ErrPilotRequired, http.MethodPut, "/mode", http.StatusConflict, "MIKROTIK_PILOT_REQUIRED"},
 		{errors.Join(mikrotik.ErrModeInvalid), http.MethodPut, "/mode", http.StatusUnprocessableEntity, "MIKROTIK_MODE_INVALID"},
+		{errors.Join(mikrotik.ErrTenantContactRequired), http.MethodPut, "/mode", http.StatusUnprocessableEntity, "MIKROTIK_TENANT_CONTACT_REQUIRED"},
 		{&mikrotik.InvalidInputError{Message: "at most 500"}, http.MethodPut, "/mode", http.StatusUnprocessableEntity, "VALIDATION_ERROR"},
 		{mikrotik.ErrAccountNotFound, http.MethodPut, "/mode", http.StatusNotFound, "MIKROTIK_ACCOUNT_NOT_FOUND"},
 		{mikrotik.ErrEngineOff, http.MethodPost, "/pilot/" + testAccountID + "/test", http.StatusConflict, "MIKROTIK_ENGINE_OFF"},

@@ -139,7 +139,7 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 		Onboarding: mikrotikhandler.NewOnboardingHandler(onboarding),
 		// eval is nil while the engine is off; the service then refuses pilot tests.
 		Control: mikrotikhandler.NewControlHandler(mikrotikservice.NewControlService(mikrotikservice.ControlDeps{
-			Control: controlRepo, Secrets: secretRepo, Tasks: taskRepo, Accounts: accounts, Audit: repo, Evaluator: eval,
+			Control: controlRepo, Secrets: secretRepo, Tasks: taskRepo, Accounts: accounts, Audit: repo, Evaluator: eval, Profile: publicAdapter,
 		}, engineMode)),
 		Preview: mikrotikhandler.NewPreviewHandler(preview),
 		Activity: mikrotikhandler.NewActivityHandler(mikrotikservice.NewActivityService(

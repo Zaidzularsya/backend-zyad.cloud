@@ -188,6 +188,17 @@ type ctlEnv struct {
 	audit *captureAuditor
 	pol   *fakePolicyRepo
 	scope coretenant.Scope
+	prof  *fakeContact
+}
+
+// fakeContact is the organization profile; default has a phone so existing flows pass the CS gate.
+type fakeContact struct {
+	contact TenantContact
+	err     error
+}
+
+func (f *fakeContact) Profile(context.Context, coretenant.Scope) (TenantContact, error) {
+	return f.contact, f.err
 }
 
 const (
@@ -215,10 +226,11 @@ func newCtlEnv(t *testing.T, engine, mode string) *ctlEnv {
 		accPilot: {ID: accPilot, Name: "Pilot Sendiri"},
 		accOther: {ID: accOther, Name: "Budi"},
 	}}
+	prof := &fakeContact{contact: TenantContact{Name: "Org", Phone: "628123456789"}}
 	svc := NewControlService(ControlDeps{
-		Control: repo, Secrets: sec, Tasks: tasks, Accounts: accounts, Audit: audit, Evaluator: eval, Now: now,
+		Control: repo, Secrets: sec, Tasks: tasks, Accounts: accounts, Audit: audit, Evaluator: eval, Profile: prof, Now: now,
 	}, engine)
-	return &ctlEnv{svc: svc, repo: repo, sec: sec, tasks: tasks, audit: audit, pol: pol, scope: testScope(t)}
+	return &ctlEnv{svc: svc, repo: repo, sec: sec, tasks: tasks, audit: audit, pol: pol, scope: testScope(t), prof: prof}
 }
 
 func (e *ctlEnv) events() []string {

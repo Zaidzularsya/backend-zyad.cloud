@@ -11726,7 +11726,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '422':
-          description: "MIKROTIK_MODE_INVALID (mode tidak dikenal, atau exemptions bersama mode selain active) atau VALIDATION_ERROR (reason kosong/terlalu panjang, until salah format atau sudah lewat, lebih dari 500 akun, field tidak dikenal)"
+          description: "MIKROTIK_TENANT_CONTACT_REQUIRED (mode pilot/active ditolak selama kontak CS organisasi — telepon atau email — kosong; isi di Profil organisasi), MIKROTIK_MODE_INVALID (mode tidak dikenal, atau exemptions bersama mode selain active) atau VALIDATION_ERROR (reason kosong/terlalu panjang, until salah format atau sudah lewat, lebih dari 500 akun, field tidak dikenal)"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}

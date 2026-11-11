@@ -223,6 +223,8 @@ func failRouter(c *gin.Context, err error) {
 		response.Error(c, http.StatusConflict, "MIKROTIK_ROUTER_NAME_TAKEN", "router name is already used")
 	case errors.Is(err, mikrotik.ErrModeInvalid):
 		response.Error(c, http.StatusUnprocessableEntity, "MIKROTIK_MODE_INVALID", err.Error())
+	case errors.Is(err, mikrotik.ErrTenantContactRequired):
+		response.Error(c, http.StatusUnprocessableEntity, "MIKROTIK_TENANT_CONTACT_REQUIRED", mikrotik.ErrTenantContactRequired.Error())
 	case errors.Is(err, mikrotik.ErrPilotRequired):
 		response.Error(c, http.StatusConflict, "MIKROTIK_PILOT_REQUIRED", mikrotik.ErrPilotRequired.Error())
 	case errors.Is(err, mikrotik.ErrPilotModeRequired):

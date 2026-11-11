@@ -35,7 +35,10 @@ type ControlDeps struct {
 	Accounts  AccountDirectory
 	Audit     Auditor
 	Evaluator *Evaluator
-	Now       func() time.Time
+	// Profile supplies the organization CS contact required before pilot/active.
+	// A nil Profile fails closed.
+	Profile PublicTenantProfile
+	Now     func() time.Time
 }
 
 // ControlState is the tenant control center view. Engine is the deployment
@@ -183,6 +186,11 @@ func (s *ControlService) SetMode(ctx context.Context, scope coretenant.Scope, in
 	if current.Mode == in.Mode && len(exemptions) == 0 {
 		return s.State(ctx, scope)
 	}
+	if in.Mode == domain.ModePilot || in.Mode == domain.ModeActive {
+		if err := s.requireContact(ctx, scope); err != nil {
+			return ControlState{}, err
+		}
+	}
 	// Accounts are resolved only after the cheap checks above.
 	for _, e := range exemptions {
 		if _, err := s.d.Accounts.Get(ctx, scope, e.AccountID); err != nil {
@@ -208,6 +216,22 @@ func (s *ControlService) SetMode(ctx context.Context, scope coretenant.Scope, in
 			map[string]any{"target": "customer_policy", "account_id": e.AccountID, "exempt": true, "reason": e.Reason, "exempted_until": until})
 	}
 	return s.State(ctx, scope)
+}
+
+// requireContact fails closed: an unreadable profile is treated like an empty one.
+func (s *ControlService) requireContact(ctx context.Context, scope coretenant.Scope) error {
+	if s.d.Profile == nil {
+		return mikrotik.ErrTenantContactRequired
+	}
+	contact, err := s.d.Profile.Profile(ctx, scope)
+	if err != nil {
+		slog.Warn("mikrotik: read organization profile for activation gate failed", "error", scrub(err.Error()))
+		return fmt.Errorf("read organization profile: %w", err)
+	}
+	if strings.TrimSpace(contact.Phone) == "" && strings.TrimSpace(contact.Email) == "" {
+		return mikrotik.ErrTenantContactRequired
+	}
+	return nil
 }
 
 // exemptions validates the input shape (not the accounts) and dedupes ids.
