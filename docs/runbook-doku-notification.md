@@ -17,7 +17,8 @@ berstatus `pending`, dan invoice yang sudah `paid` tidak menerima pembayaran ked
 - `?paid=1` **hanya** memicu polling halaman; tidak pernah dianggap bukti lunas. Untuk VA, pelanggan membayar
   di aplikasi bank dan tidak kembali ke halaman, jadi `?paid=1` tidak berlaku.
 - Polling worker hanya menyentuh invoice pemicu isolir milik akun yang sedang terisolir, melewati invoice tanpa
-  checkout `pending` atau yang checkout-nya kedaluwarsa, dan dibatasi minimal 10 detik per invoice.
+  checkout `pending` atau yang checkout-nya kedaluwarsa lebih dari 1 jam (masa tenggang agar VA yang dibayar di
+  menit terakhir sesi tetap terkonfirmasi), dan dibatasi minimal 10 detik per invoice.
 - Polling worker **butuh kredensial DOKU** (`DOKU_CLIENT_ID`, `DOKU_SECRET_KEY`/`DOKU_ACTIVE_SECRET`) di env
   proses `zyad-worker`. Tanpa kredensial, polling dimatikan (log: `DOKU credentials missing, isolated customers
   rely on the webhook only`) karena klien Noop selalu menjawab SUCCESS.

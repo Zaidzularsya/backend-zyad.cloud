@@ -27,8 +27,12 @@ const (
 	onlinePaymentFeature   = "receivable.online_payment"
 	defaultCheckoutMinutes = 60
 	statusSyncMinInterval  = 10 * time.Second
-	checkoutStatusPending  = "pending"
-	checkoutStatusPaid     = "paid"
+	// expiredSyncGrace: the worker keeps polling a checkout this long after it
+	// expires, so a VA paid in the last minutes of the session is still
+	// confirmed when the webhook fails. Older checkouts are skipped.
+	expiredSyncGrace      = time.Hour
+	checkoutStatusPending = "pending"
+	checkoutStatusPaid    = "paid"
 )
 
 // ErrOnlinePaymentUnavailable: org tidak punya entitlement receivable.online_payment.
@@ -275,8 +279,8 @@ func (p *OnlinePayment) SyncStatus(ctx context.Context, token string) (domain.In
 
 // SyncInvoice dipakai worker isolir: pelanggan terisolir tidak bisa diandalkan
 // membuka halaman bayar, jadi status DOKU ditanyakan berkala. Invoice yang tidak
-// payable, tanpa checkout pending, atau yang checkout-nya sudah kedaluwarsa dilewati
-// tanpa memanggil DOKU. Idempoten dengan webhook: pembayaran dicatat lewat
+// payable, tanpa checkout pending, atau yang checkout-nya kedaluwarsa lebih dari
+// expiredSyncGrace dilewati tanpa memanggil DOKU. Idempoten dengan webhook: pembayaran dicatat lewat
 // HandleNotification yang sama dan checkout hanya diproses selagi berstatus pending.
 func (p *OnlinePayment) SyncInvoice(ctx context.Context, scope coretenant.Scope, invoiceID string) (domain.InvoiceStatus, error) {
 	inv, err := p.invoices.Get(ctx, scope, invoiceID)
@@ -298,7 +302,7 @@ func (p *OnlinePayment) syncCheckout(ctx context.Context, scope coretenant.Scope
 	if err != nil {
 		return "", err
 	}
-	if skipExpired && !checkout.ExpiresAt.IsZero() && checkout.ExpiresAt.Before(p.now()) {
+	if skipExpired && !checkout.ExpiresAt.IsZero() && checkout.ExpiresAt.Add(expiredSyncGrace).Before(p.now()) {
 		return inv.Status, nil
 	}
 	st, err := p.client.CheckStatus(ctx, number)
