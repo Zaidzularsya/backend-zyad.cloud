@@ -182,6 +182,7 @@ BEGIN;
 SET LOCAL TimeZone = 'UTC';
 SELECT set_config('app.organization_id', :'org', true);
 
+-- Bukti (read-only).
 SELECT id, contact_name, email, status, converted_deal_id, created_at FROM crm_leads
 WHERE organization_id = :'org' AND contact_name = '10mbps@debug' AND deleted_at IS NULL;
 SELECT d.id, d.title, d.status, d.contact_id,
@@ -190,15 +191,29 @@ SELECT d.id, d.title, d.status, d.contact_id,
 FROM crm_deals d
 WHERE d.organization_id = :'org' AND d.title = 'Uji Isolir - Basic Publik 10mbps' AND d.deleted_at IS NULL;
 
-UPDATE crm_leads SET deleted_at = now(), updated_at = now()
-WHERE organization_id = :'org' AND contact_name = '10mbps@debug' AND deleted_at IS NULL;
-UPDATE crm_deals SET deleted_at = now(), updated_at = now()
-WHERE organization_id = :'org' AND title = 'Uji Isolir - Basic Publik 10mbps' AND deleted_at IS NULL;
+ROLLBACK;
+```
 
+Hasil yang diharapkan: tepat 1 lead dan 1 deal. Catat id-nya. Perubahan dikunci ke id ini, bukan ke nama, supaya
+data lain bernama sama tidak ikut terhapus:
+
+```sql
+\set lead_id '<id lead dari SELECT>'
+\set deal_id '<id deal dari SELECT>'
+```
+
+```sql
+BEGIN;
+SET LOCAL TimeZone = 'UTC';
+SELECT set_config('app.organization_id', :'org', true);
+UPDATE crm_leads SET deleted_at = now(), updated_at = now()
+WHERE organization_id = :'org' AND id = :'lead_id' AND deleted_at IS NULL;
+UPDATE crm_deals SET deleted_at = now(), updated_at = now()
+WHERE organization_id = :'org' AND id = :'deal_id' AND deleted_at IS NULL;
 ROLLBACK;  -- ganti COMMIT setelah disetujui
 ```
 
-Hasil yang diharapkan: tepat 1 lead dan 1 deal (`UPDATE 1` dua kali). Kalau deal punya quotation atau SO,
+Hasil yang diharapkan: `UPDATE 1` dua kali. Kalau deal punya quotation atau SO,
 dokumen itu **tidak** ikut dihapus (FK hanya ke deal, jadi soft-delete aman). Laporkan jumlahnya ke
 pemilik produk: kontrak dan invoice yang lahir dari SO itu (mis. `INV-2026-0003`) di luar cakupan
 spec 3.8 dan butuh keputusan terpisah.
@@ -218,13 +233,21 @@ SELECT set_config('app.organization_id', :'org', true);
 SELECT i.id, i.invoice_number, i.status, i.grand_total, i.amount_paid, i.notes, i.contract_id,
        (SELECT count(*) FROM receivable_payments p           WHERE p.organization_id = i.organization_id AND p.invoice_id = i.id) AS payments,
        (SELECT count(*) FROM receivable_checkouts c          WHERE c.organization_id = i.organization_id AND c.invoice_id = i.id) AS checkouts,
-       (SELECT count(*) FROM landing_page_activations l      WHERE l.organization_id = i.organization_id AND l.invoice_id = i.id) AS activations
+       (SELECT count(*) FROM landing_page_activations l      WHERE l.organization_id = i.organization_id AND l.invoice_id = i.id) AS activations,
+       -- settlement_entries tanpa RLS dan tanpa FK ke invoice: filter organisasi manual.
+       (SELECT count(*) FROM settlement_entries se           WHERE se.beneficiary_organization_id = i.organization_id AND se.invoice_id = i.id) AS settlement_entries
 FROM receivable_invoices i
 WHERE i.organization_id = :'org' AND i.invoice_number IN ('INV-2026-0004', 'INV-2026-0005');
+
+SELECT se.id, se.kind, se.amount, se.provider_reference, se.occurred_at, i.invoice_number
+FROM settlement_entries se
+JOIN receivable_invoices i ON i.organization_id = se.beneficiary_organization_id AND i.id = se.invoice_id
+WHERE se.beneficiary_organization_id = :'org' AND i.invoice_number IN ('INV-2026-0004', 'INV-2026-0005');
 ROLLBACK;
 ```
 
 Hasil yang diharapkan: 2 baris, `notes` memuat "UJI webhook DOKU", dan `activations = 0`.
+`settlement_entries` menentukan jalur di 4b-B (lihat di bawah).
 
 > Nama kolom dan tabel diambil dari migration (sampai `000183`), bukan dibaca dari DB prod. Dry run (`ROLLBACK`)
 > akan langsung gagal bila ada nama yang berbeda.
@@ -250,7 +273,16 @@ ROLLBACK;  -- ganti COMMIT setelah disetujui
 
 Void tidak cocok untuk invoice lunas, karena pembayarannya tetap tercatat dan laporan jadi tidak konsisten.
 Pembayaran sandbox bukan uang nyata, jadi invoice dan pembayarannya dihapus. Item, kiriman, dan checkout
-ikut terhapus lewat `ON DELETE CASCADE`. Lakukan ini hanya bila `activations = 0`.
+ikut terhapus lewat `ON DELETE CASCADE`.
+
+Lakukan ini **hanya bila `activations = 0` dan `settlement_entries = 0`**.
+
+Bila `settlement_entries > 0`, pembayaran online itu sudah masuk buku settlement. Saldo settlement organisasi
+`ethernet` ikut menghitungnya, dan entri itu menunjuk ke invoice lewat `invoice_id` tanpa FK. **Jangan hapus
+invoice, pembayaran, maupun `settlement_entries`.** Migration `000165` sengaja membuat catatan uang tidak ikut
+terhapus. Berhenti di sini dan minta keputusan pemilik produk. Pilihan yang wajar: biarkan kedua invoice
+lunas apa adanya (tidak menghalangi uji ulang), atau koreksi saldo dengan entri `adjustment` negatif lewat UI
+settlement super admin, dengan catatan "Pembatalan pembayaran sandbox UJI webhook DOKU".
 
 ```sql
 BEGIN;
@@ -262,9 +294,14 @@ WHERE i.organization_id = :'org' AND i.invoice_number IN ('INV-2026-0004', 'INV-
 
 DELETE FROM receivable_payments p USING receivable_invoices i
 WHERE i.organization_id = :'org' AND p.organization_id = i.organization_id AND p.invoice_id = i.id
-  AND i.invoice_number IN ('INV-2026-0004', 'INV-2026-0005');
-DELETE FROM receivable_invoices
-WHERE organization_id = :'org' AND invoice_number IN ('INV-2026-0004', 'INV-2026-0005');
+  AND i.invoice_number IN ('INV-2026-0004', 'INV-2026-0005')
+  -- Penjaga: tidak menghapus apa pun bila ada entri settlement (pernyataan berikut juga dijaga).
+  AND NOT EXISTS (SELECT 1 FROM settlement_entries se
+                  WHERE se.beneficiary_organization_id = i.organization_id AND se.invoice_id = i.id);
+DELETE FROM receivable_invoices i
+WHERE i.organization_id = :'org' AND i.invoice_number IN ('INV-2026-0004', 'INV-2026-0005')
+  AND NOT EXISTS (SELECT 1 FROM settlement_entries se
+                  WHERE se.beneficiary_organization_id = i.organization_id AND se.invoice_id = i.id);
 
 SELECT count(*) FROM receivable_invoices
 WHERE organization_id = :'org' AND invoice_number IN ('INV-2026-0004', 'INV-2026-0005');
@@ -298,10 +335,26 @@ SELECT r.id, r.name, r.deleted_at,
        (SELECT count(*) FROM mikrotik_ppp_secrets s       WHERE s.organization_id = r.organization_id AND s.router_id = r.id AND s.account_id IS NOT NULL) AS paired,
        (SELECT count(*) FROM mikrotik_ppp_secrets s       WHERE s.organization_id = r.organization_id AND s.router_id = r.id AND s.isolation_state <> 'normal') AS isolated
 FROM mikrotik_routers r
-WHERE r.organization_id = :'org' AND r.name = 'lab-gns3';
+WHERE r.organization_id = :'org' AND r.name = 'lab-gns3'
+ORDER BY r.deleted_at NULLS FIRST;
+ROLLBACK;
+```
+
+Catat id router yang baru di-soft-delete lewat UI (baris dengan `deleted_at` hari ini). Bila ada router
+`lab-gns3` lain yang sudah lama di-soft-delete dari uji sebelumnya, **jangan** ikut dihapus tanpa persetujuan
+tersendiri.
+
+```sql
+\set router_id '<id router lab-gns3 dari SELECT>'
+```
+
+```sql
+BEGIN;
+SET LOCAL TimeZone = 'UTC';
+SELECT set_config('app.organization_id', :'org', true);
 
 DELETE FROM mikrotik_routers
-WHERE organization_id = :'org' AND name = 'lab-gns3' AND deleted_at IS NOT NULL;
+WHERE organization_id = :'org' AND id = :'router_id' AND deleted_at IS NOT NULL;
 
 SELECT count(*) AS sisa_secret FROM mikrotik_ppp_secrets s
 WHERE s.organization_id = :'org'
@@ -310,8 +363,8 @@ WHERE s.organization_id = :'org'
 ROLLBACK;  -- ganti COMMIT setelah disetujui
 ```
 
-Hasil yang diharapkan: tepat 1 router dengan `deleted_at` terisi, `secrets = 85`, `paired = 1`, `isolated = 0`,
-`DELETE 1`, dan `sisa_secret = 0`. Bila `deleted_at` masih kosong, langkah UI belum dijalankan dan
+Hasil yang diharapkan: SELECT menampilkan router dengan `deleted_at` terisi, `secrets = 85`, `paired = 1`,
+`isolated = 0`. Lalu `DELETE 1` dan `sisa_secret = 0`. Bila `deleted_at` masih kosong, langkah UI belum dijalankan dan
 `DELETE 0`. Jangan menghapus router yang belum di-soft-delete.
 
 Akun receivable milik kontak `keep` tetap ada. Isinya bisa dipakai lagi saat uji ulang onboarding,
