@@ -117,7 +117,7 @@ func (h *ContactHandler) Create(c *gin.Context) {
 		CreatedBy:      userID,
 	})
 	if err != nil {
-		corehttp.Fail(c, err)
+		failContact(c, err)
 		return
 	}
 
@@ -180,7 +180,7 @@ func (h *ContactHandler) Update(c *gin.Context) {
 		UpdatedBy:      userID,
 	})
 	if err != nil {
-		corehttp.Fail(c, err)
+		failContact(c, err)
 		return
 	}
 
