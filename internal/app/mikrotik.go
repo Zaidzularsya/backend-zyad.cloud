@@ -21,8 +21,10 @@ type mikrotikModule struct {
 	Router *mikrotikhandler.RouterHandler
 	Setup  *mikrotikhandler.SetupHandler
 	Secret *mikrotikhandler.SecretHandler
-	Policy *mikrotikhandler.PolicyHandler
-	Task   *mikrotikhandler.TaskHandler
+	// SecretOnboarding runs the customer onboarding from one PPP secret.
+	SecretOnboarding *mikrotikhandler.SecretOnboardingHandler
+	Policy           *mikrotikhandler.PolicyHandler
+	Task             *mikrotikhandler.TaskHandler
 	// Onboarding serves the setup checklist and per-customer isolir status.
 	Onboarding *mikrotikhandler.OnboardingHandler
 	// Control serves the tenant control center (mode, grace days, pilot, restore all).
@@ -55,6 +57,9 @@ type mikrotikBuild struct {
 	Issuer      mikrotikNotifIssuer
 	Features    mikrotikPublicFeatures
 	RateCounter middleware.RateCounter
+	// Secret onboarding: the CRM chain adapter and the operator permission check.
+	OnboardCRM         mikrotikservice.OnboardingCRM
+	OnboardPermissions mikrotikservice.OnboardingPermissions
 }
 
 // buildMikrotik assembles the Mikrotik module: repositories, production
@@ -134,6 +139,9 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 			SuggestionService: mikrotikservice.NewSuggestionService(svc, secretRepo, accounts,
 				mikrotikrepo.NewSuggestionRepository(db), mikrotikrepo.NewAdvisoryLocker(db)),
 		}),
+		SecretOnboarding: mikrotikhandler.NewSecretOnboardingHandler(mikrotikservice.NewSecretOnboardingService(
+			secrets, b.OnboardCRM, policyDeps.Products, b.OnboardPermissions,
+			mikrotikservice.NewOnboardingStore(mikrotikrepo.NewSecretOnboardingRepository(db)), mikrotikrepo.NewAdvisoryLocker(db))),
 		Policy:     mikrotikhandler.NewPolicyHandler(policy),
 		Task:       mikrotikhandler.NewTaskHandler(mikrotikservice.NewTaskService(taskRepo, secretRepo, repo)),
 		Onboarding: mikrotikhandler.NewOnboardingHandler(onboarding),
@@ -193,6 +201,9 @@ func registerMikrotikRoutes(protected *gin.RouterGroup, deps Dependencies) {
 	}
 	if deps.MikrotikSecretHandler != nil {
 		deps.MikrotikSecretHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
+	}
+	if deps.MikrotikSecretOnboardingHandler != nil {
+		deps.MikrotikSecretOnboardingHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
 	}
 	if deps.MikrotikPolicyHandler != nil {
 		deps.MikrotikPolicyHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)

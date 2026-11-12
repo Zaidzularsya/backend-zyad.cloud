@@ -96,6 +96,7 @@ type Dependencies struct {
 	MikrotikRouterHandler            *mikrotikhandler.RouterHandler
 	MikrotikSetupHandler             *mikrotikhandler.SetupHandler
 	MikrotikSecretHandler            *mikrotikhandler.SecretHandler
+	MikrotikSecretOnboardingHandler  *mikrotikhandler.SecretOnboardingHandler
 	MikrotikPolicyHandler            *mikrotikhandler.PolicyHandler
 	MikrotikTaskHandler              *mikrotikhandler.TaskHandler
 	MikrotikOnboardingHandler        *mikrotikhandler.OnboardingHandler

@@ -197,3 +197,16 @@ func (e *PilotTestNotRunnableError) Error() string {
 }
 
 func (e *PilotTestNotRunnableError) Is(target error) bool { return target == ErrPilotTestNotRunnable }
+
+// Gelombang 2: onboarding pelanggan dari secret PPPoE.
+var (
+	// ErrContactNotFound: the CRM contact does not exist in this organization.
+	ErrContactNotFound = errors.New("crm contact not found")
+	// ErrOnboardingInProgress: another onboarding of the same secret is running.
+	ErrOnboardingInProgress = errors.New("another onboarding of this ppp secret is running; try again when it finishes")
+	// ErrOnboardingForbidden: the operator lacks a permission one of the
+	// onboarding steps needs; wrapped with the missing permission names.
+	ErrOnboardingForbidden = errors.New("missing permissions to onboard this customer")
+	// ErrSecretHasContract: the secret's customer already has a contract.
+	ErrSecretHasContract = errors.New("ppp secret is already onboarded with a contract")
+)

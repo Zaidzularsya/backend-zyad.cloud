@@ -168,6 +168,22 @@ func (s *SecretService) pairableSecret(ctx context.Context, scope coretenant.Sco
 	return secret, nil
 }
 
+// Get returns one secret of the organization (mikrotik.ErrSecretNotFound when absent).
+func (s *SecretService) Get(ctx context.Context, scope coretenant.Scope, id string) (domain.PPPSecret, error) {
+	return s.repo.FindByID(ctx, scope, id)
+}
+
+// CheckOnboardable applies the pairing rules (present on the router, original
+// profile known) without refusing an existing pairing: onboarding may
+// complete a secret that was paired before Gelombang 2.
+func (s *SecretService) CheckOnboardable(ctx context.Context, scope coretenant.Scope, secret domain.PPPSecret) error {
+	router, err := s.routers.Get(ctx, scope, secret.RouterID)
+	if err != nil {
+		return err
+	}
+	return secret.Pairable(router.IsolirProfileName)
+}
+
 // Pair links a secret to an existing account of the same organization.
 func (s *SecretService) Pair(ctx context.Context, scope coretenant.Scope, secretID, accountID, actor string) (domain.PPPSecret, error) {
 	secret, err := s.pairableSecret(ctx, scope, secretID)

@@ -29,6 +29,8 @@ type ContactProvisioner interface {
 type ProductInfo struct {
 	ID, Name, SKU     string
 	Recurring, Active bool
+	// BasePrice is the catalog unit price (decimal string).
+	BasePrice string
 }
 
 // ProductCatalog reads products of the organization.

@@ -666,6 +666,12 @@ func New(ctx context.Context) (*App, error) {
 		Issuer:      receivableIssuer{repo: crmrepo.NewQuotationIssuerRepository(db)},
 		Features:    crmEntitlementChecker,
 		RateCounter: redisClient,
+		OnboardCRM: mikrotikOnboardingCRM{
+			contacts: crmContactSvc, duplicates: crmContactRepo, deals: crmDealSvc, pipelines: crmPipelineRepo,
+			quotations: crmQuotationSvc, salesOrders: crmSalesOrderSvc, soFinder: crmSalesOrderRepo,
+			accounts: receivableModule.Accounts, contracts: receivableModule.Contracts,
+		},
+		OnboardPermissions: mikrotikOnboardingPermissions{checker: permService},
 	})
 
 	// Receivable must not import mikrotik: the public invoice page gets the
@@ -744,6 +750,7 @@ func New(ctx context.Context) (*App, error) {
 		MikrotikRouterHandler:            mikrotikModule.Router,
 		MikrotikSetupHandler:             mikrotikModule.Setup,
 		MikrotikSecretHandler:            mikrotikModule.Secret,
+		MikrotikSecretOnboardingHandler:  mikrotikModule.SecretOnboarding,
 		MikrotikPolicyHandler:            mikrotikModule.Policy,
 		MikrotikTaskHandler:              mikrotikModule.Task,
 		MikrotikOnboardingHandler:        mikrotikModule.Onboarding,
