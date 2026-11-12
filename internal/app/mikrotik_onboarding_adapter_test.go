@@ -237,12 +237,18 @@ func (c *countingOnboarding) State(context.Context, coretenant.Scope, string) (m
 	return mikrotikservice.OnboardState{}, false, nil
 }
 
+func (c *countingOnboarding) Detail(context.Context, coretenant.Scope, string) (mikrotikservice.SecretDetail, error) {
+	c.calls++
+	return mikrotikservice.SecretDetail{}, nil
+}
+
 func TestMikrotikOnboardRoutes_Guards(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cases := []struct{ method, path, perm string }{
 		{http.MethodPost, "/secrets/" + rtSecretID(t) + "/onboard/preview", "mikrotik_secret.pair"},
 		{http.MethodPost, "/secrets/" + rtSecretID(t) + "/onboard", "mikrotik_secret.pair"},
 		{http.MethodGet, "/secrets/" + rtSecretID(t) + "/onboard", "mikrotik_secret.read"},
+		{http.MethodGet, "/secrets/" + rtSecretID(t), "mikrotik_secret.read"},
 	}
 	run := func(entitled bool, granted []string, method, path string) (int, int) {
 		svc := &countingOnboarding{}
@@ -262,6 +268,8 @@ func TestMikrotikOnboardRoutes_Guards(t *testing.T) {
 			PermissionChecker:               permissionSetChecker{allowed: allowed},
 			MikrotikRouterHandler:           mikrotikhandler.NewRouterHandler(&countingRouterService{}),
 			MikrotikSecretOnboardingHandler: mikrotikhandler.NewSecretOnboardingHandler(svc),
+			// Registered together to prove /secrets/summary and /secrets/:id coexist.
+			MikrotikSecretHandler: mikrotikhandler.NewSecretHandler(&countingSecretService{}),
 		})
 		req := httptest.NewRequest(method, "/api/v1/app/mikrotik"+path, strings.NewReader(`{"product_id":"p1","billing_day":5}`))
 		req.Header.Set("Content-Type", "application/json")

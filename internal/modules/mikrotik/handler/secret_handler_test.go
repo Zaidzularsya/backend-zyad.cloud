@@ -291,6 +291,7 @@ func TestSecretRoutesRequirePermissions(t *testing.T) {
 		{http.MethodGet, "/app/mikrotik/accounts/search", "mikrotik_secret.read"},
 		{http.MethodPost, "/app/mikrotik/routers/:id/secrets/analyze", "mikrotik_secret.import"},
 		{http.MethodPost, "/app/mikrotik/secrets/pair-bulk", "mikrotik_secret.pair"},
+		{http.MethodGet, "/app/mikrotik/secrets/summary", "mikrotik_secret.read"},
 	}
 	assertRoutesRequirePermissions(t, routes, func(g *gin.RouterGroup, p *recordingChecker) {
 		NewSecretHandler(&fakeSecretService{}).RegisterRoutes(g, p, nil)
@@ -561,5 +562,33 @@ func TestPairBulk_RejectsEmptyAndOver200(t *testing.T) {
 	w := performJSON(secretRouter(t, svc), http.MethodPost, bulkURL, `{"items":[`+strings.Join(many[:200], ",")+`]}`)
 	if w.Code != http.StatusOK || len(svc.bulkItems) != 200 {
 		t.Fatalf("200 items: status = %d", w.Code)
+	}
+}
+
+func (f *fakeSecretService) Summary(_ context.Context, _ coretenant.Scope, routerID string) (service.SecretSummary, error) {
+	f.calls++
+	f.importRouter = routerID
+	return service.SecretSummary{Active: 7, Inactive: 2}, f.err
+}
+
+func TestSecretSummaryRoute(t *testing.T) {
+	svc := &fakeSecretService{}
+	w := performJSON(secretRouter(t, svc), http.MethodGet, "/app/mikrotik/secrets/summary?router_id="+testRouterID, "")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"active":7`) || !strings.Contains(w.Body.String(), `"inactive":2`) || svc.importRouter != testRouterID {
+		t.Fatalf("summary = %d %s router=%q", w.Code, w.Body.String(), svc.importRouter)
+	}
+	if w := performJSON(secretRouter(t, svc), http.MethodGet, "/app/mikrotik/secrets/summary?router_id=nope", ""); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("bad router id → %d", w.Code)
+	}
+}
+
+func TestSecretList_MappingStatus(t *testing.T) {
+	svc := &fakeSecretService{}
+	w := performJSON(secretRouter(t, svc), http.MethodGet, "/app/mikrotik/secrets?mapping_status=needs_decision", "")
+	if w.Code != http.StatusOK || svc.listFilter.Suggestion != repository.SuggestionFilterNeedsDecision || svc.listFilter.Paired == nil || *svc.listFilter.Paired {
+		t.Fatalf("list = %d filter=%+v", w.Code, svc.listFilter)
+	}
+	if w := performJSON(secretRouter(t, svc), http.MethodGet, "/app/mikrotik/secrets?mapping_status=bogus", ""); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("bogus status → %d", w.Code)
 	}
 }

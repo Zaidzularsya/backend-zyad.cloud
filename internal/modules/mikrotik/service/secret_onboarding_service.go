@@ -103,6 +103,9 @@ type ConfirmOrder struct {
 	Channels           []string
 }
 
+// ContractRef identifies a receivable contract.
+type ContractRef struct{ ID, Number string }
+
 // ConfirmedOrder is the billing outcome of a confirmed sales order.
 type ConfirmedOrder struct{ AccountID, ContractID string }
 
@@ -120,6 +123,10 @@ type OnboardingCRM interface {
 	// ContactOfAccount: the CRM contact a receivable account was created for ("" = none).
 	ContactOfAccount(ctx context.Context, scope coretenant.Scope, accountID string) (string, error)
 	AccountHasActiveContract(ctx context.Context, scope coretenant.Scope, accountID string) (bool, error)
+	// ContractRef reads one contract; ActiveContractOfAccount the account's
+	// first active one (found=false when none).
+	ContractRef(ctx context.Context, scope coretenant.Scope, id string) (ContractRef, error)
+	ActiveContractOfAccount(ctx context.Context, scope coretenant.Scope, accountID string) (ContractRef, bool, error)
 	CreateDeal(ctx context.Context, scope coretenant.Scope, d OnboardDeal, actor string) (string, error)
 	CreateQuotation(ctx context.Context, scope coretenant.Scope, q OnboardQuotation, actor string) (string, error)
 	// ApproveQuotation marks a draft sent and approves it; approved = no-op.
@@ -196,6 +203,51 @@ type resolved struct {
 // State returns the stored onboarding state of a secret (found=false when none).
 func (s *SecretOnboardingService) State(ctx context.Context, scope coretenant.Scope, secretID string) (OnboardState, bool, error) {
 	return s.store.Get(ctx, scope, secretID)
+}
+
+// SecretDetail is the secret page: the secret, its onboarding progress and
+// its contract (the onboarding's, else for a legacy pairing the paired
+// account's active one). CanOnboard is false once a contract exists or the
+// secret cannot be paired.
+type SecretDetail struct {
+	Secret     domain.PPPSecret
+	Onboarding *OnboardState
+	Contract   *ContractRef
+	CanOnboard bool
+}
+
+// Detail assembles SecretDetail without writing.
+func (s *SecretOnboardingService) Detail(ctx context.Context, scope coretenant.Scope, secretID string) (SecretDetail, error) {
+	secret, err := s.secrets.Get(ctx, scope, secretID)
+	if err != nil {
+		return SecretDetail{}, err
+	}
+	d := SecretDetail{Secret: secret}
+	state, found, err := s.store.Get(ctx, scope, secretID)
+	if err != nil {
+		return SecretDetail{}, err
+	}
+	if found {
+		d.Onboarding = &state
+	}
+	switch {
+	case found && state.ContractID != "":
+		c, err := s.crm.ContractRef(ctx, scope, state.ContractID)
+		if err != nil {
+			return SecretDetail{}, err
+		}
+		d.Contract = &c
+	case !found && secret.AccountID != nil:
+		c, ok, err := s.crm.ActiveContractOfAccount(ctx, scope, *secret.AccountID)
+		if err != nil {
+			return SecretDetail{}, err
+		}
+		if ok {
+			d.Contract = &c
+		}
+	}
+	d.CanOnboard = d.Contract == nil && s.secrets.CheckOnboardable(ctx, scope, secret) == nil
+	return d, nil
 }
 
 // Preview validates the input and describes what Run would create, without

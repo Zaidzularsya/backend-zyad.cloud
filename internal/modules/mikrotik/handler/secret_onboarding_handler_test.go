@@ -11,6 +11,7 @@ import (
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/mikrotik"
+	"zyad.cloud/internal/modules/mikrotik/domain"
 	"zyad.cloud/internal/modules/mikrotik/service"
 )
 
@@ -118,5 +119,26 @@ func TestOnboardRun_SuccessAndGetState(t *testing.T) {
 	}
 	if w := performJSON(r, http.MethodPost, "/secrets/not-a-uuid/onboard", onboardBody); w.Code != http.StatusNotFound {
 		t.Fatalf("bad id → %d", w.Code)
+	}
+}
+
+func (f *fakeSecretOnboarding) Detail(context.Context, coretenant.Scope, string) (service.SecretDetail, error) {
+	acc := "acct1"
+	return service.SecretDetail{
+		Secret:     domain.PPPSecret{ID: onboardSecretID, Name: "budi", Disabled: true, Present: true, AccountID: &acc, AccountName: "Budi"},
+		Onboarding: &service.OnboardState{Stage: service.StagePaired},
+		Contract:   &service.ContractRef{ID: "ctr1", Number: "CTR-2026-0001"},
+	}, nil
+}
+
+func TestSecretDetailRoute(t *testing.T) {
+	r := newTestRouter(t)
+	r.GET("/secrets/:id", NewSecretOnboardingHandler(&fakeSecretOnboarding{}).Detail)
+	w := performJSON(r, http.MethodGet, "/secrets/"+onboardSecretID, "")
+	body := w.Body.String()
+	for _, want := range []string{`"name":"budi"`, `"disabled":true`, `"account_name":"Budi"`, `"stage":"paired"`, `"number":"CTR-2026-0001"`, `"can_onboard":false`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("detail %d missing %s: %s", w.Code, want, body)
+		}
 	}
 }

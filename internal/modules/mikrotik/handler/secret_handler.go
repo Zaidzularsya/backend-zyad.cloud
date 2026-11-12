@@ -30,6 +30,7 @@ type SecretService interface {
 	Analyze(ctx context.Context, scope coretenant.Scope, routerID, actor string) (service.AnalyzeResult, error)
 	PairBulk(ctx context.Context, scope coretenant.Scope, items []service.PairItem, actor string) []service.PairResult
 	SearchAccounts(ctx context.Context, scope coretenant.Scope, q string, limit int) ([]service.AccountRef, error)
+	Summary(ctx context.Context, scope coretenant.Scope, routerID string) (service.SecretSummary, error)
 }
 
 type SecretHandler struct {
@@ -48,6 +49,7 @@ func (h *SecretHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmidd
 	router.POST("/routers/:id/secrets/analyze", limit, permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_secret.import"), h.Analyze)
 	router.POST("/secrets/pair-bulk", limit, permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_secret.pair"), h.PairBulk)
 	router.GET("/secrets", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_secret.read"), h.List)
+	router.GET("/secrets/summary", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_secret.read"), h.Summary)
 	router.POST("/secrets/:id/pair", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_secret.pair"), h.Pair)
 	router.POST("/secrets/:id/pair-new-customer", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_secret.pair"), h.PairNewCustomer)
 	router.POST("/secrets/:id/unpair", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_secret.unpair"), h.Unpair)
@@ -145,13 +147,37 @@ func (h *SecretHandler) List(c *gin.Context) {
 		// Same clamp as the repository, so meta.per_page is the real page size.
 		perPage = domain.MaxRouterPageSize
 	}
-	secrets, total, err := h.svc.List(c.Request.Context(), scope,
-		repository.SecretFilter{RouterID: query.RouterID, Paired: query.Paired, Search: query.Q, Suggestion: query.Suggestion, NeedsOriginalProfile: query.NeedsOriginalProfile}, perPage, (page-1)*perPage)
+	filter, err := service.ApplyMappingStatus(repository.SecretFilter{RouterID: query.RouterID, Paired: query.Paired, Search: query.Q,
+		Suggestion: query.Suggestion, NeedsOriginalProfile: query.NeedsOriginalProfile}, query.MappingStatus)
+	if err != nil {
+		failRouter(c, err)
+		return
+	}
+	secrets, total, err := h.svc.List(c.Request.Context(), scope, filter, perPage, (page-1)*perPage)
 	if err != nil {
 		failRouter(c, err)
 		return
 	}
 	response.JSON(c, http.StatusOK, "success", dto.SecretListFromDomain(secrets), dto.BuildMeta(page, perPage, total))
+}
+
+// Summary counts active/inactive secrets (router disabled flag).
+func (h *SecretHandler) Summary(c *gin.Context) {
+	scope, ok := scopeOrFail(c)
+	if !ok {
+		return
+	}
+	var query dto.SecretSummaryQuery
+	if err := c.ShouldBindQuery(&query); err != nil {
+		validationFail(c, err)
+		return
+	}
+	s, err := h.svc.Summary(c.Request.Context(), scope, query.RouterID)
+	if err != nil {
+		failRouter(c, err)
+		return
+	}
+	corehttp.OK(c, "success", dto.SecretSummaryResponse{Active: s.Active, Inactive: s.Inactive})
 }
 
 func (h *SecretHandler) Pair(c *gin.Context) {

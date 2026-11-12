@@ -67,6 +67,7 @@ type onboardAccounts interface {
 }
 
 type onboardContracts interface {
+	Get(ctx context.Context, scope coretenant.Scope, id string) (receivabledomain.Contract, error)
 	List(ctx context.Context, scope coretenant.Scope, f receivablerepo.ContractListFilter) ([]receivabledomain.Contract, int64, error)
 }
 
@@ -144,6 +145,24 @@ func (a mikrotikOnboardingCRM) AccountHasActiveContract(ctx context.Context, sco
 		Status: string(receivabledomain.ContractActive), AccountID: accountID, Limit: 1,
 	})
 	return total > 0, err
+}
+
+func (a mikrotikOnboardingCRM) ContractRef(ctx context.Context, scope coretenant.Scope, id string) (mikrotikservice.ContractRef, error) {
+	c, err := a.contracts.Get(ctx, scope, id)
+	if err != nil {
+		return mikrotikservice.ContractRef{}, err
+	}
+	return mikrotikservice.ContractRef{ID: c.ID, Number: c.ContractNumber}, nil
+}
+
+func (a mikrotikOnboardingCRM) ActiveContractOfAccount(ctx context.Context, scope coretenant.Scope, accountID string) (mikrotikservice.ContractRef, bool, error) {
+	list, _, err := a.contracts.List(ctx, scope, receivablerepo.ContractListFilter{
+		Status: string(receivabledomain.ContractActive), AccountID: accountID, Limit: 1,
+	})
+	if err != nil || len(list) == 0 {
+		return mikrotikservice.ContractRef{}, false, err
+	}
+	return mikrotikservice.ContractRef{ID: list[0].ID, Number: list[0].ContractNumber}, true, nil
 }
 
 // defaultStage picks the default (else the most recently created) active pipeline and its

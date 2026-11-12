@@ -165,6 +165,17 @@ func (f *fakeOnboardCRM) AccountHasActiveContract(_ context.Context, _ coretenan
 	return f.active[accountID], nil
 }
 
+func (f *fakeOnboardCRM) ContractRef(_ context.Context, _ coretenant.Scope, id string) (ContractRef, error) {
+	return ContractRef{ID: id, Number: "CTR-" + id}, nil
+}
+
+func (f *fakeOnboardCRM) ActiveContractOfAccount(_ context.Context, _ coretenant.Scope, accountID string) (ContractRef, bool, error) {
+	if !f.active[accountID] {
+		return ContractRef{}, false, nil
+	}
+	return ContractRef{ID: "ctr-of-" + accountID, Number: "CTR-L"}, true, nil
+}
+
 func (f *fakeOnboardCRM) CreateDeal(_ context.Context, _ coretenant.Scope, d OnboardDeal, _ string) (string, error) {
 	if err := f.record("create_deal"); err != nil {
 		return "", err
@@ -548,5 +559,31 @@ func TestRun_ContactWithoutEmailOrPhoneIsRejected(t *testing.T) {
 	in.Customer.New = &NewContact{Name: "Tanpa Kontak"}
 	if _, err := e.svc.Run(ctx, testScope(t), in, "u1"); !errors.Is(err, mikrotik.ErrInvalidInput) {
 		t.Fatalf("err = %v, want ErrInvalidInput (an invoice needs email or WhatsApp)", err)
+	}
+}
+
+func TestGetSecret_IncludesOnboardingAndContract(t *testing.T) {
+	e := newOnboardEnv(t)
+	d, err := e.svc.Detail(ctx, testScope(t), "s1")
+	if err != nil || d.Onboarding != nil || d.Contract != nil || d.Secret.ID != "s1" || !d.CanOnboard {
+		t.Fatalf("fresh detail = %+v err=%v", d, err)
+	}
+	if _, err := e.svc.Run(ctx, testScope(t), newCustomerInput("s1"), "u1"); err != nil {
+		t.Fatal(err)
+	}
+	d, err = e.svc.Detail(ctx, testScope(t), "s1")
+	if err != nil || d.Onboarding == nil || d.Onboarding.Stage != StagePaired || d.Contract == nil || d.Contract.Number != "CTR-ctr-so-quo-deal-c-new" || d.CanOnboard {
+		t.Fatalf("onboarded detail = %+v err=%v", d, err)
+	}
+
+	// A legacy pairing with an active contract shows that contract and blocks onboarding.
+	acct := "acct-legacy"
+	s := e.secrets.secrets["s2"]
+	s.AccountID = &acct
+	e.secrets.secrets["s2"] = s
+	e.crm.active[acct] = true
+	d, err = e.svc.Detail(ctx, testScope(t), "s2")
+	if err != nil || d.Contract == nil || d.Contract.ID != "ctr-of-"+acct || d.CanOnboard {
+		t.Fatalf("legacy detail = %+v err=%v", d, err)
 	}
 }

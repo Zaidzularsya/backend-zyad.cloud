@@ -22,6 +22,7 @@ type SecretOnboardingService interface {
 	Preview(ctx context.Context, scope coretenant.Scope, in service.OnboardInput, actor string) (service.OnboardPlan, error)
 	Run(ctx context.Context, scope coretenant.Scope, in service.OnboardInput, actor string) (service.OnboardState, error)
 	State(ctx context.Context, scope coretenant.Scope, secretID string) (service.OnboardState, bool, error)
+	Detail(ctx context.Context, scope coretenant.Scope, secretID string) (service.SecretDetail, error)
 }
 
 type SecretOnboardingHandler struct{ svc SecretOnboardingService }
@@ -36,6 +37,26 @@ func (h *SecretOnboardingHandler) RegisterRoutes(router *gin.RouterGroup, p perm
 	router.POST("/secrets/:id/onboard/preview", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_secret.pair"), h.Preview)
 	router.POST("/secrets/:id/onboard", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_secret.pair"), h.Run)
 	router.GET("/secrets/:id/onboard", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_secret.read"), h.Get)
+	router.GET("/secrets/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_secret.read"), h.Detail)
+}
+
+// Detail is the secret page: secret, onboarding progress and contract.
+func (h *SecretOnboardingHandler) Detail(c *gin.Context) {
+	scope, ok := scopeOrFail(c)
+	if !ok {
+		return
+	}
+	id := c.Param("id")
+	if !validUUID(id) {
+		failOnboarding(c, mikrotik.ErrSecretNotFound)
+		return
+	}
+	d, err := h.svc.Detail(c.Request.Context(), scope, id)
+	if err != nil {
+		failOnboarding(c, err)
+		return
+	}
+	corehttp.OK(c, "success", dto.SecretDetailFromService(d))
 }
 
 func (h *SecretOnboardingHandler) bind(c *gin.Context) (coretenant.Scope, service.OnboardInput, bool) {

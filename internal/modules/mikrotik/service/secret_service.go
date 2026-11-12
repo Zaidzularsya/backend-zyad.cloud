@@ -354,6 +354,48 @@ func (s *SecretService) auditSecret(ctx context.Context, scope coretenant.Scope,
 	}
 }
 
+// SecretSummary counts present secrets by the router's disabled flag.
+type SecretSummary struct{ Active, Inactive int }
+
+// Summary returns the active/inactive counts (routerID "" = all routers).
+func (s *SecretService) Summary(ctx context.Context, scope coretenant.Scope, routerID string) (SecretSummary, error) {
+	active, inactive, err := s.repo.CountByDisabled(ctx, scope, routerID)
+	return SecretSummary{Active: active, Inactive: inactive}, err
+}
+
+// Mapping statuses of the secret list filter (the former tabs).
+const (
+	MappingAll           = "all"
+	MappingSuggested     = "suggested"
+	MappingNeedsDecision = "needs_decision"
+	MappingNeedsProfile  = "needs_profile"
+	MappingPaired        = "paired"
+)
+
+// ApplyMappingStatus narrows f the way the former tabs did: "all",
+// "suggested" and "needs_decision" list unpaired secrets, "needs_profile"
+// those waiting for an original profile, "paired" the paired ones. "" leaves
+// f unchanged (every secret).
+func ApplyMappingStatus(f repository.SecretFilter, status string) (repository.SecretFilter, error) {
+	yes, no := true, false
+	switch status {
+	case "":
+	case MappingAll:
+		f.Paired = &no
+	case MappingSuggested:
+		f.Paired, f.Suggestion = &no, repository.SuggestionFilterSuggested
+	case MappingNeedsDecision:
+		f.Paired, f.Suggestion = &no, repository.SuggestionFilterNeedsDecision
+	case MappingNeedsProfile:
+		f.NeedsOriginalProfile = &yes
+	case MappingPaired:
+		f.Paired = &yes
+	default:
+		return f, invalid("mapping_status tidak dikenal.")
+	}
+	return f, nil
+}
+
 // List returns the cached secrets of the organization, one page at a time.
 func (s *SecretService) List(ctx context.Context, scope coretenant.Scope, filter repository.SecretFilter, limit, offset int) ([]domain.PPPSecret, int64, error) {
 	return s.repo.List(ctx, scope, filter, limit, offset)

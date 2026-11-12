@@ -83,6 +83,32 @@ func OnboardPlanFromService(p service.OnboardPlan) OnboardPlanResponse {
 	return out
 }
 
+// ContractRefResponse identifies a receivable contract.
+type ContractRefResponse struct {
+	ID     string `json:"id"`
+	Number string `json:"number"`
+}
+
+// SecretDetailResponse is GET /secrets/:id.
+type SecretDetailResponse struct {
+	Secret     SecretResponse        `json:"secret"`
+	Onboarding *OnboardStateResponse `json:"onboarding"`
+	Contract   *ContractRefResponse  `json:"contract"`
+	CanOnboard bool                  `json:"can_onboard"`
+}
+
+func SecretDetailFromService(d service.SecretDetail) SecretDetailResponse {
+	out := SecretDetailResponse{Secret: SecretFromDomain(d.Secret), CanOnboard: d.CanOnboard}
+	if d.Onboarding != nil {
+		st := OnboardStateFromService(*d.Onboarding)
+		out.Onboarding = &st
+	}
+	if d.Contract != nil {
+		out.Contract = &ContractRefResponse{ID: d.Contract.ID, Number: d.Contract.Number}
+	}
+	return out
+}
+
 // OnboardStateResponse is the stored progress; ids are "" until their stage completes.
 type OnboardStateResponse struct {
 	SecretID     string     `json:"secret_id"`
