@@ -277,6 +277,7 @@ type DealResponse struct {
 	LostReason         string     `json:"lost_reason,omitempty"`
 	Description        string     `json:"description,omitempty"`
 	DecisionMaker      string     `json:"decision_maker,omitempty"`
+	Source             string     `json:"source"`
 	OwnerUserID        string     `json:"owner_user_id,omitempty"`
 	DiscountPercent    *string    `json:"discount_percent,omitempty"`
 	DiscountApprovedBy string     `json:"discount_approved_by,omitempty"`
@@ -301,6 +302,7 @@ func DealFromDomain(d domain.Deal) DealResponse {
 		LostReason:         d.LostReason,
 		Description:        d.Description,
 		DecisionMaker:      d.DecisionMaker,
+		Source:             d.Source,
 		OwnerUserID:        d.OwnerUserID,
 		DiscountPercent:    d.DiscountPercent,
 		DiscountApprovedBy: d.DiscountApprovedBy,

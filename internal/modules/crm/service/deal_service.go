@@ -48,6 +48,17 @@ func NewDealService(repo repository.DealRepository, pipelineRepo repository.Pipe
 	return service
 }
 
+// validateContact turns a contact of another organization (or a deleted one)
+// into CONTACT_NOT_FOUND instead of a foreign-key 500. Empty = no contact.
+// Skipped when the service was built without a contact repository.
+func (s *dealService) validateContact(ctx context.Context, scope coretenant.Scope, contactID string) error {
+	if contactID == "" || s.contactRepo == nil {
+		return nil
+	}
+	_, err := s.contactRepo.FindByID(ctx, scope, contactID)
+	return crmmodule.MapNotFound(err, "CONTACT_NOT_FOUND", "contact not found or already deleted")
+}
+
 func (s *dealService) validateStageInPipeline(ctx context.Context, scope coretenant.Scope, pipelineID string, stageID string) error {
 	pipeline, err := s.pipelineRepo.FindByID(ctx, scope, pipelineID)
 	if err != nil {
@@ -63,6 +74,9 @@ func (s *dealService) validateStageInPipeline(ctx context.Context, scope coreten
 
 func (s *dealService) Create(ctx context.Context, scope coretenant.Scope, params repository.CreateDealParams) (domain.Deal, error) {
 	if err := s.validateStageInPipeline(ctx, scope, params.PipelineID, params.StageID); err != nil {
+		return domain.Deal{}, err
+	}
+	if err := s.validateContact(ctx, scope, params.ContactID); err != nil {
 		return domain.Deal{}, err
 	}
 	if s.quota != nil {
@@ -92,6 +106,11 @@ func (s *dealService) Update(ctx context.Context, scope coretenant.Scope, id str
 			return domain.Deal{}, crmmodule.MapNotFound(err, "DEAL_NOT_FOUND", "deal not found or already deleted")
 		}
 		if err := s.validateStageInPipeline(ctx, scope, deal.PipelineID, *params.StageID); err != nil {
+			return domain.Deal{}, err
+		}
+	}
+	if params.ContactID != nil {
+		if err := s.validateContact(ctx, scope, *params.ContactID); err != nil {
 			return domain.Deal{}, err
 		}
 	}

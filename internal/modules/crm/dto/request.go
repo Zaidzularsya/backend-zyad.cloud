@@ -243,6 +243,7 @@ type DealListQuery struct {
 	Status      string `form:"status"`
 	OwnerUserID string `form:"owner_user_id"`
 	ContactID   string `form:"contact_id"`
+	Source      string `form:"source"`
 }
 
 // CreateDealRequest binds the payload for creating a deal.
