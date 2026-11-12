@@ -11,7 +11,33 @@ SELECT set_config('app.organization_id', '<organization-uuid>', true);
 
 The setting is transaction-local. Missing or empty settings make
 `app_current_organization_id()` return `NULL`, so tenant policies deny reads and
-writes.
+writes: a manual `SELECT` silently returns 0 rows.
+
+### Manual psql sessions
+
+Run manual queries against RLS tables inside a transaction, in UTC (timestamp
+columns are `timestamp without time zone` and the application compares in UTC):
+
+```sql
+BEGIN;
+SET LOCAL TimeZone = 'UTC';
+SELECT set_config('app.organization_id', '<organization-uuid>', true);
+SELECT id, name FROM mikrotik_routers WHERE deleted_at IS NULL;
+COMMIT;
+```
+
+### Tables under RLS
+
+RLS is not limited to `landing_*`. As of migration 000179 it covers 69 tables:
+`landing_*`, `crm_*`, `receivable_*`, `mikrotik_*`, `catalog_*`,
+`asset_objects`, `mail_messages`, `mail_message_attachments`, `user_mailboxes`
+and `wa_*` (full list in `docs/database-context.md` section 3). Check the live
+list with:
+
+```sql
+SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relrowsecurity ORDER BY 1;
+```
 
 New tenant-owned tables must:
 
