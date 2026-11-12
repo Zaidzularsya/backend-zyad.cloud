@@ -283,6 +283,19 @@ allowlist dari konfigurasi (`SetupDefaults.Fill`, `internal/modules/mikrotik/ser
   kosong untuk base URL produksi, jadi allowlist produksi belum memuat host DOKU. Ini **memblokir go-live
   produksi** sampai host dipastikan dari uji checkout nyata (rencana Gelombang 1 Task 11). Sementara itu host
   bisa ditambahkan lewat `MIKROTIK_SETUP_EXTRA_HOSTS` tanpa deploy kode, lalu Setup diterapkan ulang.
+- Riset dokumentasi DOKU (12 Nov 2026) tidak memastikan host produksi:
+  - Contoh `payment.url` di dokumen backend memakai `sandbox.doku.com/checkout-link-v2/...`, sedangkan checkout
+    sandbox nyata dialihkan ke `staging.doku.com`. Dokumen tidak bisa dijadikan sumber tunggal.
+  - Petunjuk produksi satu-satunya: `jokul.doku.com` (host Checkout JS produksi
+    `https://jokul.doku.com/jokul-checkout-js/v1/jokul-checkout-1.0.0.js` dan contoh link tanpa label).
+    **Kandidat, belum terbukti.**
+  - Domain aset produksi (padanan `cdn-doku.oss-ap-southeast-5.aliyuncs.com`) dan domain redirect bank/e-wallet
+    tidak disebut di dokumen.
+  - Sumber: developers.doku.com `.../doku-checkout/integration-guide/frontend-integration` dan
+    `.../backend-integration`.
+- Cara memastikan sebelum go-live: dengan kredensial produksi, buat satu checkout nyata, catat host redirect
+  `payment.url` dan semua host yang dimuat halaman checkout (DevTools > Network), lalu isi cabang produksi
+  `doku.CheckoutHosts` dan ganti `t.Skip` di `TestCheckoutHosts_Production`.
 - API DOKU (`api.doku.com`) dipanggil server, bukan browser pelanggan.
 - Kesehatan DNS allowlist: `GET /routers/:id/setup/allowlist-health` menghitung entri FQDN yang belum punya
   entri dinamis ber-`comment` nama tersebut (lihat 4.3). UI hanya menampilkan peringatan ringkas, tanpa host.
