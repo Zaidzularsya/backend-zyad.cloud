@@ -168,6 +168,7 @@ type SettingsResponse struct {
 	PaymentTermsDays    int      `json:"payment_terms_days"`
 	DefaultChannels     []string `json:"default_channels"`
 	DefaultSenderUserID *string  `json:"default_sender_user_id"`
+	DefaultBillingDay   *int     `json:"default_billing_day"`
 }
 
 type SenderResponse struct {

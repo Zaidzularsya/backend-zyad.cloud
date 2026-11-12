@@ -70,6 +70,6 @@ func SettingsFromDomain(s domain.Settings) SettingsResponse {
 	}
 	return SettingsResponse{
 		InvoiceLeadDays: s.InvoiceLeadDays, PaymentTermsDays: s.PaymentTermsDays, DefaultChannels: channels,
-		DefaultSenderUserID: strPtr(s.DefaultSenderUserID),
+		DefaultSenderUserID: strPtr(s.DefaultSenderUserID), DefaultBillingDay: s.DefaultBillingDay,
 	}
 }

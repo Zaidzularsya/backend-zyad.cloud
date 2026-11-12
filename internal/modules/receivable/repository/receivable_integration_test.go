@@ -520,6 +520,22 @@ func TestSettingsDefault(t *testing.T) {
 	if _, err := e.settings.Upsert(e.ctx, scope, domain.Settings{InvoiceLeadDays: 61, PaymentTermsDays: 7, DefaultChannels: []string{"email"}}, ""); err == nil {
 		t.Fatal("lead days > 60 must be rejected by the database CHECK")
 	}
+	day := 31
+	withDay, err := e.settings.Upsert(e.ctx, scope, domain.Settings{InvoiceLeadDays: 7, PaymentTermsDays: 7, DefaultChannels: []string{"email"}, DefaultBillingDay: &day}, "")
+	if err != nil || withDay.DefaultBillingDay == nil || *withDay.DefaultBillingDay != 31 {
+		t.Fatalf("default_billing_day saved = %+v err=%v", withDay, err)
+	}
+	if again, _ := e.settings.Get(e.ctx, scope); again.DefaultBillingDay == nil || *again.DefaultBillingDay != 31 {
+		t.Fatalf("default_billing_day persisted = %+v", again)
+	}
+	cleared, err := e.settings.Upsert(e.ctx, scope, domain.Settings{InvoiceLeadDays: 7, PaymentTermsDays: 7, DefaultChannels: []string{"email"}}, "")
+	if err != nil || cleared.DefaultBillingDay != nil {
+		t.Fatalf("default_billing_day cleared = %+v err=%v", cleared, err)
+	}
+	bad := 32
+	if _, err := e.settings.Upsert(e.ctx, scope, domain.Settings{InvoiceLeadDays: 7, PaymentTermsDays: 7, DefaultChannels: []string{"email"}, DefaultBillingDay: &bad}, ""); err == nil {
+		t.Fatal("default_billing_day 32 must be rejected by the database CHECK")
+	}
 }
 
 // Referensi pembayaran manual bebas diisi tenant (mis. nomor transfer): tidak boleh
