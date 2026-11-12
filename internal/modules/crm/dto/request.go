@@ -195,6 +195,15 @@ type ConvertLeadRequest struct {
 	OwnerUserID   string                 `json:"owner_user_id"`
 	Company       *ConvertCompanyRequest `json:"company"`
 	Deal          *ConvertDealRequest    `json:"deal"`
+	// Contact nil = new contact from the lead (rejected with 409
+	// CONTACT_DUPLICATE when the email/WhatsApp already belongs to one).
+	Contact *ConvertContactRequest `json:"contact"`
+}
+
+// ConvertContactRequest: mode "new" (default) or "existing" + contact_id.
+type ConvertContactRequest struct {
+	Mode      string `json:"mode" binding:"omitempty,oneof=new existing"`
+	ContactID string `json:"contact_id"`
 }
 
 // StageRequest binds one pipeline stage in a create/replace-stages request.
