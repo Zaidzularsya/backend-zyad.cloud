@@ -184,6 +184,9 @@ func NewSecretOnboardingService(secrets OnboardingSecrets, crm OnboardingCRM, pr
 	return &SecretOnboardingService{secrets: secrets, crm: crm, products: products, perms: perms, store: store, locker: locker, now: time.Now}
 }
 
+// onboardRunTimeout bounds a detached run (the chain normally takes seconds).
+const onboardRunTimeout = 2 * time.Minute
+
 var decimalPattern = regexp.MustCompile(`^\d{1,13}(\.\d{1,2})?$`)
 
 func onboardInvalid(msg string) error { return &mikrotik.InvalidInputError{Message: msg} }
@@ -277,6 +280,10 @@ func (s *SecretOnboardingService) Preview(ctx context.Context, scope coretenant.
 // Run executes (or resumes) the onboarding. On failure the state keeps the
 // last completed stage and a user-facing LastError, and the error is returned.
 func (s *SecretOnboardingService) Run(ctx context.Context, scope coretenant.Scope, in OnboardInput, actor string) (OnboardState, error) {
+	// A client disconnect must not stop the chain between a committed CRM write
+	// and its stage record, or a retry would create a second deal/quotation.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), onboardRunTimeout)
+	defer cancel()
 	unlock, ok, err := s.locker.TryLock(ctx, "mikrotik.onboard:"+scope.OrganizationID()+":"+in.SecretID)
 	if err != nil {
 		return OnboardState{}, err
@@ -424,6 +431,11 @@ func (s *SecretOnboardingService) resolve(ctx context.Context, scope coretenant.
 	}
 	if !stageAtLeast(state.Stage, StageQuotation) && (!product.Active || !product.Recurring) {
 		return r, onboardInvalid("Pilih produk aktif yang ditagih berulang.")
+	}
+	// The billing day and contract start are a monthly cycle; any other
+	// frequency would make the billing run back-date invoices or skip periods.
+	if !stageAtLeast(state.Stage, StageQuotation) && product.Frequency != pricing.Monthly {
+		return r, onboardInvalid("Onboarding dari secret hanya untuk produk yang ditagih bulanan.")
 	}
 	r.product = product
 

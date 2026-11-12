@@ -6,6 +6,7 @@ import (
 
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/mikrotik/domain"
+	"zyad.cloud/internal/shared/pricing"
 )
 
 // AccountRef is the minimal customer account view the mikrotik module needs.
@@ -31,6 +32,8 @@ type ProductInfo struct {
 	Recurring, Active bool
 	// BasePrice is the catalog unit price (decimal string).
 	BasePrice string
+	// Frequency is the billing frequency of a recurring product.
+	Frequency pricing.Frequency
 }
 
 // ProductCatalog reads products of the organization.

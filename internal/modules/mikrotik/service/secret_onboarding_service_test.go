@@ -13,6 +13,7 @@ import (
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/mikrotik"
 	"zyad.cloud/internal/modules/mikrotik/domain"
+	"zyad.cloud/internal/shared/pricing"
 )
 
 var ctx = context.Background()
@@ -68,6 +69,7 @@ type fakeOnboardCRM struct {
 	confirm   ConfirmOrder
 	seq       int
 	slow      time.Duration
+	onDeal    func() // called after the deal is "committed" (simulates a client disconnect)
 }
 
 func newFakeCRM() *fakeOnboardCRM {
@@ -181,10 +183,17 @@ func (f *fakeOnboardCRM) CreateDeal(_ context.Context, _ coretenant.Scope, d Onb
 		return "", err
 	}
 	f.deal = d
+	if f.onDeal != nil {
+		f.onDeal()
+	}
 	return "deal-" + d.ContactID, nil
 }
 
-func (f *fakeOnboardCRM) CreateQuotation(_ context.Context, _ coretenant.Scope, q OnboardQuotation, _ string) (string, error) {
+func (f *fakeOnboardCRM) CreateQuotation(ctx context.Context, _ coretenant.Scope, q OnboardQuotation, _ string) (string, error) {
+	// Like a real pgx write: a cancelled context aborts the call.
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if err := f.record("create_quotation"); err != nil {
 		return "", err
 	}
@@ -283,7 +292,8 @@ func newOnboardEnv(t *testing.T) onboardEnv {
 	store := &memOnboardStore{state: map[string]OnboardState{}}
 	perms := &fakeOnboardPerms{}
 	products := fakeOnboardProducts{products: map[string]ProductInfo{
-		"p-10m":  {ID: "p-10m", Name: "Internet 10M", Recurring: true, Active: true, BasePrice: "200000"},
+		"p-10m":  {ID: "p-10m", Name: "Internet 10M", Recurring: true, Active: true, BasePrice: "200000", Frequency: pricing.Monthly},
+		"p-week": {ID: "p-week", Name: "Voucher mingguan", Recurring: true, Active: true, BasePrice: "25000", Frequency: pricing.Weekly},
 		"p-once": {ID: "p-once", Name: "Instalasi", Recurring: false, Active: true, BasePrice: "500000"},
 	}}
 	svc := NewSecretOnboardingService(secrets, crm, products, perms, store, &mutexLocker{held: map[string]bool{}})
@@ -453,6 +463,42 @@ func TestRun_PermissionMissingRejectedBeforeAnyWrite(t *testing.T) {
 	}
 	if w := e.crm.writes(); len(w) != 0 {
 		t.Fatalf("writes: %v", w)
+	}
+}
+
+// The billing day and cycle start are monthly; a weekly/daily/annual product
+// would make the billing run back-date invoices or skip periods (review I1).
+func TestRun_NonMonthlyProductRejectedBeforeAnyWrite(t *testing.T) {
+	e := newOnboardEnv(t)
+	in := newCustomerInput("s1")
+	in.ProductID = "p-week"
+	_, err := e.svc.Run(ctx, testScope(t), in, "u1")
+	var invalid *mikrotik.InvalidInputError
+	if !errors.As(err, &invalid) || !strings.Contains(invalid.Message, "bulanan") {
+		t.Fatalf("err = %v, want InvalidInputError mentioning bulanan", err)
+	}
+	if w := e.crm.writes(); len(w) != 0 {
+		t.Fatalf("writes: %v", w)
+	}
+	if _, err := e.svc.Preview(ctx, testScope(t), in, "u1"); !errors.As(err, &invalid) {
+		t.Fatalf("preview err = %v, want InvalidInputError", err)
+	}
+}
+
+// A client disconnect cancels the request context; the chain must not stop
+// between a committed CRM write and its stage record (review I2).
+func TestRun_ClientDisconnectDoesNotAbortChain(t *testing.T) {
+	e := newOnboardEnv(t)
+	reqCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	e.crm.onDeal = cancel
+
+	st, err := e.svc.Run(reqCtx, testScope(t), newCustomerInput("s1"), "u1")
+	if err != nil || st.Stage != StagePaired {
+		t.Fatalf("state = %+v err = %v, want paired despite the cancelled request", st, err)
+	}
+	if n := e.crm.count("create_deal"); n != 1 {
+		t.Fatalf("create_deal calls = %d, want 1", n)
 	}
 }
 

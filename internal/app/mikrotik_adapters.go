@@ -149,6 +149,7 @@ func productInfo(p catalogdomain.Product) mikrotikservice.ProductInfo {
 	return mikrotikservice.ProductInfo{
 		ID: p.ID, Name: p.Name, SKU: p.SKU,
 		Recurring: p.Pricing.ChargeType == pricing.Recurring, Active: p.IsActive, BasePrice: p.BasePrice,
+		Frequency: p.Pricing.Frequency,
 	}
 }
 
