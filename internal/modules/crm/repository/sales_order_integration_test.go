@@ -70,8 +70,12 @@ func TestSalesOrderLifecycle(t *testing.T) {
 
 	// Konfirmasi paralel: tepat satu menang.
 	start := time.Now().UTC()
-	if _, err := orders.UpdateDraft(ctx, scope, so.ID, repository.SalesOrderDraftFields{StartDate: &start, BillToName: "Budi", Channels: []string{"email"}}, ""); err != nil {
-		t.Fatal(err)
+	skip := true
+	if got, err := orders.UpdateDraft(ctx, scope, so.ID, repository.SalesOrderDraftFields{SkipInitialInvoice: &skip}, ""); err != nil || !got.SkipInitialInvoice {
+		t.Fatalf("skip_initial_invoice set: %v err=%v", got.SkipInitialInvoice, err)
+	}
+	if got, err := orders.UpdateDraft(ctx, scope, so.ID, repository.SalesOrderDraftFields{StartDate: &start, BillToName: "Budi", Channels: []string{"email"}}, ""); err != nil || !got.SkipInitialInvoice {
+		t.Fatalf("nil SkipInitialInvoice must keep the flag: %v err=%v", got.SkipInitialInvoice, err)
 	}
 	var wg sync.WaitGroup
 	results := make([]error, 2)

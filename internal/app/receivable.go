@@ -239,7 +239,7 @@ func buildReceivable(b receivableBuild) receivableModule {
 	settingsSvc := receivableservice.NewSettingsService(settingsRepo, members)
 	contractSvc := receivableservice.NewContractService(contractRepo, listeners, nil)
 	overviewSvc := receivableservice.NewOverviewService(receivablerepo.NewOverviewRepository(db), settingsRepo, nil)
-	orderBilling := receivableservice.NewOrderBilling(accountRepo, invoiceSvc, contractRepo, counterRepo, listeners)
+	orderBilling := receivableservice.NewOrderBilling(accountRepo, invoiceSvc, contractRepo, counterRepo, listeners, settingsRepo)
 
 	// Halaman publik: scope tenant dibangun dari baris link lewat resolver worker (identitas
 	// public-document-link, sama dengan penawaran), lalu query berjalan di bawah RLS.
