@@ -394,3 +394,15 @@ func TestCheckOnboardable_AllowsPairedButNotIsolirWithoutOriginal(t *testing.T) 
 		t.Fatalf("err = %v, want ErrSecretNotPairable", err)
 	}
 }
+
+func TestSecretGet_FillsAccountName(t *testing.T) {
+	e := newPairEnv(t)
+	id := e.importOne(t, "alice", "paket-10m")
+	if _, err := e.svc.Pair(context.Background(), e.scope, id, "acct-1", testActor); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.svc.Get(context.Background(), e.scope, id)
+	if err != nil || got.AccountName != "Alice" {
+		t.Fatalf("Get = %+v err=%v", got, err)
+	}
+}

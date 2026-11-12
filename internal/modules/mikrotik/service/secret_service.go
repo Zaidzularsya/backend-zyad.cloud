@@ -169,8 +169,16 @@ func (s *SecretService) pairableSecret(ctx context.Context, scope coretenant.Sco
 }
 
 // Get returns one secret of the organization (mikrotik.ErrSecretNotFound when absent).
+// AccountName is filled from the account directory (best effort).
 func (s *SecretService) Get(ctx context.Context, scope coretenant.Scope, id string) (domain.PPPSecret, error) {
-	return s.repo.FindByID(ctx, scope, id)
+	secret, err := s.repo.FindByID(ctx, scope, id)
+	if err != nil || secret.AccountID == nil || s.accounts == nil {
+		return secret, err
+	}
+	if acc, accErr := s.accounts.Get(ctx, scope, *secret.AccountID); accErr == nil {
+		secret.AccountName = acc.Name
+	}
+	return secret, nil
 }
 
 // CheckOnboardable applies the pairing rules (present on the router, original
