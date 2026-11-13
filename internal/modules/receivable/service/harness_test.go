@@ -47,6 +47,9 @@ type fakeStore struct {
 	overdueSeen time.Time
 	// failCreateAfter > 0: Create fails once that many invoices exist (simulates a mid-way failure).
 	failCreateAfter int
+	// failIssueAfter > 0: Issue fails once that many invoices are issued (draft left behind).
+	failIssueAfter int
+	issued         int
 }
 
 func newFakeStore() *fakeStore { return &fakeStore{invoices: map[string]domain.Invoice{}} }
@@ -127,11 +130,15 @@ func (s *fakeStore) Issue(_ context.Context, _ coretenant.Scope, id, number stri
 	if !ok {
 		return domain.Invoice{}, pgx.ErrNoRows
 	}
+	if s.failIssueAfter > 0 && s.issued >= s.failIssueAfter {
+		return domain.Invoice{}, errors.New("issue failed")
+	}
 	if inv.Status != domain.InvoiceDraft || s.issueRace {
 		return domain.Invoice{}, repository.ErrInvoiceNotDraft
 	}
 	inv.Status, inv.InvoiceNumber, inv.IssueDate, inv.DueDate = domain.InvoiceIssued, number, &issueDate, &dueDate
 	s.invoices[id] = inv
+	s.issued++
 	return inv, nil
 }
 

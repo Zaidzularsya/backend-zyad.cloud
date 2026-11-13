@@ -328,6 +328,9 @@ func (s *arrearsService) Record(ctx context.Context, scope coretenant.Scope, in 
 	for _, pr := range planned {
 		inv, err := s.invoices.createHistorical(ctx, scope, s.historical(c, rec, pr, reason), actorUserID)
 		if err != nil {
+			if inv.ID != "" {
+				created = append(created, inv) // draft committed, issue failed: void it as well
+			}
 			s.compensate(ctx, scope, rec, created, actorUserID)
 			if errors.Is(err, repository.ErrDuplicateArrearsPeriod) {
 				return ArrearsResult{}, &ArrearsConflictError{Conflicts: []ArrearsConflict{{

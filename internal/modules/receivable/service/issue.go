@@ -175,7 +175,8 @@ type historicalInvoice struct {
 // createHistorical creates and issues one arrears invoice: the due date is kept even when it
 // is in the past, nothing is sent automatically and the invoice quota is not enforced (it
 // records an existing debt, see ArrearsService). Not idempotent by itself; the caller owns
-// idempotency through the recording.
+// idempotency through the recording. On an issue failure the committed draft is returned with
+// the error (ID set) so the caller can void it.
 func (s *invoiceService) createHistorical(ctx context.Context, scope coretenant.Scope, h historicalInvoice, actorUserID string) (domain.Invoice, error) {
 	if h.Input.DueDate == nil || h.RecordingID == "" {
 		return domain.Invoice{}, invalidInvoice("Tunggakan butuh jatuh tempo dan pencatatan.")
@@ -189,7 +190,12 @@ func (s *invoiceService) createHistorical(ctx context.Context, scope coretenant.
 	if err != nil {
 		return domain.Invoice{}, err
 	}
-	return s.issue(ctx, scope, draft.ID, actorUserID, h.Input.DueDate, issueOptions{ExactDue: true, SkipAutoSend: true})
+	inv, err := s.issue(ctx, scope, draft.ID, actorUserID, h.Input.DueDate, issueOptions{ExactDue: true, SkipAutoSend: true})
+	if err != nil {
+		// The draft is committed: hand it back so the caller can void it (compensation).
+		return draft, err
+	}
+	return inv, nil
 }
 
 // issueExisting: invoice yang sudah terbit dikembalikan apa adanya; draft sisa proses yang terputus dilanjutkan.

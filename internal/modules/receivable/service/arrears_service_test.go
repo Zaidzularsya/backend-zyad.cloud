@@ -482,3 +482,25 @@ func TestArrearsRecord_PeriodTheBillingRunWillBillIsRejected(t *testing.T) {
 		t.Fatalf("period before the pointer: %v", err)
 	}
 }
+
+// I2: a draft whose issue failed is voided too, so the same dialog can retry.
+func TestArrearsRecord_IssueFailureVoidsTheLeftoverDraft(t *testing.T) {
+	h := newArrearsHarness(t)
+	h.store.failIssueAfter = 1 // the second row's draft is created, its issue fails
+	in := h.input("k1", row("2026-07-05", "333000", "2026-07-12", false), row("2026-08-05", "333000", "2026-08-12", false))
+	if _, err := h.svc.Record(ctx, scope, in, "u1"); err == nil {
+		t.Fatal("want error")
+	}
+	if len(h.store.invoices) != 2 {
+		t.Fatalf("invoices = %d, want 2 (one issued, one draft)", len(h.store.invoices))
+	}
+	for _, inv := range h.store.invoices {
+		if inv.Status != domain.InvoiceVoid {
+			t.Fatalf("invoice %s left %s, want void", inv.ID, inv.Status)
+		}
+	}
+	h.store.failIssueAfter = 0
+	if res, err := h.svc.Record(ctx, scope, in, "u1"); err != nil || len(res.Invoices) != 2 {
+		t.Fatalf("retry: invoices=%d err=%v", len(res.Invoices), err)
+	}
+}
