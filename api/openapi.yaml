@@ -11523,7 +11523,7 @@ paths:
       - Mikrotik
       security:
       - BearerAuth: []
-      description: "Menandai (`enabled=true`) atau membatalkan penandaan produk. Menandai produk yang sudah aktif mempertahankan `effective_from`; mengaktifkan kembali setelah dinonaktifkan mengatur ulang ke hari ini (WIB). Tidak ada efek langsung ke router. Dampak penggunaan (kontrak aktif, pelanggan, invoice overdue) diperoleh dari endpoint preview (`GET /products/{id}/trigger/preview`), bukan dari respons ini. Audit: `product_trigger.set`. Permission: `mikrotik_product_trigger.update`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      description: "Menandai (`enabled=true`) atau membatalkan penandaan produk. Menandai produk yang sudah aktif mempertahankan `effective_from`; mengaktifkan (pertama kali atau kembali setelah dinonaktifkan) memakai `effective_from` dari body bila diisi, selain itu hari ini (WIB). Tidak ada efek langsung ke router. Dampak penggunaan (kontrak aktif, pelanggan, invoice overdue) diperoleh dari endpoint preview (`GET /products/{id}/trigger/preview`), bukan dari respons ini. Audit: `product_trigger.set`. Permission: `mikrotik_product_trigger.update`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
       parameters:
       - name: id
         in: path
@@ -17844,6 +17844,7 @@ components:
       required: [enabled]
       properties:
         enabled: {type: boolean}
+        effective_from: {type: string, format: date, description: 'Opsional, hanya bersama enabled=true. Invoice dengan jatuh tempo pada/sesudah tanggal ini bisa memicu isolir. Kosong = hari ini (WIB). Diabaikan bila produk sudah aktif. Format lain atau enabled=false → 422 VALIDATION_ERROR.'}
     MikrotikProductTrigger:
       type: object
       properties:

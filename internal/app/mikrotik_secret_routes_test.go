@@ -86,7 +86,7 @@ func (s *countingPolicyService) PreviewTrigger(context.Context, coretenant.Scope
 	s.calls++
 	return mikrotikservice.TriggerPreview{}, nil
 }
-func (s *countingPolicyService) SetTrigger(context.Context, coretenant.Scope, string, bool, string) (mikrotikdomain.ProductTrigger, error) {
+func (s *countingPolicyService) SetTriggerFrom(context.Context, coretenant.Scope, string, bool, *time.Time, string) (mikrotikdomain.ProductTrigger, error) {
 	s.calls++
 	return mikrotikdomain.ProductTrigger{}, nil
 }
