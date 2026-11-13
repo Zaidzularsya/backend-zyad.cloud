@@ -51,6 +51,9 @@ type CreateInvoiceParams struct {
 	PeriodStart, PeriodEnd                                                                             *time.Time
 	Totals                                                                                             pricing.Totals
 	Items                                                                                              []InvoiceItemParams
+	// Arrears only: the owning recording and the isolation flag (zero values for every other invoice).
+	ArrearsRecordingID string
+	IsolirFlag         bool
 }
 
 type InvoiceListFilter struct {
