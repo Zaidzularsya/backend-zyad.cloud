@@ -55,7 +55,8 @@ Bukan SQL. Objeknya: pool, profile, 4 address-list, 4 filter, plus allowlist `zy
 1. Pastikan tidak ada akun yang masih terisolir dan tidak ada tugas isolir aktif. Akun pilot `10mbps@debug`
    harus sudah pulih (`isolation_state = 'normal'`). Kalau masih ada yang terisolir, pulihkan dulu lewat
    Pusat Kendali ("Pulihkan semua").
-2. Keluarkan `10mbps@debug` dari daftar pilot (Pusat Kendali), lalu set mode tenant ke `off`.
+2. Keluarkan `10mbps@debug` dari daftar pilot (Pusat Kendali), lalu set mode tenant ke `simulation`
+   (mode tenant yang ada hanya `simulation|pilot|active|paused`; tidak ada `off`).
    **Jangan** klik "Aktifkan Isolir Otomatis".
 3. Halaman router `lab-gns3` → tombol **"Bersihkan"** → baca pratinjau (objek yang akan dihapus hanya yang
    berlabel `zyad-managed`) → konfirmasi.
