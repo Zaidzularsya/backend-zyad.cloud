@@ -173,3 +173,41 @@ func TestListenerSurvivesPanicAndChecklistRecovers(t *testing.T) {
 	}
 	_ = errors.New
 }
+
+// skipInitial turns the harness SO into an onboarding order (Gelombang 2): no initial invoice.
+func (h *wonHarness) skipInitial(withContract bool) {
+	so := &h.orders.orders[0]
+	so.SkipInitialInvoice, so.InitialInvoiceID = true, ""
+	if !withContract {
+		so.ContractID = ""
+	}
+}
+
+func TestWonEvaluator_SkipInitialInvoiceWinsOnContract(t *testing.T) {
+	h := newWonHarness([]wonItem{{attrs: prepaidRecurring()}}, "", true)
+	h.skipInitial(true)
+	lists, err := h.eval.Checklist(context.Background(), coretenant.Scope{}, "d1")
+	if err != nil || len(lists) != 1 || !lists[0].AllMet || lists[0].Conditions[0].Label != "Kontrak CTR-2026-0001 terbentuk (tanpa invoice awal)" {
+		t.Fatalf("checklist = %+v err=%v", lists, err)
+	}
+	won, err := h.eval.Evaluate(context.Background(), coretenant.Scope{}, "d1")
+	if err != nil || !won || h.deals.closed != 1 {
+		t.Fatalf("won=%v closed=%d err=%v", won, h.deals.closed, err)
+	}
+}
+
+func TestWonEvaluator_SkipInitialInvoiceWithoutContractWaits(t *testing.T) {
+	h := newWonHarness([]wonItem{{attrs: prepaidRecurring()}}, "", false)
+	h.skipInitial(false)
+	if won, _ := h.eval.Evaluate(context.Background(), coretenant.Scope{}, "d1"); won || h.deals.closed != 0 {
+		t.Fatal("no contract yet → not won")
+	}
+}
+
+// Regression guard: the normal CRM path still waits for the initial invoice to be paid.
+func TestWonEvaluator_NormalPrepaidStillWaitsForPayment(t *testing.T) {
+	h := newWonHarness([]wonItem{{attrs: prepaidRecurring()}}, "issued", true)
+	if won, _ := h.eval.Evaluate(context.Background(), coretenant.Scope{}, "d1"); won || h.deals.closed != 0 {
+		t.Fatal("unpaid initial invoice on a normal SO must not win")
+	}
+}
