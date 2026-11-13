@@ -1,0 +1,67 @@
+package service
+
+import (
+	"math/big"
+	"time"
+
+	"zyad.cloud/internal/modules/receivable/domain"
+	"zyad.cloud/internal/shared/pricing"
+)
+
+// maxArrearsPeriods caps how many past periods ArrearsPeriods lists (the most recent ones).
+const maxArrearsPeriods = 120
+
+// ArrearsPeriod is one billing cycle of a contract that may be recorded as arrears.
+type ArrearsPeriod struct {
+	Index         int
+	Start, End    time.Time
+	DefaultAmount string // gross (incl. tax) total of the contract items of the reference frequency
+}
+
+// ArrearsPeriods lists the contract's billing cycles from start_date whose start is on or
+// before today (calendar dates), following pricing.PeriodRange. The reference frequency is
+// the first item's; DefaultAmount sums every item of that frequency (qty, discount, tax),
+// rounded to 2 decimals. Only the latest maxArrearsPeriods are returned.
+func ArrearsPeriods(c domain.Contract, today time.Time) []ArrearsPeriod {
+	out := []ArrearsPeriod{}
+	if len(c.Items) == 0 {
+		return out
+	}
+	freq := c.Items[0].Frequency
+	amount := arrearsDefaultAmount(c.Items, freq)
+	y, m, d := today.Date()
+	limit := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	for n := 0; ; n++ {
+		from, to := pricing.PeriodRange(c.StartDate, freq, n)
+		if from.After(limit) {
+			break
+		}
+		out = append(out, ArrearsPeriod{Index: n, Start: from, End: to, DefaultAmount: amount})
+	}
+	if len(out) > maxArrearsPeriods {
+		out = out[len(out)-maxArrearsPeriods:]
+	}
+	return out
+}
+
+func arrearsDefaultAmount(items []domain.ContractItem, freq pricing.Frequency) string {
+	lines := []pricing.LineInput{}
+	for _, it := range items {
+		if it.Frequency != freq {
+			continue
+		}
+		lines = append(lines, pricing.LineInput{
+			Description: it.Description, Quantity: it.Quantity, UnitPrice: it.UnitPrice,
+			DiscountPercent: it.DiscountPercent, TaxPercent: it.TaxPercent,
+		})
+	}
+	totals, _, err := pricing.PriceLines(lines)
+	if err != nil {
+		return "0.00"
+	}
+	grand, ok := new(big.Rat).SetString(totals.GrandTotal)
+	if !ok {
+		return "0.00"
+	}
+	return grand.FloatString(2)
+}
