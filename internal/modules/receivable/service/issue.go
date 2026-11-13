@@ -27,12 +27,18 @@ const (
 	linkGraceDays      = 90
 )
 
-// LinkExpiry: link publik berlaku sampai jatuh tempo + 90 hari pukul 23:59:59 WIB.
+// LinkExpiry: link publik berlaku sampai jatuh tempo + 90 hari pukul 23:59:59 WIB. A due date
+// before the issue date (only back-dated arrears) counts from the issue date, otherwise an old
+// arrears invoice would get a pay link that is already expired. Normal invoices are unaffected:
+// their due date is clamped to >= issue date.
 func LinkExpiry(inv domain.Invoice, now time.Time) time.Time {
 	base := businesstime.DayOf(now)
 	switch {
 	case inv.DueDate != nil:
 		base = *inv.DueDate
+		if inv.IssueDate != nil && inv.IssueDate.After(base) {
+			base = *inv.IssueDate
+		}
 	case inv.IssueDate != nil:
 		base = *inv.IssueDate
 	}

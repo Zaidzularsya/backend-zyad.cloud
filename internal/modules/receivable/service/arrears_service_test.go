@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"zyad.cloud/internal/core/businesstime"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/receivable/domain"
 	"zyad.cloud/internal/modules/receivable/repository"
@@ -440,5 +441,30 @@ func TestArrearsSetIsolirFlag(t *testing.T) {
 	}
 	if _, err := h.svc.SetIsolirFlag(ctx, scope, res.Invoices[0].ID, false, "owner"); !errors.Is(err, ErrArrearsInvalid) {
 		t.Fatalf("void invoice err = %v", err)
+	}
+}
+
+// C1: a back-dated due date must not produce a pay link that is already expired.
+func TestLinkExpiry_BackdatedDueUsesIssueDate(t *testing.T) {
+	inv := domain.Invoice{IssueDate: day("2026-11-13"), DueDate: day("2026-06-15")}
+	got := LinkExpiry(inv, nowWIB)
+	want := time.Date(2027, 2, 11, 23, 59, 59, 0, businesstime.Location()).UTC()
+	if !got.Equal(want) {
+		t.Fatalf("expiry = %v, want %v", got, want)
+	}
+	// Normal invoices (due >= issue) keep the due-date rule.
+	normal := domain.Invoice{IssueDate: day("2026-10-05"), DueDate: day("2026-10-12")}
+	if want := time.Date(2027, 1, 10, 23, 59, 59, 0, businesstime.Location()).UTC(); !LinkExpiry(normal, nowWIB).Equal(want) {
+		t.Fatalf("normal expiry = %v", LinkExpiry(normal, nowWIB))
+	}
+}
+
+func TestArrearsRecord_OldDueGetsLiveLink(t *testing.T) {
+	h := newArrearsHarness(t)
+	if _, err := h.svc.Record(ctx, scope, h.input("k1", row("2026-07-05", "333000", "2026-07-05", false)), "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if !h.links.lastExpiry.After(nowWIB.AddDate(0, 0, 89)) {
+		t.Fatalf("link expires %v, before now+89d", h.links.lastExpiry)
 	}
 }
