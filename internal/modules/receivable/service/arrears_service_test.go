@@ -468,3 +468,17 @@ func TestArrearsRecord_OldDueGetsLiveLink(t *testing.T) {
 		t.Fatalf("link expires %v, before now+89d", h.links.lastExpiry)
 	}
 }
+
+func TestArrearsRecord_PeriodTheBillingRunWillBillIsRejected(t *testing.T) {
+	h := newArrearsHarness(t)
+	c := h.contracts.byID[h.contract.ID]
+	c.Items[0].NextPeriodStart = *day("2026-09-05")
+	h.contracts.byID[c.ID] = c
+	_, err := h.svc.Record(ctx, scope, h.input("k1", row("2026-09-05", "333000", "2026-09-12", false)), "u1")
+	if !errors.Is(err, ErrArrearsInvalid) || !strings.Contains(err.Error(), "ditagih otomatis") {
+		t.Fatalf("err = %v", err)
+	}
+	if _, err := h.svc.Record(ctx, scope, h.input("k2", row("2026-08-05", "333000", "2026-08-12", false)), "u1"); err != nil {
+		t.Fatalf("period before the pointer: %v", err)
+	}
+}

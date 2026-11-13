@@ -72,3 +72,34 @@ func TestArrearsPeriods_NoItemsIsEmpty(t *testing.T) {
 		t.Fatalf("periods = %+v", got)
 	}
 }
+
+// I1: periods from the billing pointer on are the engine's to bill; offering them double-bills.
+func TestArrearsPeriods_StopsAtTheBillingPointer(t *testing.T) {
+	it := monthlyItem("300000", "0")
+	it.PaymentTiming = "postpaid"
+	it.NextPeriodStart = d("2026-10-15") // 15 Okt–14 Nov not billed yet; the run bills it on 15 Nov
+	c := domain.Contract{StartDate: d("2026-08-15"), Items: []domain.ContractItem{it}}
+	got := ArrearsPeriods(c, d("2026-11-13"))
+	if len(got) != 2 || got[1].Start.Format("2006-01-02") != "2026-09-15" {
+		t.Fatalf("periods = %+v", got)
+	}
+}
+
+func TestArrearsPeriods_PointerIsTheEarliestOfSameFrequencyItems(t *testing.T) {
+	a, b := monthlyItem("100000", "0"), monthlyItem("50000", "0")
+	a.NextPeriodStart, b.NextPeriodStart = d("2026-11-15"), d("2026-10-15")
+	c := domain.Contract{StartDate: d("2026-08-15"), Items: []domain.ContractItem{a, b}}
+	if got := ArrearsPeriods(c, d("2026-11-13")); len(got) != 2 {
+		t.Fatalf("periods = %+v", got)
+	}
+}
+
+// M1 (re-graded): an ended contract offers no period that starts after its end date.
+func TestArrearsPeriods_StopsAtContractEnd(t *testing.T) {
+	end := d("2026-09-20")
+	c := domain.Contract{StartDate: d("2026-08-15"), EndDate: &end, Items: []domain.ContractItem{monthlyItem("300000", "0")}}
+	got := ArrearsPeriods(c, d("2026-11-13"))
+	if len(got) != 2 || got[1].Start.Format("2006-01-02") != "2026-09-15" {
+		t.Fatalf("periods = %+v", got)
+	}
+}

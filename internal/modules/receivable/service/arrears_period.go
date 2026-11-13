@@ -19,7 +19,8 @@ type ArrearsPeriod struct {
 }
 
 // ArrearsPeriods lists the contract's billing cycles from start_date whose start is on or
-// before today (calendar dates), following pricing.PeriodRange. The reference frequency is
+// before today (calendar dates), before the billing pointer (earliest next_period_start of the
+// reference-frequency items) and not after the contract end date, following pricing.PeriodRange. The reference frequency is
 // the first item's; DefaultAmount sums every item of that frequency (qty, discount, tax),
 // rounded to 2 decimals. Only the latest maxArrearsPeriods are returned.
 func ArrearsPeriods(c domain.Contract, today time.Time) []ArrearsPeriod {
@@ -31,9 +32,17 @@ func ArrearsPeriods(c domain.Contract, today time.Time) []ArrearsPeriod {
 	amount := arrearsDefaultAmount(c.Items, freq)
 	y, m, d := today.Date()
 	limit := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	// Periods from the billing pointer on belong to the billing run (it bills them from
+	// next_period_start); recording them as arrears would bill the customer twice.
+	var pointer time.Time
+	for _, it := range c.Items {
+		if it.Frequency == freq && !it.NextPeriodStart.IsZero() && (pointer.IsZero() || it.NextPeriodStart.Before(pointer)) {
+			pointer = it.NextPeriodStart
+		}
+	}
 	for n := 0; ; n++ {
 		from, to := pricing.PeriodRange(c.StartDate, freq, n)
-		if from.After(limit) {
+		if from.After(limit) || (!pointer.IsZero() && !from.Before(pointer)) || (c.EndDate != nil && from.After(*c.EndDate)) {
 			break
 		}
 		out = append(out, ArrearsPeriod{Index: n, Start: from, End: to, DefaultAmount: amount})
