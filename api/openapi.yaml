@@ -8950,7 +8950,7 @@ paths:
       - Receivable
       security:
       - BearerAuth: []
-      description: "Billing cycles of the contract from start_date whose start is on or before today (WIB), with the default amount (gross total of the items of the first item's frequency) and a conflict text when the period already has a non-void invoice. `has_trigger_product` tells whether any contract item's product has an enabled Mikrotik isolation trigger (without it the isolation flag has no effect). Permission: `invoice.record_arrears`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      description: "Billing cycles of the contract, from 24 cycles before start_date (negative index: service before the customer entered the system) up to the last cycle whose start is on or before today (WIB), excluding cycles at or after the billing pointer (the billing run bills those) and after the contract end date, with the default amount (gross total of the items of the first item's frequency) and a conflict text when the period already has a non-void invoice. `has_trigger_product` tells whether any contract item's product has an enabled Mikrotik isolation trigger (without it the isolation flag has no effect). Permission: `invoice.record_arrears`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
       parameters:
       - name: id
         in: path
@@ -17220,7 +17220,7 @@ components:
             type: object
             required: [period_start, amount, due_date]
             properties:
-              period_start: {type: string, format: date, description: 'A cycle start of the contract, not before start_date and not after today'}
+              period_start: {type: string, format: date, description: 'A cycle start listed by the periods endpoint (at most 24 cycles before start_date, not after today, before the billing pointer)'}
               amount: {type: string, description: 'Gross amount > 0, at most 2 decimals'}
               due_date: {type: string, format: date, description: 'On or before today (WIB); kept as is'}
               isolir_flag: {type: boolean, default: false}

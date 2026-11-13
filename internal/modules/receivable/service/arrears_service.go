@@ -236,11 +236,10 @@ func (s *arrearsService) validate(ctx context.Context, scope coretenant.Scope, c
 		key := r.PeriodStart.Format(time.DateOnly)
 		p, ok := byStart[key]
 		switch {
-		case r.PeriodStart.Before(c.StartDate):
-			return nil, invalidArrears("Baris %d: periode %s sebelum tanggal mulai kontrak.", i+1, key)
 		case !ok:
 			return nil, invalidArrears("Baris %d: %s tidak bisa dicatat sebagai tunggakan (bukan awal periode tagih yang sudah berjalan, "+
-				"setelah kontrak berakhir, atau periode yang akan ditagih otomatis).", i+1, key)
+				"lebih dari %d periode sebelum kontrak dimulai, setelah kontrak berakhir, atau periode yang akan ditagih otomatis).",
+				i+1, key, maxArrearsBackPeriods)
 		}
 		if r.DueDate.IsZero() || r.DueDate.After(today) {
 			return nil, invalidArrears("Baris %d: jatuh tempo harus hari ini atau sebelumnya.", i+1)

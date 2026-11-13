@@ -318,8 +318,8 @@ func TestArrearsRecord_InvalidInput(t *testing.T) {
 		"not a cycle start": func(h *arrearsHarness) ArrearsInput {
 			return h.input("k1", row("2026-08-06", "333000", "2026-08-12", false))
 		},
-		"before contract start": func(h *arrearsHarness) ArrearsInput {
-			return h.input("k1", row("2026-06-05", "333000", "2026-06-12", false))
+		"more than 24 cycles before contract start": func(h *arrearsHarness) ArrearsInput {
+			return h.input("k1", row("2024-06-05", "333000", "2024-06-12", false))
 		},
 		"period starting after today": func(h *arrearsHarness) ArrearsInput {
 			return h.input("k1", row("2026-11-05", "333000", "2026-10-01", false))
@@ -405,12 +405,13 @@ func TestArrearsPreview_DefaultsConflictsAndTriggerProduct(t *testing.T) {
 	if !hasTrigger || len(h.triggers.asked) != 1 || h.triggers.asked[0] != "prod-1" {
 		t.Fatalf("hasTrigger=%v asked=%v", hasTrigger, h.triggers.asked)
 	}
-	if len(rows) != 4 || rows[0].Period.DefaultAmount != "333000.00" {
-		t.Fatalf("rows = %+v", rows)
+	// 24 cycles before start_date (Q1) + 4 from 2026-07-05 to today.
+	if len(rows) != 28 || rows[0].Period.DefaultAmount != "333000.00" {
+		t.Fatalf("rows = %d", len(rows))
 	}
-	for i, r := range rows {
-		if (r.Conflict != "") != (i == 2) {
-			t.Fatalf("row %d conflict = %q", i, r.Conflict)
+	for _, r := range rows {
+		if (r.Conflict != "") != (r.Period.Index == 2) {
+			t.Fatalf("period %d conflict = %q", r.Period.Index, r.Conflict)
 		}
 	}
 	if _, _, err := h.svc.Preview(ctx, scope, "ctr-missing"); !errors.Is(err, ErrArrearsContractMissing) {
@@ -502,5 +503,14 @@ func TestArrearsRecord_IssueFailureVoidsTheLeftoverDraft(t *testing.T) {
 	h.store.failIssueAfter = 0
 	if res, err := h.svc.Record(ctx, scope, in, "u1"); err != nil || len(res.Invoices) != 2 {
 		t.Fatalf("retry: invoices=%d err=%v", len(res.Invoices), err)
+	}
+}
+
+func TestArrearsRecord_PeriodBeforeContractStart(t *testing.T) {
+	h := newArrearsHarness(t)
+	res, err := h.svc.Record(ctx, scope, h.input("k1", row("2026-05-05", "333000", "2026-05-12", false),
+		row("2026-06-05", "333000", "2026-06-12", false)), "u1")
+	if err != nil || len(res.Invoices) != 2 || res.Invoices[0].PeriodEnd.Format("2006-01-02") != "2026-06-04" {
+		t.Fatalf("res=%+v err=%v", res.Invoices, err)
 	}
 }
