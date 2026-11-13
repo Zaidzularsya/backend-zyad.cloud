@@ -8,11 +8,13 @@ import (
 	"zyad.cloud/internal/config"
 	"zyad.cloud/internal/core/middleware"
 	coretenant "zyad.cloud/internal/core/tenant"
+	mailboxrepo "zyad.cloud/internal/modules/mailbox/repository"
 	mikrotikhandler "zyad.cloud/internal/modules/mikrotik/handler"
 	mikrotikrepo "zyad.cloud/internal/modules/mikrotik/repository"
 	mikrotikservice "zyad.cloud/internal/modules/mikrotik/service"
 	receivablerepo "zyad.cloud/internal/modules/receivable/repository"
 	receivableservice "zyad.cloud/internal/modules/receivable/service"
+	warepo "zyad.cloud/internal/modules/whatsapp/repository"
 	"zyad.cloud/internal/platform/database"
 )
 
@@ -120,7 +122,8 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 		mikrotikrepo.NewOnboardingRepository(db), mikrotikSenderSettings{settings: receivablerepo.NewSettingsRepository(db)})
 	onboarding.SetPendingReader(preview)
 	publicAdapter := newMikrotikPublicAdapter(secretRepo, reader, b.Accounts,
-		receivablerepo.NewSettingsRepository(db), b.PayLinks, b.Issuer, b.Features)
+		receivablerepo.NewSettingsRepository(db), b.PayLinks, b.Issuer, b.Features,
+		warepo.NewSessionRepository(db), mailboxrepo.NewMailboxRepository(db))
 	publicDeps := mikrotikservice.PublicServiceDeps{
 		Directory: publicAdapter, Secrets: secretRepo, Overdue: reader, PayLinks: publicAdapter,
 		Profile: publicAdapter, Gate: publicAdapter, Tasks: taskRepo,

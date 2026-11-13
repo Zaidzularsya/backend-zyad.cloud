@@ -7,8 +7,10 @@ import (
 	"time"
 
 	coretenant "zyad.cloud/internal/core/tenant"
+	mailboxdomain "zyad.cloud/internal/modules/mailbox/domain"
 	"zyad.cloud/internal/modules/organization"
 	receivabledomain "zyad.cloud/internal/modules/receivable/domain"
+	wadomain "zyad.cloud/internal/modules/whatsapp/domain"
 	"zyad.cloud/internal/shared/docpdf"
 )
 
@@ -115,6 +117,81 @@ func TestAccountsByUsername_ResolvesIDsToRefs(t *testing.T) {
 	a := mikrotikPublicAdapter{names: fakeNameLookup{ids: []string{"a1"}}, accounts: accs}
 	got, err := a.AccountsByUsername(context.Background(), mkScope("o1"), "budi")
 	if err != nil || len(got) != 1 || got[0].ID != "a1" || got[0].Name != "Budi" {
+		t.Fatalf("got %+v err=%v", got, err)
+	}
+}
+
+type emptyIssuer struct{}
+
+func (emptyIssuer) OrganizationProfile(context.Context, coretenant.Scope) (docpdf.Party, error) {
+	return docpdf.Party{Name: "ISP Jaya"}, nil
+}
+
+type fakeContactSessions struct {
+	list []wadomain.Session
+	err  error
+}
+
+func (f fakeContactSessions) List(context.Context, coretenant.Scope) ([]wadomain.Session, error) {
+	return f.list, f.err
+}
+
+type fakeContactMailboxes struct {
+	byUser map[string][]mailboxdomain.Mailbox
+	err    error
+}
+
+func (f fakeContactMailboxes) ListByUser(_ context.Context, _ coretenant.Scope, userID string) ([]mailboxdomain.Mailbox, error) {
+	return f.byUser[userID], f.err
+}
+
+// Without a branding contact, the CS contact falls back to the connected channels that also send
+// the invoices: the default working WhatsApp session and the default sender's active mailbox
+// (prod finding T13-E1: no UI could fill the branding contact).
+func TestProfile_FallsBackToConnectedChannels(t *testing.T) {
+	a := mikrotikPublicAdapter{
+		issuer:   emptyIssuer{},
+		settings: fakeNotifSettings{sender: "u1"},
+		sessions: fakeContactSessions{list: []wadomain.Session{
+			{Phone: "6281111", Status: wadomain.SessionStatusWorking},
+			{Phone: "6282222", Status: wadomain.SessionStatusStopped, IsDefault: true},
+			{Phone: "6283333", Status: wadomain.SessionStatusWorking, IsDefault: true},
+		}},
+		mailboxes: fakeContactMailboxes{byUser: map[string][]mailboxdomain.Mailbox{"u1": {
+			{EmailAddress: "old@isp.id", Status: mailboxdomain.MailboxStatus("error")},
+			{EmailAddress: "billing@isp.id", Status: mailboxdomain.MailboxStatusActive},
+		}}},
+	}
+	got, err := a.Profile(context.Background(), mkScope("o1"))
+	if err != nil || got.Name != "ISP Jaya" || got.Phone != "6283333" || got.Email != "billing@isp.id" {
+		t.Fatalf("got %+v err=%v", got, err)
+	}
+}
+
+func TestProfile_BrandingContactWinsOverChannels(t *testing.T) {
+	a := mikrotikPublicAdapter{
+		issuer:    profileIssuer{},
+		settings:  fakeNotifSettings{sender: "u1"},
+		sessions:  fakeContactSessions{list: []wadomain.Session{{Phone: "6283333", Status: wadomain.SessionStatusWorking, IsDefault: true}}},
+		mailboxes: fakeContactMailboxes{byUser: map[string][]mailboxdomain.Mailbox{"u1": {{EmailAddress: "billing@isp.id", Status: mailboxdomain.MailboxStatusActive}}}},
+	}
+	got, _ := a.Profile(context.Background(), mkScope("o1"))
+	if got.Phone != "0812" || got.Email != "a@isp.id" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+// Channel lookups are a best-effort fallback: no connected channel or a lookup error leaves the
+// contact empty (the activation gate then refuses) instead of failing the request.
+func TestProfile_NoConnectedChannelLeavesContactEmpty(t *testing.T) {
+	a := mikrotikPublicAdapter{
+		issuer:    emptyIssuer{},
+		settings:  fakeNotifSettings{sender: ""},
+		sessions:  fakeContactSessions{err: errors.New("boom")},
+		mailboxes: fakeContactMailboxes{},
+	}
+	got, err := a.Profile(context.Background(), mkScope("o1"))
+	if err != nil || got.Phone != "" || got.Email != "" {
 		t.Fatalf("got %+v err=%v", got, err)
 	}
 }

@@ -159,10 +159,10 @@ var (
 	ErrModeInvalid = errors.New("invalid isolation mode change")
 	// ErrPilotRequired: active needs at least one successful pilot test (pilot_verified_at).
 	ErrPilotRequired = errors.New("complete at least one successful pilot test before activating automatic isolation")
-	// ErrTenantContactRequired: pilot/active need a CS contact (phone or email) on the
-	// organization profile, otherwise the public /isolir help block is empty and
+	// ErrTenantContactRequired: pilot/active need a CS contact (phone or email): the branding
+	// contact, else the connected WhatsApp session / sender mailbox; otherwise the /isolir help block is empty and
 	// isolated customers have nobody to ask.
-	ErrTenantContactRequired = errors.New("fill the customer-service contact (phone or email) in the organization profile before enabling pilot or active isolation")
+	ErrTenantContactRequired = errors.New("connect a WhatsApp session or an email account (they become the customer-service contact on the isolir page) before enabling pilot or active isolation")
 	// ErrPilotModeRequired: a pilot test can only run while the tenant mode is pilot.
 	ErrPilotModeRequired = errors.New("a pilot test can only run in pilot mode")
 	// ErrEngineOff: the isolation engine is not switched on for this deployment.
