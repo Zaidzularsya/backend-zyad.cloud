@@ -45,11 +45,16 @@ type fakeStore struct {
 	seq         int
 	issueRace   bool // Issue gagal ErrInvoiceNotDraft seolah request lain menang
 	overdueSeen time.Time
+	// failCreateAfter > 0: Create fails once that many invoices exist (simulates a mid-way failure).
+	failCreateAfter int
 }
 
 func newFakeStore() *fakeStore { return &fakeStore{invoices: map[string]domain.Invoice{}} }
 
 func (s *fakeStore) Create(_ context.Context, _ coretenant.Scope, p repository.CreateInvoiceParams) (domain.Invoice, error) {
+	if s.failCreateAfter > 0 && len(s.invoices) >= s.failCreateAfter {
+		return domain.Invoice{}, errors.New("create failed")
+	}
 	if p.SourceID != "" && p.IdempotencyKey != "" {
 		for _, inv := range s.invoices {
 			if string(inv.SourceType) == p.SourceType && inv.SourceID == p.SourceID && inv.IdempotencyKey == p.IdempotencyKey {
@@ -68,6 +73,7 @@ func (s *fakeStore) Create(_ context.Context, _ coretenant.Scope, p repository.C
 		PeriodStart: p.PeriodStart, PeriodEnd: p.PeriodEnd, Currency: p.Currency, Subtotal: p.Totals.Subtotal,
 		DiscountTotal: p.Totals.DiscountTotal, TaxTotal: p.Totals.TaxTotal, GrandTotal: p.Totals.GrandTotal, AmountPaid: "0.00",
 		Channels: p.Channels, PICUserID: p.PICUserID, Notes: p.Notes, CreatedBy: p.CreatedBy,
+		ArrearsRecordingID: p.ArrearsRecordingID, IsolirFlag: p.IsolirFlag,
 	}
 	for i, it := range p.Items {
 		inv.Items = append(inv.Items, domain.InvoiceItem{ContractItemID: it.ContractItemID, Description: it.Line.Description, LineTotal: it.Line.LineTotal, Pricing: it.Line.Attrs, PeriodStart: it.PeriodStart, PeriodEnd: it.PeriodEnd, Position: i})
@@ -157,6 +163,12 @@ func (s *fakeStore) Void(_ context.Context, _ coretenant.Scope, id, reason, _ st
 
 func (s *fakeStore) MarkOverdue(_ context.Context, _ coretenant.Scope, today time.Time) (int64, error) {
 	s.overdueSeen = today
+	for id, inv := range s.invoices {
+		if inv.Status == domain.InvoiceIssued && inv.DueDate != nil && inv.DueDate.Before(today) {
+			inv.Status = domain.InvoiceOverdue
+			s.invoices[id] = inv
+		}
+	}
 	return 1, nil
 }
 

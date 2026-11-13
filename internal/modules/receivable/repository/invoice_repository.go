@@ -145,6 +145,9 @@ func (r *invoiceRepository) Create(ctx context.Context, scope coretenant.Scope, 
 	if isUniqueViolation(err, "idx_receivable_invoices_source_idempotency") {
 		return domain.Invoice{}, ErrDuplicateSource
 	}
+	if isUniqueViolation(err, "idx_receivable_invoices_arrears_period") {
+		return domain.Invoice{}, ErrDuplicateArrearsPeriod
+	}
 	return out, err
 }
 

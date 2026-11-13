@@ -38,6 +38,11 @@ ALTER TABLE receivable_invoices
 		REFERENCES receivable_arrears_recordings(organization_id, id) ON DELETE RESTRICT;
 CREATE INDEX IF NOT EXISTS idx_receivable_invoices_arrears_recording
 	ON receivable_invoices(organization_id, arrears_recording_id) WHERE arrears_recording_id IS NOT NULL;
+-- Backstop for two concurrent recordings of the same period: at most one open (non-void)
+-- arrears invoice per contract period. Normal invoices (arrears_recording_id NULL) are not covered.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_receivable_invoices_arrears_period
+	ON receivable_invoices(organization_id, contract_id, period_start)
+	WHERE arrears_recording_id IS NOT NULL AND status <> 'void';
 
 CREATE TABLE IF NOT EXISTS receivable_isolir_flag_audits (
 	id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

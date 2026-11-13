@@ -17,6 +17,8 @@ var (
 	ErrDuplicateRecording = errors.New("arrears recording for this idempotency key already exists")
 	// ErrInvoiceNotOpen: the invoice is not issued/overdue (paid, void or draft).
 	ErrInvoiceNotOpen = errors.New("invoice is not issued or overdue")
+	// ErrDuplicateArrearsPeriod: the contract period already has an open arrears invoice.
+	ErrDuplicateArrearsPeriod = errors.New("contract period already has an open arrears invoice")
 )
 
 type CreateRecordingParams struct {
@@ -35,6 +37,8 @@ type ArrearsRepository interface {
 	GetRecording(ctx context.Context, scope coretenant.Scope, id string) (domain.ArrearsRecording, error)
 	// SetNotify stores the summary message result and stamps notified_at.
 	SetNotify(ctx context.Context, scope coretenant.Scope, id, status, errText string) error
+	// ReleaseRecordingKey replaces the key of a cancelled recording so the client key can be reused.
+	ReleaseRecordingKey(ctx context.Context, scope coretenant.Scope, id string) error
 	// InvoicesByRecording lists the recording's invoices (without items) by period start.
 	InvoicesByRecording(ctx context.Context, scope coretenant.Scope, id string) ([]domain.Invoice, error)
 	// ExistingPeriods lists the periods already billed on the contract by non-void invoices:
@@ -110,6 +114,21 @@ func (r *arrearsRepository) SetNotify(ctx context.Context, scope coretenant.Scop
 		tag, err := tx.Exec(ctx, `
 			UPDATE receivable_arrears_recordings SET notify_status = $3, notify_error = $4, notified_at = now()
 			WHERE organization_id = $1 AND id = $2`, scope.OrganizationID(), id, status, errText)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return pgx.ErrNoRows
+		}
+		return nil
+	})
+}
+
+func (r *arrearsRepository) ReleaseRecordingKey(ctx context.Context, scope coretenant.Scope, id string) error {
+	return withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
+			UPDATE receivable_arrears_recordings SET idempotency_key = 'cancelled:' || id::text
+			WHERE organization_id = $1 AND id = $2`, scope.OrganizationID(), id)
 		if err != nil {
 			return err
 		}

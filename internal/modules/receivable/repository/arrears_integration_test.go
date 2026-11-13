@@ -190,3 +190,47 @@ func TestArrears_SetNotifyAndGetRecording(t *testing.T) {
 		t.Fatalf("recording = %+v", got)
 	}
 }
+
+func TestArrears_OpenPeriodIsUniqueButVoidFreesIt(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	acc := e.account(t, scope, "Budi")
+	c := e.contract(t, scope, acc.ID, "CTR-2026-0001", "cccccccc-0000-0000-0000-000000000001")
+	r1 := e.recording(t, scope, acc.ID, c.ID, "key-1")
+	r2 := e.recording(t, scope, acc.ID, c.ID, "key-2")
+	first := e.arrearsInvoice(t, scope, c, r1.ID, "2026-08-05", "2026-09-04", "INV-2026-0101", false)
+
+	p := params(t, acc.ID, pricing.LineInput{Description: "Tunggakan", UnitPrice: "1"})
+	p.ContractID, p.SourceType, p.SourceID, p.IdempotencyKey = c.ID, "contract", c.ID, "arrears:"+r2.ID+":2026-08-05"
+	p.PeriodStart, p.PeriodEnd, p.ArrearsRecordingID = date("2026-08-05"), date("2026-09-04"), r2.ID
+	if _, err := e.invoices.Create(e.ctx, scope, p); !errors.Is(err, repository.ErrDuplicateArrearsPeriod) {
+		t.Fatalf("second open arrears invoice err = %v, want ErrDuplicateArrearsPeriod", err)
+	}
+	if _, err := e.invoices.Void(e.ctx, scope, first.ID, "salah catat", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.invoices.Create(e.ctx, scope, p); err != nil {
+		t.Fatalf("after void: %v", err)
+	}
+	// A normal invoice of the same contract period is not affected by the arrears index.
+	n := params(t, acc.ID, pricing.LineInput{Description: "Internet", UnitPrice: "1"})
+	n.ContractID, n.PeriodStart, n.PeriodEnd = c.ID, date("2026-08-05"), date("2026-09-04")
+	if _, err := e.invoices.Create(e.ctx, scope, n); err != nil {
+		t.Fatalf("normal invoice: %v", err)
+	}
+}
+
+func TestArrears_ReleaseRecordingKeyFreesClientKey(t *testing.T) {
+	e := setup(t)
+	scope := e.tenants.A.Scope
+	acc := e.account(t, scope, "Budi")
+	c := e.contract(t, scope, acc.ID, "CTR-2026-0001", "cccccccc-0000-0000-0000-000000000001")
+	r := e.recording(t, scope, acc.ID, c.ID, "key-1")
+	if err := e.arrears.ReleaseRecordingKey(e.ctx, scope, r.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := e.arrears.FindRecordingByKey(e.ctx, scope, "key-1"); ok {
+		t.Fatal("released key still found")
+	}
+	e.recording(t, scope, acc.ID, c.ID, "key-1")
+}
