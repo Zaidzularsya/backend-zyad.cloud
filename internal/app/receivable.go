@@ -193,6 +193,7 @@ type receivableModule struct {
 	ContractHandler   *receivablehandler.ContractHandler
 	OverviewHandler   *receivablehandler.OverviewHandler
 	SettlementHandler *receivablehandler.SettlementHandler
+	ArrearsHandler    *receivablehandler.ArrearsHandler
 
 	Invoices  receivableservice.InvoiceService
 	Contracts receivableservice.ContractService
@@ -239,6 +240,16 @@ func buildReceivable(b receivableBuild) receivableModule {
 	settingsSvc := receivableservice.NewSettingsService(settingsRepo, members)
 	contractSvc := receivableservice.NewContractService(contractRepo, listeners, nil)
 	overviewSvc := receivableservice.NewOverviewService(receivablerepo.NewOverviewRepository(db), settingsRepo, nil)
+	// Tunggakan (Gelombang 3): one summary message via the send service; trigger products are
+	// read from mikrotik_product_triggers through the mikrotik reader adapter.
+	arrearsNotifier, ok := sendSvc.(receivableservice.ArrearsNotifier)
+	if !ok {
+		panic("receivable: send service does not implement ArrearsNotifier")
+	}
+	arrearsSvc := receivableservice.NewArrearsService(receivableservice.ArrearsDeps{
+		Arrears: receivablerepo.NewArrearsRepository(db), Contracts: contractRepo, Invoices: invoiceSvc, Overdue: invoiceRepo,
+		Triggers: mikrotikReceivableReader{db: db, now: time.Now}, Notifier: arrearsNotifier,
+	})
 	orderBilling := receivableservice.NewOrderBilling(accountRepo, invoiceSvc, contractRepo, counterRepo, listeners, settingsRepo)
 
 	// Halaman publik: scope tenant dibangun dari baris link lewat resolver worker (identitas
@@ -266,6 +277,7 @@ func buildReceivable(b receivableBuild) receivableModule {
 		OnlinePayment:     onlinePayment,
 		ContractHandler:   receivablehandler.NewContractHandler(contractSvc).WithUpcoming(overviewSvc),
 		OverviewHandler:   receivablehandler.NewOverviewHandler(overviewSvc),
+		ArrearsHandler:    receivablehandler.NewArrearsHandler(arrearsSvc),
 		SettlementHandler: receivablehandler.NewSettlementHandler(receivableservice.NewSettlementService(receivablerepo.NewSettlementLedgerRepository(db))),
 		Invoices:          invoiceSvc, Accounts: accountSvc, Payments: paymentSvc, Listeners: listeners,
 		Contracts: contractSvc, Billing: orderBilling,

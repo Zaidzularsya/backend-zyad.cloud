@@ -36,6 +36,7 @@ func InvoiceFromDomain(inv domain.Invoice, last *domain.Send) InvoiceResponse {
 		AmountPaid: inv.AmountPaid, Balance: inv.Balance(), Channels: inv.Channels, PICUserID: strPtr(inv.PICUserID),
 		Notes: inv.Notes, VoidReason: inv.VoidReason, PaidAt: inv.PaidAt, VoidedAt: inv.VoidedAt,
 		Items: []InvoiceItemResponse{}, CreatedAt: inv.CreatedAt,
+		IsolirFlag: inv.IsolirFlag, ArrearsRecordingID: strPtr(inv.ArrearsRecordingID),
 	}
 	if out.Channels == nil {
 		out.Channels = []string{}

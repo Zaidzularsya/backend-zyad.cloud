@@ -137,6 +137,9 @@ type InvoiceResponse struct {
 	Items         []InvoiceItemResponse `json:"items"`
 	LastSend      *InvoiceSendResponse  `json:"last_send"`
 	CreatedAt     time.Time             `json:"created_at"`
+	// IsolirFlag / ArrearsRecordingID: set on invoices created by an arrears recording.
+	IsolirFlag         bool    `json:"isolir_flag"`
+	ArrearsRecordingID *string `json:"arrears_recording_id"`
 }
 
 type InvoiceLinkResponse struct {

@@ -8942,6 +8942,156 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/receivable/contracts/{id}/arrears/periods:
+    get:
+      summary: Arrears periods of a contract
+      operationId: listReceivableArrearsPeriods
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Billing cycles of the contract from start_date whose start is on or before today (WIB), with the default amount (gross total of the items of the first item's frequency) and a conflict text when the period already has a non-void invoice. `has_trigger_product` tells whether any contract item's product has an enabled Mikrotik isolation trigger (without it the isolation flag has no effect). Permission: `invoice.record_arrears`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableArrearsPeriodsEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: "ARREARS_CONTRACT_MISSING"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/receivable/invoices/arrears:
+    post:
+      summary: Record old arrears as back-dated invoices
+      operationId: recordReceivableArrears
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Creates one issued invoice per row (overdue when the due date is before today) on the customer's contract, keeping the past due date. All rows are validated first; any conflict or invalid row rejects the whole recording and no invoice is created. One summary message is sent over the contract's channels; a send failure does not fail the recording (`notify_status` failed, resend available). A repeated `Idempotency-Key` returns the first recording's result. Rows with `isolir_flag: true` additionally need `invoice.isolir_flag`. Permission: `invoice.record_arrears`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        description: "Client key, one per dialog (1–100 characters)."
+        schema: {type: string, minLength: 1, maxLength: 100}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReceivableArrearsRequest'}
+      responses:
+        '201':
+          description: "Recorded (or the earlier result for the same key)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableArrearsResultEnvelope'}
+        '403':
+          description: "Forbidden (missing permission, entitlement, or invoice.isolir_flag for a flagged row)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: "ARREARS_CONFLICT; data.conflicts lists the rejected rows"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableArrearsConflictResponse'}
+        '422':
+          description: "VALIDATION_ERROR (missing Idempotency-Key, reason, rows 1–24, cycle start, due date after today, amount) or ARREARS_CONTRACT_MISSING"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/receivable/invoices/arrears/{recordingId}/resend:
+    post:
+      summary: Resend the arrears summary message
+      operationId: resendReceivableArrears
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Sends the summary again for the recording's open invoices and stores the result. Permission: `invoice.record_arrears`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: recordingId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableArrearsRecordingEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "INVOICE_NOT_FOUND (recording not found)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR (no open arrears invoice left)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/receivable/invoices/{id}/isolir-flag:
+    put:
+      summary: Change the isolation flag of an arrears invoice
+      operationId: setReceivableInvoiceIsolirFlag
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Only arrears invoices that are issued or overdue. A flagged invoice may trigger Mikrotik isolation (regardless of the trigger's effective_from) only when the contract has an item whose product has an enabled trigger. Audited. Permission: `invoice.isolir_flag` (owner). Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value: {type: boolean}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableInvoiceEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "INVOICE_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR (not an arrears invoice, or paid/void)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /api/v1/app/receivable/invoices/{id}/pdf:
     get:
       summary: Invoice PDF
@@ -17053,6 +17203,94 @@ components:
         items: {type: array, items: {$ref: '#/components/schemas/ReceivableInvoiceItem'}, description: 'Empty in list responses'}
         last_send: {allOf: [{$ref: '#/components/schemas/ReceivableInvoiceSend'}], nullable: true}
         created_at: {type: string, format: date-time}
+        isolir_flag: {type: boolean, description: 'Arrears invoices only: the owner chose that it may trigger isolation'}
+        arrears_recording_id: {type: string, format: uuid, nullable: true, description: 'Set when created by an arrears recording'}
+    ReceivableArrearsRequest:
+      type: object
+      required: [account_id, contract_id, reason, rows]
+      properties:
+        account_id: {type: string, format: uuid}
+        contract_id: {type: string, format: uuid}
+        reason: {type: string, minLength: 1, maxLength: 500}
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 24
+          items:
+            type: object
+            required: [period_start, amount, due_date]
+            properties:
+              period_start: {type: string, format: date, description: 'A cycle start of the contract, not before start_date and not after today'}
+              amount: {type: string, description: 'Gross amount > 0, at most 2 decimals'}
+              due_date: {type: string, format: date, description: 'On or before today (WIB); kept as is'}
+              isolir_flag: {type: boolean, default: false}
+    ReceivableArrearsRecording:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        account_id: {type: string, format: uuid}
+        contract_id: {type: string, format: uuid}
+        reason: {type: string}
+        recorded_by: {type: string, format: uuid, nullable: true}
+        notify_status: {type: string, enum: [pending, sent, failed, skipped]}
+        notify_error: {type: string}
+        notified_at: {type: string, format: date-time, nullable: true}
+        created_at: {type: string, format: date-time}
+    ReceivableArrearsRecordingEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/ReceivableArrearsRecording'}
+    ReceivableArrearsResultEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data:
+          type: object
+          properties:
+            recording: {$ref: '#/components/schemas/ReceivableArrearsRecording'}
+            invoices: {type: array, items: {$ref: '#/components/schemas/ReceivableInvoice'}}
+            notify_status: {type: string, enum: [pending, sent, failed, skipped]}
+    ReceivableArrearsPeriodsEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data:
+          type: object
+          properties:
+            has_trigger_product: {type: boolean}
+            periods:
+              type: array
+              items:
+                type: object
+                properties:
+                  index: {type: integer}
+                  start: {type: string, format: date}
+                  end: {type: string, format: date}
+                  default_amount: {type: string}
+                  conflict: {type: string, description: 'Empty when the period can be recorded'}
+    ReceivableArrearsConflictResponse:
+      allOf:
+      - {$ref: '#/components/schemas/ErrorResponse'}
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              conflicts:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    row: {type: integer}
+                    period_start: {type: string, format: date}
+                    reason: {type: string}
     ReceivableInvoiceEnvelope:
       type: object
       required: [success, message, data]

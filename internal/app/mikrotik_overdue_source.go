@@ -90,6 +90,23 @@ func (r mikrotikReceivableReader) AccountsWithTriggerInvoices(ctx context.Contex
 	return out, err
 }
 
+// AnyTriggerProduct reports whether any of the products has an enabled isolation trigger
+// (receivable.TriggerProductChecker; the arrears dialog explains the flag has no effect otherwise).
+func (r mikrotikReceivableReader) AnyTriggerProduct(ctx context.Context, scope coretenant.Scope, productIDs []string) (bool, error) {
+	if len(productIDs) == 0 {
+		return false, nil
+	}
+	var found bool
+	err := r.scopedRead(ctx, scope, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM mikrotik_product_triggers
+				WHERE organization_id = $1 AND product_id = ANY($2::uuid[]) AND enabled)`,
+			scope.OrganizationID(), productIDs).Scan(&found)
+	})
+	return found, err
+}
+
 // AccountOfInvoice returns the invoice's account id, or mikrotik.ErrAccountNotFound.
 func (r mikrotikReceivableReader) AccountOfInvoice(ctx context.Context, scope coretenant.Scope, invoiceID string) (string, error) {
 	var id string
