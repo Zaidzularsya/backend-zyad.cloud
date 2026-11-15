@@ -36,7 +36,9 @@ func seedSummaryData(t *testing.T, e routerEnv, scope coretenant.Scope, routerID
 			VALUES ($1, $2, 'isolate', 'failed')`, scope.OrganizationID(), unpaired); err != nil {
 			t.Fatal(err)
 		}
-		_ = tx.Commit(e.ctx)
+		if err := tx.Commit(e.ctx); err != nil {
+			t.Fatal(err)
+		}
 	})
 	if ok, err := taskRepo(e).EnqueueIsolate(e.ctx, scope, paired, "test"); err != nil || !ok {
 		t.Fatalf("enqueue: %v %v", ok, err)
@@ -72,6 +74,17 @@ func TestRouterSummaryCountsPerOrganization(t *testing.T) {
 	}
 	if got.TaskCounts["pending"] != 1 || got.TaskCounts["failed"] != 1 || len(got.TaskCounts) != 2 {
 		t.Fatalf("task counts = %v", got.TaskCounts)
+	}
+
+	// A router without secrets must report zero, not one (LEFT JOIN null row).
+	empty := e.create(t, a, "R-empty")
+	es, err := e.repo.Summary(e.ctx, a, empty.ID)
+	if err != nil {
+		t.Fatalf("summary empty: %v", err)
+	}
+	if es.SecretsTotal != 0 || es.SecretsPaired != 0 || es.SecretsUnpaired != 0 || es.SecretsMissing != 0 ||
+		es.SecretsNeedOriginalProfile != 0 || es.SecretsIsolated != 0 || len(es.TaskCounts) != 0 {
+		t.Fatalf("empty router summary = %+v", es)
 	}
 
 	// Another organization's router is invisible through this scope.

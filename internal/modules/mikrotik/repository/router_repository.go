@@ -383,7 +383,7 @@ func (r *routerRepository) Summary(ctx context.Context, scope coretenant.Scope, 
 	sum := domain.RouterSummary{TaskCounts: map[string]int{}}
 	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
 		err := tx.QueryRow(ctx, `
-			SELECT COUNT(*),
+			SELECT COUNT(s.id),
 				COUNT(*) FILTER (WHERE s.account_id IS NOT NULL AND s.present),
 				COUNT(*) FILTER (WHERE s.account_id IS NULL AND s.present),
 				COUNT(*) FILTER (WHERE NOT s.present),
