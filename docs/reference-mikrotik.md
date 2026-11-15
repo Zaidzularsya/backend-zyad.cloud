@@ -20,6 +20,8 @@ Semua di bawah `/api/v1/app/mikrotik`, memakai envelope standar. Detail skema ad
 | PATCH | `/routers/{id}` | `mikrotik_router.update` | Update parsial |
 | DELETE | `/routers/{id}` | `mikrotik_router.delete` | Hapus pendaftaran (204) |
 | POST | `/routers/{id}/check` | `mikrotik_router.update` | Uji koneksi + deteksi versi |
+| GET | `/routers/{id}/summary` | `mikrotik_router.read` | Hitungan secret dan task (hanya DB) |
+| GET | `/routers/{id}/stats` | `mikrotik_router.read` | Identity, CPU, memori, sesi PPPoE aktif (live) |
 | POST | `/routers/{id}/setup/preview` | `mikrotik_router.setup` | Rencana tindakan + `hash` (read-only) |
 | POST | `/routers/{id}/setup/apply` | `mikrotik_router.setup` | Terapkan rencana (`plan_hash` wajib) |
 | POST | `/routers/{id}/setup/cleanup` | `mikrotik_router.setup` | Hapus objek `zyad-managed` |
@@ -101,6 +103,21 @@ organization aktif bertipe customer atau platform.
 - **nginx (DEV/prod)**: set `proxy_read_timeout 300s;` (minimal) untuk `location /api/v1/app/mikrotik/`. Tanpa itu
   klien bisa menerima 504 (gateway timeout) dari nginx padahal operasi di backend tetap selesai; klien lalu cenderung mengulang.
 - Follow-up (belum dikerjakan): sesi binary per operasi (satu login untuk seluruh `apply`/`cleanup`) agar durasi turun.
+
+## Summary dan stats router
+
+- `GET /routers/{id}/summary`: hanya membaca database, tidak menghubungi router. `secrets` memuat `total`, `paired`,
+  `unpaired`, `missing`, `need_original_profile`, `isolated`; `tasks` memuat `pending`, `running`, `failed`, `done`,
+  `cancelled` (semua kunci selalu ada, 0 bila kosong).
+- `GET /routers/{id}/stats`: membaca langsung `/system/identity`, `/system/resource`, dan `/ppp/active`. Respons:
+  `identity`, `board_name`, `version`, `architecture`, `uptime`, `cpu_load`, `memory_total`, `memory_free` (byte),
+  `ppp_active`, `fetched_at`. `cpu_load`, `memory_total`, `memory_free`, `ppp_active` bernilai `null` bila tidak terbaca
+  (kegagalan `/system/resource` atau `/ppp/active` hanya mengosongkan field miliknya).
+- Tenggat total 8 detik (dial + tiga perintah). Hasil di-cache 60 detik per organization+router; kegagalan dial atau
+  perintah pertama (`/system/identity`) mengembalikan error (502 `MIKROTIK_AUTH_FAILED`/`MIKROTIK_UNREACHABLE`, 422 untuk
+  host/TLS) dan tidak di-cache. Tidak menulis `last_check_status` atau state router apa pun.
+- Rate limit stats terpisah dari bucket probe: 10 panggilan per menit per organization (429 `RATE_LIMITED`).
+- Status stats pada router nyata: lihat catatan uji lab (`TestStatsLab`).
 
 ## Kode error
 

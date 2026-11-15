@@ -10638,6 +10638,94 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/routers/{id}/summary:
+    get:
+      summary: Router secret and task counts
+      operationId: getMikrotikRouterSummary
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Hanya membaca database; tidak pernah menghubungi router. Semua kunci selalu ada (0 bila kosong). Permission: `mikrotik_router.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikRouterSummaryEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "MIKROTIK_ROUTER_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/routers/{id}/stats:
+    get:
+      summary: Live router stats
+      operationId: getMikrotikRouterStats
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Membaca langsung identity, resource, dan jumlah sesi PPPoE aktif dari router (tenggat total 8 detik). Hasil di-cache 60 detik per organization+router (`fetched_at` menunjukkan waktu baca), kegagalan tidak di-cache. Tidak menulis `last_check_status`. Angka yang tidak terbaca bernilai null; kegagalan dial atau perintah pertama (/system/identity) menggagalkan seluruh panggilan. Rate limit sendiri: 10 panggilan per menit per organization. Permission: `mikrotik_router.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikRouterStatsEnvelope'}
+        '429':
+          description: "RATE_LIMITED (maksimal 10 panggilan per menit per organization, terpisah dari bucket probe 20/menit)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "MIKROTIK_ROUTER_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '422':
+          description: "MIKROTIK_HOST_NOT_ALLOWED | MIKROTIK_TLS_REQUIRED | MIKROTIK_TLS_UNTRUSTED"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - {$ref: '#/components/schemas/MikrotikErrorResponse'}
+                - {$ref: '#/components/schemas/MikrotikTLSUntrustedError'}
+        '502':
+          description: "MIKROTIK_AUTH_FAILED | MIKROTIK_UNREACHABLE"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
   /api/v1/app/mikrotik/routers/{id}/setup/preview:
     post:
       summary: Preview isolir setup
@@ -17498,6 +17586,57 @@ components:
         success: {type: boolean}
         message: {type: string}
         data: {$ref: '#/components/schemas/MikrotikRouter'}
+    MikrotikRouterSummary:
+      type: object
+      required: [secrets, tasks]
+      properties:
+        secrets:
+          type: object
+          required: [total, paired, unpaired, missing, need_original_profile, isolated]
+          properties:
+            total: {type: integer}
+            paired: {type: integer}
+            unpaired: {type: integer}
+            missing: {type: integer}
+            need_original_profile: {type: integer}
+            isolated: {type: integer}
+        tasks:
+          type: object
+          required: [pending, running, failed, done, cancelled]
+          properties:
+            pending: {type: integer}
+            running: {type: integer}
+            failed: {type: integer}
+            done: {type: integer}
+            cancelled: {type: integer}
+    MikrotikRouterSummaryEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/MikrotikRouterSummary'}
+    MikrotikRouterStats:
+      type: object
+      required: [identity, board_name, version, architecture, uptime, cpu_load, memory_total, memory_free, ppp_active, fetched_at]
+      properties:
+        identity: {type: string}
+        board_name: {type: string}
+        version: {type: string}
+        architecture: {type: string}
+        uptime: {type: string, description: "Format RouterOS, mis. 1d2h3m4s"}
+        cpu_load: {type: integer, nullable: true}
+        memory_total: {type: integer, format: int64, nullable: true, description: "Byte"}
+        memory_free: {type: integer, format: int64, nullable: true, description: "Byte"}
+        ppp_active: {type: integer, nullable: true}
+        fetched_at: {type: string, format: date-time}
+    MikrotikRouterStatsEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/MikrotikRouterStats'}
     MikrotikRouterListEnvelope:
       type: object
       required: [success, message, data, meta]
