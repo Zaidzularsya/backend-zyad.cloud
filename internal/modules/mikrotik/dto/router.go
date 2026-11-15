@@ -117,6 +117,28 @@ func RouterSummaryFromDomain(s domain.RouterSummary) RouterSummaryResponse {
 	}
 }
 
+// RouterStatsResponse is the live router read; unreadable numbers are null.
+type RouterStatsResponse struct {
+	Identity     string    `json:"identity"`
+	BoardName    string    `json:"board_name"`
+	Version      string    `json:"version"`
+	Architecture string    `json:"architecture"`
+	Uptime       string    `json:"uptime"`
+	CPULoad      *int      `json:"cpu_load"`
+	MemoryTotal  *int64    `json:"memory_total"`
+	MemoryFree   *int64    `json:"memory_free"`
+	PPPActive    *int      `json:"ppp_active"`
+	FetchedAt    time.Time `json:"fetched_at"`
+}
+
+func RouterStatsFromDomain(s domain.RouterStats) RouterStatsResponse {
+	return RouterStatsResponse{
+		Identity: s.Identity, BoardName: s.BoardName, Version: s.Version, Architecture: s.Architecture,
+		Uptime: s.Uptime, CPULoad: s.CPULoad, MemoryTotal: s.MemoryTotal, MemoryFree: s.MemoryFree,
+		PPPActive: s.PPPActive, FetchedAt: s.FetchedAt,
+	}
+}
+
 func RouterListFromDomain(routers []domain.Router) []RouterResponse {
 	out := make([]RouterResponse, 0, len(routers))
 	for _, r := range routers {

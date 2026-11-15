@@ -88,6 +88,16 @@ type SetupPlan struct {
 	Hash    string        `json:"hash"`
 }
 
+// RouterStats is a live read of one router. Pointer fields are nil and string
+// fields empty when the router did not answer that part.
+type RouterStats struct {
+	Identity, BoardName, Version, Architecture, Uptime string
+	CPULoad                                            *int   // percent
+	MemoryTotal, MemoryFree                            *int64 // bytes
+	PPPActive                                          *int   // /ppp/active rows
+	FetchedAt                                          time.Time
+}
+
 // RouterSummary is a database-only overview of one router: how many of its PPP
 // secrets are in each state, and its isolation tasks by status. TaskCounts keys
 // are task statuses; a status with no task is absent (read as 0).

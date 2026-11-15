@@ -26,6 +26,7 @@ type RouterService interface {
 	List(ctx context.Context, scope coretenant.Scope, limit, offset int) ([]domain.Router, int64, error)
 	Check(ctx context.Context, scope coretenant.Scope, id string) (domain.Router, error)
 	Summary(ctx context.Context, scope coretenant.Scope, id string) (domain.RouterSummary, error)
+	Stats(ctx context.Context, scope coretenant.Scope, id string) (domain.RouterStats, error)
 	Update(ctx context.Context, scope coretenant.Scope, id string, in service.UpdateInput) (domain.Router, error)
 	Delete(ctx context.Context, scope coretenant.Scope, id, by string) error
 }
@@ -42,9 +43,11 @@ func NewRouterHandler(svc RouterService) *RouterHandler {
 // carries the tenant and mikrotik.enabled entitlement guards. probeLimit (may
 // be nil) runs before the permission check on every route that logs in to the
 // tenant's router (create, update, check); list/get/delete are not limited.
-func (h *RouterHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker, probeLimit gin.HandlerFunc) {
+// statsLimit (may be nil) is a separate bucket for the live stats read.
+func (h *RouterHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker, probeLimit, statsLimit gin.HandlerFunc) {
 	group := router.Group("/routers")
 	limit := orPass(probeLimit)
+	statsLim := orPass(statsLimit)
 
 	group.GET("", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.read"), h.List)
 	group.POST("", limit, permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.create"), h.Create)
@@ -52,6 +55,7 @@ func (h *RouterHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmidd
 	group.PATCH("/:id", limit, permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.update"), h.Update)
 	group.DELETE("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.delete"), h.Delete)
 	group.GET("/:id/summary", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.read"), h.Summary)
+	group.GET("/:id/stats", statsLim, permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.read"), h.Stats)
 	group.POST("/:id/check", limit, permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.update"), h.Check)
 }
 
@@ -152,6 +156,21 @@ func (h *RouterHandler) Summary(c *gin.Context) {
 		return
 	}
 	corehttp.OK(c, "success", dto.RouterSummaryFromDomain(summary))
+}
+
+// Stats reads live identity, resource and PPPoE session data from the router.
+func (h *RouterHandler) Stats(c *gin.Context) {
+	extendWriteDeadline(c, probeWriteDeadline)
+	scope, ok := scopeOrFail(c)
+	if !ok {
+		return
+	}
+	stats, err := h.svc.Stats(c.Request.Context(), scope, c.Param("id"))
+	if err != nil {
+		failRouter(c, err)
+		return
+	}
+	corehttp.OK(c, "success", dto.RouterStatsFromDomain(stats))
 }
 
 func (h *RouterHandler) Update(c *gin.Context) {

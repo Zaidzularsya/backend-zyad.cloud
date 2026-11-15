@@ -50,6 +50,10 @@ func (s *countingRouterService) Summary(context.Context, coretenant.Scope, strin
 	s.calls++
 	return mikrotikdomain.RouterSummary{}, nil
 }
+func (s *countingRouterService) Stats(context.Context, coretenant.Scope, string) (mikrotikdomain.RouterStats, error) {
+	s.calls++
+	return mikrotikdomain.RouterStats{}, nil
+}
 func (s *countingRouterService) Update(context.Context, coretenant.Scope, string, mikrotikservice.UpdateInput) (mikrotikdomain.Router, error) {
 	s.calls++
 	return mikrotikdomain.Router{}, nil

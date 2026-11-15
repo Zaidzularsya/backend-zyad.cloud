@@ -200,6 +200,8 @@ type fakeFactory struct {
 	client        *pmk.FakeClient
 	detectCalls   int
 	lastEndpoint  pmk.Endpoint
+	newCalls      int
+	newFailures   int // the next N New calls fail
 }
 
 func (f *fakeFactory) Detect(_ context.Context, ep pmk.Endpoint) (string, string, error) {
@@ -213,6 +215,11 @@ func (f *fakeFactory) Detect(_ context.Context, ep pmk.Endpoint) (string, string
 
 func (f *fakeFactory) New(_ string, ep pmk.Endpoint) (pmk.RouterClient, error) {
 	f.lastEndpoint = ep
+	f.newCalls++
+	if f.newFailures > 0 {
+		f.newFailures--
+		return nil, errors.New("boom")
+	}
 	return f.client, nil
 }
 

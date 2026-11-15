@@ -174,6 +174,13 @@ const (
 	mikrotikProbeLimitWindow = time.Minute
 )
 
+// Live router stats (dashboard polling) get their own, smaller bucket so they
+// neither starve nor are starved by the probe bucket.
+const (
+	mikrotikStatsLimit       = 10
+	mikrotikStatsLimitWindow = time.Minute
+)
+
 // registerMikrotikRoutes mounts /app/mikrotik under the authenticated group.
 // Tenant rules match CRM/receivable and the whole group is gated by the
 // mikrotik.enabled entitlement. Order per route: tenant + entitlement guards,
@@ -191,14 +198,15 @@ func registerMikrotikRoutes(protected *gin.RouterGroup, deps Dependencies) {
 		middleware.RequireEntitlement(deps.CRMEntitlementChecker, "mikrotik.enabled"),
 	)
 	// Fail open when no counter is configured or Redis errors (middleware behavior).
-	probeLimit := middleware.RateLimit(deps.MikrotikRateCounter, "rl:mikrotik:org:", mikrotikProbeLimit, mikrotikProbeLimitWindow,
-		func(c *gin.Context) string {
-			if tc, ok := coretenant.FromContext(c.Request.Context()); ok {
-				return tc.OrganizationID()
-			}
-			return "unknown"
-		})
-	deps.MikrotikRouterHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
+	orgKey := func(c *gin.Context) string {
+		if tc, ok := coretenant.FromContext(c.Request.Context()); ok {
+			return tc.OrganizationID()
+		}
+		return "unknown"
+	}
+	probeLimit := middleware.RateLimit(deps.MikrotikRateCounter, "rl:mikrotik:org:", mikrotikProbeLimit, mikrotikProbeLimitWindow, orgKey)
+	statsLimit := middleware.RateLimit(deps.MikrotikRateCounter, "rl:mikrotik:stats:org:", mikrotikStatsLimit, mikrotikStatsLimitWindow, orgKey)
+	deps.MikrotikRouterHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit, statsLimit)
 	if deps.MikrotikSetupHandler != nil {
 		deps.MikrotikSetupHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
 	}

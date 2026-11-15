@@ -8,6 +8,8 @@ import (
 	"net/netip"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 
@@ -89,6 +91,10 @@ type RouterService struct {
 	secret         string
 	allowedPrivate []netip.Prefix
 	validateHost   func(ctx context.Context, host string, allowed []netip.Prefix) ([]netip.Addr, bool, error)
+	now            func() time.Time // injectable clock for the stats cache
+
+	statsMu    sync.Mutex
+	statsCache map[string]statsCacheEntry
 }
 
 func NewRouterService(repo repository.RouterRepository, factory ClientFactory, secret string, allowedPrivate []netip.Prefix) *RouterService {
@@ -98,6 +104,8 @@ func NewRouterService(repo repository.RouterRepository, factory ClientFactory, s
 		secret:         secret,
 		allowedPrivate: allowedPrivate,
 		validateHost:   pmk.ValidateHost,
+		now:            time.Now,
+		statsCache:     map[string]statsCacheEntry{},
 	}
 }
 

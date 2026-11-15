@@ -159,3 +159,30 @@ func TestMikrotikRateLimitFailsOpenWithoutCounter(t *testing.T) {
 		}
 	}
 }
+
+func TestMikrotikStatsHasItsOwnRateLimitBucket(t *testing.T) {
+	const org = "11111111-1111-1111-1111-111111111111"
+	const id = "/33333333-3333-3333-3333-333333333333"
+	counter := &fakeMikrotikCounter{counts: map[string]int64{}}
+	engine, svc := rateLimitedEngine(t, counter, true)
+	const routers = "/api/v1/app/mikrotik/routers"
+
+	for i := 1; i <= mikrotikStatsLimit; i++ {
+		if w := mikrotikRequest(engine, http.MethodGet, routers+id+"/stats", org); w.Code != http.StatusOK {
+			t.Fatalf("stats %d: status %d body %s", i, w.Code, w.Body)
+		}
+	}
+	w := mikrotikRequest(engine, http.MethodGet, routers+id+"/stats", org)
+	if w.Code != http.StatusTooManyRequests || !strings.Contains(w.Body.String(), `"code":"RATE_LIMITED"`) {
+		t.Fatalf("stats %d: status %d body %s, want 429", mikrotikStatsLimit+1, w.Code, w.Body)
+	}
+	if svc.calls != mikrotikStatsLimit {
+		t.Fatalf("service calls = %d, want %d", svc.calls, mikrotikStatsLimit)
+	}
+	if w := mikrotikRequest(engine, http.MethodPost, routers+id+"/check", org); w.Code == http.StatusTooManyRequests {
+		t.Fatal("check must use the separate probe bucket")
+	}
+	if w := mikrotikRequest(engine, http.MethodGet, routers+id+"/summary", org); w.Code == http.StatusTooManyRequests {
+		t.Fatal("summary must not be rate limited")
+	}
+}
