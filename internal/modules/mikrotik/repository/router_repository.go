@@ -80,6 +80,9 @@ type RouterRepository interface {
 	// HasReadyRouter reports whether the organization has at least one
 	// non-deleted router with isolir_ready = true.
 	HasReadyRouter(ctx context.Context, scope coretenant.Scope) (bool, error)
+	// Summary counts the router's secrets and isolation tasks from the database
+	// only; ErrRouterNotFound when the router is not live in the scope.
+	Summary(ctx context.Context, scope coretenant.Scope, routerID string) (domain.RouterSummary, error)
 	InsertAudit(ctx context.Context, scope coretenant.Scope, entry AuditEntry) error
 }
 
@@ -374,6 +377,51 @@ func (r *routerRepository) HasReadyRouter(ctx context.Context, scope coretenant.
 			WHERE organization_id = $1 AND isolir_ready AND deleted_at IS NULL)`, scope.OrganizationID()).Scan(&ok)
 	})
 	return ok, err
+}
+
+func (r *routerRepository) Summary(ctx context.Context, scope coretenant.Scope, routerID string) (domain.RouterSummary, error) {
+	sum := domain.RouterSummary{TaskCounts: map[string]int{}}
+	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `
+			SELECT COUNT(*),
+				COUNT(*) FILTER (WHERE s.account_id IS NOT NULL AND s.present),
+				COUNT(*) FILTER (WHERE s.account_id IS NULL AND s.present),
+				COUNT(*) FILTER (WHERE NOT s.present),
+				COUNT(*) FILTER (WHERE s.needs_original_profile AND s.account_id IS NOT NULL),
+				COUNT(*) FILTER (WHERE s.isolation_state = 'isolated')
+			FROM mikrotik_routers rt
+			LEFT JOIN mikrotik_ppp_secrets s ON s.organization_id = rt.organization_id AND s.router_id = rt.id
+			WHERE rt.organization_id = $1 AND rt.id = $2 AND rt.deleted_at IS NULL
+			GROUP BY rt.id`, scope.OrganizationID(), routerID).Scan(
+			&sum.SecretsTotal, &sum.SecretsPaired, &sum.SecretsUnpaired,
+			&sum.SecretsMissing, &sum.SecretsNeedOriginalProfile, &sum.SecretsIsolated)
+		if err != nil {
+			return err // pgx.ErrNoRows: router missing, deleted or in another organization
+		}
+		rows, err := tx.Query(ctx, `
+			SELECT t.status, COUNT(*)
+			FROM mikrotik_isolation_tasks t
+			JOIN mikrotik_ppp_secrets s ON s.organization_id = t.organization_id AND s.id = t.secret_id
+			WHERE t.organization_id = $1 AND s.router_id = $2
+			GROUP BY t.status`, scope.OrganizationID(), routerID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var status string
+			var n int
+			if err := rows.Scan(&status, &n); err != nil {
+				return err
+			}
+			sum.TaskCounts[status] = n
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return domain.RouterSummary{}, mapRouterError(err)
+	}
+	return sum, nil
 }
 
 // execOne runs a single-row UPDATE in a scoped transaction and returns ErrRouterNotFound when no row matched.

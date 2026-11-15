@@ -304,6 +304,14 @@ func (s *RouterService) Get(ctx context.Context, scope coretenant.Scope, id stri
 	return s.repo.FindByID(ctx, scope, id)
 }
 
+// Summary returns the database-only secret and task counts of one router.
+func (s *RouterService) Summary(ctx context.Context, scope coretenant.Scope, id string) (domain.RouterSummary, error) {
+	if _, err := s.Get(ctx, scope, id); err != nil {
+		return domain.RouterSummary{}, err
+	}
+	return s.repo.Summary(ctx, scope, id)
+}
+
 func (s *RouterService) List(ctx context.Context, scope coretenant.Scope, limit, offset int) ([]domain.Router, int64, error) {
 	return s.repo.List(ctx, scope, limit, offset)
 }

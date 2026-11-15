@@ -87,3 +87,16 @@ type SetupPlan struct {
 	Actions []SetupAction `json:"actions"`
 	Hash    string        `json:"hash"`
 }
+
+// RouterSummary is a database-only overview of one router: how many of its PPP
+// secrets are in each state, and its isolation tasks by status. TaskCounts keys
+// are task statuses; a status with no task is absent (read as 0).
+type RouterSummary struct {
+	SecretsTotal               int
+	SecretsPaired              int
+	SecretsUnpaired            int
+	SecretsMissing             int
+	SecretsNeedOriginalProfile int
+	SecretsIsolated            int
+	TaskCounts                 map[string]int
+}

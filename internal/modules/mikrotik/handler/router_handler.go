@@ -25,6 +25,7 @@ type RouterService interface {
 	Get(ctx context.Context, scope coretenant.Scope, id string) (domain.Router, error)
 	List(ctx context.Context, scope coretenant.Scope, limit, offset int) ([]domain.Router, int64, error)
 	Check(ctx context.Context, scope coretenant.Scope, id string) (domain.Router, error)
+	Summary(ctx context.Context, scope coretenant.Scope, id string) (domain.RouterSummary, error)
 	Update(ctx context.Context, scope coretenant.Scope, id string, in service.UpdateInput) (domain.Router, error)
 	Delete(ctx context.Context, scope coretenant.Scope, id, by string) error
 }
@@ -50,6 +51,7 @@ func (h *RouterHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmidd
 	group.GET("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.read"), h.Get)
 	group.PATCH("/:id", limit, permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.update"), h.Update)
 	group.DELETE("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.delete"), h.Delete)
+	group.GET("/:id/summary", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.read"), h.Summary)
 	group.POST("/:id/check", limit, permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.update"), h.Check)
 }
 
@@ -136,6 +138,20 @@ func (h *RouterHandler) Get(c *gin.Context) {
 		return
 	}
 	corehttp.OK(c, "success", dto.RouterFromDomain(router))
+}
+
+// Summary returns database-only secret and task counts; it never contacts the router.
+func (h *RouterHandler) Summary(c *gin.Context) {
+	scope, ok := scopeOrFail(c)
+	if !ok {
+		return
+	}
+	summary, err := h.svc.Summary(c.Request.Context(), scope, c.Param("id"))
+	if err != nil {
+		failRouter(c, err)
+		return
+	}
+	corehttp.OK(c, "success", dto.RouterSummaryFromDomain(summary))
 }
 
 func (h *RouterHandler) Update(c *gin.Context) {

@@ -81,6 +81,42 @@ func RouterFromDomain(r domain.Router) RouterResponse {
 	}
 }
 
+// RouterSummaryResponse always carries every task status key, zero when absent.
+type RouterSummaryResponse struct {
+	Secrets RouterSummarySecrets `json:"secrets"`
+	Tasks   RouterSummaryTasks   `json:"tasks"`
+}
+
+type RouterSummarySecrets struct {
+	Total               int `json:"total"`
+	Paired              int `json:"paired"`
+	Unpaired            int `json:"unpaired"`
+	Missing             int `json:"missing"`
+	NeedOriginalProfile int `json:"need_original_profile"`
+	Isolated            int `json:"isolated"`
+}
+
+type RouterSummaryTasks struct {
+	Pending   int `json:"pending"`
+	Running   int `json:"running"`
+	Failed    int `json:"failed"`
+	Done      int `json:"done"`
+	Cancelled int `json:"cancelled"`
+}
+
+func RouterSummaryFromDomain(s domain.RouterSummary) RouterSummaryResponse {
+	return RouterSummaryResponse{
+		Secrets: RouterSummarySecrets{
+			Total: s.SecretsTotal, Paired: s.SecretsPaired, Unpaired: s.SecretsUnpaired,
+			Missing: s.SecretsMissing, NeedOriginalProfile: s.SecretsNeedOriginalProfile, Isolated: s.SecretsIsolated,
+		},
+		Tasks: RouterSummaryTasks{
+			Pending: s.TaskCounts["pending"], Running: s.TaskCounts["running"], Failed: s.TaskCounts["failed"],
+			Done: s.TaskCounts["done"], Cancelled: s.TaskCounts["cancelled"],
+		},
+	}
+}
+
 func RouterListFromDomain(routers []domain.Router) []RouterResponse {
 	out := make([]RouterResponse, 0, len(routers))
 	for _, r := range routers {
