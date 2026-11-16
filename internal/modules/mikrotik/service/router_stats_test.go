@@ -159,3 +159,43 @@ func TestStatsUnknownRouterIsNotFound(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestStatsCacheDroppedOnUpdateAndDelete(t *testing.T) {
+	svc, _, factory := newTestService(t)
+	r := registerOne(t, svc)
+	seedStats(factory.client)
+	scope := testScope(t)
+	base := factory.newCalls
+
+	if _, err := svc.Stats(context.Background(), scope, r.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Stats(context.Background(), scope, r.ID); err != nil {
+		t.Fatal(err)
+	}
+	if factory.newCalls-base != 1 {
+		t.Fatalf("New calls = %d, want 1 (cached)", factory.newCalls-base)
+	}
+
+	host := "10.8.0.9"
+	if _, err := svc.Update(context.Background(), scope, r.ID, UpdateInput{Host: &host, ActorUserID: testActor}); err != nil {
+		t.Fatal(err)
+	}
+	base = factory.newCalls
+	if _, err := svc.Stats(context.Background(), scope, r.ID); err != nil {
+		t.Fatal(err)
+	}
+	if factory.newCalls-base != 1 {
+		t.Fatalf("New calls after Update = %d, want 1 (cache dropped)", factory.newCalls-base)
+	}
+
+	if err := svc.Delete(context.Background(), scope, r.ID, testActor); err != nil {
+		t.Fatal(err)
+	}
+	svc.statsMu.Lock()
+	_, stale := svc.statsCache[scope.OrganizationID()+"/"+r.ID]
+	svc.statsMu.Unlock()
+	if stale {
+		t.Fatal("stats cache entry survived Delete")
+	}
+}

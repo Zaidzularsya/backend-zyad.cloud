@@ -17618,6 +17618,9 @@ components:
         data: {$ref: '#/components/schemas/MikrotikRouterSummary'}
     MikrotikRouterStats:
       type: object
+      description: >-
+        Field string (identity, board_name, version, architecture, uptime) bisa kosong bila
+        perintah RouterOS terkait gagal; field angka bernilai null dalam kasus yang sama.
       required: [identity, board_name, version, architecture, uptime, cpu_load, memory_total, memory_free, ppp_active, fetched_at]
       properties:
         identity: {type: string}

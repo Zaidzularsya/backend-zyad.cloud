@@ -475,6 +475,7 @@ func (s *RouterService) Update(ctx context.Context, scope coretenant.Scope, id s
 	if err != nil {
 		return domain.Router{}, storeError(err, newPassword, s.storedPassword(current), derefStr(params.PasswordEncrypted), current.PasswordEncrypted)
 	}
+	s.dropStats(scope, id)
 	if connectionChanged {
 		// Bookkeeping after a committed update (no shared transaction): log, do not fail.
 		if err := s.repo.RecordCheck(ctx, scope, id, CheckStatusOK, updated.RouterOSVersion); err != nil {
@@ -496,6 +497,7 @@ func (s *RouterService) Delete(ctx context.Context, scope coretenant.Scope, id, 
 	if err := s.repo.SoftDelete(ctx, scope, id, by); err != nil {
 		return err
 	}
+	s.dropStats(scope, id)
 	s.audit(ctx, scope, repository.AuditEntry{
 		Event: "router.deleted", ActorUserID: by, TargetID: id, Metadata: auditMetadata(router),
 	})

@@ -117,7 +117,7 @@ organization aktif bertipe customer atau platform.
   perintah pertama (`/system/identity`) mengembalikan error (502 `MIKROTIK_AUTH_FAILED`/`MIKROTIK_UNREACHABLE`, 422 untuk
   host/TLS) dan tidak di-cache. Tidak menulis `last_check_status` atau state router apa pun.
 - Rate limit stats terpisah dari bucket probe: 10 panggilan per menit per organization (429 `RATE_LIMITED`).
-- Status stats pada router nyata: lihat catatan uji lab (`TestStatsLab`).
+- Status stats pada router nyata: belum terbukti di router nyata; jalankan `TestStatsLab` (tag `mikrotiklab`) dengan env lab.
 
 ## Kode error
 

@@ -89,3 +89,11 @@ func (s *RouterService) cachedStats(key string) (domain.RouterStats, bool) {
 	}
 	return e.stats, true
 }
+
+// dropStats forgets the cached stats of one router so a host/credential change
+// or deletion is not masked for up to statsCacheTTL.
+func (s *RouterService) dropStats(scope coretenant.Scope, routerID string) {
+	s.statsMu.Lock()
+	delete(s.statsCache, scope.OrganizationID()+"/"+routerID)
+	s.statsMu.Unlock()
+}
