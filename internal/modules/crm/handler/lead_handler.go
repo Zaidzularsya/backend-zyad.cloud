@@ -43,6 +43,7 @@ func (h *LeadHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddle
 	group.POST("/:id/restore", permissionmiddleware.RequireOrganizationOrGlobal(p, "lead.restore"), h.Restore)
 	group.POST("/:id/assign", permissionmiddleware.RequireOrganizationOrGlobal(p, "lead.assign"), h.Assign)
 	group.POST("/:id/convert", permissionmiddleware.RequireOrganizationOrGlobal(p, "lead.convert"), h.Convert)
+	group.GET("/:id/contact-matches", permissionmiddleware.RequireOrganizationOrGlobal(p, "lead.convert"), h.ContactMatches)
 	group.POST("/:id/deal", permissionmiddleware.RequireOrganizationOrGlobal(p, "deal.create"), h.CreateDeal)
 	group.POST("/:id/disqualify", permissionmiddleware.RequireOrganizationOrGlobal(p, "lead.update"), h.Disqualify)
 	group.POST("/:id/playbook/start", permissionmiddleware.RequireOrganizationOrGlobal(p, "lead.update"), h.StartPlaybook)
@@ -315,6 +316,9 @@ func (h *LeadHandler) Convert(c *gin.Context) {
 			Industry: req.Company.Industry, Website: req.Company.Website, Phone: req.Company.Phone,
 		}
 	}
+	if req.Contact != nil {
+		params.Contact = &service.ConvertContactInput{Mode: req.Contact.Mode, ContactID: req.Contact.ContactID}
+	}
 	if req.Deal != nil {
 		deal := convertDealInput(*req.Deal)
 		if deal.OwnerUserID == "" {
@@ -329,6 +333,22 @@ func (h *LeadHandler) Convert(c *gin.Context) {
 		return
 	}
 	corehttp.OK(c, "success", dto.LeadConversionFromDomain(result))
+}
+
+// ContactMatches lists contacts sharing the lead's email/WhatsApp, for the
+// convert dialog's "use this contact" choice.
+func (h *LeadHandler) ContactMatches(c *gin.Context) {
+	scope, err := coretenant.RequireScope(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, coreerrors.New("UNAUTHORIZED", "missing scope", http.StatusUnauthorized))
+		return
+	}
+	contacts, err := h.svc.MatchContacts(c.Request.Context(), scope, c.Param("id"))
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	corehttp.OK(c, "success", dto.ContactListFromDomain(contacts))
 }
 
 func convertDealInput(r dto.ConvertDealRequest) service.ConvertDealInput {
@@ -366,9 +386,15 @@ func (h *LeadHandler) CreateDeal(c *gin.Context) {
 // failLeadError memetakan error validasi service lead ke 422; error lain
 // diteruskan apa adanya (AppError dari MapNotFound, dsb).
 func failLeadError(c *gin.Context, err error) {
+	var dup *service.DuplicateContactError
+	if errors.As(err, &dup) {
+		failContact(c, err)
+		return
+	}
 	if errors.Is(err, service.ErrLeadOwnerNotMember) || errors.Is(err, service.ErrInvalidAnnualRevenue) ||
 		errors.Is(err, service.ErrInvalidBudgetEstimate) || errors.Is(err, service.ErrInvalidTargetDate) ||
-		errors.Is(err, service.ErrInvalidDealInput) || errors.Is(err, service.ErrInvalidCompanyInput) {
+		errors.Is(err, service.ErrInvalidDealInput) || errors.Is(err, service.ErrInvalidCompanyInput) ||
+		errors.Is(err, service.ErrInvalidContactInput) {
 		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
 		return
 	}

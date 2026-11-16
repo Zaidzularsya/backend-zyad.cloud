@@ -126,7 +126,8 @@ func TestTaskSchema_DownMigrations(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(e.ctx)
-	for _, f := range []string{"000177_mikrotik_control_permissions", "000176_mikrotik_control_center", "000175_mikrotik_secret_suggestions", "000174_mikrotik_isolation_permissions_notification", "000173_create_mikrotik_isolation_tasks"} {
+	// 000183 depends on mikrotik_ppp_secrets_org_id_unique (000173), so it is rolled back first.
+	for _, f := range []string{"000183_mikrotik_secret_onboardings", "000177_mikrotik_control_permissions", "000176_mikrotik_control_center", "000175_mikrotik_secret_suggestions", "000174_mikrotik_isolation_permissions_notification", "000173_create_mikrotik_isolation_tasks"} {
 		sql, err := os.ReadFile("../../../../migrations/" + f + ".down.sql")
 		if err != nil {
 			t.Fatal(err)

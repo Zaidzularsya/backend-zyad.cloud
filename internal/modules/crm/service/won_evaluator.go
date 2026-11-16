@@ -95,6 +95,14 @@ func (w *WonEvaluator) checklistFor(ctx context.Context, scope coretenant.Scope,
 		case !recurring && prepaid:
 			c.Kind = WonKindPrepaidOneTime
 			c.Met, c.Label = paidLabel()
+		case recurring && prepaid && so.SkipInitialInvoice:
+			// Onboarding of an existing customer (Gelombang 2): no initial invoice by design,
+			// the contract carries the billing from now on, so the contract is the condition.
+			c.Kind = WonKindPrepaidRecurring
+			c.Met, c.Label = so.ContractID != "", "Menunggu kontrak terbentuk"
+			if c.Met {
+				c.Label = w.contractLabel(ctx, scope, so.ContractID) + " (tanpa invoice awal)"
+			}
 		case recurring && prepaid:
 			c.Kind = WonKindPrepaidRecurring
 			c.Met, c.Label = paidLabel()
@@ -102,12 +110,7 @@ func (w *WonEvaluator) checklistFor(ctx context.Context, scope coretenant.Scope,
 			c.Kind = WonKindPostpaidRecurring
 			if so.ContractID != "" {
 				c.Met = true
-				c.Label = "Kontrak terbentuk"
-				if w.contracts != nil {
-					if num, err := w.contracts.ContractNumber(ctx, scope, so.ContractID); err == nil && num != "" {
-						c.Label = fmt.Sprintf("Kontrak %s terbentuk", num)
-					}
-				}
+				c.Label = w.contractLabel(ctx, scope, so.ContractID)
 			} else {
 				c.Label = "Menunggu kontrak terbentuk"
 			}
@@ -128,6 +131,16 @@ func (w *WonEvaluator) checklistFor(ctx context.Context, scope coretenant.Scope,
 		}
 	}
 	return cl
+}
+
+// contractLabel: "Kontrak CTR-… terbentuk", or without the number when it cannot be read.
+func (w *WonEvaluator) contractLabel(ctx context.Context, scope coretenant.Scope, contractID string) string {
+	if w.contracts != nil {
+		if num, err := w.contracts.ContractNumber(ctx, scope, contractID); err == nil && num != "" {
+			return fmt.Sprintf("Kontrak %s terbentuk", num)
+		}
+	}
+	return "Kontrak terbentuk"
 }
 
 // Evaluate: deal open + ada SO dengan AllMet → CloseWon (tanpa aktor) + aktivitas. Deal won/lost tidak disentuh.

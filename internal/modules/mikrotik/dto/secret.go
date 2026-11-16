@@ -17,8 +17,22 @@ type SecretListQuery struct {
 	Suggestion string `form:"suggestion" binding:"omitempty,oneof=suggested needs_decision"`
 	// NeedsOriginalProfile nil means both.
 	NeedsOriginalProfile *bool `form:"needs_original_profile"`
+	// MappingStatus is one former tab (all, suggested, needs_decision,
+	// needs_profile, paired); applied on top of the filters above.
+	MappingStatus string `form:"mapping_status" binding:"omitempty,oneof=all suggested needs_decision needs_profile paired"`
 	Page                 int   `form:"page"`
 	PerPage              int   `form:"per_page"`
+}
+
+// SecretSummaryQuery narrows the summary to one router ("" = all).
+type SecretSummaryQuery struct {
+	RouterID string `form:"router_id" binding:"omitempty,uuid"`
+}
+
+// SecretSummaryResponse counts present secrets by the router's disabled flag.
+type SecretSummaryResponse struct {
+	Active   int `json:"active"`
+	Inactive int `json:"inactive"`
 }
 
 type PairSecretRequest struct {

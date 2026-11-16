@@ -275,6 +275,7 @@ func (s *selfServeService) startChain(ctx context.Context, c *chain, company dom
 	}
 	result, err := s.deps.Leads.Convert(ctx, c.platform, lead.ID, ConvertLeadParams{
 		Company: companyInput, Contact: contactInput, OwnerUserID: c.cfg.DealOwnerUserID, ConvertedBy: c.cfg.BotUserID,
+		AllowDuplicateContact: true,
 		Deal: &ConvertDealInput{
 			PipelineID: c.cfg.PipelineID, StageID: c.stage0, Title: dealTitle(workspace, *c.product),
 			Value: c.product.BasePrice, ExpectedCloseDate: businesstime.DayOf(s.now()).Format("2006-01-02"),

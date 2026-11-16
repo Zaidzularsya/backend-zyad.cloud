@@ -56,3 +56,27 @@ func TestSettingsListSenders(t *testing.T) {
 		t.Fatalf("members = %+v err=%v", members, err)
 	}
 }
+
+func TestSettingsDefaultBillingDay(t *testing.T) {
+	svc, store := newSettingsService()
+	base := domain.Settings{InvoiceLeadDays: 7, PaymentTermsDays: 7, DefaultChannels: []string{"email"}}
+	for _, bad := range []int{0, 32, -1} {
+		in := base
+		in.DefaultBillingDay = &bad
+		if _, err := svc.Update(ctx, scope, in, "u-1"); !errors.Is(err, ErrInvalidSettings) {
+			t.Errorf("default_billing_day=%d: err = %v, want ErrInvalidSettings", bad, err)
+		}
+	}
+	ok := 31
+	in := base
+	in.DefaultBillingDay = &ok
+	got, err := svc.Update(ctx, scope, in, "u-1")
+	if err != nil || got.DefaultBillingDay == nil || *got.DefaultBillingDay != 31 {
+		t.Fatalf("got = %+v err=%v", got, err)
+	}
+	// nil clears it.
+	got, err = svc.Update(ctx, scope, base, "u-1")
+	if err != nil || got.DefaultBillingDay != nil || store.s.DefaultBillingDay != nil {
+		t.Fatalf("clear: got = %+v err=%v", got, err)
+	}
+}

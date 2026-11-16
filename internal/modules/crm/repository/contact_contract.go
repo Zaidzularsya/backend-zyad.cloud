@@ -65,4 +65,9 @@ type ContactRepository interface {
 	// FindActiveByPhone returns the most recently updated non-deleted contact
 	// whose phone_normalized matches (WhatsApp matching), or pgx.ErrNoRows.
 	FindActiveByPhone(ctx context.Context, scope coretenant.Scope, phoneNormalized string) (domain.Contact, error)
+	// FindDuplicate returns the oldest live contact (other than excludeID)
+	// whose lower(trim(email)) equals email or whose phone_normalized equals
+	// phoneNormalized. Empty arguments are not compared. Callers pass values
+	// already normalized; found=false when there is no match.
+	FindDuplicate(ctx context.Context, scope coretenant.Scope, email, phoneNormalized, excludeID string) (domain.Contact, bool, error)
 }

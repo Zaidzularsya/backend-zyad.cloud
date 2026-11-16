@@ -275,3 +275,23 @@ func TestHasReadyRouter(t *testing.T) {
 		t.Fatal("deleted router must not count")
 	}
 }
+
+func TestSaveSetupSnapshotRoundTripAndTenantScoped(t *testing.T) {
+	e := setupRouter(t)
+	a := e.create(t, e.tenants.A.Scope, "Core Router")
+	got, _ := e.repo.FindByID(e.ctx, e.tenants.A.Scope, a.ID)
+	if got.Setup != nil {
+		t.Fatalf("fresh router must have no snapshot: %+v", got.Setup)
+	}
+	snap := domain.SetupSnapshot{ProfileName: "zyad-isolir", PoolCIDR: "10.99.0.0/24", RateLimit: "512k/512k"}
+	if err := e.repo.SaveSetupSnapshot(e.ctx, e.tenants.A.Scope, a.ID, snap); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, _ = e.repo.FindByID(e.ctx, e.tenants.A.Scope, a.ID)
+	if got.Setup == nil || *got.Setup != snap {
+		t.Fatalf("snapshot = %+v, want %+v", got.Setup, snap)
+	}
+	if err := e.repo.SaveSetupSnapshot(e.ctx, e.tenants.B.Scope, a.ID, snap); err == nil {
+		t.Fatal("tenant B must not write tenant A's router")
+	}
+}

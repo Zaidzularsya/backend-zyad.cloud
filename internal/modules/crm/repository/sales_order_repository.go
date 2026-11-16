@@ -29,7 +29,7 @@ const salesOrderSelect = `
 		so.subtotal::text, so.tax_total::text, so.grand_total::text, so.first_invoice_total::text, so.recurring_totals,
 		COALESCE(so.receivable_account_id::text, ''), COALESCE(so.initial_invoice_id::text, ''), COALESCE(so.contract_id::text, ''),
 		so.confirmed_at, so.cancelled_at, COALESCE(so.confirmed_by::text, ''), COALESCE(so.created_by::text, ''),
-		so.created_at, so.updated_at
+		so.created_at, so.updated_at, so.skip_initial_invoice
 	FROM crm_sales_orders so
 	LEFT JOIN crm_quotations q ON q.organization_id = so.organization_id AND q.id = so.quotation_id`
 
@@ -43,7 +43,7 @@ func scanSalesOrder(row pgx.Row) (domain.SalesOrder, error) {
 		&so.Channels, &so.PICUserID, &so.Currency,
 		&so.Subtotal, &so.TaxTotal, &so.GrandTotal, &so.FirstInvoiceTotal, &recurring,
 		&so.ReceivableAccountID, &so.InitialInvoiceID, &so.ContractID,
-		&so.ConfirmedAt, &so.CancelledAt, &so.ConfirmedBy, &so.CreatedBy, &so.CreatedAt, &so.UpdatedAt)
+		&so.ConfirmedAt, &so.CancelledAt, &so.ConfirmedBy, &so.CreatedBy, &so.CreatedAt, &so.UpdatedAt, &so.SkipInitialInvoice)
 	if err != nil {
 		return domain.SalesOrder{}, err
 	}
@@ -333,10 +333,11 @@ func (r *salesOrderRepository) UpdateDraft(ctx context.Context, scope coretenant
 	return r.mutate(ctx, scope, id, func(tx pgx.Tx) error {
 		return conditionalUpdate(ctx, tx, scope.OrganizationID(), id, ErrSalesOrderNotDraft, `
 			UPDATE crm_sales_orders SET start_date = $3, bill_to_name = $4, bill_to_company = $5, bill_to_email = $6,
-				bill_to_phone = $7, bill_to_address = $8, channels = $9, pic_user_id = $10, updated_at = now()
+				bill_to_phone = $7, bill_to_address = $8, channels = $9, pic_user_id = $10,
+				skip_initial_invoice = COALESCE($11, skip_initial_invoice), updated_at = now()
 			WHERE id = $1 AND organization_id = $2 AND status = 'draft'`,
 			f.StartDate, f.BillToName, f.BillToCompany, f.BillToEmail, f.BillToPhone, f.BillToAddress,
-			channelsOrEmpty(f.Channels), nullableString(f.PICUserID))
+			channelsOrEmpty(f.Channels), nullableString(f.PICUserID), f.SkipInitialInvoice)
 	})
 }
 

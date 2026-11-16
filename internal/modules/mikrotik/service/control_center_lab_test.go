@@ -152,6 +152,7 @@ func TestLabControlCenter(t *testing.T) {
 		Control: crepo, Secrets: srepo, Tasks: trepo,
 		Accounts: fakeAccounts{known: map[string]AccountRef{account: {ID: account, Name: "Lab Pilot"}}},
 		Audit:    audit, Evaluator: ev, Now: clock,
+		Profile: &fakeContact{contact: TenantContact{Phone: "628123456789"}},
 	}, ModeOn)
 	rec := NewReconciler(src, labSecretRepo{srepo}, ev, clock)
 

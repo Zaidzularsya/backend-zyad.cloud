@@ -2,12 +2,15 @@ package app
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 
 	coretenant "zyad.cloud/internal/core/tenant"
+	mailboxdomain "zyad.cloud/internal/modules/mailbox/domain"
 	"zyad.cloud/internal/modules/mikrotik/service"
+	wadomain "zyad.cloud/internal/modules/whatsapp/domain"
 )
 
 // publicLookupMax mirrors the repository cap: enough rows to tell 0, 1 and ambiguous.
@@ -63,6 +66,19 @@ type mikrotikPublicAdapter struct {
 	links    payLinker
 	issuer   mikrotikNotifIssuer
 	features mikrotikPublicFeatures
+	// sessions and mailboxes supply the CS contact fallback (nil = no fallback).
+	sessions  mikrotikContactSessions
+	mailboxes mikrotikContactMailboxes
+}
+
+// mikrotikContactSessions lists the tenant's WhatsApp sessions.
+type mikrotikContactSessions interface {
+	List(ctx context.Context, scope coretenant.Scope) ([]wadomain.Session, error)
+}
+
+// mikrotikContactMailboxes lists one user's connected mailboxes.
+type mikrotikContactMailboxes interface {
+	ListByUser(ctx context.Context, scope coretenant.Scope, userID string) ([]mailboxdomain.Mailbox, error)
 }
 
 var (
@@ -73,8 +89,10 @@ var (
 )
 
 func newMikrotikPublicAdapter(names mikrotikPublicNames, phones mikrotikPublicPhones, accounts mikrotikNotifAccounts,
-	settings mikrotikNotifSettings, links payLinker, issuer mikrotikNotifIssuer, features mikrotikPublicFeatures) mikrotikPublicAdapter {
-	return mikrotikPublicAdapter{names: names, phones: phones, accounts: accounts, settings: settings, links: links, issuer: issuer, features: features}
+	settings mikrotikNotifSettings, links payLinker, issuer mikrotikNotifIssuer, features mikrotikPublicFeatures,
+	sessions mikrotikContactSessions, mailboxes mikrotikContactMailboxes) mikrotikPublicAdapter {
+	return mikrotikPublicAdapter{names: names, phones: phones, accounts: accounts, settings: settings, links: links,
+		issuer: issuer, features: features, sessions: sessions, mailboxes: mailboxes}
 }
 
 // AccountsByUsername: one DISTINCT scoped id query (<= 5 rows), then at most 5 account reads.
@@ -127,12 +145,76 @@ func (a mikrotikPublicAdapter) PayLink(ctx context.Context, scope coretenant.Sco
 	return link, nil
 }
 
+// Profile is the tenant's customer-service contact (activation gate and the public isolir page).
+// The branding contact wins; an empty phone or email falls back to the channels that already
+// send the invoices: the default working WhatsApp session and the default sender's active
+// mailbox (prod finding T13-E1: no current UI fills the branding contact). The fallback is best
+// effort: a lookup error leaves that field empty.
 func (a mikrotikPublicAdapter) Profile(ctx context.Context, scope coretenant.Scope) (service.TenantContact, error) {
 	party, err := a.issuer.OrganizationProfile(ctx, scope)
 	if err != nil {
 		return service.TenantContact{}, err
 	}
-	return service.TenantContact{Name: party.Name, Phone: party.Phone, Email: party.Email}, nil
+	contact := service.TenantContact{Name: party.Name, Phone: party.Phone, Email: party.Email}
+	if strings.TrimSpace(contact.Phone) == "" {
+		contact.Phone = a.sessionPhone(ctx, scope)
+	}
+	if strings.TrimSpace(contact.Email) == "" {
+		contact.Email = a.senderEmail(ctx, scope)
+	}
+	return contact, nil
+}
+
+// sessionPhone: the default working session's number, else the first working one.
+func (a mikrotikPublicAdapter) sessionPhone(ctx context.Context, scope coretenant.Scope) string {
+	if a.sessions == nil {
+		return ""
+	}
+	sessions, err := a.sessions.List(ctx, scope)
+	if err != nil {
+		slog.WarnContext(ctx, "mikrotik: list whatsapp sessions for cs contact failed", "error", err)
+		return ""
+	}
+	phone := ""
+	for _, s := range sessions {
+		if s.Status != wadomain.SessionStatusWorking || strings.TrimSpace(s.Phone) == "" {
+			continue
+		}
+		if s.IsDefault {
+			return s.Phone
+		}
+		if phone == "" {
+			phone = s.Phone
+		}
+	}
+	return phone
+}
+
+// senderEmail: the first active mailbox of the receivable default sender.
+func (a mikrotikPublicAdapter) senderEmail(ctx context.Context, scope coretenant.Scope) string {
+	if a.mailboxes == nil || a.settings == nil {
+		return ""
+	}
+	settings, err := a.settings.Get(ctx, scope)
+	if err != nil {
+		slog.WarnContext(ctx, "mikrotik: read receivable settings for cs contact failed", "error", err)
+		return ""
+	}
+	sender := strings.TrimSpace(settings.DefaultSenderUserID)
+	if sender == "" {
+		return ""
+	}
+	list, err := a.mailboxes.ListByUser(ctx, scope, sender)
+	if err != nil {
+		slog.WarnContext(ctx, "mikrotik: list mailboxes for cs contact failed", "error", err)
+		return ""
+	}
+	for _, mb := range list {
+		if mb.Status == mailboxdomain.MailboxStatusActive && strings.TrimSpace(mb.EmailAddress) != "" {
+			return mb.EmailAddress
+		}
+	}
+	return ""
 }
 
 // Enabled reports the plain entitlement denial as (false, nil); other errors surface.

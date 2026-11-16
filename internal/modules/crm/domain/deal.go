@@ -37,6 +37,9 @@ type Deal struct {
 	// Description / DecisionMaker membawa form kebutuhan lead saat convert.
 	Description        string
 	DecisionMaker      string
+	// Source marks where the deal came from (e.g. DealSourcePPPoEImport);
+	// empty for manual and lead-convert deals.
+	Source             string
 	OwnerUserID        string
 	DiscountPercent    *string
 	DiscountApprovedBy string
@@ -47,6 +50,9 @@ type Deal struct {
 	UpdatedAt          time.Time
 	DeletedAt          *time.Time
 }
+
+// DealSourcePPPoEImport marks deals created by the mikrotik secret onboarding.
+const DealSourcePPPoEImport = "Impor PPPoE"
 
 // DealSourceLead adalah lead asal deal (lewat crm_leads.converted_deal_id).
 type DealSourceLead struct {

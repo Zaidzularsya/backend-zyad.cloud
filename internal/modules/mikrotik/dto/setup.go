@@ -44,3 +44,10 @@ func SetupPlanFromDomain(p domain.SetupPlan) SetupPlanResponse {
 	}
 	return out
 }
+
+// AllowlistHealthResponse is deliberately counts-only: operators never see the
+// allowlist hosts.
+type AllowlistHealthResponse struct {
+	Total      int `json:"total"`
+	Unresolved int `json:"unresolved"`
+}

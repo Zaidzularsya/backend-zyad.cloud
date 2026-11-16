@@ -27,12 +27,18 @@ const (
 	linkGraceDays      = 90
 )
 
-// LinkExpiry: link publik berlaku sampai jatuh tempo + 90 hari pukul 23:59:59 WIB.
+// LinkExpiry: link publik berlaku sampai jatuh tempo + 90 hari pukul 23:59:59 WIB. A due date
+// before the issue date (only back-dated arrears) counts from the issue date, otherwise an old
+// arrears invoice would get a pay link that is already expired. Normal invoices are unaffected:
+// their due date is clamped to >= issue date.
 func LinkExpiry(inv domain.Invoice, now time.Time) time.Time {
 	base := businesstime.DayOf(now)
 	switch {
 	case inv.DueDate != nil:
 		base = *inv.DueDate
+		if inv.IssueDate != nil && inv.IssueDate.After(base) {
+			base = *inv.IssueDate
+		}
 	case inv.IssueDate != nil:
 		base = *inv.IssueDate
 	}
@@ -51,11 +57,17 @@ func dueDate(issue time.Time, terms int, periodStart *time.Time) time.Time {
 }
 
 func (s *invoiceService) Issue(ctx context.Context, scope coretenant.Scope, id, actorUserID string) (domain.Invoice, error) {
-	return s.issue(ctx, scope, id, actorUserID, nil)
+	return s.issue(ctx, scope, id, actorUserID, nil, issueOptions{})
+}
+
+// issueOptions: only the arrears path sets them; the zero value is the normal issue behaviour.
+type issueOptions struct {
+	ExactDue     bool // dueOverride is kept as is, even before the issue date (no clamp)
+	SkipAutoSend bool // no per-invoice automatic send (arrears send one summary instead)
 }
 
 // issue menerbitkan draft; dueOverride (opsional) menggantikan termin pembayaran settings.
-func (s *invoiceService) issue(ctx context.Context, scope coretenant.Scope, id, actorUserID string, dueOverride *time.Time) (domain.Invoice, error) {
+func (s *invoiceService) issue(ctx context.Context, scope coretenant.Scope, id, actorUserID string, dueOverride *time.Time, opts issueOptions) (domain.Invoice, error) {
 	inv, err := s.Get(ctx, scope, id)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -81,7 +93,7 @@ func (s *invoiceService) issue(ctx context.Context, scope coretenant.Scope, id, 
 	due := dueDate(today, settings.PaymentTermsDays, inv.PeriodStart)
 	if dueOverride != nil {
 		due = businesstime.DayOf(*dueOverride)
-		if due.Before(today) {
+		if due.Before(today) && !opts.ExactDue {
 			due = today
 		}
 	}
@@ -107,7 +119,7 @@ func (s *invoiceService) issue(ctx context.Context, scope coretenant.Scope, id, 
 			slog.WarnContext(ctx, "receivable: invoice link failed", "invoice_id", id, "error", err)
 		}
 	}
-	if s.sender != nil {
+	if s.sender != nil && !opts.SkipAutoSend {
 		s.sender.AutoSend(ctx, scope, final, actorUserID)
 	}
 	return final, nil
@@ -150,13 +162,46 @@ func (s *invoiceService) CreateAndIssue(ctx context.Context, scope coretenant.Sc
 	if err != nil {
 		return domain.Invoice{}, err
 	}
-	return s.issue(ctx, scope, draft.ID, actorUserID, in.DueDate)
+	return s.issue(ctx, scope, draft.ID, actorUserID, in.DueDate, issueOptions{})
+}
+
+// historicalInvoice is one back-dated arrears invoice: the normal input plus the arrears fields.
+type historicalInvoice struct {
+	Input       InvoiceInput // DueDate is required and kept exactly
+	RecordingID string
+	IsolirFlag  bool
+}
+
+// createHistorical creates and issues one arrears invoice: the due date is kept even when it
+// is in the past, nothing is sent automatically and the invoice quota is not enforced (it
+// records an existing debt, see ArrearsService). Not idempotent by itself; the caller owns
+// idempotency through the recording. On an issue failure the committed draft is returned with
+// the error (ID set) so the caller can void it.
+func (s *invoiceService) createHistorical(ctx context.Context, scope coretenant.Scope, h historicalInvoice, actorUserID string) (domain.Invoice, error) {
+	if h.Input.DueDate == nil || h.RecordingID == "" {
+		return domain.Invoice{}, invalidInvoice("Tunggakan butuh jatuh tempo dan pencatatan.")
+	}
+	p, err := s.buildParams(ctx, scope, h.Input, actorUserID)
+	if err != nil {
+		return domain.Invoice{}, err
+	}
+	p.ArrearsRecordingID, p.IsolirFlag = h.RecordingID, h.IsolirFlag
+	draft, err := s.invoices.Create(ctx, scope, p)
+	if err != nil {
+		return domain.Invoice{}, err
+	}
+	inv, err := s.issue(ctx, scope, draft.ID, actorUserID, h.Input.DueDate, issueOptions{ExactDue: true, SkipAutoSend: true})
+	if err != nil {
+		// The draft is committed: hand it back so the caller can void it (compensation).
+		return draft, err
+	}
+	return inv, nil
 }
 
 // issueExisting: invoice yang sudah terbit dikembalikan apa adanya; draft sisa proses yang terputus dilanjutkan.
 func (s *invoiceService) issueExisting(ctx context.Context, scope coretenant.Scope, inv domain.Invoice, actorUserID string, dueOverride *time.Time) (domain.Invoice, error) {
 	if inv.Status == domain.InvoiceDraft {
-		return s.issue(ctx, scope, inv.ID, actorUserID, dueOverride)
+		return s.issue(ctx, scope, inv.ID, actorUserID, dueOverride, issueOptions{})
 	}
 	return inv, nil
 }

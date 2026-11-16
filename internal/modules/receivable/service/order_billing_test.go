@@ -191,7 +191,8 @@ func newOrderHarness(t *testing.T) *orderHarness {
 	h := &orderHarness{store: ih.store, contracts: newFakeContracts(), invoices: &failingInvoices{InvoiceService: ih.svc}, listener: ih.listener, counter: ih.counter}
 	registry := NewRegistry()
 	registry.Add(ih.listener)
-	ob := NewOrderBilling(fakeAccounts{}, h.invoices, h.contracts, ih.counter, registry).(*orderBilling)
+	ob := NewOrderBilling(fakeAccounts{}, h.invoices, h.contracts, ih.counter, registry,
+		&fakeSettings{domain.Settings{InvoiceLeadDays: 7, PaymentTermsDays: 7, DefaultChannels: []string{"email"}}}).(*orderBilling)
 	ob.now = func() time.Time { return nowWIB }
 	h.billing = ob
 	return h
@@ -322,5 +323,94 @@ func contractParamsForTest() repository.CreateContractParams {
 		Number: "CTR-2026-0001", AccountID: "a1", SourceType: "sales_order", SourceID: "so9", StartDate: date("2026-10-05"),
 		Items: []repository.ContractItemParams{{Description: "Internet", Frequency: pricing.Monthly, PaymentTiming: pricing.Prepaid,
 			NextPeriodStart: date("2026-11-05"), NextPeriodEnd: date("2026-12-04")}},
+	}
+}
+
+// Onboarding requests: only the recurring line, start = running cycle start
+// (nowWIB = 2026-10-05; billing day 25 → cycle start 2026-09-25).
+func onboardingRequest(soID string, attrs pricing.Attributes) OrderBillingRequest {
+	return OrderBillingRequest{
+		SourceType: domain.SourceSalesOrder, SourceID: soID, StartDate: date("2026-09-25"), ActorUserID: "u1",
+		SkipInitialInvoice: true,
+		Account:            AccountInput{Name: "Budi", SourceType: "crm_contact", SourceID: "c1"},
+		Lines:              []OrderLine{{SourceLineID: "l1", Description: "Internet", Quantity: "1", UnitPrice: "300000", Attrs: attrs}},
+	}
+}
+
+func TestBillOrder_SkipInitialInvoice_PrepaidStartsAtIndex1(t *testing.T) {
+	h := newOrderHarness(t)
+	res, err := h.billing.BillOrder(ctx, scope, onboardingRequest("so-on1", monthlyPrepaid()))
+	if err != nil || res.ContractID == "" || res.InitialInvoiceID != "" || len(h.store.invoices) != 0 {
+		t.Fatalf("res=%+v err=%v invoices=%d", res, err, len(h.store.invoices))
+	}
+	c := h.contracts.byID[res.ContractID]
+	ci := c.Items[0]
+	if !c.StartDate.Equal(date("2026-09-25")) || ci.PeriodIndex != 1 ||
+		ci.NextPeriodStart.Format("2006-01-02") != "2026-10-25" || ci.NextPeriodEnd.Format("2006-01-02") != "2026-11-24" {
+		t.Fatalf("contract=%v item=%+v", c.StartDate, ci)
+	}
+}
+
+func TestBillOrder_SkipInitialInvoice_PrepaidIssueMomentAhead(t *testing.T) {
+	h := newOrderHarness(t)
+	req := onboardingRequest("so-on1b", monthlyPrepaid())
+	req.StartDate = date("2026-10-20") // 20 Oct − 7 lead days = 13 Oct, still ahead of 5 Oct
+	res, err := h.billing.BillOrder(ctx, scope, req)
+	if err != nil || res.InitialInvoiceID != "" {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if ci := h.contracts.byID[res.ContractID].Items[0]; ci.PeriodIndex != 0 || ci.NextPeriodStart.Format("2006-01-02") != "2026-10-20" {
+		t.Fatalf("item=%+v", ci)
+	}
+}
+
+func TestBillOrder_SkipInitialInvoice_PostpaidKeepsIndex0WhenPeriodNotEnded(t *testing.T) {
+	h := newOrderHarness(t)
+	attrs := pricing.Attributes{ChargeType: pricing.Recurring, Frequency: pricing.Monthly, PaymentTiming: pricing.Postpaid}
+	res, err := h.billing.BillOrder(ctx, scope, onboardingRequest("so-on2", attrs))
+	if err != nil || res.InitialInvoiceID != "" || len(h.store.invoices) != 0 {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	ci := h.contracts.byID[res.ContractID].Items[0]
+	if ci.PeriodIndex != 0 || ci.NextPeriodStart.Format("2006-01-02") != "2026-09-25" || ci.NextPeriodEnd.Format("2006-01-02") != "2026-10-24" {
+		t.Fatalf("item=%+v", ci)
+	}
+}
+
+func TestBillOrder_WithInitialInvoice_Unchanged(t *testing.T) {
+	h := newOrderHarness(t)
+	req := onboardingRequest("so-on3", monthlyPrepaid())
+	req.SkipInitialInvoice = false
+	res, err := h.billing.BillOrder(ctx, scope, req)
+	if err != nil || res.InitialInvoiceID == "" || len(h.store.invoices) != 1 {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if ci := h.contracts.byID[res.ContractID].Items[0]; ci.PeriodIndex != 1 || ci.NextPeriodStart.Format("2006-01-02") != "2026-10-25" {
+		t.Fatalf("item=%+v", ci)
+	}
+}
+
+func TestBillOrder_SkipInitialInvoice_RetryIsIdempotent(t *testing.T) {
+	h := newOrderHarness(t)
+	req := onboardingRequest("so-on4", monthlyPrepaid())
+	first, err := h.billing.BillOrder(ctx, scope, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := h.billing.BillOrder(ctx, scope, req)
+	if err != nil || again != first || h.contracts.created != 1 || len(h.store.invoices) != 0 {
+		t.Fatalf("again=%+v first=%+v contracts=%d invoices=%d", again, first, h.contracts.created, len(h.store.invoices))
+	}
+}
+
+func TestBillOrder_SkipInitialInvoice_RejectsOneTimePrepaidLines(t *testing.T) {
+	h := newOrderHarness(t)
+	req := ispRequest("so-on5", date("2026-09-25")) // has a one-time "Instalasi" line
+	req.SkipInitialInvoice = true
+	if _, err := h.billing.BillOrder(ctx, scope, req); !errors.Is(err, ErrInvalidInvoice) {
+		t.Fatalf("err = %v, want ErrInvalidInvoice (one-time charge would never be billed)", err)
+	}
+	if h.contracts.created != 0 {
+		t.Fatal("nothing may be created")
 	}
 }

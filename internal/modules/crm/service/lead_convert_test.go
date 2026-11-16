@@ -186,3 +186,81 @@ func TestConvertExistingContact(t *testing.T) {
 		t.Fatalf("new mode params = %+v", repo.lastConvert)
 	}
 }
+
+func dedupeConvertFixture(existing ...domain.Contact) (*leadService, *fakeConvertLeadRepo) {
+	repo := &fakeConvertLeadRepo{fakeLeadRepo: fakeLeadRepo{leads: map[string]domain.Lead{
+		"l1": {ID: "l1", ContactName: "Budi", Email: " BUDI@b.com", Phone: "+62 812-3456-7890", Status: domain.LeadStatusQualified},
+		"l2": {ID: "l2", ContactName: "Sari", Email: "sari@b.com", Status: domain.LeadStatusQualified},
+	}}}
+	contacts := &dedupeContactRepo{contacts: existing}
+	svc := NewLeadService(repo, contacts, nil).(*leadService)
+	return svc, repo
+}
+
+func TestMatchContacts_ByEmailAndPhone(t *testing.T) {
+	svc, _ := dedupeConvertFixture(
+		domain.Contact{ID: "by-email", Email: "budi@b.com"},
+		domain.Contact{ID: "by-phone", Phone: "081234567890"},
+		domain.Contact{ID: "other", Email: "x@b.com"},
+	)
+	got, err := svc.MatchContacts(context.Background(), testScope(t), "l1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := []string{}
+	for _, c := range got {
+		ids = append(ids, c.ID)
+	}
+	if strings.Join(ids, ",") != "by-email,by-phone" {
+		t.Fatalf("matches = %v", ids)
+	}
+
+	// One contact matching both email and phone is listed once.
+	svc, _ = dedupeConvertFixture(domain.Contact{ID: "both", Email: "budi@b.com", Phone: "0812 3456 7890"})
+	got, _ = svc.MatchContacts(context.Background(), testScope(t), "l1")
+	if len(got) != 1 || got[0].ID != "both" {
+		t.Fatalf("matches = %+v", got)
+	}
+
+	if _, err := svc.MatchContacts(context.Background(), testScope(t), "missing"); err == nil {
+		t.Fatal("unknown lead must fail")
+	}
+}
+
+func TestConvert_NewModeDuplicateIsRejected(t *testing.T) {
+	svc, repo := dedupeConvertFixture(domain.Contact{ID: "old", Email: "budi@b.com"})
+
+	_, err := svc.Convert(context.Background(), testScope(t), "l1", ConvertLeadParams{})
+	var dup *DuplicateContactError
+	if !errors.As(err, &dup) || dup.Existing.ID != "old" {
+		t.Fatalf("Convert(new) error = %v, want DuplicateContactError", err)
+	}
+	if repo.lastConvert.Contact.FirstName != "" {
+		t.Fatal("convert must not run")
+	}
+
+	// mode existing with the matching contact still works.
+	if _, err := svc.Convert(context.Background(), testScope(t), "l1", ConvertLeadParams{
+		Contact: &ConvertContactInput{Mode: "existing", ContactID: "old"},
+	}); err != nil {
+		t.Fatalf("Convert(existing) error = %v", err)
+	}
+	if repo.lastConvert.ExistingContactID != "old" {
+		t.Fatalf("ExistingContactID = %q", repo.lastConvert.ExistingContactID)
+	}
+
+	// A lead without a match converts as before.
+	if _, err := svc.Convert(context.Background(), testScope(t), "l2", ConvertLeadParams{}); err != nil {
+		t.Fatalf("Convert(no match) error = %v", err)
+	}
+}
+
+func TestConvert_AllowDuplicateContactKeepsSelfServeBehaviour(t *testing.T) {
+	svc, repo := dedupeConvertFixture(domain.Contact{ID: "old", Email: "budi@b.com"})
+	if _, err := svc.Convert(context.Background(), testScope(t), "l1", ConvertLeadParams{AllowDuplicateContact: true}); err != nil {
+		t.Fatalf("Convert(allow duplicate) error = %v", err)
+	}
+	if repo.lastConvert.Contact.FirstName != "Budi" {
+		t.Fatal("contact should be created")
+	}
+}

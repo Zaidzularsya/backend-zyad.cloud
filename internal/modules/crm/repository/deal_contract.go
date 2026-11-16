@@ -15,6 +15,7 @@ type DealListFilter struct {
 	Status         domain.DealStatus
 	OwnerUserID    string
 	ContactID      string
+	Source         string
 	IncludeDeleted bool
 	Limit          int
 	Offset         int
@@ -35,6 +36,8 @@ type CreateDealParams struct {
 	CreatedBy         string
 	Description       string
 	DecisionMaker     string
+	// Source is stored as-is (max 40 chars); empty for manual deals.
+	Source string
 }
 
 type UpdateDealParams struct {

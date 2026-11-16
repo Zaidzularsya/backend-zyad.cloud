@@ -218,9 +218,10 @@ gambaran lintas-modul.
    `billing_plan_entitlements`/`billing_subscriptions`/`billing_subscription_events` **sudah tidak ada**,
    digantikan `product_*`/`customer_subscriptions`/`subscription_events`. Lihat
    [product-subscription-billing-concept.md](product-subscription-billing-concept.md).
-4. **RLS hanya melindungi tabel `landing_*`.** Tabel `organization_*`, `product_*`, `customer_subscriptions`,
-   `billing_*`, dan tabel user/auth mengandalkan filter `organization_id` manual di level repository —
-   kalau menulis query baru di modul selain landing, pastikan filter tenant tidak lupa ditambahkan manual.
+4. **RLS melindungi tabel tenant `landing_*`, `crm_*`, `receivable_*`, `mikrotik_*`, `catalog_*`, `mail_*`,
+   `wa_*` dan `asset_objects`** (daftar di [database-context.md](database-context.md) bagian 3). Tabel
+   `organization_*`, `product_*`, `customer_subscriptions`, `billing_*`, dan tabel user/auth tidak ber-RLS dan
+   mengandalkan filter `organization_id` manual di level repository; filter manual tetap wajib di semua modul.
 5. **Seed harus berurutan**: `super-admin` dulu, baru `platform-organization` (yang kedua mencari user
    super-admin yang sudah ada via `findPlatformOwner`). Lihat [database-context.md](database-context.md).
 6. **README.md lama (sebelum koreksi) menyebut fitur yang tidak ada** (CRM, POS, Membership, Casbin,

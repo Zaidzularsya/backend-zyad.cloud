@@ -159,6 +159,10 @@ var (
 	ErrModeInvalid = errors.New("invalid isolation mode change")
 	// ErrPilotRequired: active needs at least one successful pilot test (pilot_verified_at).
 	ErrPilotRequired = errors.New("complete at least one successful pilot test before activating automatic isolation")
+	// ErrTenantContactRequired: pilot/active need a CS contact (phone or email): the branding
+	// contact, else the connected WhatsApp session / sender mailbox; otherwise the /isolir help block is empty and
+	// isolated customers have nobody to ask.
+	ErrTenantContactRequired = errors.New("connect a WhatsApp session or an email account (they become the customer-service contact on the isolir page) before enabling pilot or active isolation")
 	// ErrPilotModeRequired: a pilot test can only run while the tenant mode is pilot.
 	ErrPilotModeRequired = errors.New("a pilot test can only run in pilot mode")
 	// ErrEngineOff: the isolation engine is not switched on for this deployment.
@@ -193,3 +197,16 @@ func (e *PilotTestNotRunnableError) Error() string {
 }
 
 func (e *PilotTestNotRunnableError) Is(target error) bool { return target == ErrPilotTestNotRunnable }
+
+// Gelombang 2: onboarding pelanggan dari secret PPPoE.
+var (
+	// ErrContactNotFound: the CRM contact does not exist in this organization.
+	ErrContactNotFound = errors.New("crm contact not found")
+	// ErrOnboardingInProgress: another onboarding of the same secret is running.
+	ErrOnboardingInProgress = errors.New("another onboarding of this ppp secret is running; try again when it finishes")
+	// ErrOnboardingForbidden: the operator lacks a permission one of the
+	// onboarding steps needs; wrapped with the missing permission names.
+	ErrOnboardingForbidden = errors.New("missing permissions to onboard this customer")
+	// ErrSecretHasContract: the secret's customer already has a contract.
+	ErrSecretHasContract = errors.New("ppp secret is already onboarded with a contract")
+)

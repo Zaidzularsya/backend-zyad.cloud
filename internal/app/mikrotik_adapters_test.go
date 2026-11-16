@@ -203,7 +203,7 @@ func TestProductCatalog(t *testing.T) {
 	c := mikrotikProductCatalog{products: src, inUse: fakeInUse{ids: []string{"p1", "p2", "p3", "pX"}}}
 
 	info, err := c.Get(context.Background(), mkScope("org-a"), "p2")
-	if err != nil || !info.Recurring || !info.Active || info.SKU != "Z" {
+	if err != nil || !info.Recurring || !info.Active || info.SKU != "Z" || info.Frequency != pricing.Monthly {
 		t.Fatalf("get: %+v %v", info, err)
 	}
 	if _, err := c.Get(context.Background(), mkScope("org-b"), "p2"); !errors.Is(err, mikrotik.ErrProductNotFound) {

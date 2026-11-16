@@ -91,6 +91,9 @@ func (r *soRepoFake) UpdateDraft(_ context.Context, _ coretenant.Scope, id strin
 	}
 	so.StartDate, so.BillToName, so.BillToCompany, so.BillToEmail, so.BillToPhone, so.Channels, so.PICUserID =
 		f.StartDate, f.BillToName, f.BillToCompany, f.BillToEmail, f.BillToPhone, f.Channels, f.PICUserID
+	if f.SkipInitialInvoice != nil {
+		so.SkipInitialInvoice = *f.SkipInitialInvoice
+	}
 	r.byID[id] = so
 	return so, nil
 }
@@ -502,5 +505,33 @@ func TestCancelUnpaidResumesAfterPartialFailure(t *testing.T) {
 		if strings.HasPrefix(call, "void") {
 			t.Fatalf("invoice already void must be skipped: %v", c.calls)
 		}
+	}
+}
+
+func TestSalesOrderConfirm_PassesSkipFlag(t *testing.T) {
+	h := newSOHarness(t)
+	so := h.draft(t)
+	skip := true
+	if _, err := h.svc.UpdateDraft(soCtx, soScope, so.ID, repository.SalesOrderDraftFields{
+		StartDate: soDate("2026-10-05"), BillToName: so.BillToName, BillToEmail: so.BillToEmail,
+		Channels: so.Channels, SkipInitialInvoice: &skip}, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.Confirm(soCtx, soScope, so.ID, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if !h.billing.req.SkipInitialInvoice {
+		t.Fatal("billingRequest.SkipInitialInvoice = false, want true")
+	}
+
+	// A draft update that does not mention the flag keeps it.
+	h2 := newSOHarness(t)
+	so2 := h2.draft(t)
+	if _, err := h2.svc.UpdateDraft(soCtx, soScope, so2.ID, repository.SalesOrderDraftFields{SkipInitialInvoice: &skip}, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	h2.fill(t, so2.ID, "2026-10-05")
+	if !h2.repo.byID[so2.ID].SkipInitialInvoice {
+		t.Fatal("UpdateDraft without the flag must not reset it")
 	}
 }

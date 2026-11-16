@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -71,12 +72,17 @@ type RouterRepository interface {
 	RecordCheck(ctx context.Context, scope coretenant.Scope, id, status, version string) error
 	// MarkSetup stores the isolir setup result; isolir_ready_at is set only when ready is true.
 	MarkSetup(ctx context.Context, scope coretenant.Scope, id string, ready bool, profile, redirectURL string) error
+	// SaveSetupSnapshot remembers the last applied setup input for the wizard.
+	SaveSetupSnapshot(ctx context.Context, scope coretenant.Scope, id string, s domain.SetupSnapshot) error
 	// SoftDelete: ErrRouterHasIsolatedSecrets while the router has isolated
 	// secrets or secrets with a pending/running isolation task.
 	SoftDelete(ctx context.Context, scope coretenant.Scope, id string, by string) error
 	// HasReadyRouter reports whether the organization has at least one
 	// non-deleted router with isolir_ready = true.
 	HasReadyRouter(ctx context.Context, scope coretenant.Scope) (bool, error)
+	// Summary counts the router's secrets and isolation tasks from the database
+	// only; ErrRouterNotFound when the router is not live in the scope.
+	Summary(ctx context.Context, scope coretenant.Scope, routerID string) (domain.RouterSummary, error)
 	InsertAudit(ctx context.Context, scope coretenant.Scope, entry AuditEntry) error
 }
 
@@ -90,7 +96,7 @@ func NewRouterRepository(db *database.Pool) RouterRepository {
 
 const routerColumns = `
 	id, organization_id, name, host, port, api_type, use_tls, tls_fingerprint, username, password_encrypted,
-	isolir_ready, isolir_ready_at, isolir_profile_name, isolir_redirect_url,
+	isolir_ready, isolir_ready_at, isolir_profile_name, isolir_redirect_url, isolir_setup,
 	last_check_at, last_check_status, routeros_version, created_at, updated_at
 `
 
@@ -98,9 +104,10 @@ func scanRouter(row pgx.Row) (domain.Router, error) {
 	var r domain.Router
 	var apiType string
 	var fingerprint, profile, redirectURL, checkStatus, version *string
+	var setupJSON []byte
 	err := row.Scan(
 		&r.ID, &r.OrganizationID, &r.Name, &r.Host, &r.Port, &apiType, &r.UseTLS, &fingerprint, &r.Username, &r.PasswordEncrypted,
-		&r.IsolirReady, &r.IsolirReadyAt, &profile, &redirectURL,
+		&r.IsolirReady, &r.IsolirReadyAt, &profile, &redirectURL, &setupJSON,
 		&r.LastCheckAt, &checkStatus, &version, &r.CreatedAt, &r.UpdatedAt,
 	)
 	if err != nil {
@@ -110,6 +117,12 @@ func scanRouter(row pgx.Row) (domain.Router, error) {
 	r.TLSFingerprint = derefString(fingerprint)
 	r.IsolirProfileName = derefString(profile)
 	r.IsolirRedirectURL = derefString(redirectURL)
+	if len(setupJSON) > 0 {
+		var snap domain.SetupSnapshot
+		if json.Unmarshal(setupJSON, &snap) == nil {
+			r.Setup = &snap
+		}
+	}
 	r.LastCheckStatus = derefString(checkStatus)
 	r.RouterOSVersion = derefString(version)
 	return r, nil
@@ -306,6 +319,17 @@ func (r *routerRepository) MarkSetup(ctx context.Context, scope coretenant.Scope
 		ready, nullableString(profile), nullableString(redirectURL), id, scope.OrganizationID())
 }
 
+func (r *routerRepository) SaveSetupSnapshot(ctx context.Context, scope coretenant.Scope, id string, s domain.SetupSnapshot) error {
+	raw, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	return r.execOne(ctx, scope, `
+		UPDATE mikrotik_routers SET isolir_setup = $1::jsonb, updated_at = now()
+		WHERE id = $2 AND organization_id = $3 AND deleted_at IS NULL`,
+		string(raw), id, scope.OrganizationID())
+}
+
 // routerHasNoIsolationActivity ($3 = organization) is true when no secret of
 // router r is isolated or has a pending/running isolation task.
 const routerHasNoIsolationActivity = `NOT EXISTS (
@@ -353,6 +377,51 @@ func (r *routerRepository) HasReadyRouter(ctx context.Context, scope coretenant.
 			WHERE organization_id = $1 AND isolir_ready AND deleted_at IS NULL)`, scope.OrganizationID()).Scan(&ok)
 	})
 	return ok, err
+}
+
+func (r *routerRepository) Summary(ctx context.Context, scope coretenant.Scope, routerID string) (domain.RouterSummary, error) {
+	sum := domain.RouterSummary{TaskCounts: map[string]int{}}
+	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `
+			SELECT COUNT(s.id),
+				COUNT(*) FILTER (WHERE s.account_id IS NOT NULL AND s.present),
+				COUNT(*) FILTER (WHERE s.account_id IS NULL AND s.present),
+				COUNT(*) FILTER (WHERE NOT s.present),
+				COUNT(*) FILTER (WHERE s.needs_original_profile AND s.account_id IS NOT NULL),
+				COUNT(*) FILTER (WHERE s.isolation_state = 'isolated')
+			FROM mikrotik_routers rt
+			LEFT JOIN mikrotik_ppp_secrets s ON s.organization_id = rt.organization_id AND s.router_id = rt.id
+			WHERE rt.organization_id = $1 AND rt.id = $2 AND rt.deleted_at IS NULL
+			GROUP BY rt.id`, scope.OrganizationID(), routerID).Scan(
+			&sum.SecretsTotal, &sum.SecretsPaired, &sum.SecretsUnpaired,
+			&sum.SecretsMissing, &sum.SecretsNeedOriginalProfile, &sum.SecretsIsolated)
+		if err != nil {
+			return err // pgx.ErrNoRows: router missing, deleted or in another organization
+		}
+		rows, err := tx.Query(ctx, `
+			SELECT t.status, COUNT(*)
+			FROM mikrotik_isolation_tasks t
+			JOIN mikrotik_ppp_secrets s ON s.organization_id = t.organization_id AND s.id = t.secret_id
+			WHERE t.organization_id = $1 AND s.router_id = $2
+			GROUP BY t.status`, scope.OrganizationID(), routerID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var status string
+			var n int
+			if err := rows.Scan(&status, &n); err != nil {
+				return err
+			}
+			sum.TaskCounts[status] = n
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return domain.RouterSummary{}, mapRouterError(err)
+	}
+	return sum, nil
 }
 
 // execOne runs a single-row UPDATE in a scoped transaction and returns ErrRouterNotFound when no row matched.

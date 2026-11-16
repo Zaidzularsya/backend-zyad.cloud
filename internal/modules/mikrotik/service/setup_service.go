@@ -109,6 +109,9 @@ type SetupOptions struct {
 	// place-before, query filters, PATCH/DELETE by .id) has only been tested
 	// against httptest, so it is off by default. Preview is always allowed.
 	AllowREST bool
+	// Defaults completes operator input: pool, platform host and the whole
+	// allowlist come from platform configuration, so operators type nothing.
+	Defaults SetupDefaults
 }
 
 // SetupService plans, applies and removes the isolir objects on a router.
@@ -715,7 +718,7 @@ func checkOverlap(subnet netip.Prefix, pools []pmk.Row, ownPool int, addrs []pmk
 
 // Preview computes the plan from the current router state without writing.
 func (s *SetupService) Preview(ctx context.Context, scope coretenant.Scope, routerID string, in SetupInput) (domain.SetupPlan, error) {
-	n, err := normalizeSetup(in)
+	n, err := normalizeSetup(s.opts.Defaults.Fill(in))
 	if err != nil {
 		return domain.SetupPlan{}, err
 	}
@@ -771,6 +774,7 @@ func (s *SetupService) audit(ctx context.Context, scope coretenant.Scope, event,
 // isolir-ready. Fail closed: a router that is already ready is marked not
 // ready before the first write, and ready again only after verification.
 func (s *SetupService) Apply(ctx context.Context, scope coretenant.Scope, routerID string, in SetupInput, planHash, actor string) (domain.Router, error) {
+	in = s.opts.Defaults.Fill(in)
 	n, err := normalizeSetup(in)
 	if err != nil {
 		return domain.Router{}, err
@@ -858,6 +862,13 @@ func (s *SetupService) Apply(ctx context.Context, scope coretenant.Scope, router
 	if err := s.repo.MarkSetup(ctx, scope, routerID, true, n.profile, n.redirectURL); err != nil {
 		slog.Warn("mikrotik: mark setup failed after apply", "router_id", routerID, "error", scrub(err.Error(), secrets...))
 		return domain.Router{}, mikrotik.ErrSetupStateNotSaved
+	}
+	// The snapshot only pre-fills the wizard next time; losing it is not worth
+	// failing an apply that already verified and marked the router ready.
+	if err := s.repo.SaveSetupSnapshot(ctx, scope, routerID, domain.SetupSnapshot{
+		ProfileName: n.profile, PoolCIDR: n.subnet.String(), RateLimit: n.rateLimit, RedirectURL: n.redirectURL,
+	}); err != nil {
+		slog.Warn("mikrotik: save setup snapshot failed", "router_id", routerID, "error", scrub(err.Error(), secrets...))
 	}
 	s.audit(ctx, scope, "router.setup_applied", actor, router, map[string]any{
 		"profile": n.profile, "created": created, "updated": updated, "unchanged": unchanged, "redirect": n.redirectURL != "",

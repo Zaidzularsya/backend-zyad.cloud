@@ -397,3 +397,34 @@ func TestRESTClientResponseTooLarge(t *testing.T) {
 		t.Fatalf("err = %v, want ErrResponseTooLarge", err)
 	}
 }
+
+func TestRESTPrintWrapsSingleObject(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/system/identity" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"name":"core-1"}`))
+	}))
+	defer srv.Close()
+
+	rows, err := newREST(t, endpointFor(t, srv, false)).Print(context.Background(), "/system/identity", nil)
+	if err != nil {
+		t.Fatalf("Print: %v", err)
+	}
+	if len(rows) != 1 || rows[0]["name"] != "core-1" {
+		t.Fatalf("rows = %v", rows)
+	}
+}
+
+func TestRESTPrintRejectsScalar(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`"x"`))
+	}))
+	defer srv.Close()
+
+	_, err := newREST(t, endpointFor(t, srv, false)).Print(context.Background(), "/system/identity", nil)
+	if err == nil || !strings.Contains(err.Error(), "unexpected response") {
+		t.Fatalf("err = %v, want unexpected response", err)
+	}
+}

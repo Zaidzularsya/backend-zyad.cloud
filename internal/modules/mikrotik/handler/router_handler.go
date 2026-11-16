@@ -25,6 +25,8 @@ type RouterService interface {
 	Get(ctx context.Context, scope coretenant.Scope, id string) (domain.Router, error)
 	List(ctx context.Context, scope coretenant.Scope, limit, offset int) ([]domain.Router, int64, error)
 	Check(ctx context.Context, scope coretenant.Scope, id string) (domain.Router, error)
+	Summary(ctx context.Context, scope coretenant.Scope, id string) (domain.RouterSummary, error)
+	Stats(ctx context.Context, scope coretenant.Scope, id string) (domain.RouterStats, error)
 	Update(ctx context.Context, scope coretenant.Scope, id string, in service.UpdateInput) (domain.Router, error)
 	Delete(ctx context.Context, scope coretenant.Scope, id, by string) error
 }
@@ -41,15 +43,19 @@ func NewRouterHandler(svc RouterService) *RouterHandler {
 // carries the tenant and mikrotik.enabled entitlement guards. probeLimit (may
 // be nil) runs before the permission check on every route that logs in to the
 // tenant's router (create, update, check); list/get/delete are not limited.
-func (h *RouterHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker, probeLimit gin.HandlerFunc) {
+// statsLimit (may be nil) is a separate bucket for the live stats read.
+func (h *RouterHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker, probeLimit, statsLimit gin.HandlerFunc) {
 	group := router.Group("/routers")
 	limit := orPass(probeLimit)
+	statsLim := orPass(statsLimit)
 
 	group.GET("", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.read"), h.List)
 	group.POST("", limit, permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.create"), h.Create)
 	group.GET("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.read"), h.Get)
 	group.PATCH("/:id", limit, permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.update"), h.Update)
 	group.DELETE("/:id", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.delete"), h.Delete)
+	group.GET("/:id/summary", permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.read"), h.Summary)
+	group.GET("/:id/stats", statsLim, permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.read"), h.Stats)
 	group.POST("/:id/check", limit, permissionmiddleware.RequireOrganizationOrGlobal(p, "mikrotik_router.update"), h.Check)
 }
 
@@ -138,6 +144,35 @@ func (h *RouterHandler) Get(c *gin.Context) {
 	corehttp.OK(c, "success", dto.RouterFromDomain(router))
 }
 
+// Summary returns database-only secret and task counts; it never contacts the router.
+func (h *RouterHandler) Summary(c *gin.Context) {
+	scope, ok := scopeOrFail(c)
+	if !ok {
+		return
+	}
+	summary, err := h.svc.Summary(c.Request.Context(), scope, c.Param("id"))
+	if err != nil {
+		failRouter(c, err)
+		return
+	}
+	corehttp.OK(c, "success", dto.RouterSummaryFromDomain(summary))
+}
+
+// Stats reads live identity, resource and PPPoE session data from the router.
+func (h *RouterHandler) Stats(c *gin.Context) {
+	extendWriteDeadline(c, probeWriteDeadline)
+	scope, ok := scopeOrFail(c)
+	if !ok {
+		return
+	}
+	stats, err := h.svc.Stats(c.Request.Context(), scope, c.Param("id"))
+	if err != nil {
+		failRouter(c, err)
+		return
+	}
+	corehttp.OK(c, "success", dto.RouterStatsFromDomain(stats))
+}
+
 func (h *RouterHandler) Update(c *gin.Context) {
 	extendWriteDeadline(c, probeWriteDeadline)
 	scope, ok := scopeOrFail(c)
@@ -223,6 +258,8 @@ func failRouter(c *gin.Context, err error) {
 		response.Error(c, http.StatusConflict, "MIKROTIK_ROUTER_NAME_TAKEN", "router name is already used")
 	case errors.Is(err, mikrotik.ErrModeInvalid):
 		response.Error(c, http.StatusUnprocessableEntity, "MIKROTIK_MODE_INVALID", err.Error())
+	case errors.Is(err, mikrotik.ErrTenantContactRequired):
+		response.Error(c, http.StatusUnprocessableEntity, "MIKROTIK_TENANT_CONTACT_REQUIRED", mikrotik.ErrTenantContactRequired.Error())
 	case errors.Is(err, mikrotik.ErrPilotRequired):
 		response.Error(c, http.StatusConflict, "MIKROTIK_PILOT_REQUIRED", mikrotik.ErrPilotRequired.Error())
 	case errors.Is(err, mikrotik.ErrPilotModeRequired):

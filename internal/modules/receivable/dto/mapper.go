@@ -36,6 +36,7 @@ func InvoiceFromDomain(inv domain.Invoice, last *domain.Send) InvoiceResponse {
 		AmountPaid: inv.AmountPaid, Balance: inv.Balance(), Channels: inv.Channels, PICUserID: strPtr(inv.PICUserID),
 		Notes: inv.Notes, VoidReason: inv.VoidReason, PaidAt: inv.PaidAt, VoidedAt: inv.VoidedAt,
 		Items: []InvoiceItemResponse{}, CreatedAt: inv.CreatedAt,
+		IsolirFlag: inv.IsolirFlag, ArrearsRecordingID: strPtr(inv.ArrearsRecordingID),
 	}
 	if out.Channels == nil {
 		out.Channels = []string{}
@@ -70,6 +71,6 @@ func SettingsFromDomain(s domain.Settings) SettingsResponse {
 	}
 	return SettingsResponse{
 		InvoiceLeadDays: s.InvoiceLeadDays, PaymentTermsDays: s.PaymentTermsDays, DefaultChannels: channels,
-		DefaultSenderUserID: strPtr(s.DefaultSenderUserID),
+		DefaultSenderUserID: strPtr(s.DefaultSenderUserID), DefaultBillingDay: s.DefaultBillingDay,
 	}
 }

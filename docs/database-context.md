@@ -75,10 +75,34 @@ lihat `docs/migration-guide.md` untuk detail cara kerja runner.
   (`organization_isolation_boundary` RESTRICTIVE dan `organization_tenant_access` PERMISSIVE), keduanya
   memvalidasi `organization_id` cocok dengan session variable, termasuk `WITH CHECK` untuk INSERT/UPDATE.
 
-**RLS diterapkan HANYA pada tabel `landing_*`** (dikonfirmasi lewat pencarian pemanggilan
-`apply_organization_rls`/`ENABLE ROW LEVEL SECURITY` di seluruh migration): `landing_pages`,
-`landing_page_sections`, `landing_forms`, `landing_form_fields`, `landing_submissions`,
-`landing_submission_notes`, dan tabel landing lainnya yang dibuat di migration 000025–000044.
+**RLS (dengan `FORCE ROW LEVEL SECURITY`) diterapkan pada 69 tabel tenant** (diverifikasi 12 Nov 2026
+dari `pg_class.relrowsecurity` setelah migration sampai 000179; versi lama dokumen ini keliru membatasinya
+pada tabel landing saja):
+
+- `landing_*` (semua tabel landing, sejak migration 000025–000044)
+- `crm_*`: `crm_activities`, `crm_companies`, `crm_contact_attachments`, `crm_contacts`, `crm_deals`,
+  `crm_document_counters`, `crm_integrations`, `crm_lead_attachments`, `crm_lead_events`, `crm_leads`,
+  `crm_pipeline_stages`, `crm_pipelines`, `crm_playbook_runs`, `crm_quotation_items`,
+  `crm_quotation_responses`, `crm_quotation_sends`, `crm_quotations`, `crm_sales_order_items`,
+  `crm_sales_orders`, `crm_settings`
+- `receivable_*`: `receivable_accounts`, `receivable_contract_items`, `receivable_contracts`,
+  `receivable_document_counters`, `receivable_invoice_items`, `receivable_invoice_sends`,
+  `receivable_invoices`, `receivable_payments`, `receivable_settings`
+- `mikrotik_*`: `mikrotik_customer_policies`, `mikrotik_isolation_tasks`, `mikrotik_org_settings`,
+  `mikrotik_pilot_accounts`, `mikrotik_ppp_secrets`, `mikrotik_product_triggers`, `mikrotik_routers`,
+  `mikrotik_secret_suggestions`
+- `catalog_*`: `catalog_product_categories`, `catalog_product_features`, `catalog_products`
+- lain-lain: `asset_objects`, `mail_messages`, `mail_message_attachments`, `user_mailboxes`,
+  `wa_conversations`, `wa_messages`, `wa_sessions`
+
+Cek daftar terkini langsung dari database (lebih dipercaya daripada dokumen ini):
+
+```sql
+SELECT c.relname, c.relforcerowsecurity
+FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relrowsecurity
+ORDER BY 1;
+```
 
 **RLS TIDAK diterapkan pada:**
 - Tabel `organization_*` (`organizations`, `organization_memberships`, `organization_domains`,
@@ -90,21 +114,29 @@ lihat `docs/migration-guide.md` untuk detail cara kerja runner.
   `billing_payment_events` — organization-scoped, TIDAK ada RLS)
 - Tabel user/auth (`users`, `sessions`, dll — memang tidak per-organization secara langsung)
 
-**Implikasi**: isolasi tenant di tabel `organization_*`, `customer_subscriptions`/`subscription_events`, dan
-`billing_*` bergantung sepenuhnya pada filter `organization_id` yang ditulis manual di setiap query
+**Implikasi**: isolasi tenant di tabel yang tidak ber-RLS (`organization_*`, `customer_subscriptions`/`subscription_events`,
+`billing_*`) bergantung sepenuhnya pada filter `organization_id` yang ditulis manual di setiap query
 repository. **Ini adalah gap arsitektur yang perlu diverifikasi eksplisit**: apakah ini keputusan desain
 sadar (mis. karena tabel-tabel ini hanya diakses lewat service layer yang selalu inject `organization_id`,
 dan RLS dianggap redundant) atau memang belum sempat diterapkan. Detail rekomendasi ada di
 [next-development-tasks.md](next-development-tasks.md) (P0/P1 tergantung hasil klarifikasi). Lihat juga
 `docs/multi-tenant-rls.md` untuk desain RLS yang sudah didokumentasikan sebelumnya.
 
-Untuk query manual yang butuh scope RLS, session variable harus di-set eksplisit:
+Query manual (psql) ke tabel ber-RLS **wajib** di dalam transaksi dengan `set_config(..., true)`;
+tanpa itu `SELECT` mengembalikan 0 baris (bukan error) dan `UPDATE`/`DELETE` tidak mengenai apa pun.
+Set juga zona waktu UTC karena kolom waktu bertipe `timestamp without time zone` dan aplikasi
+membandingkan dalam UTC:
+
 ```sql
-SET app.organization_id = '<org_uuid>';
+BEGIN;
+SET LOCAL TimeZone = 'UTC';
+SELECT set_config('app.organization_id', '<organization-uuid>', true);
+SELECT id, name, isolir_ready FROM mikrotik_routers WHERE deleted_at IS NULL;
+COMMIT;
 ```
 Di level aplikasi, ini ditangani lewat `internal/platform/database/tenant_transaction.go` — pastikan alur
 request melewati middleware resolver tenant (`ResolveAuthenticatedOrganization`/`ResolvePublicOrganization`)
-sebelum repository landing dipanggil.
+sebelum repository tenant (landing, crm, receivable, mikrotik, dll.) dipanggil.
 
 ## 4. Relasi & Constraint Penting
 

@@ -33,6 +33,9 @@ func (s *settingsService) Update(ctx context.Context, scope coretenant.Scope, in
 	if in.PaymentTermsDays < 0 || in.PaymentTermsDays > 90 {
 		return domain.Settings{}, invalidSettings("Termin pembayaran harus 0–90 hari.")
 	}
+	if in.DefaultBillingDay != nil && (*in.DefaultBillingDay < 1 || *in.DefaultBillingDay > 31) {
+		return domain.Settings{}, invalidSettings("Default tanggal tagih harus 1–31.")
+	}
 	channels, err := normalizeChannels(in.DefaultChannels)
 	if err != nil {
 		return domain.Settings{}, invalidSettings("Pilih minimal satu kanal default (email atau whatsapp).")

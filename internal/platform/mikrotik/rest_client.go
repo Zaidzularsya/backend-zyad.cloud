@@ -244,7 +244,13 @@ func (c *restClient) Print(ctx context.Context, path string, query Row) ([]Row, 
 	}
 	var list []map[string]any
 	if err := json.Unmarshal(data, &list); err != nil {
-		return nil, errors.New("mikrotik: unexpected response from router")
+		// Singleton paths such as /system/identity and /system/resource
+		// answer with one JSON object instead of an array.
+		var single map[string]any
+		if json.Unmarshal(data, &single) != nil || single == nil {
+			return nil, errors.New("mikrotik: unexpected response from router")
+		}
+		return []Row{toRow(single)}, nil
 	}
 	rows := make([]Row, 0, len(list))
 	for _, m := range list {

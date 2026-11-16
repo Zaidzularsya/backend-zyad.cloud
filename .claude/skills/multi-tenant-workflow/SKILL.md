@@ -17,5 +17,6 @@ menyimpan data organization:
 Zyad Cloud sendiri direpresentasikan sebagai platform organization. Landing Page marketing platform dan
 Landing Page customer memakai module yang sama dengan `organization_id` yang konkret.
 
-Lihat juga rule `.claude/rules/rls.md` — RLS PostgreSQL hanya aktif di tabel `landing_*`, modul lain wajib
-filter manual `organization_id`.
+Lihat juga rule `.claude/rules/rls.md` — RLS PostgreSQL aktif di tabel tenant `landing_*`, `crm_*`,
+`receivable_*`, `mikrotik_*`, `catalog_*`, `mail_*`, `wa_*`; tabel `organization_*`, `billing_*`, `product_*`
+tanpa RLS. Filter manual `organization_id` tetap wajib di semua modul.

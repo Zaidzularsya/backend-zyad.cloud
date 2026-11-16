@@ -265,16 +265,40 @@ Logika ini disusun dari perilaku `place-before` yang teramati (4.4); kasus "seba
 - Sesi lama terputus, sesi baru mendapat profile isolir, address-list `zyad-isolir` terisi dinamis: **belum terbukti**.
 - `{ORIGINAL_PROFILE}` tidak boleh `{ISOLIR_PROFILE}` (spec bagian 11).
 
-## 7. Domain pembayaran DOKU
+## 7. Domain pembayaran DOKU dan allowlist otomatis
 
-- API: `api-sandbox.doku.com` (sandbox), `api.doku.com` (produksi) di `internal/platform/doku/client.go`. Dipanggil
-  server, bukan browser pelanggan; tidak wajib di allowlist.
-- Halaman checkout: `sandbox.doku.com/checkout/link/...` hanya muncul di fixture test
-  (`internal/platform/doku/client_test.go`); host checkout produksi tidak tertulis di kode.
+Sejak Gelombang 1 (Nov 2026) operator **tidak** mengisi host apa pun di wizard Setup. Backend menurunkan
+allowlist dari konfigurasi (`SetupDefaults.Fill`, `internal/modules/mikrotik/service/setup_defaults.go`):
 
-Daftar final `{DOKU_HOSTS}` (halaman checkout, aset, CDN, halaman bank/e-wallet): **perlu uji checkout nyata**.
-Awal yang masuk akal: DEV `sandbox.doku.com`; produksi host dari `PaymentURL` yang dikembalikan DOKU. Simpan
-sebagai konfigurasi, bukan hardcode.
+| Sumber | Env | Default |
+|---|---|---|
+| Host API platform (`{PLATFORM_HOST}`) | `MIKROTIK_SETUP_PLATFORM_HOST` | host dari `APP_URL` |
+| Host halaman bayar `pay_url` (`zyad.cloud/i/<token>`) | `MIKROTIK_SETUP_PAY_HOST` | host dari `APP_FRONTEND_URL` |
+| Host checkout DOKU + aset | dari `DOKU_BASE_URL` (`doku.CheckoutHosts`) | sandbox: `staging.doku.com`, `sandbox.doku.com`, `api-sandbox.doku.com`, `cdn-doku.oss-ap-southeast-5.aliyuncs.com` |
+| Host tambahan | `MIKROTIK_SETUP_EXTRA_HOSTS` (koma) | kosong |
+
+- Sandbox: redirect checkout terbukti ke `staging.doku.com/checkout-link-v2/...` dan memuat aset dari
+  `cdn-doku.oss-ap-southeast-5.aliyuncs.com` (uji 11 Nov 2026, temuan B7).
+- **Produksi: host checkout dan aset belum terkonfirmasi.** `doku.CheckoutHosts` sengaja mengembalikan daftar
+  kosong untuk base URL produksi, jadi allowlist produksi belum memuat host DOKU. Ini **memblokir go-live
+  produksi** sampai host dipastikan dari uji checkout nyata (rencana Gelombang 1 Task 11). Sementara itu host
+  bisa ditambahkan lewat `MIKROTIK_SETUP_EXTRA_HOSTS` tanpa deploy kode, lalu Setup diterapkan ulang.
+- Riset dokumentasi DOKU (12 Nov 2026) tidak memastikan host produksi:
+  - Contoh `payment.url` di dokumen backend memakai `sandbox.doku.com/checkout-link-v2/...`, sedangkan checkout
+    sandbox nyata dialihkan ke `staging.doku.com`. Dokumen tidak bisa dijadikan sumber tunggal.
+  - Petunjuk produksi satu-satunya: `jokul.doku.com` (host Checkout JS produksi
+    `https://jokul.doku.com/jokul-checkout-js/v1/jokul-checkout-1.0.0.js` dan contoh link tanpa label).
+    **Kandidat, belum terbukti.**
+  - Domain aset produksi (padanan `cdn-doku.oss-ap-southeast-5.aliyuncs.com`) dan domain redirect bank/e-wallet
+    tidak disebut di dokumen.
+  - Sumber: developers.doku.com `.../doku-checkout/integration-guide/frontend-integration` dan
+    `.../backend-integration`.
+- Cara memastikan sebelum go-live: dengan kredensial produksi, buat satu checkout nyata, catat host redirect
+  `payment.url` dan semua host yang dimuat halaman checkout (DevTools > Network), lalu isi cabang produksi
+  `doku.CheckoutHosts` dan ganti `t.Skip` di `TestCheckoutHosts_Production`.
+- API DOKU (`api.doku.com`) dipanggil server, bukan browser pelanggan.
+- Kesehatan DNS allowlist: `GET /routers/:id/setup/allowlist-health` menghitung entri FQDN yang belum punya
+  entri dinamis ber-`comment` nama tersebut (lihat 4.3). UI hanya menampilkan peringatan ringkas, tanpa host.
 
 ## 8. Perbedaan v6 dan v7 yang relevan
 

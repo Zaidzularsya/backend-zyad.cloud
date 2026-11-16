@@ -31,6 +31,10 @@ const (
 // got past every gate and reached the service.
 type countingSecretService struct{ calls int }
 
+func (s *countingSecretService) Summary(context.Context, coretenant.Scope, string) (mikrotikservice.SecretSummary, error) {
+	s.calls++
+	return mikrotikservice.SecretSummary{}, nil
+}
 func (s *countingSecretService) Import(context.Context, coretenant.Scope, string, string) (mikrotikrepo.ImportResult, error) {
 	s.calls++
 	return mikrotikrepo.ImportResult{}, nil
@@ -82,7 +86,7 @@ func (s *countingPolicyService) PreviewTrigger(context.Context, coretenant.Scope
 	s.calls++
 	return mikrotikservice.TriggerPreview{}, nil
 }
-func (s *countingPolicyService) SetTrigger(context.Context, coretenant.Scope, string, bool, string) (mikrotikdomain.ProductTrigger, error) {
+func (s *countingPolicyService) SetTriggerFrom(context.Context, coretenant.Scope, string, bool, *time.Time, string) (mikrotikdomain.ProductTrigger, error) {
 	s.calls++
 	return mikrotikdomain.ProductTrigger{}, nil
 }
@@ -129,6 +133,7 @@ var secretRouteCases = []secretRouteCase{
 	{http.MethodPost, "/routers/" + rtRouter + "/secrets/analyze", ``, "mikrotik_secret.import", true},
 	{http.MethodPost, "/secrets/pair-bulk", `{"items":[{"secret_id":"` + rtSecret + `","account_id":"` + rtAccount + `"}]}`, "mikrotik_secret.pair", true},
 	{http.MethodGet, "/secrets", ``, "mikrotik_secret.read", false},
+	{http.MethodGet, "/secrets/summary", ``, "mikrotik_secret.read", false},
 	{http.MethodPost, "/secrets/" + rtSecret + "/pair", `{"account_id":"` + rtAccount + `"}`, "mikrotik_secret.pair", false},
 	{http.MethodPost, "/secrets/" + rtSecret + "/pair-new-customer", ``, "mikrotik_secret.pair", false},
 	{http.MethodPost, "/secrets/" + rtSecret + "/unpair", ``, "mikrotik_secret.unpair", false},

@@ -28,6 +28,23 @@ type fakeSecretRepo struct {
 
 	listFilter            repository.SecretFilter
 	listLimit, listOffset int
+	summaryRouter         string
+}
+
+func (f *fakeSecretRepo) CountByDisabled(_ context.Context, _ coretenant.Scope, routerID string) (int, int, error) {
+	f.summaryRouter = routerID
+	active, inactive := 0, 0
+	for _, r := range f.rows {
+		if !r.Present || (routerID != "" && r.RouterID != routerID) {
+			continue
+		}
+		if r.Disabled {
+			inactive++
+		} else {
+			active++
+		}
+	}
+	return active, inactive, nil
 }
 
 func newFakeSecretRepo() *fakeSecretRepo {

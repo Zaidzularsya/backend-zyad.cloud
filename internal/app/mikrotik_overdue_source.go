@@ -14,21 +14,37 @@ import (
 )
 
 // triggerInvoiceCond selects candidate invoices (alias i): issued/overdue, due
-// strictly before $2 (today), and holding an item whose product has an enabled
-// trigger with effective_from <= due_date. Partial payment does not matter; the
+// strictly before $2 (today), and either
+//   - a normal invoice holding an item whose product has an enabled trigger with
+//     effective_from <= due_date, or
+//   - an arrears invoice the owner flagged (isolir_flag) whose contract has an
+//     item with an enabled trigger product; effective_from does not apply (the
+//     flag is the owner's explicit choice).
+// Unflagged arrears invoices never qualify. Partial payment does not matter; the
 // invoice leaves the set only when it becomes paid/void. $1 = organization id.
 const triggerInvoiceCond = `
 	i.organization_id = $1
 	AND i.status IN ('issued', 'overdue')
 	AND i.due_date < $2::date
-	AND EXISTS (
-		SELECT 1
-		FROM receivable_invoice_items ii
-		JOIN mikrotik_product_triggers t
-		  ON t.organization_id = ii.organization_id AND t.product_id = ii.product_id
-		WHERE ii.organization_id = i.organization_id AND ii.invoice_id = i.id
-		  AND ii.product_id IS NOT NULL
-		  AND t.enabled AND i.due_date >= t.effective_from
+	AND (
+		(i.arrears_recording_id IS NULL AND EXISTS (
+			SELECT 1
+			FROM receivable_invoice_items ii
+			JOIN mikrotik_product_triggers t
+			  ON t.organization_id = ii.organization_id AND t.product_id = ii.product_id
+			WHERE ii.organization_id = i.organization_id AND ii.invoice_id = i.id
+			  AND ii.product_id IS NOT NULL
+			  AND t.enabled AND i.due_date >= t.effective_from
+		))
+		OR (i.isolir_flag AND i.contract_id IS NOT NULL AND EXISTS (
+			SELECT 1
+			FROM receivable_contract_items ci
+			JOIN mikrotik_product_triggers t
+			  ON t.organization_id = ci.organization_id AND t.product_id = ci.product_id
+			WHERE ci.organization_id = i.organization_id AND ci.contract_id = i.contract_id
+			  AND ci.product_id IS NOT NULL
+			  AND t.enabled
+		))
 	)`
 
 var _ mikrotikservice.OverdueSource = mikrotikReceivableReader{}
@@ -88,6 +104,23 @@ func (r mikrotikReceivableReader) AccountsWithTriggerInvoices(ctx context.Contex
 		return rows.Err()
 	})
 	return out, err
+}
+
+// AnyTriggerProduct reports whether any of the products has an enabled isolation trigger
+// (receivable.TriggerProductChecker; the arrears dialog explains the flag has no effect otherwise).
+func (r mikrotikReceivableReader) AnyTriggerProduct(ctx context.Context, scope coretenant.Scope, productIDs []string) (bool, error) {
+	if len(productIDs) == 0 {
+		return false, nil
+	}
+	var found bool
+	err := r.scopedRead(ctx, scope, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM mikrotik_product_triggers
+				WHERE organization_id = $1 AND product_id = ANY($2::uuid[]) AND enabled)`,
+			scope.OrganizationID(), productIDs).Scan(&found)
+	})
+	return found, err
 }
 
 // AccountOfInvoice returns the invoice's account id, or mikrotik.ErrAccountNotFound.
@@ -165,17 +198,26 @@ const candidateWhere = `
 	  AND ($6 = '' OR cr.name ILIKE $6 ESCAPE '\' OR cr.phone ILIKE $6 ESCAPE '\')`
 
 // candidateProducts lists up to $9 trigger product names of the account's
-// candidate invoices (same triggerInvoiceCond), read only for the page rows.
+// candidate invoices (same triggerInvoiceCond), read only for the page rows:
+// item products of normal invoices, contract item products of flagged arrears.
 const candidateProducts = `ARRAY(
 	SELECT x.n FROM (
-		SELECT DISTINCT COALESCE(cp.name, ii.description) AS n
+		SELECT COALESCE(cp.name, ii.description) AS n
 		FROM receivable_invoices i
 		JOIN receivable_invoice_items ii ON ii.organization_id = i.organization_id AND ii.invoice_id = i.id
 		JOIN mikrotik_product_triggers t
 		  ON t.organization_id = ii.organization_id AND t.product_id = ii.product_id
 		 AND t.enabled AND i.due_date >= t.effective_from
 		LEFT JOIN catalog_products cp ON cp.organization_id = ii.organization_id AND cp.id = ii.product_id
-		WHERE ` + triggerInvoiceCond + ` AND i.account_id = cr.account_id
+		WHERE ` + triggerInvoiceCond + ` AND i.account_id = cr.account_id AND i.arrears_recording_id IS NULL
+		UNION
+		SELECT COALESCE(cp.name, ci.description) AS n
+		FROM receivable_invoices i
+		JOIN receivable_contract_items ci ON ci.organization_id = i.organization_id AND ci.contract_id = i.contract_id
+		JOIN mikrotik_product_triggers t
+		  ON t.organization_id = ci.organization_id AND t.product_id = ci.product_id AND t.enabled
+		LEFT JOIN catalog_products cp ON cp.organization_id = ci.organization_id AND cp.id = ci.product_id
+		WHERE ` + triggerInvoiceCond + ` AND i.account_id = cr.account_id AND i.isolir_flag
 	) x ORDER BY x.n LIMIT $9)`
 
 // maxCandidateProducts is how many product names a row lists before "…".

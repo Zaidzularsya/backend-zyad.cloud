@@ -31,6 +31,7 @@ type env struct {
 	settings  repository.SettingsRepository
 	counters  repository.CounterRepository
 	contracts repository.ContractRepository
+	arrears   repository.ArrearsRepository
 }
 
 func setup(t *testing.T) env {
@@ -55,8 +56,8 @@ func setup(t *testing.T) env {
 			}
 			_, _ = tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", orgID)
 			for _, table := range []string{
-				"receivable_payments", "receivable_invoice_sends", "receivable_invoice_items", "receivable_invoices",
-				"receivable_contract_items", "receivable_contracts",
+				"receivable_isolir_flag_audits", "receivable_payments", "receivable_invoice_sends", "receivable_invoice_items",
+				"receivable_invoices", "receivable_arrears_recordings", "receivable_contract_items", "receivable_contracts",
 				"receivable_accounts", "receivable_document_counters", "receivable_settings",
 			} {
 				_, _ = tx.Exec(ctx, "DELETE FROM "+table+" WHERE organization_id = $1", orgID)
@@ -71,7 +72,7 @@ func setup(t *testing.T) env {
 		accounts: repository.NewAccountRepository(db), invoices: repository.NewInvoiceRepository(db),
 		payments: repository.NewPaymentRepository(db), sends: repository.NewSendRepository(db),
 		settings: repository.NewSettingsRepository(db), counters: repository.NewCounterRepository(db),
-		contracts: repository.NewContractRepository(db),
+		contracts: repository.NewContractRepository(db), arrears: repository.NewArrearsRepository(db),
 	}
 }
 
@@ -519,6 +520,22 @@ func TestSettingsDefault(t *testing.T) {
 	}
 	if _, err := e.settings.Upsert(e.ctx, scope, domain.Settings{InvoiceLeadDays: 61, PaymentTermsDays: 7, DefaultChannels: []string{"email"}}, ""); err == nil {
 		t.Fatal("lead days > 60 must be rejected by the database CHECK")
+	}
+	day := 31
+	withDay, err := e.settings.Upsert(e.ctx, scope, domain.Settings{InvoiceLeadDays: 7, PaymentTermsDays: 7, DefaultChannels: []string{"email"}, DefaultBillingDay: &day}, "")
+	if err != nil || withDay.DefaultBillingDay == nil || *withDay.DefaultBillingDay != 31 {
+		t.Fatalf("default_billing_day saved = %+v err=%v", withDay, err)
+	}
+	if again, _ := e.settings.Get(e.ctx, scope); again.DefaultBillingDay == nil || *again.DefaultBillingDay != 31 {
+		t.Fatalf("default_billing_day persisted = %+v", again)
+	}
+	cleared, err := e.settings.Upsert(e.ctx, scope, domain.Settings{InvoiceLeadDays: 7, PaymentTermsDays: 7, DefaultChannels: []string{"email"}}, "")
+	if err != nil || cleared.DefaultBillingDay != nil {
+		t.Fatalf("default_billing_day cleared = %+v err=%v", cleared, err)
+	}
+	bad := 32
+	if _, err := e.settings.Upsert(e.ctx, scope, domain.Settings{InvoiceLeadDays: 7, PaymentTermsDays: 7, DefaultChannels: []string{"email"}, DefaultBillingDay: &bad}, ""); err == nil {
+		t.Fatal("default_billing_day 32 must be rejected by the database CHECK")
 	}
 }
 

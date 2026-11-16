@@ -33,6 +33,7 @@ type fakeRepo struct {
 	setups  []setupCall
 	markErr error
 	finds   int
+	summary domain.RouterSummary
 
 	// Error injection.
 	auditErr, checkErr, createErr, updateErr, deleteErr error
@@ -149,6 +150,16 @@ func (f *fakeRepo) MarkSetup(_ context.Context, _ coretenant.Scope, id string, r
 	return nil
 }
 
+func (f *fakeRepo) SaveSetupSnapshot(_ context.Context, _ coretenant.Scope, id string, s domain.SetupSnapshot) error {
+	r, ok := f.routers[id]
+	if !ok {
+		return mikrotik.ErrRouterNotFound
+	}
+	r.Setup = &s
+	f.routers[id] = r
+	return nil
+}
+
 func (f *fakeRepo) SoftDelete(_ context.Context, _ coretenant.Scope, id, _ string) error {
 	if _, ok := f.routers[id]; !ok {
 		return mikrotik.ErrRouterNotFound
@@ -169,6 +180,10 @@ func (f *fakeRepo) HasReadyRouter(_ context.Context, scope coretenant.Scope) (bo
 	return false, nil
 }
 
+func (f *fakeRepo) Summary(_ context.Context, _ coretenant.Scope, _ string) (domain.RouterSummary, error) {
+	return f.summary, nil
+}
+
 func (f *fakeRepo) InsertAudit(_ context.Context, _ coretenant.Scope, e repository.AuditEntry) error {
 	if f.auditErr != nil {
 		return f.auditErr
@@ -185,6 +200,8 @@ type fakeFactory struct {
 	client        *pmk.FakeClient
 	detectCalls   int
 	lastEndpoint  pmk.Endpoint
+	newCalls      int
+	newFailures   int // the next N New calls fail
 }
 
 func (f *fakeFactory) Detect(_ context.Context, ep pmk.Endpoint) (string, string, error) {
@@ -198,6 +215,11 @@ func (f *fakeFactory) Detect(_ context.Context, ep pmk.Endpoint) (string, string
 
 func (f *fakeFactory) New(_ string, ep pmk.Endpoint) (pmk.RouterClient, error) {
 	f.lastEndpoint = ep
+	f.newCalls++
+	if f.newFailures > 0 {
+		f.newFailures--
+		return nil, errors.New("boom")
+	}
 	return f.client, nil
 }
 
@@ -635,5 +657,30 @@ func TestDelete_RefusedWithIsolationActivity_NoAudit(t *testing.T) {
 	}
 	if _, ok := repo.routers[r.ID]; !ok || len(repo.audits) != audits {
 		t.Fatalf("router must stay and no audit: audits %d -> %d", audits, len(repo.audits))
+	}
+}
+
+func TestSummaryUnknownRouterIsNotFound(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	_, err := svc.Summary(context.Background(), testScope(t), "00000000-0000-0000-0000-0000000000ff")
+	if !errors.Is(err, mikrotik.ErrRouterNotFound) {
+		t.Fatalf("err = %v, want ErrRouterNotFound", err)
+	}
+}
+
+func TestSummaryReturnsRepoCounts(t *testing.T) {
+	svc, repo, _ := newTestService(t)
+	scope := testScope(t)
+	r, err := repo.Create(context.Background(), scope, repository.CreateRouterParams{Name: "r1", Host: "10.8.0.5", Port: 443})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.summary = domain.RouterSummary{SecretsTotal: 4, SecretsPaired: 2, TaskCounts: map[string]int{"failed": 3}}
+	got, err := svc.Summary(context.Background(), scope, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SecretsTotal != 4 || got.SecretsPaired != 2 || got.TaskCounts["failed"] != 3 {
+		t.Fatalf("summary = %+v", got)
 	}
 }

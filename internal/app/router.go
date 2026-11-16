@@ -354,6 +354,9 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		if deps.ReceivableOverviewHandler != nil {
 			deps.ReceivableOverviewHandler.RegisterRoutes(receivableGroup, deps.PermissionChecker)
 		}
+		if deps.ReceivableArrearsHandler != nil {
+			deps.ReceivableArrearsHandler.RegisterRoutes(receivableGroup, deps.PermissionChecker)
+		}
 	}
 
 	registerMikrotikRoutes(protected, deps)

@@ -8,11 +8,13 @@ import (
 	"zyad.cloud/internal/config"
 	"zyad.cloud/internal/core/middleware"
 	coretenant "zyad.cloud/internal/core/tenant"
+	mailboxrepo "zyad.cloud/internal/modules/mailbox/repository"
 	mikrotikhandler "zyad.cloud/internal/modules/mikrotik/handler"
 	mikrotikrepo "zyad.cloud/internal/modules/mikrotik/repository"
 	mikrotikservice "zyad.cloud/internal/modules/mikrotik/service"
 	receivablerepo "zyad.cloud/internal/modules/receivable/repository"
 	receivableservice "zyad.cloud/internal/modules/receivable/service"
+	warepo "zyad.cloud/internal/modules/whatsapp/repository"
 	"zyad.cloud/internal/platform/database"
 )
 
@@ -21,8 +23,10 @@ type mikrotikModule struct {
 	Router *mikrotikhandler.RouterHandler
 	Setup  *mikrotikhandler.SetupHandler
 	Secret *mikrotikhandler.SecretHandler
-	Policy *mikrotikhandler.PolicyHandler
-	Task   *mikrotikhandler.TaskHandler
+	// SecretOnboarding runs the customer onboarding from one PPP secret.
+	SecretOnboarding *mikrotikhandler.SecretOnboardingHandler
+	Policy           *mikrotikhandler.PolicyHandler
+	Task             *mikrotikhandler.TaskHandler
 	// Onboarding serves the setup checklist and per-customer isolir status.
 	Onboarding *mikrotikhandler.OnboardingHandler
 	// Control serves the tenant control center (mode, grace days, pilot, restore all).
@@ -55,6 +59,9 @@ type mikrotikBuild struct {
 	Issuer      mikrotikNotifIssuer
 	Features    mikrotikPublicFeatures
 	RateCounter middleware.RateCounter
+	// Secret onboarding: the CRM chain adapter and the operator permission check.
+	OnboardCRM         mikrotikservice.OnboardingCRM
+	OnboardPermissions mikrotikservice.OnboardingPermissions
 }
 
 // buildMikrotik assembles the Mikrotik module: repositories, production
@@ -68,7 +75,15 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 		cfg.Mikrotik.AllowedPrivateCIDRs,
 	)
 	setup := mikrotikservice.NewSetupService(svc, repo, mikrotikrepo.NewAdvisoryLocker(db),
-		mikrotikservice.SetupOptions{AllowREST: cfg.Mikrotik.SetupAllowREST})
+		mikrotikservice.SetupOptions{
+			AllowREST: cfg.Mikrotik.SetupAllowREST,
+			Defaults: mikrotikservice.SetupDefaults{
+				PlatformHost: cfg.Mikrotik.SetupPlatformHost,
+				PayHost:      cfg.Mikrotik.SetupPayHost,
+				DokuBaseURL:  cfg.Doku.BaseURL,
+				ExtraHosts:   cfg.Mikrotik.SetupExtraHosts,
+			},
+		})
 
 	reader := newMikrotikReceivableReader(db)
 	accounts := mikrotikAccountDirectory{accounts: b.Accounts}
@@ -107,7 +122,8 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 		mikrotikrepo.NewOnboardingRepository(db), mikrotikSenderSettings{settings: receivablerepo.NewSettingsRepository(db)})
 	onboarding.SetPendingReader(preview)
 	publicAdapter := newMikrotikPublicAdapter(secretRepo, reader, b.Accounts,
-		receivablerepo.NewSettingsRepository(db), b.PayLinks, b.Issuer, b.Features)
+		receivablerepo.NewSettingsRepository(db), b.PayLinks, b.Issuer, b.Features,
+		warepo.NewSessionRepository(db), mailboxrepo.NewMailboxRepository(db))
 	publicDeps := mikrotikservice.PublicServiceDeps{
 		Directory: publicAdapter, Secrets: secretRepo, Overdue: reader, PayLinks: publicAdapter,
 		Profile: publicAdapter, Gate: publicAdapter, Tasks: taskRepo,
@@ -126,12 +142,15 @@ func buildMikrotik(cfg config.Config, db *database.Pool, b mikrotikBuild) mikrot
 			SuggestionService: mikrotikservice.NewSuggestionService(svc, secretRepo, accounts,
 				mikrotikrepo.NewSuggestionRepository(db), mikrotikrepo.NewAdvisoryLocker(db)),
 		}),
+		SecretOnboarding: mikrotikhandler.NewSecretOnboardingHandler(mikrotikservice.NewSecretOnboardingService(
+			secrets, b.OnboardCRM, policyDeps.Products, b.OnboardPermissions,
+			mikrotikservice.NewOnboardingStore(mikrotikrepo.NewSecretOnboardingRepository(db)), mikrotikrepo.NewAdvisoryLocker(db))),
 		Policy:     mikrotikhandler.NewPolicyHandler(policy),
 		Task:       mikrotikhandler.NewTaskHandler(mikrotikservice.NewTaskService(taskRepo, secretRepo, repo)),
 		Onboarding: mikrotikhandler.NewOnboardingHandler(onboarding),
 		// eval is nil while the engine is off; the service then refuses pilot tests.
 		Control: mikrotikhandler.NewControlHandler(mikrotikservice.NewControlService(mikrotikservice.ControlDeps{
-			Control: controlRepo, Secrets: secretRepo, Tasks: taskRepo, Accounts: accounts, Audit: repo, Evaluator: eval,
+			Control: controlRepo, Secrets: secretRepo, Tasks: taskRepo, Accounts: accounts, Audit: repo, Evaluator: eval, Profile: publicAdapter,
 		}, engineMode)),
 		Preview: mikrotikhandler.NewPreviewHandler(preview),
 		Activity: mikrotikhandler.NewActivityHandler(mikrotikservice.NewActivityService(
@@ -155,6 +174,13 @@ const (
 	mikrotikProbeLimitWindow = time.Minute
 )
 
+// Live router stats (dashboard polling) get their own, smaller bucket so they
+// neither starve nor are starved by the probe bucket.
+const (
+	mikrotikStatsLimit       = 10
+	mikrotikStatsLimitWindow = time.Minute
+)
+
 // registerMikrotikRoutes mounts /app/mikrotik under the authenticated group.
 // Tenant rules match CRM/receivable and the whole group is gated by the
 // mikrotik.enabled entitlement. Order per route: tenant + entitlement guards,
@@ -172,19 +198,23 @@ func registerMikrotikRoutes(protected *gin.RouterGroup, deps Dependencies) {
 		middleware.RequireEntitlement(deps.CRMEntitlementChecker, "mikrotik.enabled"),
 	)
 	// Fail open when no counter is configured or Redis errors (middleware behavior).
-	probeLimit := middleware.RateLimit(deps.MikrotikRateCounter, "rl:mikrotik:org:", mikrotikProbeLimit, mikrotikProbeLimitWindow,
-		func(c *gin.Context) string {
-			if tc, ok := coretenant.FromContext(c.Request.Context()); ok {
-				return tc.OrganizationID()
-			}
-			return "unknown"
-		})
-	deps.MikrotikRouterHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
+	orgKey := func(c *gin.Context) string {
+		if tc, ok := coretenant.FromContext(c.Request.Context()); ok {
+			return tc.OrganizationID()
+		}
+		return "unknown"
+	}
+	probeLimit := middleware.RateLimit(deps.MikrotikRateCounter, "rl:mikrotik:org:", mikrotikProbeLimit, mikrotikProbeLimitWindow, orgKey)
+	statsLimit := middleware.RateLimit(deps.MikrotikRateCounter, "rl:mikrotik:stats:org:", mikrotikStatsLimit, mikrotikStatsLimitWindow, orgKey)
+	deps.MikrotikRouterHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit, statsLimit)
 	if deps.MikrotikSetupHandler != nil {
 		deps.MikrotikSetupHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
 	}
 	if deps.MikrotikSecretHandler != nil {
 		deps.MikrotikSecretHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
+	}
+	if deps.MikrotikSecretOnboardingHandler != nil {
+		deps.MikrotikSecretOnboardingHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)
 	}
 	if deps.MikrotikPolicyHandler != nil {
 		deps.MikrotikPolicyHandler.RegisterRoutes(group, deps.PermissionChecker, probeLimit)

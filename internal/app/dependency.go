@@ -90,12 +90,14 @@ type Dependencies struct {
 	CRMSalesOrderHandler             *crmhandler.SalesOrderHandler
 	CRMDealOrdersHandler             *crmhandler.DealOrdersHandler
 	ReceivableContractHandler        *receivablehandler.ContractHandler
+	ReceivableArrearsHandler         *receivablehandler.ArrearsHandler
 	ReceivableOverviewHandler        *receivablehandler.OverviewHandler
 	ReceivableSettlementHandler      *receivablehandler.SettlementHandler
 	ReceivableAccountHandler         *receivablehandler.AccountHandler
 	MikrotikRouterHandler            *mikrotikhandler.RouterHandler
 	MikrotikSetupHandler             *mikrotikhandler.SetupHandler
 	MikrotikSecretHandler            *mikrotikhandler.SecretHandler
+	MikrotikSecretOnboardingHandler  *mikrotikhandler.SecretOnboardingHandler
 	MikrotikPolicyHandler            *mikrotikhandler.PolicyHandler
 	MikrotikTaskHandler              *mikrotikhandler.TaskHandler
 	MikrotikOnboardingHandler        *mikrotikhandler.OnboardingHandler

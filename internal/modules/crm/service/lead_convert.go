@@ -58,6 +58,12 @@ func (s *leadService) Convert(ctx context.Context, scope coretenant.Scope, id st
 	if err := s.applyContactInput(ctx, scope, params.Contact, &tx); err != nil {
 		return domain.LeadConversionResult{}, err
 	}
+	if tx.ExistingContactID == "" && !params.AllowDuplicateContact && s.contactRepo != nil {
+		// Checked before anything is written: the UI offers the match instead.
+		if err := checkDuplicate(ctx, s.contactRepo, scope, lead.Email, lead.Phone, ""); err != nil {
+			return domain.LeadConversionResult{}, err
+		}
+	}
 	if params.Deal != nil {
 		dealInput := *params.Deal
 		if dealInput.OwnerUserID == "" {
@@ -103,6 +109,34 @@ func (s *leadService) Convert(ctx context.Context, scope coretenant.Scope, id st
 		}
 	}
 	return result, nil
+}
+
+// MatchContacts lists live contacts sharing the lead's email or WhatsApp
+// number (normalized), email match first, each contact once. The convert
+// dialog offers them as "use this contact".
+func (s *leadService) MatchContacts(ctx context.Context, scope coretenant.Scope, leadID string) ([]domain.Contact, error) {
+	lead, err := s.repo.FindByID(ctx, scope, leadID)
+	if err != nil {
+		return nil, crmmodule.MapNotFound(err, "LEAD_NOT_FOUND", "lead not found or already deleted")
+	}
+	matches := []domain.Contact{}
+	if s.contactRepo == nil {
+		return matches, nil
+	}
+	lookups := [][2]string{{NormalizeEmail(lead.Email), ""}, {"", NormalizePhone(lead.Phone)}}
+	for _, lookup := range lookups {
+		if lookup[0] == "" && lookup[1] == "" {
+			continue
+		}
+		contact, found, err := s.contactRepo.FindDuplicate(ctx, scope, lookup[0], lookup[1], "")
+		if err != nil {
+			return nil, err
+		}
+		if found && (len(matches) == 0 || matches[0].ID != contact.ID) {
+			matches = append(matches, contact)
+		}
+	}
+	return matches, nil
 }
 
 func (s *leadService) applyContactInput(ctx context.Context, scope coretenant.Scope, in *ConvertContactInput, tx *repository.ConvertLeadTxParams) error {

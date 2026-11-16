@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"zyad.cloud/internal/config"
+	"zyad.cloud/internal/core/businesstime"
 	coreerrors "zyad.cloud/internal/core/errors"
 	coretenant "zyad.cloud/internal/core/tenant"
 	crmrepo "zyad.cloud/internal/modules/crm/repository"
@@ -16,10 +17,12 @@ import (
 	"zyad.cloud/internal/modules/organization"
 	organizationrepo "zyad.cloud/internal/modules/organization/repository"
 	organizationservice "zyad.cloud/internal/modules/organization/service"
+	receivabledomain "zyad.cloud/internal/modules/receivable/domain"
 	receivablerepo "zyad.cloud/internal/modules/receivable/repository"
 	receivableservice "zyad.cloud/internal/modules/receivable/service"
 	whatsappservice "zyad.cloud/internal/modules/whatsapp/service"
 	"zyad.cloud/internal/platform/database"
+	"zyad.cloud/internal/platform/doku"
 )
 
 // MikrotikIsolationWorkerIdentity is the WorkerResolver identity of the isolation job.
@@ -73,6 +76,17 @@ type isolationProcessor interface {
 	RunRestoreOnly(ctx context.Context, scope coretenant.Scope, batch int) (mikrotikservice.ProcessResult, error)
 }
 
+// isolatedPaymentSyncer asks the payment provider for the status of an invoice
+// whose customer may have paid without ever opening the pay page again.
+type isolatedPaymentSyncer interface {
+	SyncInvoice(ctx context.Context, scope coretenant.Scope, invoiceID string) (receivabledomain.InvoiceStatus, error)
+}
+
+// isolatedAccounts lists the accounts that currently own an isolated secret.
+type isolatedAccounts interface {
+	AccountsWithIsolatedSecrets(ctx context.Context, scope coretenant.Scope) ([]string, error)
+}
+
 type mikrotikIsolationRunnerDeps struct {
 	Mode       string
 	Orgs       receivableservice.OrganizationLister
@@ -81,6 +95,12 @@ type mikrotikIsolationRunnerDeps struct {
 	Readiness  isolationReadiness
 	Reconciler isolationReconciler
 	Processor  isolationProcessor
+	// PaymentSync, Isolated, Invoices and Now are optional: without PaymentSync
+	// the runner relies on the provider webhook alone.
+	PaymentSync isolatedPaymentSyncer
+	Isolated    isolatedAccounts
+	Invoices    mikrotikservice.OverdueSource
+	Now         func() time.Time
 }
 
 // IsolationRunResult summarizes one RunOnce. It carries counts only, never
@@ -111,6 +131,9 @@ type MikrotikIsolationRunner struct {
 
 func newMikrotikIsolationRunner(d mikrotikIsolationRunnerDeps) *MikrotikIsolationRunner {
 	d.Mode = mikrotikIsolationMode(d.Mode)
+	if d.Now == nil {
+		d.Now = time.Now
+	}
 	return &MikrotikIsolationRunner{d: d, pageSize: mikrotikIsolationOrgPage}
 }
 
@@ -193,6 +216,10 @@ func (r *MikrotikIsolationRunner) runOrganization(ctx context.Context, orgID str
 		reconcile, process = r.d.Reconciler.RunOrganizationRestoreOnly, r.processRestoreOnly
 	}
 
+	// Before reconciling, so a payment confirmed here restores the customer in
+	// this very round instead of waiting for the next webhook or page visit.
+	r.syncIsolatedPayments(ctx, scope)
+
 	rec, recErr := reconcile(ctx, scope)
 	res.Accounts += rec.Accounts
 	res.AccountsFailed += rec.Failed
@@ -214,6 +241,36 @@ func (r *MikrotikIsolationRunner) runOrganization(ctx context.Context, orgID str
 	res.Tasks.Skipped += proc.Skipped
 	if err != nil {
 		fail("process", err)
+	}
+}
+
+// syncIsolatedPayments polls the provider for the invoices that isolated
+// customers owe. A failure never stops the round: the webhook and the
+// customer's own page visit remain, and the next round retries.
+func (r *MikrotikIsolationRunner) syncIsolatedPayments(ctx context.Context, scope coretenant.Scope) {
+	if r.d.PaymentSync == nil || r.d.Isolated == nil || r.d.Invoices == nil {
+		return
+	}
+	accounts, err := r.d.Isolated.AccountsWithIsolatedSecrets(ctx, scope)
+	if err != nil {
+		slog.WarnContext(ctx, "mikrotik: list isolated accounts for payment sync failed", "organization_id", scope.OrganizationID(), "error", err)
+		return
+	}
+	today := businesstime.DayOf(r.d.Now())
+	for _, accountID := range accounts {
+		if ctx.Err() != nil {
+			return
+		}
+		invoices, err := r.d.Invoices.TriggerInvoices(ctx, scope, accountID, today)
+		if err != nil {
+			slog.WarnContext(ctx, "mikrotik: list trigger invoices for payment sync failed", "organization_id", scope.OrganizationID(), "account_id", accountID, "error", err)
+			continue
+		}
+		for _, inv := range invoices {
+			if _, err := r.d.PaymentSync.SyncInvoice(ctx, scope, inv.ID); err != nil {
+				slog.WarnContext(ctx, "mikrotik: payment status sync failed", "organization_id", scope.OrganizationID(), "invoice_id", inv.ID, "error", err)
+			}
+		}
 	}
 }
 
@@ -260,7 +317,22 @@ func NewMikrotikIsolationRunner(cfg config.Config, db *database.Pool, log *slog.
 	if err != nil {
 		return nil, err
 	}
+	// The worker has no DOKU client of its own. Without credentials doku
+	// falls back to a Noop client whose CheckStatus always says SUCCESS, which
+	// would mark real invoices paid: sync only with real credentials.
+	dokuCfg := doku.Config{
+		BaseURL: cfg.Doku.BaseURL, ClientID: cfg.Doku.ClientID, SecretKey: cfg.Doku.SecretKey, FrontendURL: cfg.App.FrontendURL,
+	}
+	var paymentSync isolatedPaymentSyncer
+	if dokuCfg.HasCredentials() {
+		b.Doku = doku.NewHTTPClient(dokuCfg)
+	} else {
+		log.Warn("mikrotik: DOKU credentials missing, isolated customers rely on the webhook only")
+	}
 	module := buildReceivable(b)
+	if dokuCfg.HasCredentials() {
+		paymentSync = module.OnlinePayment
+	}
 
 	routerRepo := mikrotikrepo.NewRouterRepository(db)
 	secretRepo := mikrotikrepo.NewSecretRepository(db)
@@ -299,6 +371,8 @@ func NewMikrotikIsolationRunner(cfg config.Config, db *database.Pool, log *slog.
 		Readiness:  mikrotikReadiness{routers: routerRepo, secrets: secretRepo},
 		Reconciler: mikrotikservice.NewReconciler(source, secretRepo, eval, nil),
 		Processor:  processor,
+
+		PaymentSync: paymentSync, Isolated: secretRepo, Invoices: source,
 	}), nil
 }
 

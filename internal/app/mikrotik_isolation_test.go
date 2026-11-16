@@ -13,6 +13,7 @@ import (
 	coretenant "zyad.cloud/internal/core/tenant"
 	mikrotikservice "zyad.cloud/internal/modules/mikrotik/service"
 	"zyad.cloud/internal/modules/organization"
+	receivabledomain "zyad.cloud/internal/modules/receivable/domain"
 	receivableservice "zyad.cloud/internal/modules/receivable/service"
 )
 
@@ -355,5 +356,60 @@ func TestRunner_DryRun_RestoreOnlyDoesNotProcess(t *testing.T) {
 	}
 	if e.rec.restoreOnly.sorted() != "[org-a]" || len(e.proc.restoreOnly.ids)+len(e.proc.calls.ids) != 0 {
 		t.Fatalf("reconciler=%v processor=%v/%v", e.rec.restoreOnly.ids, e.proc.calls.ids, e.proc.restoreOnly.ids)
+	}
+}
+
+type isoIsolated map[string][]string // org -> account ids
+
+func (m isoIsolated) AccountsWithIsolatedSecrets(_ context.Context, scope coretenant.Scope) ([]string, error) {
+	return m[scope.OrganizationID()], nil
+}
+
+// isoInvoices returns one overdue invoice "inv-<account>" per account.
+type isoInvoices struct{ mikrotikservice.OverdueSource }
+
+func (isoInvoices) TriggerInvoices(_ context.Context, _ coretenant.Scope, accountID string, _ time.Time) ([]mikrotikservice.TriggerInvoice, error) {
+	return []mikrotikservice.TriggerInvoice{{ID: "inv-" + accountID}}, nil
+}
+
+type isoSyncer struct {
+	isoCalls
+	failFor string
+}
+
+func (s *isoSyncer) SyncInvoice(_ context.Context, _ coretenant.Scope, invoiceID string) (receivabledomain.InvoiceStatus, error) {
+	s.add(invoiceID)
+	if invoiceID == s.failFor {
+		return "", errors.New("doku down")
+	}
+	return receivabledomain.InvoicePaid, nil
+}
+
+func TestRunOrganization_SyncsOnlyIsolatedAccounts(t *testing.T) {
+	e := newIsoEnv(mikrotikservice.ModeOn, []string{"org-a"}, isoFeatures{}, isoReadiness{ready: map[string]bool{"org-a": true}})
+	sync := &isoSyncer{failFor: "inv-acc-1"}
+	// acc-1 and acc-2 are isolated; acc-3 is overdue but not isolated and must not be polled.
+	e.runner.d.PaymentSync = sync
+	e.runner.d.Isolated = isoIsolated{"org-a": {"acc-1", "acc-2"}}
+	e.runner.d.Invoices = isoInvoices{}
+	res, err := e.runner.RunOnce(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sync.sorted(); got != "[inv-acc-1 inv-acc-2]" {
+		t.Fatalf("synced %s; the failure on acc-1 must not stop acc-2", got)
+	}
+	if res.Failed != 0 {
+		t.Fatalf("a payment sync failure must not fail the round: %+v", res)
+	}
+	if got := e.rec.calls.sorted(); got != "[org-a]" {
+		t.Fatalf("reconcile must still run: %s", got)
+	}
+}
+
+func TestRunOrganization_NoPaymentSyncerIsANoop(t *testing.T) {
+	e := newIsoEnv(mikrotikservice.ModeOn, []string{"org-a"}, isoFeatures{}, isoReadiness{ready: map[string]bool{"org-a": true}})
+	if _, err := e.runner.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }

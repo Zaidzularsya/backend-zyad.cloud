@@ -45,6 +45,10 @@ type Invoice struct {
 	Notes                                                               string
 	PaidAt, VoidedAt                                                    *time.Time
 	VoidReason                                                          string
+	// IsolirFlag: the owner chose that this (arrears) invoice may trigger isolation.
+	IsolirFlag bool
+	// ArrearsRecordingID: set when the invoice was created by an arrears recording.
+	ArrearsRecordingID string
 	Items                                                               []InvoiceItem
 	CreatedBy                                                           string
 	CreatedAt, UpdatedAt                                                time.Time

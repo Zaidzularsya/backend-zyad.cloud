@@ -46,6 +46,14 @@ func (s *countingRouterService) Check(context.Context, coretenant.Scope, string)
 	s.calls++
 	return mikrotikdomain.Router{}, nil
 }
+func (s *countingRouterService) Summary(context.Context, coretenant.Scope, string) (mikrotikdomain.RouterSummary, error) {
+	s.calls++
+	return mikrotikdomain.RouterSummary{}, nil
+}
+func (s *countingRouterService) Stats(context.Context, coretenant.Scope, string) (mikrotikdomain.RouterStats, error) {
+	s.calls++
+	return mikrotikdomain.RouterStats{}, nil
+}
 func (s *countingRouterService) Update(context.Context, coretenant.Scope, string, mikrotikservice.UpdateInput) (mikrotikdomain.Router, error) {
 	s.calls++
 	return mikrotikdomain.Router{}, nil
@@ -122,6 +130,11 @@ func (s *countingSetupService) Apply(context.Context, coretenant.Scope, string, 
 func (s *countingSetupService) Cleanup(context.Context, coretenant.Scope, string, string) (mikrotikdomain.Router, error) {
 	s.calls++
 	return mikrotikdomain.Router{}, nil
+}
+
+func (s *countingSetupService) AllowlistHealth(context.Context, coretenant.Scope, string) (mikrotikservice.AllowlistHealth, error) {
+	s.calls++
+	return mikrotikservice.AllowlistHealth{}, nil
 }
 
 func TestMikrotikSetupRoutesAreGatedByEntitlement(t *testing.T) {

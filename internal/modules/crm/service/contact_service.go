@@ -45,6 +45,9 @@ func NewContactService(repo repository.ContactRepository, options ...ContactServ
 }
 
 func (s *contactService) Create(ctx context.Context, scope coretenant.Scope, params repository.CreateContactParams) (domain.Contact, error) {
+	if err := checkDuplicate(ctx, s.repo, scope, params.Email, params.Phone, ""); err != nil {
+		return domain.Contact{}, err
+	}
 	if err := s.requireCreateQuota(ctx, scope); err != nil {
 		return domain.Contact{}, err
 	}
@@ -82,6 +85,9 @@ func (s *contactService) List(ctx context.Context, scope coretenant.Scope, filte
 }
 
 func (s *contactService) Update(ctx context.Context, scope coretenant.Scope, id string, params repository.UpdateContactParams) (domain.Contact, error) {
+	if err := s.checkUpdateDuplicate(ctx, scope, id, params); err != nil {
+		return domain.Contact{}, err
+	}
 	contact, err := s.repo.Update(ctx, scope, id, params)
 	if err != nil {
 		return domain.Contact{}, crmmodule.MapNotFound(err, "CONTACT_NOT_FOUND", "contact not found or already deleted")
@@ -100,4 +106,24 @@ func (s *contactService) Restore(ctx context.Context, scope coretenant.Scope, id
 		return err
 	}
 	return crmmodule.MapNotFound(s.repo.Restore(ctx, scope, id, restoredBy), "CONTACT_NOT_FOUND", "contact not found or not deleted")
+}
+
+// checkUpdateDuplicate only checks an email/phone the edit actually changes,
+// so legacy duplicates stay editable until someone touches the shared value.
+func (s *contactService) checkUpdateDuplicate(ctx context.Context, scope coretenant.Scope, id string, params repository.UpdateContactParams) error {
+	if params.Email == nil && params.Phone == nil {
+		return nil
+	}
+	current, err := s.repo.FindByID(ctx, scope, id)
+	if err != nil {
+		return crmmodule.MapNotFound(err, "CONTACT_NOT_FOUND", "contact not found or already deleted")
+	}
+	email, rawPhone := "", ""
+	if params.Email != nil && NormalizeEmail(*params.Email) != NormalizeEmail(current.Email) {
+		email = *params.Email
+	}
+	if params.Phone != nil && NormalizePhone(*params.Phone) != NormalizePhone(current.Phone) {
+		rawPhone = *params.Phone
+	}
+	return checkDuplicate(ctx, s.repo, scope, email, rawPhone, id)
 }

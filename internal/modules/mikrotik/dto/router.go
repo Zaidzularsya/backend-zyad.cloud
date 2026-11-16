@@ -34,28 +34,43 @@ type RouterListQuery struct {
 
 // RouterResponse never carries the password: only whether one is stored.
 type RouterResponse struct {
-	ID                string     `json:"id"`
-	Name              string     `json:"name"`
-	Host              string     `json:"host"`
-	Port              int        `json:"port"`
-	APIType           string     `json:"api_type"`
-	UseTLS            bool       `json:"use_tls"`
-	TLSFingerprint    string     `json:"tls_fingerprint,omitempty"`
-	Username          string     `json:"username"`
-	HasPassword       bool       `json:"has_password"`
-	IsolirReady       bool       `json:"isolir_ready"`
-	IsolirReadyAt     *time.Time `json:"isolir_ready_at,omitempty"`
-	IsolirProfileName string     `json:"isolir_profile_name,omitempty"`
-	IsolirRedirectURL string     `json:"isolir_redirect_url,omitempty"`
-	LastCheckAt       *time.Time `json:"last_check_at,omitempty"`
-	LastCheckStatus   string     `json:"last_check_status,omitempty"`
-	RouterOSVersion   string     `json:"routeros_version,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
+	ID                string                 `json:"id"`
+	Name              string                 `json:"name"`
+	Host              string                 `json:"host"`
+	Port              int                    `json:"port"`
+	APIType           string                 `json:"api_type"`
+	UseTLS            bool                   `json:"use_tls"`
+	TLSFingerprint    string                 `json:"tls_fingerprint,omitempty"`
+	Username          string                 `json:"username"`
+	HasPassword       bool                   `json:"has_password"`
+	IsolirReady       bool                   `json:"isolir_ready"`
+	IsolirReadyAt     *time.Time             `json:"isolir_ready_at,omitempty"`
+	IsolirProfileName string                 `json:"isolir_profile_name,omitempty"`
+	IsolirRedirectURL string                 `json:"isolir_redirect_url,omitempty"`
+	Setup             *SetupSnapshotResponse `json:"setup"`
+	LastCheckAt       *time.Time             `json:"last_check_at,omitempty"`
+	LastCheckStatus   string                 `json:"last_check_status,omitempty"`
+	RouterOSVersion   string                 `json:"routeros_version,omitempty"`
+	CreatedAt         time.Time              `json:"created_at"`
+	UpdatedAt         time.Time              `json:"updated_at"`
+}
+
+// SetupSnapshotResponse is the last applied setup input (no hosts), or null.
+type SetupSnapshotResponse struct {
+	ProfileName string `json:"profile_name"`
+	PoolCIDR    string `json:"pool_cidr"`
+	RateLimit   string `json:"rate_limit"`
+	RedirectURL string `json:"redirect_url"`
 }
 
 func RouterFromDomain(r domain.Router) RouterResponse {
-	return RouterResponse{
+	var snap *SetupSnapshotResponse
+	if r.Setup != nil {
+		v := SetupSnapshotResponse(*r.Setup)
+		snap = &v
+	}
+	return RouterResponse{Setup: snap,
+
 		ID: r.ID, Name: r.Name, Host: r.Host, Port: r.Port, APIType: string(r.APIType),
 		UseTLS: r.UseTLS, TLSFingerprint: r.TLSFingerprint, Username: r.Username,
 		HasPassword: r.PasswordEncrypted != "",
@@ -63,6 +78,64 @@ func RouterFromDomain(r domain.Router) RouterResponse {
 		IsolirProfileName: r.IsolirProfileName, IsolirRedirectURL: r.IsolirRedirectURL,
 		LastCheckAt: r.LastCheckAt, LastCheckStatus: r.LastCheckStatus,
 		RouterOSVersion: r.RouterOSVersion, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}
+}
+
+// RouterSummaryResponse always carries every task status key, zero when absent.
+type RouterSummaryResponse struct {
+	Secrets RouterSummarySecrets `json:"secrets"`
+	Tasks   RouterSummaryTasks   `json:"tasks"`
+}
+
+type RouterSummarySecrets struct {
+	Total               int `json:"total"`
+	Paired              int `json:"paired"`
+	Unpaired            int `json:"unpaired"`
+	Missing             int `json:"missing"`
+	NeedOriginalProfile int `json:"need_original_profile"`
+	Isolated            int `json:"isolated"`
+}
+
+type RouterSummaryTasks struct {
+	Pending   int `json:"pending"`
+	Running   int `json:"running"`
+	Failed    int `json:"failed"`
+	Done      int `json:"done"`
+	Cancelled int `json:"cancelled"`
+}
+
+func RouterSummaryFromDomain(s domain.RouterSummary) RouterSummaryResponse {
+	return RouterSummaryResponse{
+		Secrets: RouterSummarySecrets{
+			Total: s.SecretsTotal, Paired: s.SecretsPaired, Unpaired: s.SecretsUnpaired,
+			Missing: s.SecretsMissing, NeedOriginalProfile: s.SecretsNeedOriginalProfile, Isolated: s.SecretsIsolated,
+		},
+		Tasks: RouterSummaryTasks{
+			Pending: s.TaskCounts["pending"], Running: s.TaskCounts["running"], Failed: s.TaskCounts["failed"],
+			Done: s.TaskCounts["done"], Cancelled: s.TaskCounts["cancelled"],
+		},
+	}
+}
+
+// RouterStatsResponse is the live router read; unreadable numbers are null.
+type RouterStatsResponse struct {
+	Identity     string    `json:"identity"`
+	BoardName    string    `json:"board_name"`
+	Version      string    `json:"version"`
+	Architecture string    `json:"architecture"`
+	Uptime       string    `json:"uptime"`
+	CPULoad      *int      `json:"cpu_load"`
+	MemoryTotal  *int64    `json:"memory_total"`
+	MemoryFree   *int64    `json:"memory_free"`
+	PPPActive    *int      `json:"ppp_active"`
+	FetchedAt    time.Time `json:"fetched_at"`
+}
+
+func RouterStatsFromDomain(s domain.RouterStats) RouterStatsResponse {
+	return RouterStatsResponse{
+		Identity: s.Identity, BoardName: s.BoardName, Version: s.Version, Architecture: s.Architecture,
+		Uptime: s.Uptime, CPULoad: s.CPULoad, MemoryTotal: s.MemoryTotal, MemoryFree: s.MemoryFree,
+		PPPActive: s.PPPActive, FetchedAt: s.FetchedAt,
 	}
 }
 

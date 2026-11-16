@@ -1,0 +1,1 @@
+ALTER TABLE crm_deals DROP COLUMN IF EXISTS source;

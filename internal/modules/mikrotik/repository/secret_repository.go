@@ -97,6 +97,9 @@ type SecretRepository interface {
 	ListIsolated(ctx context.Context, scope coretenant.Scope, afterID string, limit int) ([]domain.PPPSecret, error)
 	// CountIsolated counts what ListIsolated pages through (same filters).
 	CountIsolated(ctx context.Context, scope coretenant.Scope) (int, error)
+	// CountByDisabled counts the secrets still present on live routers by the
+	// router's disabled flag; routerID "" = every router.
+	CountByDisabled(ctx context.Context, scope coretenant.Scope, routerID string) (active, inactive int, err error)
 }
 
 type secretRepository struct {
@@ -630,6 +633,17 @@ func (r *secretRepository) ListIsolated(ctx context.Context, scope coretenant.Sc
 const isolatedSecretsFrom = ` FROM mikrotik_ppp_secrets s
 			JOIN mikrotik_routers rt ON rt.organization_id = s.organization_id AND rt.id = s.router_id
 			WHERE s.organization_id = $1 AND s.isolation_state = 'isolated' AND rt.deleted_at IS NULL`
+
+func (r *secretRepository) CountByDisabled(ctx context.Context, scope coretenant.Scope, routerID string) (active, inactive int, err error) {
+	err = withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+			SELECT count(*) FILTER (WHERE NOT s.disabled), count(*) FILTER (WHERE s.disabled)
+			FROM mikrotik_ppp_secrets s
+			WHERE s.organization_id = $1 AND s.present AND `+liveRouterOnly+`
+				AND ($2 = '' OR s.router_id::text = $2)`, scope.OrganizationID(), routerID).Scan(&active, &inactive)
+	})
+	return active, inactive, err
+}
 
 func (r *secretRepository) CountIsolated(ctx context.Context, scope coretenant.Scope) (int, error) {
 	var n int
