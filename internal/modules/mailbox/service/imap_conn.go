@@ -16,6 +16,7 @@ import (
 	"github.com/emersion/go-message/mail"
 
 	"zyad.cloud/internal/modules/mailbox/domain"
+	platformmail "zyad.cloud/internal/platform/mail"
 )
 
 // imapOperationTimeout bounds one sync pass for one mailbox (connect,
@@ -59,7 +60,12 @@ func dialIMAP(ctx context.Context, cfg IMAPDialConfig, allowPrivateHosts bool) (
 		return nil, fmt.Errorf("imap starttls: %w", err)
 	}
 
-	if err := client.Login(cfg.Username, cfg.Password).Wait(); err != nil {
+	if cfg.AccessToken != "" {
+		if err := client.Authenticate(platformmail.XOAuth2SASL{User: cfg.Username, Token: cfg.AccessToken}); err != nil {
+			_ = client.Close()
+			return nil, fmt.Errorf("imap authenticate xoauth2: %w", err)
+		}
+	} else if err := client.Login(cfg.Username, cfg.Password).Wait(); err != nil {
 		_ = client.Close()
 		return nil, fmt.Errorf("imap login: %w", err)
 	}

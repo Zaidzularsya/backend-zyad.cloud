@@ -13,7 +13,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	corecrypto "zyad.cloud/internal/core/crypto"
 	coretenant "zyad.cloud/internal/core/tenant"
 	assetdomain "zyad.cloud/internal/modules/asset/domain"
 	assetservice "zyad.cloud/internal/modules/asset/service"
@@ -71,6 +70,7 @@ type MessageServiceOptions struct {
 	SecretKey         string
 	AllowPrivateHosts bool
 	Send              EnvelopeSender
+	MicrosoftOAuth    MicrosoftOAuth
 	Log               *slog.Logger
 	// Synchronous delivers inside Send instead of in a goroutine (tests).
 	Synchronous bool
@@ -81,9 +81,9 @@ type MessageService struct {
 	messages    repository.MessageRepository
 	storage     AttachmentStorage
 	crm         CRMEntities
-	secretKey   string
 	allowAny    bool
 	send        EnvelopeSender
+	creds       *credentialResolver
 	log         *slog.Logger
 	synchronous bool
 	now         func() time.Time
@@ -109,9 +109,9 @@ func NewMessageService(
 		messages:    messages,
 		storage:     storage,
 		crm:         crm,
-		secretKey:   options.SecretKey,
 		allowAny:    options.AllowPrivateHosts,
 		send:        send,
+		creds:       newCredentialResolver(options.SecretKey, mailboxes, options.MicrosoftOAuth),
 		log:         log,
 		synchronous: options.Synchronous,
 		now:         time.Now,
@@ -244,9 +244,9 @@ func (s *MessageService) deliver(ctx context.Context, scope coretenant.Scope, us
 	sendCtx, cancel := context.WithTimeout(ctx, deliveryTimeout)
 	defer cancel()
 
-	password, err := corecrypto.DecryptSecret(s.secretKey, mailbox.SecretEncrypted)
+	creds, err := s.creds.resolve(sendCtx, scope, mailbox)
 	if err == nil {
-		cfg := smtpConfig(mailbox.EmailAddress, mailbox.DisplayName, mailbox.Username, password,
+		cfg := smtpConfig(mailbox.EmailAddress, mailbox.DisplayName, creds,
 			mailbox.SMTPHost, mailbox.SMTPPort, mailbox.SMTPSecurity, s.allowAny)
 		err = s.send(sendCtx, cfg, mailbox.EmailAddress, recipients, raw)
 	}

@@ -24,18 +24,20 @@ const mailboxColumns = `
 	id, user_id, email_address, COALESCE(display_name, ''), username, secret_encrypted,
 	smtp_host, smtp_port, smtp_security,
 	COALESCE(imap_host, ''), COALESCE(imap_port, 0), COALESCE(imap_security, ''),
-	status, COALESCE(last_error, ''), sync_cursor, last_synced_at, created_at, updated_at
+	status, COALESCE(last_error, ''), sync_cursor, last_synced_at, created_at, updated_at,
+	auth_method, COALESCE(access_token_encrypted, ''), access_token_expires_at
 `
 
 func scanMailbox(row pgx.Row) (domain.Mailbox, error) {
 	var m domain.Mailbox
-	var smtpSecurity, imapSecurity, status string
+	var smtpSecurity, imapSecurity, status, authMethod string
 	var cursor []byte
 	err := row.Scan(
 		&m.ID, &m.UserID, &m.EmailAddress, &m.DisplayName, &m.Username, &m.SecretEncrypted,
 		&m.SMTPHost, &m.SMTPPort, &smtpSecurity,
 		&m.IMAPHost, &m.IMAPPort, &imapSecurity,
 		&status, &m.LastError, &cursor, &m.LastSyncedAt, &m.CreatedAt, &m.UpdatedAt,
+		&authMethod, &m.AccessTokenEncrypted, &m.AccessTokenExpiresAt,
 	)
 	if err != nil {
 		return domain.Mailbox{}, err
@@ -43,6 +45,7 @@ func scanMailbox(row pgx.Row) (domain.Mailbox, error) {
 	m.SMTPSecurity = domain.Security(smtpSecurity)
 	m.IMAPSecurity = domain.Security(imapSecurity)
 	m.Status = domain.MailboxStatus(status)
+	m.AuthMethod = domain.AuthMethod(authMethod)
 	m.SyncCursor = domain.SyncCursor{}
 	if len(cursor) > 0 {
 		if err := json.Unmarshal(cursor, &m.SyncCursor); err != nil {
@@ -96,12 +99,14 @@ func (r *mailboxRepository) Create(ctx context.Context, scope coretenant.Scope, 
 		mailbox, err = scanMailbox(tx.QueryRow(ctx, `
 			INSERT INTO user_mailboxes (
 				organization_id, user_id, email_address, display_name, username, secret_encrypted,
-				smtp_host, smtp_port, smtp_security, imap_host, imap_port, imap_security
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+				smtp_host, smtp_port, smtp_security, imap_host, imap_port, imap_security,
+				auth_method, access_token_encrypted, access_token_expires_at
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 			RETURNING `+mailboxColumns,
 			scope.OrganizationID(), userID, p.EmailAddress, nullableString(p.DisplayName), p.Username, p.SecretEncrypted,
 			p.SMTPHost, p.SMTPPort, string(p.SMTPSecurity),
 			nullableString(p.IMAPHost), nullableInt(p.IMAPPort), nullableString(string(p.IMAPSecurity)),
+			string(authMethodOrDefault(p.AuthMethod)), nullableString(p.AccessTokenEncrypted), p.AccessTokenExpiresAt,
 		))
 		if err != nil {
 			return err
@@ -129,6 +134,9 @@ func (r *mailboxRepository) Update(ctx context.Context, scope coretenant.Scope, 
 				secret_encrypted = COALESCE($7, secret_encrypted),
 				smtp_host = $8, smtp_port = $9, smtp_security = $10,
 				imap_host = $11, imap_port = $12, imap_security = $13,
+				auth_method = CASE WHEN $7::text IS NULL THEN auth_method ELSE $14 END,
+				access_token_encrypted = CASE WHEN $7::text IS NULL THEN access_token_encrypted ELSE $15 END,
+				access_token_expires_at = CASE WHEN $7::text IS NULL THEN access_token_expires_at ELSE $16 END,
 				status = 'active', last_error = NULL, updated_at = now()
 			WHERE organization_id = $1 AND user_id = $2 AND id = $3
 			RETURNING `+mailboxColumns,
@@ -136,6 +144,7 @@ func (r *mailboxRepository) Update(ctx context.Context, scope coretenant.Scope, 
 			p.EmailAddress, nullableString(p.DisplayName), p.Username, nullableString(p.SecretEncrypted),
 			p.SMTPHost, p.SMTPPort, string(p.SMTPSecurity),
 			nullableString(p.IMAPHost), nullableInt(p.IMAPPort), nullableString(string(p.IMAPSecurity)),
+			string(authMethodOrDefault(p.AuthMethod)), nullableString(p.AccessTokenEncrypted), p.AccessTokenExpiresAt,
 		))
 		return err
 	})
@@ -171,6 +180,28 @@ func (r *mailboxRepository) UpdateSyncCursor(ctx context.Context, scope coretena
 		`, scope.OrganizationID(), id, encoded, syncedAt)
 		return err
 	})
+}
+
+// UpdateOAuthTokens stores a refreshed token set. Microsoft rotates the
+// refresh token on every refresh, so it is replaced too (empty keeps it).
+func (r *mailboxRepository) UpdateOAuthTokens(ctx context.Context, scope coretenant.Scope, id string, tokens OAuthTokenParams) error {
+	return withTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			UPDATE user_mailboxes SET
+				secret_encrypted = COALESCE($3, secret_encrypted),
+				access_token_encrypted = $4, access_token_expires_at = $5, updated_at = now()
+			WHERE organization_id = $1 AND id = $2 AND auth_method <> 'password'
+		`, scope.OrganizationID(), id, nullableString(tokens.RefreshTokenEncrypted),
+			tokens.AccessTokenEncrypted, tokens.AccessTokenExpiresAt)
+		return err
+	})
+}
+
+func authMethodOrDefault(method domain.AuthMethod) domain.AuthMethod {
+	if method == "" {
+		return domain.AuthMethodPassword
+	}
+	return method
 }
 
 func (r *mailboxRepository) SetStatus(ctx context.Context, scope coretenant.Scope, id string, status domain.MailboxStatus, lastError string) error {

@@ -166,6 +166,12 @@ func LoadMail() MailConfig {
 		MailSyncIntervalSeconds:  getEnvInt("MAIL_SYNC_INTERVAL_SECONDS", 300),
 		MailSyncInitialDays:      getEnvInt("MAIL_SYNC_INITIAL_DAYS", 30),
 		MailSyncBatchLimit:       getEnvInt("MAIL_SYNC_BATCH_LIMIT", 200),
+
+		MicrosoftOAuthClientID:     getEnv("MICROSOFT_OAUTH_CLIENT_ID", ""),
+		MicrosoftOAuthClientSecret: getEnv("MICROSOFT_OAUTH_CLIENT_SECRET", ""),
+		MicrosoftOAuthTenant:       getEnv("MICROSOFT_OAUTH_TENANT", "common"),
+		MicrosoftOAuthRedirectURL: getEnv("MICROSOFT_OAUTH_REDIRECT_URL",
+			strings.TrimRight(getEnv("APP_FRONTEND_URL", "http://localhost:3001"), "/")+"/oauth/microsoft/callback"),
 	}
 }
 

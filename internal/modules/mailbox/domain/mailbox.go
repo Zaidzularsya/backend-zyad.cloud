@@ -16,6 +16,22 @@ func (s Security) IsValid() bool {
 	return s == SecuritySSL || s == SecuritySTARTTLS
 }
 
+// AuthMethod is how the mailbox logs in to SMTP/IMAP.
+type AuthMethod string
+
+const (
+	// AuthMethodPassword: SecretEncrypted is the (app) password.
+	AuthMethodPassword AuthMethod = "password"
+	// AuthMethodMicrosoftOAuth: SecretEncrypted is a Microsoft identity
+	// platform refresh token; SMTP/IMAP use SASL XOAUTH2 with an access
+	// token derived from it (cached in AccessTokenEncrypted).
+	AuthMethodMicrosoftOAuth AuthMethod = "microsoft_oauth"
+)
+
+func (a AuthMethod) IsOAuth() bool {
+	return a == AuthMethodMicrosoftOAuth
+}
+
 type MailboxStatus string
 
 const (
@@ -33,18 +49,23 @@ type Mailbox struct {
 	DisplayName     string
 	Username        string
 	SecretEncrypted string
-	SMTPHost        string
-	SMTPPort        int
-	SMTPSecurity    Security
-	IMAPHost        string
-	IMAPPort        int
-	IMAPSecurity    Security
-	Status          MailboxStatus
-	LastError       string
-	SyncCursor      SyncCursor
-	LastSyncedAt    *time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	AuthMethod      AuthMethod
+	// AccessTokenEncrypted/AccessTokenExpiresAt cache the OAuth access
+	// token; empty/nil for password mailboxes.
+	AccessTokenEncrypted string
+	AccessTokenExpiresAt *time.Time
+	SMTPHost             string
+	SMTPPort             int
+	SMTPSecurity         Security
+	IMAPHost             string
+	IMAPPort             int
+	IMAPSecurity         Security
+	Status               MailboxStatus
+	LastError            string
+	SyncCursor           SyncCursor
+	LastSyncedAt         *time.Time
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
 }
 
 // HasIMAP reports whether inbox sync can run for this mailbox.

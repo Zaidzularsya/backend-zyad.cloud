@@ -52,6 +52,8 @@ type IMAPDialConfig struct {
 	Security domain.Security
 	Username string
 	Password string
+	// AccessToken, when set, logs in with SASL XOAUTH2 instead of Password.
+	AccessToken string
 }
 
 // IMAPDialer connects and authenticates, and selects INBOX.

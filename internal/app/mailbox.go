@@ -49,6 +49,7 @@ func NewMailSyncServiceWithStorage(cfg config.Config, db *database.Pool, assetSv
 			AllowPrivateHosts: cfg.Mail.MailboxAllowPrivateHosts,
 			InitialSyncDays:   cfg.Mail.MailSyncInitialDays,
 			BatchLimit:        cfg.Mail.MailSyncBatchLimit,
+			MicrosoftOAuth:    NewMicrosoftMailOAuth(cfg),
 			Log:               log,
 		},
 	)
@@ -65,4 +66,14 @@ func NewMailSyncService(cfg config.Config, db *database.Pool, log *slog.Logger) 
 		return nil
 	}
 	return NewMailSyncServiceWithStorage(cfg, db, assetSvc, log)
+}
+
+// NewMicrosoftMailOAuth is nil when MICROSOFT_OAUTH_CLIENT_ID is unset.
+func NewMicrosoftMailOAuth(cfg config.Config) mailboxservice.MicrosoftOAuth {
+	return mailboxservice.NewMicrosoftOAuth(mailboxservice.MicrosoftOAuthConfig{
+		ClientID:     cfg.Mail.MicrosoftOAuthClientID,
+		ClientSecret: cfg.Mail.MicrosoftOAuthClientSecret,
+		Tenant:       cfg.Mail.MicrosoftOAuthTenant,
+		RedirectURL:  cfg.Mail.MicrosoftOAuthRedirectURL,
+	})
 }

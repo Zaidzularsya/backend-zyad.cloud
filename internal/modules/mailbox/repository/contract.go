@@ -16,14 +16,28 @@ type MailboxParams struct {
 	EmailAddress string
 	DisplayName  string
 	Username     string
-	// SecretEncrypted empty on update keeps the stored password.
+	// SecretEncrypted empty on update keeps the stored secret, and with it
+	// the stored AuthMethod and cached access token.
 	SecretEncrypted string
-	SMTPHost        string
-	SMTPPort        int
-	SMTPSecurity    domain.Security
-	IMAPHost        string
-	IMAPPort        int
-	IMAPSecurity    domain.Security
+	// AuthMethod defaults to password. For OAuth, SecretEncrypted is the
+	// refresh token and the access token fields seed the token cache.
+	AuthMethod           domain.AuthMethod
+	AccessTokenEncrypted string
+	AccessTokenExpiresAt *time.Time
+	SMTPHost             string
+	SMTPPort             int
+	SMTPSecurity         domain.Security
+	IMAPHost             string
+	IMAPPort             int
+	IMAPSecurity         domain.Security
+}
+
+// OAuthTokenParams is a refreshed OAuth token set, already encrypted.
+type OAuthTokenParams struct {
+	// RefreshTokenEncrypted empty keeps the stored refresh token.
+	RefreshTokenEncrypted string
+	AccessTokenEncrypted  string
+	AccessTokenExpiresAt  time.Time
 }
 
 // MailboxRepository always filters by user_id: a mailbox is only visible to
@@ -39,6 +53,7 @@ type MailboxRepository interface {
 	Create(ctx context.Context, scope coretenant.Scope, userID string, params MailboxParams) (domain.Mailbox, error)
 	Update(ctx context.Context, scope coretenant.Scope, userID, id string, params MailboxParams) (domain.Mailbox, error)
 	SetStatus(ctx context.Context, scope coretenant.Scope, id string, status domain.MailboxStatus, lastError string) error
+	UpdateOAuthTokens(ctx context.Context, scope coretenant.Scope, id string, tokens OAuthTokenParams) error
 	// UpdateSyncCursor also clears an error status left by a previous failed
 	// sync, mirroring SetStatus(active) on a successful pass.
 	UpdateSyncCursor(ctx context.Context, scope coretenant.Scope, id string, cursor domain.SyncCursor, syncedAt time.Time) error

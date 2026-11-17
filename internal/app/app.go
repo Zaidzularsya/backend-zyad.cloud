@@ -473,6 +473,7 @@ func New(ctx context.Context) (*App, error) {
 	mailboxSvc := mailboxservice.NewMailboxService(mailboxRepo, mailMessageRepo, assetSvc, mailboxservice.MailboxServiceOptions{
 		SecretKey:         cfg.App.Secret,
 		AllowPrivateHosts: cfg.Mail.MailboxAllowPrivateHosts,
+		MicrosoftOAuth:    NewMicrosoftMailOAuth(cfg),
 	})
 	mailMessageSvc := mailboxservice.NewMessageService(
 		mailboxRepo, mailMessageRepo, assetSvc,
@@ -480,6 +481,7 @@ func New(ctx context.Context) (*App, error) {
 		mailboxservice.MessageServiceOptions{
 			SecretKey:         cfg.App.Secret,
 			AllowPrivateHosts: cfg.Mail.MailboxAllowPrivateHosts,
+			MicrosoftOAuth:    NewMicrosoftMailOAuth(cfg),
 			Log:               log,
 		},
 	)
