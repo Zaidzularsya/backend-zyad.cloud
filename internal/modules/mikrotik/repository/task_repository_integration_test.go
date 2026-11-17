@@ -659,3 +659,62 @@ func TestOldestPendingRestore(t *testing.T) {
 		t.Fatalf("cross-org: %v", other)
 	}
 }
+
+func TestLatestRestoreBySecret(t *testing.T) {
+	f := newIsoFixture(t)
+	e, repo := f.e, taskRepo(f.e)
+	if m, err := repo.LatestRestoreBySecret(e.ctx, f.scope, nil); err != nil || len(m) != 0 {
+		t.Fatalf("empty input: %v %v", m, err)
+	}
+	if m, err := repo.LatestRestoreBySecret(e.ctx, f.scope, []string{f.secretID}); err != nil || len(m) != 0 {
+		t.Fatalf("no tasks yet: %v %v", m, err)
+	}
+
+	secretRepo(e).MarkIsolated(e.ctx, f.scope, f.secretID, "")
+	pendingRestoreID := func() string {
+		t.Helper()
+		for _, v := range f.pending(t) {
+			if v.Action == domain.ActionRestore && v.Status == domain.TaskPending {
+				return v.ID
+			}
+		}
+		t.Fatal("no pending restore")
+		return ""
+	}
+	if ok, err := repo.EnqueueRestore(e.ctx, f.scope, f.secretID, "paid"); err != nil || !ok {
+		t.Fatalf("restore 1: %v %v", ok, err)
+	}
+	first := pendingRestoreID()
+	if err := repo.Complete(e.ctx, f.scope, first); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := repo.EnqueueRestore(e.ctx, f.scope, f.secretID, "paid"); err != nil || !ok {
+		t.Fatalf("restore 2: %v %v", ok, err)
+	}
+	second := pendingRestoreID()
+	if second == first {
+		t.Fatal("second restore must be a new task")
+	}
+	// A newer isolate task must not shadow the latest restore.
+	secretRepo(e).MarkNormal(e.ctx, f.scope, f.secretID)
+	if err := repo.Complete(e.ctx, f.scope, second); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := repo.EnqueueIsolate(e.ctx, f.scope, f.secretID, "overdue"); err != nil || !ok {
+		t.Fatalf("isolate: %v %v", ok, err)
+	}
+
+	got, err := repo.LatestRestoreBySecret(e.ctx, f.scope, []string{f.secretID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[f.secretID].ID != second || got[f.secretID].Action != domain.ActionRestore {
+		t.Fatalf("want latest restore %s, got %+v", second, got)
+	}
+
+	// RLS: another organization cannot see this secret's tasks.
+	other, err := repo.LatestRestoreBySecret(e.ctx, e.tenants.B.Scope, []string{f.secretID})
+	if err != nil || len(other) != 0 {
+		t.Fatalf("cross-tenant leak: %v %v", other, err)
+	}
+}

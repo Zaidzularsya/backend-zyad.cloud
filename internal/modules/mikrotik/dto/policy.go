@@ -33,6 +33,9 @@ func (r SetPolicyRequest) ParseExemptedUntil() (*time.Time, error) {
 
 type SetTriggerRequest struct {
 	Enabled *bool `json:"enabled" binding:"required"`
+	// EffectiveFrom (optional, YYYY-MM-DD, only with enabled=true): invoices due on or after
+	// this date can trigger isolation. Empty = today (WIB). Ignored when already enabled.
+	EffectiveFrom string `json:"effective_from"`
 }
 
 type PolicyResponse struct {

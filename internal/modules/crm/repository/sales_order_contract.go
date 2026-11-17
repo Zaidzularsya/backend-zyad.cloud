@@ -20,11 +20,14 @@ type SalesOrderDraftFields struct {
 	BillToName, BillToCompany, BillToEmail, BillToPhone, BillToAddress string
 	Channels                                                           []string
 	PICUserID                                                          string
+	// SkipInitialInvoice nil = unchanged (the SO edit form never sends it);
+	// only the mikrotik onboarding sets it.
+	SkipInitialInvoice *bool
 }
 
 type SalesOrderListFilter struct {
 	Status, BillingStatus, DealID, CompanyID, Search string
-	Limit, Offset                         int
+	Limit, Offset                                    int
 }
 
 type SalesOrderRepository interface {

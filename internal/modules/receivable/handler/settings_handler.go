@@ -57,7 +57,7 @@ func (h *SettingsHandler) Update(c *gin.Context) {
 	}
 	s, err := h.svc.Update(c.Request.Context(), scope, domain.Settings{
 		InvoiceLeadDays: req.InvoiceLeadDays, PaymentTermsDays: req.PaymentTermsDays,
-		DefaultChannels: req.DefaultChannels, DefaultSenderUserID: sender,
+		DefaultChannels: req.DefaultChannels, DefaultSenderUserID: sender, DefaultBillingDay: req.DefaultBillingDay,
 	}, permissionmiddleware.UserID(c))
 	if err != nil {
 		failReceivable(c, err)

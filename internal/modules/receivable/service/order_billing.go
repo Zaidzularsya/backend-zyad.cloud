@@ -32,6 +32,11 @@ type OrderBillingRequest struct {
 	Channels                                []string
 	PICUserID, Currency, Notes, ActorUserID string
 	Lines                                   []OrderLine
+	// SkipInitialInvoice: create account + contract only. Each recurring item
+	// starts at pricing.FirstPeriodIndex, so the billing run issues period 0
+	// on time when its moment is still ahead and never back-dates it. Not
+	// allowed with one-time prepaid lines (they would never be billed).
+	SkipInitialInvoice bool
 }
 
 type OrderBillingResult struct{ AccountID, InitialInvoiceID, ContractID string }
@@ -51,12 +56,14 @@ type orderBilling struct {
 	contracts repository.ContractRepository
 	counters  repository.CounterRepository
 	registry  *Registry
+	settings  repository.SettingsRepository
 	now       func() time.Time
 }
 
 func NewOrderBilling(accounts repository.AccountRepository, invoices InvoiceService, contracts repository.ContractRepository,
-	counters repository.CounterRepository, registry *Registry) OrderBilling {
-	return &orderBilling{accounts: accounts, invoices: invoices, contracts: contracts, counters: counters, registry: registry, now: time.Now}
+	counters repository.CounterRepository, registry *Registry, settings repository.SettingsRepository) OrderBilling {
+	return &orderBilling{accounts: accounts, invoices: invoices, contracts: contracts, counters: counters, registry: registry,
+		settings: settings, now: time.Now}
 }
 
 var indoMonths = [...]string{"Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"}
@@ -118,6 +125,14 @@ func (b *orderBilling) BillOrder(ctx context.Context, scope coretenant.Scope, re
 	prepaid, recurring, err := classify(req.Lines)
 	if err != nil {
 		return OrderBillingResult{}, err
+	}
+	if req.SkipInitialInvoice {
+		for _, c := range prepaid {
+			if c.recurringIdx < 0 {
+				return OrderBillingResult{}, invalidInvoice("Invoice awal tidak bisa dilewati: baris \"%s\" sekali bayar prabayar.", c.line.Description)
+			}
+		}
+		prepaid = nil
 	}
 
 	// 1. Account.
@@ -260,10 +275,20 @@ func (b *orderBilling) ensureContract(ctx context.Context, scope coretenant.Scop
 	if err != nil {
 		return domain.Contract{}, err
 	}
+	leadDays := 0
+	if req.SkipInitialInvoice {
+		if leadDays, err = b.invoiceLeadDays(ctx, scope); err != nil {
+			return domain.Contract{}, err
+		}
+	}
+	today := businesstime.DayOf(b.now())
 	items := make([]repository.ContractItemParams, len(recurring))
 	for i, c := range recurring {
 		index := 0
-		if c.attrs.PaymentTiming == pricing.Prepaid {
+		switch {
+		case req.SkipInitialInvoice:
+			index = pricing.FirstPeriodIndex(c.attrs.PaymentTiming, c.attrs.Frequency, start, today, leadDays)
+		case c.attrs.PaymentTiming == pricing.Prepaid:
 			index = 1 // periode pertama sudah ditagih di invoice awal
 		}
 		from, to := pricing.PeriodRange(start, c.attrs.Frequency, index)
@@ -292,6 +317,19 @@ func (b *orderBilling) ensureContract(ctx context.Context, scope coretenant.Scop
 	}
 	b.registry.ContractCreated(ctx, scope, ContractRef{ID: created.ID, Number: created.ContractNumber, SourceID: req.SourceID, SourceType: sourceType})
 	return created, nil
+}
+
+// invoiceLeadDays: the tenant's invoice_lead_days (the same value the billing
+// run uses for prepaid issue moments).
+func (b *orderBilling) invoiceLeadDays(ctx context.Context, scope coretenant.Scope) (int, error) {
+	if b.settings == nil {
+		return 0, errors.New("order billing: settings repository is required to skip the initial invoice")
+	}
+	s, err := b.settings.Get(ctx, scope)
+	if err != nil {
+		return 0, err
+	}
+	return s.InvoiceLeadDays, nil
 }
 
 func orChannels(c []string) []string {

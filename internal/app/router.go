@@ -354,6 +354,9 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		if deps.ReceivableOverviewHandler != nil {
 			deps.ReceivableOverviewHandler.RegisterRoutes(receivableGroup, deps.PermissionChecker)
 		}
+		if deps.ReceivableArrearsHandler != nil {
+			deps.ReceivableArrearsHandler.RegisterRoutes(receivableGroup, deps.PermissionChecker)
+		}
 	}
 
 	registerMikrotikRoutes(protected, deps)
@@ -428,6 +431,10 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.CRMTenantCheckoutHandler != nil {
 		// Checkout publik tenant: tenant dari host (organization_id klien diabaikan), rate limit per IP & tenant.
 		deps.CRMTenantCheckoutHandler.RegisterRoutes(publicModules)
+	}
+	if deps.MikrotikPublicHandler != nil {
+		// Halaman isolir publik: tenant dari host, rate limit per IP/query/tenant.
+		deps.MikrotikPublicHandler.RegisterRoutes(publicModules)
 	}
 	registerModuleRoutes(publicModules)
 	return router, nil

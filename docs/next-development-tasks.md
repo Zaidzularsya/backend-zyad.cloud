@@ -9,7 +9,7 @@
 ## P0 — Kritis (Risiko Data/Keamanan atau Blocking)
 
 ### P0-1. Klarifikasi & tindak lanjut cakupan RLS untuk `organization_*`, `customer_subscriptions`, dan `billing_*`
-- **Alasan prioritas**: RLS hanya melindungi tabel `landing_*`. Tabel `organization_*`,
+- **Alasan prioritas**: RLS belum melindungi tabel `organization_*`,
   `customer_subscriptions`/`subscription_events`, dan `billing_*` menyimpan data sensitif (membership,
   entitlement, subscription, invoice, payment) tanpa lapisan pertahanan database — bug filter manual di
   satu query bisa membocorkan data lintas tenant.

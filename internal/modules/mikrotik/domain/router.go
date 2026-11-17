@@ -35,11 +35,22 @@ type Router struct {
 	IsolirReadyAt     *time.Time
 	IsolirProfileName string
 	IsolirRedirectURL string
-	LastCheckAt       *time.Time
-	LastCheckStatus   string
-	RouterOSVersion   string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	// Setup is the last successfully applied setup input, nil before the first apply.
+	Setup           *SetupSnapshot
+	LastCheckAt     *time.Time
+	LastCheckStatus string
+	RouterOSVersion string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// SetupSnapshot is the operator-visible part of the last applied setup. Hosts
+// are excluded on purpose: the allowlist is derived from platform config.
+type SetupSnapshot struct {
+	ProfileName string `json:"profile_name"`
+	PoolCIDR    string `json:"pool_cidr"`
+	RateLimit   string `json:"rate_limit"`
+	RedirectURL string `json:"redirect_url"`
 }
 
 // Setup action kinds.
@@ -75,4 +86,27 @@ type SetupAction struct {
 type SetupPlan struct {
 	Actions []SetupAction `json:"actions"`
 	Hash    string        `json:"hash"`
+}
+
+// RouterStats is a live read of one router. Pointer fields are nil and string
+// fields empty when the router did not answer that part.
+type RouterStats struct {
+	Identity, BoardName, Version, Architecture, Uptime string
+	CPULoad                                            *int   // percent
+	MemoryTotal, MemoryFree                            *int64 // bytes
+	PPPActive                                          *int   // /ppp/active rows
+	FetchedAt                                          time.Time
+}
+
+// RouterSummary is a database-only overview of one router: how many of its PPP
+// secrets are in each state, and its isolation tasks by status. TaskCounts keys
+// are task statuses; a status with no task is absent (read as 0).
+type RouterSummary struct {
+	SecretsTotal               int
+	SecretsPaired              int
+	SecretsUnpaired            int
+	SecretsMissing             int
+	SecretsNeedOriginalProfile int
+	SecretsIsolated            int
+	TaskCounts                 map[string]int
 }

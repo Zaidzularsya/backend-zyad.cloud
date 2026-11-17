@@ -37,9 +37,10 @@ func TestLongRoutesExtendWriteDeadline(t *testing.T) {
 		registerFn: func(service.RegisterInput) (domain.Router, error) { return sampleRouter(), nil },
 		checkFn:    func(string) (domain.Router, error) { return sampleRouter(), nil },
 		getFn:      func(string) (domain.Router, error) { return sampleRouter(), nil },
+		statsFn:    func(string) (domain.RouterStats, error) { return domain.RouterStats{}, nil },
 	}
 	engine := newTestRouter(t)
-	NewRouterHandler(routerSvc).RegisterRoutes(engine.Group("/app/mikrotik"), nil, nil)
+	NewRouterHandler(routerSvc).RegisterRoutes(engine.Group("/app/mikrotik"), nil, nil, nil)
 	NewSetupHandler(&fakeSetupService{
 		previewFn: func(service.SetupInput) (domain.SetupPlan, error) { return domain.SetupPlan{}, nil },
 		applyFn:   func(service.SetupInput, string) (domain.Router, error) { return sampleRouter(), nil },
@@ -54,6 +55,7 @@ func TestLongRoutesExtendWriteDeadline(t *testing.T) {
 		{http.MethodPost, "/app/mikrotik/routers", `{"name":"a","host":"10.0.0.1","port":8728,"username":"u","password":"p"}`, probeWriteDeadline},
 		{http.MethodPatch, "/app/mikrotik/routers/" + id, `{"name":"b"}`, probeWriteDeadline},
 		{http.MethodPost, "/app/mikrotik/routers/" + id + "/check", ``, probeWriteDeadline},
+		{http.MethodGet, "/app/mikrotik/routers/" + id + "/stats", ``, probeWriteDeadline},
 		{http.MethodPost, "/app/mikrotik/routers/" + id + "/setup/preview", setupBody, previewWriteDeadline},
 		{http.MethodPost, "/app/mikrotik/routers/" + id + "/setup/apply", `{"pool_cidr":"10.255.254.0/24","platform_host":"zyad.online","plan_hash":"h"}`, setupWriteDeadline},
 		{http.MethodPost, "/app/mikrotik/routers/" + id + "/setup/cleanup", ``, setupWriteDeadline},

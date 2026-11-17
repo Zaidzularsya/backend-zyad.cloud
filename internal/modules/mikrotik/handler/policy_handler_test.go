@@ -25,6 +25,7 @@ type fakePolicyService struct {
 	reason  string
 	until   *time.Time
 	enabled bool
+	from    *time.Time
 	calls   int
 }
 
@@ -44,9 +45,10 @@ func (f *fakePolicyService) PreviewTrigger(_ context.Context, _ coretenant.Scope
 		Usage:   service.ProductUsage{ActiveContracts: 4, Accounts: 3, OverdueInvoices: 1}, EffectiveFrom: time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC),
 	}, f.err
 }
-func (f *fakePolicyService) SetTrigger(_ context.Context, _ coretenant.Scope, productID string, enabled bool, _ string) (domain.ProductTrigger, error) {
+func (f *fakePolicyService) SetTriggerFrom(_ context.Context, _ coretenant.Scope, productID string, enabled bool, from *time.Time, _ string) (domain.ProductTrigger, error) {
 	f.calls++
 	f.enabled = enabled
+	f.from = from
 	return domain.ProductTrigger{ProductID: productID, Enabled: enabled, EffectiveFrom: time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC)}, f.err
 }
 func (f *fakePolicyService) UnmarkedProducts(context.Context, coretenant.Scope) ([]service.ProductInfo, error) {
@@ -264,6 +266,25 @@ func TestPolicyPut_ExemptedUntilParsing(t *testing.T) {
 		_ = json.Unmarshal(w.Body.Bytes(), &body)
 		if v, ok := body.Data["exempted_until"]; !ok || v != nil {
 			t.Errorf("%s: response exempted_until = %v (present %v)", b, v, ok)
+		}
+	}
+}
+
+func TestSetTrigger_EffectiveFrom(t *testing.T) {
+	svc := &fakePolicyService{}
+	r := policyRouter(t, svc)
+	url := "/app/mikrotik/products/" + testProductID + "/trigger"
+	if w := performJSON(r, http.MethodPut, url, `{"enabled":true,"effective_from":"2026-08-01"}`); w.Code != http.StatusOK ||
+		svc.from == nil || svc.from.Format("2006-01-02") != "2026-08-01" {
+		t.Fatalf("status = %d from = %v", w.Code, svc.from)
+	}
+	if w := performJSON(r, http.MethodPut, url, `{"enabled":true}`); w.Code != http.StatusOK || svc.from != nil {
+		t.Fatalf("without date: status = %d from = %v", w.Code, svc.from)
+	}
+	for _, body := range []string{`{"enabled":true,"effective_from":"1-8-2026"}`, `{"enabled":false,"effective_from":"2026-08-01"}`} {
+		calls := svc.calls
+		if w := performJSON(r, http.MethodPut, url, body); w.Code != http.StatusUnprocessableEntity || svc.calls != calls {
+			t.Fatalf("%s: status = %d", body, w.Code)
 		}
 	}
 }

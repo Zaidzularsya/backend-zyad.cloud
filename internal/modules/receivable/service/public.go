@@ -131,6 +131,24 @@ func stateOf(inv domain.Invoice) PublicInvoiceState {
 	return PublicInvoiceStateOpen
 }
 
+// ResolvedInvoice is the tenant scope and invoice behind a valid public token.
+type ResolvedInvoice struct {
+	Scope   coretenant.Scope
+	Invoice domain.Invoice
+	State   PublicInvoiceState
+}
+
+// Resolve validates the token exactly like View (same ErrLinkInvalid cases) but
+// returns the internal scope and invoice for sibling public endpoints. It does
+// not touch the link, so polling endpoints do not inflate view counters.
+func (s *PublicInvoiceService) Resolve(ctx context.Context, token string) (ResolvedInvoice, error) {
+	d, err := s.load(ctx, token)
+	if err != nil {
+		return ResolvedInvoice{}, err
+	}
+	return ResolvedInvoice{Scope: d.scope, Invoice: d.inv, State: d.state}, nil
+}
+
 func (s *PublicInvoiceService) View(ctx context.Context, token string) (PublicInvoiceView, error) {
 	d, err := s.load(ctx, token)
 	if err != nil {

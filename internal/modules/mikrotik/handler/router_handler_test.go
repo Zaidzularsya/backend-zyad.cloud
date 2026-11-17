@@ -28,6 +28,8 @@ type fakeService struct {
 	getFn      func(id string) (domain.Router, error)
 	listFn     func(limit, offset int) ([]domain.Router, int64, error)
 	checkFn    func(id string) (domain.Router, error)
+	summaryFn  func(id string) (domain.RouterSummary, error)
+	statsFn    func(id string) (domain.RouterStats, error)
 	deleteErr  error
 }
 
@@ -42,6 +44,12 @@ func (f *fakeService) List(_ context.Context, _ coretenant.Scope, limit, offset 
 }
 func (f *fakeService) Check(_ context.Context, _ coretenant.Scope, id string) (domain.Router, error) {
 	return f.checkFn(id)
+}
+func (f *fakeService) Summary(_ context.Context, _ coretenant.Scope, id string) (domain.RouterSummary, error) {
+	return f.summaryFn(id)
+}
+func (f *fakeService) Stats(_ context.Context, _ coretenant.Scope, id string) (domain.RouterStats, error) {
+	return f.statsFn(id)
 }
 func (f *fakeService) Update(context.Context, coretenant.Scope, string, service.UpdateInput) (domain.Router, error) {
 	return domain.Router{}, nil
@@ -60,7 +68,7 @@ func sampleRouter() domain.Router {
 
 func routerFor(t *testing.T, svc RouterService) *gin.Engine {
 	r := newTestRouter(t)
-	NewRouterHandler(svc).RegisterRoutes(r.Group("/app/mikrotik"), nil, nil)
+	NewRouterHandler(svc).RegisterRoutes(r.Group("/app/mikrotik"), nil, nil, nil)
 	return r
 }
 
@@ -275,10 +283,12 @@ func TestRoutesRequirePermissions(t *testing.T) {
 		{http.MethodPatch, "/app/mikrotik/routers/:id", "mikrotik_router.update"},
 		{http.MethodDelete, "/app/mikrotik/routers/:id", "mikrotik_router.delete"},
 		{http.MethodPost, "/app/mikrotik/routers/:id/check", "mikrotik_router.update"},
+		{http.MethodGet, "/app/mikrotik/routers/:id/summary", "mikrotik_router.read"},
+		{http.MethodGet, "/app/mikrotik/routers/:id/stats", "mikrotik_router.read"},
 	}
 
 	engine := newTestRouter(t)
-	NewRouterHandler(&fakeService{}).RegisterRoutes(engine.Group("/app/mikrotik"), nil, nil)
+	NewRouterHandler(&fakeService{}).RegisterRoutes(engine.Group("/app/mikrotik"), nil, nil, nil)
 	registered := map[string]bool{}
 	for _, ri := range engine.Routes() {
 		registered[ri.Method+" "+ri.Path] = true
@@ -298,7 +308,7 @@ func TestRoutesRequirePermissions(t *testing.T) {
 		checker := &recordingChecker{}
 		r := newTestRouter(t)
 		r.Use(func(c *gin.Context) { permissionmiddleware.SetUserID(c, "user-1") })
-		NewRouterHandler(&fakeService{}).RegisterRoutes(r.Group("/app/mikrotik"), checker, nil)
+		NewRouterHandler(&fakeService{}).RegisterRoutes(r.Group("/app/mikrotik"), checker, nil, nil)
 		path := strings.ReplaceAll(rt.path, ":id", "33333333-3333-3333-3333-333333333333")
 		w := performJSON(r, rt.method, path, `{}`)
 		if w.Code != http.StatusForbidden {
@@ -308,4 +318,79 @@ func TestRoutesRequirePermissions(t *testing.T) {
 			t.Errorf("%s %s: asked %v, want %s", rt.method, rt.path, checker.asked, rt.perm)
 		}
 	}
+}
+
+func TestRouterSummaryRoute(t *testing.T) {
+	const url = "/app/mikrotik/routers/22222222-2222-2222-2222-222222222222/summary"
+	t.Run("200 emits all task keys", func(t *testing.T) {
+		r := routerFor(t, &fakeService{summaryFn: func(string) (domain.RouterSummary, error) {
+			return domain.RouterSummary{
+				SecretsTotal: 5, SecretsPaired: 3, SecretsUnpaired: 1, SecretsMissing: 1,
+				SecretsNeedOriginalProfile: 2, SecretsIsolated: 1,
+				TaskCounts: map[string]int{"failed": 4, "pending": 1},
+			}, nil
+		}})
+		w := performJSON(r, http.MethodGet, url, "")
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", w.Code, w.Body)
+		}
+		var body struct {
+			Data json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		want := `{"secrets":{"total":5,"paired":3,"unpaired":1,"missing":1,"need_original_profile":2,"isolated":1},` +
+			`"tasks":{"pending":1,"running":0,"failed":4,"done":0,"cancelled":0}}`
+		if string(body.Data) != want {
+			t.Fatalf("data = %s\nwant   %s", body.Data, want)
+		}
+	})
+	t.Run("404", func(t *testing.T) {
+		r := routerFor(t, &fakeService{summaryFn: func(string) (domain.RouterSummary, error) {
+			return domain.RouterSummary{}, mikrotik.ErrRouterNotFound
+		}})
+		w := performJSON(r, http.MethodGet, url, "")
+		if code, _ := errorBody(t, w.Body.Bytes()); w.Code != http.StatusNotFound || code != "MIKROTIK_ROUTER_NOT_FOUND" {
+			t.Fatalf("status = %d code = %q", w.Code, code)
+		}
+	})
+}
+
+func TestRouterStatsRoute(t *testing.T) {
+	const url = "/app/mikrotik/routers/22222222-2222-2222-2222-222222222222/stats"
+	t.Run("200 emits fields and null for unreadable", func(t *testing.T) {
+		total, free, ppp := int64(1000), int64(400), 3
+		fetched := time.Date(2026, 11, 16, 1, 2, 3, 0, time.UTC)
+		r := routerFor(t, &fakeService{statsFn: func(string) (domain.RouterStats, error) {
+			return domain.RouterStats{
+				Identity: "core-1", BoardName: "RB4011", Version: "7.15", Architecture: "arm", Uptime: "3d4h",
+				MemoryTotal: &total, MemoryFree: &free, PPPActive: &ppp, FetchedAt: fetched,
+			}, nil
+		}})
+		w := performJSON(r, http.MethodGet, url, "")
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, body = %s", w.Code, w.Body)
+		}
+		var body struct {
+			Data json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		want := `{"identity":"core-1","board_name":"RB4011","version":"7.15","architecture":"arm","uptime":"3d4h",` +
+			`"cpu_load":null,"memory_total":1000,"memory_free":400,"ppp_active":3,"fetched_at":"2026-11-16T01:02:03Z"}`
+		if string(body.Data) != want {
+			t.Fatalf("data = %s\nwant   %s", body.Data, want)
+		}
+	})
+	t.Run("unreachable maps like check", func(t *testing.T) {
+		r := routerFor(t, &fakeService{statsFn: func(string) (domain.RouterStats, error) {
+			return domain.RouterStats{}, mikrotik.ErrUnreachable
+		}})
+		w := performJSON(r, http.MethodGet, url, "")
+		if code, _ := errorBody(t, w.Body.Bytes()); w.Code != http.StatusBadGateway || code != "MIKROTIK_UNREACHABLE" {
+			t.Fatalf("status = %d code = %q", w.Code, code)
+		}
+	})
 }

@@ -124,7 +124,7 @@ S -> N : receivable.invoice_send_failed\nke PIC, atau pemegang invoice.send
 
 ## Halaman publik
 
-`GET /api/v1/public/invoices/:token` (+ `/pdf`), tanpa login, rate limit 30/menit per IP (`rl:pubi:ip:`),
+`GET /api/v1/public/invoices/:token` (+ `/pdf`), tanpa login, rate limit 120/menit per IP (`rl:pubi:ip:`; pelanggan satu ISP sering berbagi IP NAT),
 `X-Robots-Tag: noindex`, `Cache-Control: no-store`. Tenant diturunkan dari baris link lewat
 `WorkerResolver` identitas `public-document-link` (sama dengan penawaran). Link berlaku sampai jatuh tempo + 90 hari
 (23:59:59 WIB); token tidak dikenal/kedaluwarsa/bukan invoice → `404 LINK_INVALID` yang sama.

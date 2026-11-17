@@ -90,18 +90,22 @@ type Dependencies struct {
 	CRMSalesOrderHandler             *crmhandler.SalesOrderHandler
 	CRMDealOrdersHandler             *crmhandler.DealOrdersHandler
 	ReceivableContractHandler        *receivablehandler.ContractHandler
+	ReceivableArrearsHandler         *receivablehandler.ArrearsHandler
 	ReceivableOverviewHandler        *receivablehandler.OverviewHandler
 	ReceivableSettlementHandler      *receivablehandler.SettlementHandler
 	ReceivableAccountHandler         *receivablehandler.AccountHandler
 	MikrotikRouterHandler            *mikrotikhandler.RouterHandler
 	MikrotikSetupHandler             *mikrotikhandler.SetupHandler
 	MikrotikSecretHandler            *mikrotikhandler.SecretHandler
+	MikrotikSecretOnboardingHandler  *mikrotikhandler.SecretOnboardingHandler
 	MikrotikPolicyHandler            *mikrotikhandler.PolicyHandler
 	MikrotikTaskHandler              *mikrotikhandler.TaskHandler
 	MikrotikOnboardingHandler        *mikrotikhandler.OnboardingHandler
 	MikrotikControlHandler           *mikrotikhandler.ControlHandler
 	MikrotikPreviewHandler           *mikrotikhandler.PreviewHandler
 	MikrotikActivityHandler          *mikrotikhandler.ActivityHandler
+	// MikrotikPublicHandler serves /public/isolir/*, mounted on the host-resolved public group.
+	MikrotikPublicHandler *mikrotikhandler.IsolirPublicHandler
 	// MikrotikRateCounter backs the per-organization limit on router-contacting
 	// mikrotik routes; nil disables it (fail open).
 	MikrotikRateCounter              middleware.RateCounter

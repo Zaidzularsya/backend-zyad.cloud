@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -183,6 +184,41 @@ func (r *contactRepository) FindActiveByPhone(ctx context.Context, scope coreten
 		return domain.Contact{}, err
 	}
 	return contact, nil
+}
+
+func (r *contactRepository) FindDuplicate(ctx context.Context, scope coretenant.Scope, email, phoneNormalized, excludeID string) (domain.Contact, bool, error) {
+	if !scope.IsValid() {
+		return domain.Contact{}, false, coretenant.ErrInvalidScope
+	}
+	if email == "" && phoneNormalized == "" {
+		return domain.Contact{}, false, nil
+	}
+
+	query := `SELECT ` + contactColumns + ` FROM crm_contacts
+		WHERE organization_id = $1 AND deleted_at IS NULL
+			AND ($2 = '' OR id::text <> $2)
+			AND (($3 <> '' AND lower(btrim(email)) = $3) OR ($4 <> '' AND phone_normalized = $4))
+		ORDER BY created_at ASC
+		LIMIT 1`
+
+	var contact domain.Contact
+	found := false
+	err := r.withTx(ctx, scope, func(tx pgx.Tx) error {
+		var scanErr error
+		contact, scanErr = scanContact(tx.QueryRow(ctx, query, scope.OrganizationID(), excludeID, email, phoneNormalized))
+		if errors.Is(scanErr, pgx.ErrNoRows) {
+			return nil
+		}
+		if scanErr != nil {
+			return scanErr
+		}
+		found = true
+		return nil
+	})
+	if err != nil {
+		return domain.Contact{}, false, err
+	}
+	return contact, found, nil
 }
 
 func buildContactWhere(scope coretenant.Scope, filter ContactListFilter) (string, []interface{}) {

@@ -375,3 +375,34 @@ func TestPairBulk_CancelledContextSkipsRemainingRows(t *testing.T) {
 		t.Error("no audit expected")
 	}
 }
+
+func TestCheckOnboardable_AllowsPairedButNotIsolirWithoutOriginal(t *testing.T) {
+	e := newPairEnv(t)
+	id := e.importOne(t, "alice", "paket-10m")
+	if _, err := e.svc.Pair(context.Background(), e.scope, id, "acct-1", testActor); err != nil {
+		t.Fatal(err)
+	}
+	paired, _ := e.svc.Get(context.Background(), e.scope, id)
+	if err := e.svc.CheckOnboardable(context.Background(), e.scope, paired); err != nil {
+		t.Fatalf("paired secret must stay onboardable: %v", err)
+	}
+
+	e.setIsolirProfile("zyad-isolir")
+	other := e.importOne(t, "bob", "zyad-isolir")
+	s, _ := e.svc.Get(context.Background(), e.scope, other)
+	if err := e.svc.CheckOnboardable(context.Background(), e.scope, s); !errors.Is(err, mikrotik.ErrSecretNotPairable) {
+		t.Fatalf("err = %v, want ErrSecretNotPairable", err)
+	}
+}
+
+func TestSecretGet_FillsAccountName(t *testing.T) {
+	e := newPairEnv(t)
+	id := e.importOne(t, "alice", "paket-10m")
+	if _, err := e.svc.Pair(context.Background(), e.scope, id, "acct-1", testActor); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.svc.Get(context.Background(), e.scope, id)
+	if err != nil || got.AccountName != "Alice" {
+		t.Fatalf("Get = %+v err=%v", got, err)
+	}
+}

@@ -73,6 +73,10 @@ type ConvertLeadParams struct {
 	Contact       *ConvertContactInput // nil = contact baru
 	OwnerUserID   string
 	ConvertedBy   string
+	// AllowDuplicateContact skips the email/WhatsApp duplicate guard for a
+	// new contact. Only the self-serve checkout sets it (it has its own
+	// contact lookup); the HTTP convert endpoint never does.
+	AllowDuplicateContact bool
 }
 
 type LeadService interface {
@@ -84,6 +88,7 @@ type LeadService interface {
 	Restore(context.Context, coretenant.Scope, string, string) error
 	Assign(context.Context, coretenant.Scope, string, string, string) (domain.Lead, error)
 	Convert(context.Context, coretenant.Scope, string, ConvertLeadParams) (domain.LeadConversionResult, error)
+	MatchContacts(ctx context.Context, scope coretenant.Scope, leadID string) ([]domain.Contact, error)
 	CreateDealForLead(ctx context.Context, scope coretenant.Scope, leadID string, input ConvertDealInput, createdBy string) (domain.Lead, domain.Deal, error)
 	Disqualify(ctx context.Context, scope coretenant.Scope, id string, params repository.DisqualifyLeadParams) (domain.Lead, error)
 	StartPlaybook(ctx context.Context, scope coretenant.Scope, id string, startedBy string) (domain.PlaybookRun, error)

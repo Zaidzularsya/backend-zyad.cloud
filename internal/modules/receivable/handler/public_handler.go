@@ -12,18 +12,43 @@ import (
 	coreerrors "zyad.cloud/internal/core/errors"
 	corehttp "zyad.cloud/internal/core/http"
 	"zyad.cloud/internal/core/middleware"
+	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/receivable/domain"
 	"zyad.cloud/internal/modules/receivable/dto"
 	"zyad.cloud/internal/modules/receivable/repository"
 	"zyad.cloud/internal/modules/receivable/service"
 )
 
-const publicIPLimitPerMinute = 30
+// publicIPLimitPerMinute is per client IP. Customers of one ISP often share a
+// NAT IP and the paid page polls the provisioning stage, so the bucket is wide.
+const publicIPLimitPerMinute = 120
 
 // PublicInvoiceService adalah subset service yang dipakai halaman publik.
 type PublicInvoiceService interface {
 	View(ctx context.Context, token string) (service.PublicInvoiceView, error)
 	PDF(ctx context.Context, token string) (service.InvoicePDF, error)
+	Resolve(ctx context.Context, token string) (service.ResolvedInvoice, error)
+}
+
+// PublicProvisioning reports the service-recovery stage after a paid invoice.
+// It is a port so receivable does not import the mikrotik module.
+type PublicProvisioning interface {
+	Stage(ctx context.Context, scope coretenant.Scope, invoiceID string, paidAt *time.Time) (ProvisioningResult, error)
+}
+
+// ProvisioningResult is what the port reports. Contact is only meaningful for
+// the "needs_help" stage; the handler drops it for every other stage.
+type ProvisioningResult struct {
+	Stage      string
+	Applicable bool
+	Contact    *PublicContact
+}
+
+// PublicContact is the tenant's customer-service contact. Empty fields are omitted.
+type PublicContact struct {
+	Name  string `json:"name,omitempty"`
+	Phone string `json:"phone,omitempty"`
+	Email string `json:"email,omitempty"`
 }
 
 // PublicPayments: pembayaran online dari halaman publik (hanya org dengan receivable.online_payment).
@@ -37,6 +62,7 @@ type PublicPayments interface {
 type PublicInvoiceHandler struct {
 	svc      PublicInvoiceService
 	payments PublicPayments
+	prov     PublicProvisioning
 	counter  middleware.RateCounter
 }
 
@@ -50,6 +76,12 @@ func (h *PublicInvoiceHandler) WithPayments(p PublicPayments) *PublicInvoiceHand
 	return h
 }
 
+// WithProvisioning mengaktifkan endpoint tahap pemulihan layanan.
+func (h *PublicInvoiceHandler) WithProvisioning(p PublicProvisioning) *PublicInvoiceHandler {
+	h.prov = p
+	return h
+}
+
 // RegisterRoutes dipasang langsung pada api (di luar grup auth & tenant).
 func (h *PublicInvoiceHandler) RegisterRoutes(api *gin.RouterGroup) {
 	group := api.Group("/public/invoices")
@@ -59,6 +91,9 @@ func (h *PublicInvoiceHandler) RegisterRoutes(api *gin.RouterGroup) {
 	)
 	group.GET("/:token", h.View)
 	group.GET("/:token/pdf", h.PDF)
+	if h.prov != nil {
+		group.GET("/:token/provisioning", h.Provisioning)
+	}
 	if h.payments != nil {
 		group.POST("/:token/checkout", h.Checkout)
 		group.GET("/:token/status", h.Status)
@@ -116,6 +151,38 @@ func (h *PublicInvoiceHandler) Status(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	corehttp.OK(c, "success", gin.H{"status": string(status)})
+}
+
+// Provisioning: tahap pemulihan untuk invoice lunas. Invoice belum lunas →
+// applicable=false tanpa memanggil port. Untuk invoice lunas port selalu
+// dipanggil; akun tanpa PPPoE (atau tenant tanpa mikrotik.enabled) dijawab
+// adapter dengan applicable=false.
+func (h *PublicInvoiceHandler) Provisioning(c *gin.Context) {
+	r, err := h.svc.Resolve(c.Request.Context(), c.Param("token"))
+	if err != nil {
+		failPublicInvoice(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	if r.State != service.PublicInvoiceStatePaid {
+		corehttp.OK(c, "success", gin.H{"applicable": false})
+		return
+	}
+	res, err := h.prov.Stage(c.Request.Context(), r.Scope, r.Invoice.ID, r.Invoice.PaidAt)
+	if err != nil {
+		failPublicInvoice(c, err)
+		return
+	}
+	if !res.Applicable {
+		corehttp.OK(c, "success", gin.H{"applicable": false})
+		return
+	}
+	data := gin.H{"applicable": true, "stage": res.Stage}
+	// The CS contact is only useful (and only exposed) when the customer needs help.
+	if res.Stage == "needs_help" && res.Contact != nil {
+		data["contact"] = res.Contact
+	}
+	corehttp.OK(c, "success", data)
 }
 
 func (h *PublicInvoiceHandler) PDF(c *gin.Context) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +12,8 @@ import (
 
 	coreerrors "zyad.cloud/internal/core/errors"
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
+	coretenant "zyad.cloud/internal/core/tenant"
+	"zyad.cloud/internal/modules/crm/domain"
 	"zyad.cloud/internal/modules/crm/service"
 )
 
@@ -118,5 +121,67 @@ func TestMapLeadErrorConvertCodes(t *testing.T) {
 		if !errors.As(mapLeadError(err), &appErr) || appErr.Code != code {
 			t.Errorf("mapLeadError(%v) = %v, want code %s", err, mapLeadError(err), code)
 		}
+	}
+}
+
+type convertCaptureService struct {
+	service.LeadService
+	params  service.ConvertLeadParams
+	convErr error
+	matches []domain.Contact
+}
+
+func (s *convertCaptureService) Convert(_ context.Context, _ coretenant.Scope, _ string, p service.ConvertLeadParams) (domain.LeadConversionResult, error) {
+	s.params = p
+	return domain.LeadConversionResult{}, s.convErr
+}
+
+func (s *convertCaptureService) MatchContacts(context.Context, coretenant.Scope, string) ([]domain.Contact, error) {
+	return s.matches, nil
+}
+
+func TestConvertPassesExistingContactAndMapsDuplicate(t *testing.T) {
+	svc := &convertCaptureService{}
+	r := newTestRouter(t)
+	r.Use(func(c *gin.Context) { permissionmiddleware.SetUserID(c, "u1"); c.Next() })
+	NewLeadHandler(svc).RegisterRoutes(r.Group(""), allowOnlyChecker{"lead.convert": true})
+
+	w := performJSON(r, http.MethodPost, "/leads/l1/convert", `{"contact":{"mode":"existing","contact_id":"c1"}}`)
+	if w.Code != http.StatusOK {
+		t.Fatalf("convert existing → %d %s", w.Code, w.Body.String())
+	}
+	if svc.params.Contact == nil || svc.params.Contact.Mode != "existing" || svc.params.Contact.ContactID != "c1" || svc.params.AllowDuplicateContact {
+		t.Fatalf("contact params = %+v", svc.params)
+	}
+
+	svc.convErr = &service.DuplicateContactError{Existing: domain.Contact{ID: "old", FirstName: "Budi"}, Field: "phone"}
+	w = performJSON(r, http.MethodPost, "/leads/l1/convert", `{}`)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), `"id":"old"`) {
+		t.Fatalf("duplicate → %d %s", w.Code, w.Body.String())
+	}
+
+	svc.convErr = service.ErrInvalidContactInput
+	w = performJSON(r, http.MethodPost, "/leads/l1/convert", `{"contact":{"mode":"existing"}}`)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid contact input → %d", w.Code)
+	}
+}
+
+func TestLeadContactMatchesRoute(t *testing.T) {
+	svc := &convertCaptureService{matches: []domain.Contact{{ID: "c1", FirstName: "Budi", Phone: "0812"}}}
+	r := newTestRouter(t)
+	r.Use(func(c *gin.Context) { permissionmiddleware.SetUserID(c, "u1"); c.Next() })
+	NewLeadHandler(svc).RegisterRoutes(r.Group(""), allowOnlyChecker{"lead.convert": true})
+
+	w := performJSON(r, http.MethodGet, "/leads/l1/contact-matches", "")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"id":"c1"`) {
+		t.Fatalf("contact-matches → %d %s", w.Code, w.Body.String())
+	}
+
+	r2 := newTestRouter(t)
+	r2.Use(func(c *gin.Context) { permissionmiddleware.SetUserID(c, "u1"); c.Next() })
+	NewLeadHandler(svc).RegisterRoutes(r2.Group(""), denyAllChecker{})
+	if w := performJSON(r2, http.MethodGet, "/leads/l1/contact-matches", ""); w.Code != http.StatusForbidden {
+		t.Fatalf("without lead.convert → %d", w.Code)
 	}
 }

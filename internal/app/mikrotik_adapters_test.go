@@ -203,7 +203,7 @@ func TestProductCatalog(t *testing.T) {
 	c := mikrotikProductCatalog{products: src, inUse: fakeInUse{ids: []string{"p1", "p2", "p3", "pX"}}}
 
 	info, err := c.Get(context.Background(), mkScope("org-a"), "p2")
-	if err != nil || !info.Recurring || !info.Active || info.SKU != "Z" {
+	if err != nil || !info.Recurring || !info.Active || info.SKU != "Z" || info.Frequency != pricing.Monthly {
 		t.Fatalf("get: %+v %v", info, err)
 	}
 	if _, err := c.Get(context.Background(), mkScope("org-b"), "p2"); !errors.Is(err, mikrotik.ErrProductNotFound) {
@@ -224,8 +224,17 @@ func TestBuildMikrotik_WiresAllHandlers(t *testing.T) {
 	m := buildMikrotik(config.Config{}, nil, mikrotikBuild{
 		Accounts: &fakeAccounts{}, Contacts: &fakeContacts{}, Products: fakeProducts{},
 	})
-	if m.Router == nil || m.Setup == nil || m.Secret == nil || m.Policy == nil || m.Onboarding == nil {
+	if m.Router == nil || m.Setup == nil || m.Secret == nil || m.Policy == nil || m.Onboarding == nil || m.Public == nil {
 		t.Fatalf("handlers must all be built: %+v", m)
+	}
+	d := m.publicDeps
+	if d.Directory == nil || d.Secrets == nil || d.Overdue == nil || d.PayLinks == nil || d.Profile == nil ||
+		d.Gate == nil || d.Tasks == nil || d.Control == nil || d.Policy == nil {
+		t.Fatalf("public service deps must all be wired: %+v", d)
+	}
+	p := m.Provisioning
+	if p.stager == nil || p.gate == nil || p.prof == nil || p.now == nil {
+		t.Fatalf("provisioning adapter must be wired: %+v", p)
 	}
 }
 

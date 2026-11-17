@@ -44,7 +44,7 @@ const dealColumns = `
 	value::text, currency, expected_close_date, status, lost_reason, owner_user_id,
 	discount_percent::text, discount_approved_by, discount_approved_at,
 	created_by, updated_by, created_at, updated_at, deleted_at,
-	description, decision_maker
+	description, decision_maker, source
 `
 
 func scanDeal(row pgx.Row) (domain.Deal, error) {
@@ -61,7 +61,7 @@ func scanDeal(row pgx.Row) (domain.Deal, error) {
 		&d.Value, &d.Currency, &d.ExpectedCloseDate, &status, &lostReason, &ownerUserID,
 		&discountPercent, &discountApprovedBy, &d.DiscountApprovedAt,
 		&createdBy, &updatedBy, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt,
-		&description, &decisionMaker,
+		&description, &decisionMaker, &d.Source,
 	)
 	if err != nil {
 		return domain.Deal{}, err
@@ -125,9 +125,9 @@ func insertDealTx(ctx context.Context, tx pgx.Tx, scope coretenant.Scope, params
 		INSERT INTO crm_deals (
 			organization_id, pipeline_id, stage_id, company_id, contact_id, title,
 			value, currency, expected_close_date, owner_user_id, created_by,
-			description, decision_maker
+			description, decision_maker, source
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
 		) RETURNING `+dealColumns,
 		scope.OrganizationID(),
 		params.PipelineID,
@@ -142,6 +142,7 @@ func insertDealTx(ctx context.Context, tx pgx.Tx, scope coretenant.Scope, params
 		nullableString(params.CreatedBy),
 		nullableString(strings.TrimSpace(params.Description)),
 		nullableString(strings.TrimSpace(params.DecisionMaker)),
+		strings.TrimSpace(params.Source),
 	))
 }
 
@@ -198,6 +199,10 @@ func (r *dealRepository) List(ctx context.Context, scope coretenant.Scope, filte
 	if filter.ContactID != "" {
 		args = append(args, filter.ContactID)
 		whereClauses = append(whereClauses, fmt.Sprintf("contact_id = $%d", len(args)))
+	}
+	if filter.Source != "" {
+		args = append(args, filter.Source)
+		whereClauses = append(whereClauses, fmt.Sprintf("source = $%d", len(args)))
 	}
 
 	where := strings.Join(whereClauses, " AND ")

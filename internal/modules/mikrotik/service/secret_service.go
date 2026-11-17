@@ -168,6 +168,30 @@ func (s *SecretService) pairableSecret(ctx context.Context, scope coretenant.Sco
 	return secret, nil
 }
 
+// Get returns one secret of the organization (mikrotik.ErrSecretNotFound when absent).
+// AccountName is filled from the account directory (best effort).
+func (s *SecretService) Get(ctx context.Context, scope coretenant.Scope, id string) (domain.PPPSecret, error) {
+	secret, err := s.repo.FindByID(ctx, scope, id)
+	if err != nil || secret.AccountID == nil || s.accounts == nil {
+		return secret, err
+	}
+	if acc, accErr := s.accounts.Get(ctx, scope, *secret.AccountID); accErr == nil {
+		secret.AccountName = acc.Name
+	}
+	return secret, nil
+}
+
+// CheckOnboardable applies the pairing rules (present on the router, original
+// profile known) without refusing an existing pairing: onboarding may
+// complete a secret that was paired before Gelombang 2.
+func (s *SecretService) CheckOnboardable(ctx context.Context, scope coretenant.Scope, secret domain.PPPSecret) error {
+	router, err := s.routers.Get(ctx, scope, secret.RouterID)
+	if err != nil {
+		return err
+	}
+	return secret.Pairable(router.IsolirProfileName)
+}
+
 // Pair links a secret to an existing account of the same organization.
 func (s *SecretService) Pair(ctx context.Context, scope coretenant.Scope, secretID, accountID, actor string) (domain.PPPSecret, error) {
 	secret, err := s.pairableSecret(ctx, scope, secretID)
@@ -336,6 +360,48 @@ func (s *SecretService) auditSecret(ctx context.Context, scope coretenant.Scope,
 	if err := s.audit.InsertAudit(ctx, scope, repository.AuditEntry{Event: event, ActorUserID: actor, TargetID: secret.ID, Metadata: meta}); err != nil {
 		slog.Warn("mikrotik: audit insert failed", "secret_id", secret.ID, "event", event, "error", scrub(err.Error()))
 	}
+}
+
+// SecretSummary counts present secrets by the router's disabled flag.
+type SecretSummary struct{ Active, Inactive int }
+
+// Summary returns the active/inactive counts (routerID "" = all routers).
+func (s *SecretService) Summary(ctx context.Context, scope coretenant.Scope, routerID string) (SecretSummary, error) {
+	active, inactive, err := s.repo.CountByDisabled(ctx, scope, routerID)
+	return SecretSummary{Active: active, Inactive: inactive}, err
+}
+
+// Mapping statuses of the secret list filter (the former tabs).
+const (
+	MappingAll           = "all"
+	MappingSuggested     = "suggested"
+	MappingNeedsDecision = "needs_decision"
+	MappingNeedsProfile  = "needs_profile"
+	MappingPaired        = "paired"
+)
+
+// ApplyMappingStatus narrows f the way the former tabs did: "all",
+// "suggested" and "needs_decision" list unpaired secrets, "needs_profile"
+// those waiting for an original profile, "paired" the paired ones. "" leaves
+// f unchanged (every secret).
+func ApplyMappingStatus(f repository.SecretFilter, status string) (repository.SecretFilter, error) {
+	yes, no := true, false
+	switch status {
+	case "":
+	case MappingAll:
+		f.Paired = &no
+	case MappingSuggested:
+		f.Paired, f.Suggestion = &no, repository.SuggestionFilterSuggested
+	case MappingNeedsDecision:
+		f.Paired, f.Suggestion = &no, repository.SuggestionFilterNeedsDecision
+	case MappingNeedsProfile:
+		f.NeedsOriginalProfile = &yes
+	case MappingPaired:
+		f.Paired = &yes
+	default:
+		return f, invalid("mapping_status tidak dikenal.")
+	}
+	return f, nil
 }
 
 // List returns the cached secrets of the organization, one page at a time.

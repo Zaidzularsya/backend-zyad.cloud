@@ -69,6 +69,7 @@ func setupUsageFixture(t *testing.T) usageFixture {
 			}
 			_, _ = tx.Exec(ctx, "SELECT set_config('app.organization_id', $1, true)", org)
 			_, _ = tx.Exec(ctx, `DELETE FROM receivable_invoices WHERE organization_id = $1`, org)
+			_, _ = tx.Exec(ctx, `DELETE FROM receivable_arrears_recordings WHERE organization_id = $1`, org)
 			_, _ = tx.Exec(ctx, `DELETE FROM receivable_contracts WHERE organization_id = $1`, org)
 			_, _ = tx.Exec(ctx, `DELETE FROM receivable_accounts WHERE organization_id = $1`, org)
 			_ = tx.Commit(ctx)

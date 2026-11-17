@@ -62,6 +62,10 @@ type SecretRepository interface {
 	MarkMissing(ctx context.Context, scope coretenant.Scope, routerID string, seenAt time.Time) (int, error)
 	// FindByID returns mikrotik.ErrSecretNotFound when absent in the organization.
 	FindByID(ctx context.Context, scope coretenant.Scope, id string) (domain.PPPSecret, error)
+	// AccountIDsByName returns the distinct, live account ids paired to a secret
+	// named name (lower(trim) comparison) on a live router, at most
+	// publicLookupMax rows (enough for the caller to detect ambiguity).
+	AccountIDsByName(ctx context.Context, scope coretenant.Scope, name string) ([]string, error)
 	List(ctx context.Context, scope coretenant.Scope, f SecretFilter, limit, offset int) ([]domain.PPPSecret, int64, error)
 	// SetOriginalProfile stores the profile to restore and clears needs_original_profile.
 	SetOriginalProfile(ctx context.Context, scope coretenant.Scope, id, profile string) error
@@ -93,6 +97,9 @@ type SecretRepository interface {
 	ListIsolated(ctx context.Context, scope coretenant.Scope, afterID string, limit int) ([]domain.PPPSecret, error)
 	// CountIsolated counts what ListIsolated pages through (same filters).
 	CountIsolated(ctx context.Context, scope coretenant.Scope) (int, error)
+	// CountByDisabled counts the secrets still present on live routers by the
+	// router's disabled flag; routerID "" = every router.
+	CountByDisabled(ctx context.Context, scope coretenant.Scope, routerID string) (active, inactive int, err error)
 }
 
 type secretRepository struct {
@@ -258,6 +265,40 @@ func (r *secretRepository) FindByID(ctx context.Context, scope coretenant.Scope,
 		return domain.PPPSecret{}, mapSecretError(err)
 	}
 	return out, nil
+}
+
+// publicLookupMax caps AccountIDsByName; callers only need to tell 0, 1 and "more".
+const publicLookupMax = 5
+
+func (r *secretRepository) AccountIDsByName(ctx context.Context, scope coretenant.Scope, name string) ([]string, error) {
+	ids := []string{}
+	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT DISTINCT s.account_id::text
+			FROM mikrotik_ppp_secrets s
+			JOIN receivable_accounts a ON a.organization_id = s.organization_id AND a.id = s.account_id AND a.deleted_at IS NULL
+			WHERE s.organization_id = $1 AND s.account_id IS NOT NULL
+			  AND lower(btrim(s.name)) = lower(btrim($2::text))
+			  AND `+liveRouterOnly+`
+			ORDER BY 1
+			LIMIT $3`, scope.OrganizationID(), name, publicLookupMax)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			ids = append(ids, id)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 // likeEscaper escapes LIKE wildcards so a search term is matched literally.
@@ -592,6 +633,17 @@ func (r *secretRepository) ListIsolated(ctx context.Context, scope coretenant.Sc
 const isolatedSecretsFrom = ` FROM mikrotik_ppp_secrets s
 			JOIN mikrotik_routers rt ON rt.organization_id = s.organization_id AND rt.id = s.router_id
 			WHERE s.organization_id = $1 AND s.isolation_state = 'isolated' AND rt.deleted_at IS NULL`
+
+func (r *secretRepository) CountByDisabled(ctx context.Context, scope coretenant.Scope, routerID string) (active, inactive int, err error) {
+	err = withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+			SELECT count(*) FILTER (WHERE NOT s.disabled), count(*) FILTER (WHERE s.disabled)
+			FROM mikrotik_ppp_secrets s
+			WHERE s.organization_id = $1 AND s.present AND `+liveRouterOnly+`
+				AND ($2 = '' OR s.router_id::text = $2)`, scope.OrganizationID(), routerID).Scan(&active, &inactive)
+	})
+	return active, inactive, err
+}
 
 func (r *secretRepository) CountIsolated(ctx context.Context, scope coretenant.Scope) (int, error) {
 	var n int

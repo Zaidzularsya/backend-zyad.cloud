@@ -8942,6 +8942,156 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/receivable/contracts/{id}/arrears/periods:
+    get:
+      summary: Arrears periods of a contract
+      operationId: listReceivableArrearsPeriods
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Billing cycles of the contract, from 24 cycles before start_date (negative index: service before the customer entered the system) up to the last cycle whose start is on or before today (WIB), excluding cycles at or after the billing pointer (the billing run bills those) and after the contract end date, with the default amount (gross total of the items of the first item's frequency) and a conflict text when the period already has a non-void invoice. `has_trigger_product` tells whether any contract item's product has an enabled Mikrotik isolation trigger (without it the isolation flag has no effect). Permission: `invoice.record_arrears`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableArrearsPeriodsEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: "ARREARS_CONTRACT_MISSING"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/receivable/invoices/arrears:
+    post:
+      summary: Record old arrears as back-dated invoices
+      operationId: recordReceivableArrears
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Creates one issued invoice per row (overdue when the due date is before today) on the customer's contract, keeping the past due date. All rows are validated first; any conflict or invalid row rejects the whole recording and no invoice is created. One summary message is sent over the contract's channels; a send failure does not fail the recording (`notify_status` failed, resend available). A repeated `Idempotency-Key` returns the first recording's result. Rows with `isolir_flag: true` additionally need `invoice.isolir_flag`. Permission: `invoice.record_arrears`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        description: "Client key, one per dialog (1–100 characters)."
+        schema: {type: string, minLength: 1, maxLength: 100}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ReceivableArrearsRequest'}
+      responses:
+        '201':
+          description: "Recorded (or the earlier result for the same key)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableArrearsResultEnvelope'}
+        '403':
+          description: "Forbidden (missing permission, entitlement, or invoice.isolir_flag for a flagged row)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '409':
+          description: "ARREARS_CONFLICT; data.conflicts lists the rejected rows"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableArrearsConflictResponse'}
+        '422':
+          description: "VALIDATION_ERROR (missing Idempotency-Key, reason, rows 1–24, cycle start, due date after today, amount) or ARREARS_CONTRACT_MISSING"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/receivable/invoices/arrears/{recordingId}/resend:
+    post:
+      summary: Resend the arrears summary message
+      operationId: resendReceivableArrears
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Sends the summary again for the recording's open invoices and stores the result. Permission: `invoice.record_arrears`. Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: recordingId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableArrearsRecordingEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "INVOICE_NOT_FOUND (recording not found)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR (no open arrears invoice left)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/app/receivable/invoices/{id}/isolir-flag:
+    put:
+      summary: Change the isolation flag of an arrears invoice
+      operationId: setReceivableInvoiceIsolirFlag
+      tags:
+      - Receivable
+      security:
+      - BearerAuth: []
+      description: "Only arrears invoices that are issued or overdue. A flagged invoice may trigger Mikrotik isolation (regardless of the trigger's effective_from) only when the contract has an item whose product has an enabled trigger. Audited. Permission: `invoice.isolir_flag` (owner). Tenant: customer or platform organization; requires entitlement `receivable.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value: {type: boolean}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReceivableInvoiceEnvelope'}
+        '403':
+          description: "Forbidden (missing permission or entitlement)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '404':
+          description: "INVOICE_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '422':
+          description: "VALIDATION_ERROR (not an arrears invoice, or paid/void)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /api/v1/app/receivable/invoices/{id}/pdf:
     get:
       summary: Invoice PDF
@@ -9268,7 +9418,7 @@ paths:
       operationId: getPublicInvoice
       tags:
       - Receivable
-      description: "Public endpoint (no bearer token, no tenant host): the tenant is derived from the link row. Rate limited to 30 requests/minute per IP. Unknown, expired or non-invoice tokens all return the same `404 LINK_INVALID`. `state`: `open` (issued/overdue), `paid`, `void` (a voided invoice stays viewable as cancelled even though its link is revoked). `can_pay` is true only for `open` invoices of organizations with `receivable.online_payment`, or for landing page activation invoices of organizations with `landing.page_activation` (resellers; no `receivable.online_payment` needed); see `POST .../checkout`."
+      description: "Public endpoint (no bearer token, no tenant host): the tenant is derived from the link row. Rate limited to 120 requests/minute per IP (customers of one ISP often share a NAT IP). Unknown, expired or non-invoice tokens all return the same `404 LINK_INVALID`. `state`: `open` (issued/overdue), `paid`, `void` (a voided invoice stays viewable as cancelled even though its link is revoked). `can_pay` is true only for `open` invoices of organizations with `receivable.online_payment`, or for landing page activation invoices of organizations with `landing.page_activation` (resellers; no `receivable.online_payment` needed); see `POST .../checkout`."
       parameters:
       - name: token
         in: path
@@ -9290,13 +9440,59 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/public/invoices/{token}/provisioning:
+    get:
+      summary: Service recovery stage after a paid invoice
+      operationId: getPublicInvoiceProvisioning
+      tags:
+      - Receivable
+      description: "Public endpoint (no bearer token), same token and rate limit (120 requests/minute per IP (customers of one ISP often share a NAT IP)) as the invoice view; `Cache-Control: no-store`. Unknown, expired or non-invoice tokens return the same `404 LINK_INVALID`. `applicable=false` (and no `stage`) when the invoice is not paid, the customer has no PPPoE secret, or the organization lacks `mikrotik.enabled`. Stages: `received` (payment received, restore not started), `restoring` (restore task in progress), `active` (service restored), `needs_help` (restore not finished 10 minutes after payment; customer should contact the ISP, see `contact`), `other_invoices` (restore withheld because other overdue invoices remain). `contact` (tenant customer-service name/phone/email; empty fields omitted) is present only when `stage=needs_help` and the tenant profile could be read; the key is absent for every other stage. Only registered when the mikrotik module is wired."
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema: {type: string, minLength: 43, maxLength: 43}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success, message, data]
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  data:
+                    type: object
+                    required: [applicable]
+                    properties:
+                      applicable: {type: boolean}
+                      stage: {type: string, enum: [received, restoring, active, needs_help, other_invoices]}
+                      contact:
+                        type: object
+                        description: "Only when stage=needs_help."
+                        properties:
+                          name: {type: string}
+                          phone: {type: string}
+                          email: {type: string}
+        '404':
+          description: "Link invalid (LINK_INVALID)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+        '429':
+          description: "Rate limited (RATE_LIMITED)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
   /api/v1/public/invoices/{token}/pdf:
     get:
       summary: Public invoice PDF (inline)
       operationId: getPublicInvoicePdf
       tags:
       - Receivable
-      description: "Public endpoint (no bearer token, no tenant host): the tenant is derived from the link row. Rate limited to 30 requests/minute per IP. Unknown, expired or non-invoice tokens all return the same `404 LINK_INVALID`. Served inline with `Cache-Control: no-store` and `X-Robots-Tag: noindex`."
+      description: "Public endpoint (no bearer token, no tenant host): the tenant is derived from the link row. Rate limited to 120 requests/minute per IP (customers of one ISP often share a NAT IP). Unknown, expired or non-invoice tokens all return the same `404 LINK_INVALID`. Served inline with `Cache-Control: no-store` and `X-Robots-Tag: noindex`."
       parameters:
       - name: token
         in: path
@@ -10442,6 +10638,94 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/routers/{id}/summary:
+    get:
+      summary: Router secret and task counts
+      operationId: getMikrotikRouterSummary
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Hanya membaca database; tidak pernah menghubungi router. Semua kunci selalu ada (0 bila kosong). Permission: `mikrotik_router.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikRouterSummaryEnvelope'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "MIKROTIK_ROUTER_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/routers/{id}/stats:
+    get:
+      summary: Live router stats
+      operationId: getMikrotikRouterStats
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Membaca langsung identity, resource, dan jumlah sesi PPPoE aktif dari router (tenggat total 8 detik). Hasil di-cache 60 detik per organization+router (`fetched_at` menunjukkan waktu baca), kegagalan tidak di-cache. Tidak menulis `last_check_status`. Angka yang tidak terbaca bernilai null; kegagalan dial atau perintah pertama (/system/identity) menggagalkan seluruh panggilan. Rate limit sendiri: 10 panggilan per menit per organization. Permission: `mikrotik_router.read`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikRouterStatsEnvelope'}
+        '429':
+          description: "RATE_LIMITED (maksimal 10 panggilan per menit per organization, terpisah dari bucket probe 20/menit)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '401':
+          description: "UNAUTHORIZED (token tidak ada atau scope hilang)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "Forbidden. Kode yang dapat muncul (dari middleware): FORBIDDEN (permission), ENTITLEMENT_REQUIRED (entitlement `mikrotik.enabled`), ORGANIZATION_NOT_ACTIVE, CUSTOMER_OR_PLATFORM_ORGANIZATION_REQUIRED, TENANT_CONTEXT_REQUIRED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "MIKROTIK_ROUTER_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '422':
+          description: "MIKROTIK_HOST_NOT_ALLOWED | MIKROTIK_TLS_REQUIRED | MIKROTIK_TLS_UNTRUSTED"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - {$ref: '#/components/schemas/MikrotikErrorResponse'}
+                - {$ref: '#/components/schemas/MikrotikTLSUntrustedError'}
+        '502':
+          description: "MIKROTIK_AUTH_FAILED | MIKROTIK_UNREACHABLE"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
   /api/v1/app/mikrotik/routers/{id}/setup/preview:
     post:
       summary: Preview isolir setup
@@ -10638,6 +10922,43 @@ paths:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '409':
           description: "MIKROTIK_SETUP_CONFLICT | MIKROTIK_SETUP_IN_PROGRESS (apply atau cleanup lain sedang berjalan untuk router ini; tidak ada yang dibaca atau ditulis, coba lagi setelah selesai)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/app/mikrotik/routers/{id}/setup/allowlist-health:
+    get:
+      summary: Check whether the router resolved the isolir allowlist names
+      operationId: getMikrotikAllowlistHealth
+      tags:
+      - Mikrotik
+      security:
+      - BearerAuth: []
+      description: "Read-only. Menghitung entri allowlist berbasis nama (FQDN) yang belum ter-resolve oleh DNS router; hanya angka, tanpa nama host. `unresolved > 0` berarti pelanggan terisolir mungkin tidak bisa membuka halaman bayar. Heuristik: bila baris dinamis membawa nama asal di `comment`, tiap nama dinilai sendiri; bila tidak, hanya kegagalan total (tanpa baris dinamis sama sekali) yang terdeteksi. Permission: `mikrotik_router.setup`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled`."
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: "Success"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      total: {type: integer}
+                      unresolved: {type: integer}
+        '404':
+          description: "MIKROTIK_ROUTER_NOT_FOUND"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '502':
+          description: "MIKROTIK_AUTH_FAILED | MIKROTIK_UNREACHABLE"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -11290,7 +11611,7 @@ paths:
       - Mikrotik
       security:
       - BearerAuth: []
-      description: "Menandai (`enabled=true`) atau membatalkan penandaan produk. Menandai produk yang sudah aktif mempertahankan `effective_from`; mengaktifkan kembali setelah dinonaktifkan mengatur ulang ke hari ini (WIB). Tidak ada efek langsung ke router. Dampak penggunaan (kontrak aktif, pelanggan, invoice overdue) diperoleh dari endpoint preview (`GET /products/{id}/trigger/preview`), bukan dari respons ini. Audit: `product_trigger.set`. Permission: `mikrotik_product_trigger.update`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
+      description: "Menandai (`enabled=true`) atau membatalkan penandaan produk. Menandai produk yang sudah aktif mempertahankan `effective_from`; mengaktifkan (pertama kali atau kembali setelah dinonaktifkan) memakai `effective_from` dari body bila diisi, selain itu hari ini (WIB). Tidak ada efek langsung ke router. Dampak penggunaan (kontrak aktif, pelanggan, invoice overdue) diperoleh dari endpoint preview (`GET /products/{id}/trigger/preview`), bukan dari respons ini. Audit: `product_trigger.set`. Permission: `mikrotik_product_trigger.update`. Tenant: customer atau platform organization; mewajibkan entitlement `mikrotik.enabled` (default mati)."
       parameters:
       - name: id
         in: path
@@ -11643,7 +11964,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '422':
-          description: "MIKROTIK_MODE_INVALID (mode tidak dikenal, atau exemptions bersama mode selain active) atau VALIDATION_ERROR (reason kosong/terlalu panjang, until salah format atau sudah lewat, lebih dari 500 akun, field tidak dikenal)"
+          description: "MIKROTIK_TENANT_CONTACT_REQUIRED (mode pilot/active ditolak selama kontak CS organisasi — telepon atau email — kosong; kontak diambil dari kontak branding, bila kosong dari nomor sesi WhatsApp default yang tersambung dan email mailbox aktif pengirim invoice default), MIKROTIK_MODE_INVALID (mode tidak dikenal, atau exemptions bersama mode selain active) atau VALIDATION_ERROR (reason kosong/terlalu panjang, until salah format atau sudah lewat, lebih dari 500 akun, field tidak dikenal)"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -12052,6 +12373,95 @@ paths:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
         '500':
           description: "INTERNAL_ERROR"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/public/isolir/info:
+    get:
+      summary: Public isolir page state
+      operationId: getMikrotikPublicIsolirInfo
+      tags:
+      - Mikrotik
+      security: []
+      description: "Tanpa autentikasi. Tenant diambil dari host request (sama dengan `/public/tenant-catalog`); header pemilih organisasi ditolak 400 `PUBLIC_ORGANIZATION_SELECTOR_FORBIDDEN`. `enabled=false` bila entitlement `mikrotik.enabled` tenant mati; `tenant` hanya ada bila `enabled=true` (kontak publik tenant). Rate limit per IP 300/menit (bucket sendiri, terpisah dari lookup; pelanggan satu ISP sering berbagi satu IP NAT) dan per tenant 300/menit (429 `RATE_LIMITED`). Setiap respons membawa `Cache-Control: no-store` dan `X-Robots-Tag: noindex`."
+      responses:
+        '200':
+          description: "Success"
+          headers:
+            Cache-Control: {schema: {type: string, example: no-store}}
+            X-Robots-Tag: {schema: {type: string, example: noindex}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikPublicIsolirInfoEnvelope'}
+        '400':
+          description: "PUBLIC_ORGANIZATION_SELECTOR_FORBIDDEN"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "ORGANIZATION_NOT_ACTIVE (organisasi tenant tidak aktif; dari middleware RequireActiveTenant)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "PUBLIC_HOST_NOT_FOUND (host tidak terdaftar)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '429':
+          description: "RATE_LIMITED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR (satu body generik untuk semua penyebab)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+  /api/v1/public/isolir/lookup:
+    post:
+      summary: Public isolir lookup by username or phone
+      operationId: lookupMikrotikPublicIsolir
+      tags:
+      - Mikrotik
+      security: []
+      description: "Tanpa autentikasi; tenant dari host. Pelanggan memasukkan username PPPoE atau nomor telepon. Anti-enumerasi: tidak ada kecocokan, tidak ada tunggakan, kecocokan ganda, fitur mati, query kosong, lebih dari 100 karakter, berisi karakter kontrol, body rusak/tanpa field `query`/terlalu besar (>2 KiB) semuanya menghasilkan HTTP 200 dengan body identik `{found:false, masked_name:\"\", isolated:false, invoices:[]}` (`invoices` selalu array). Respons tidak pernah memuat telepon/email pelanggan maupun nama router/secret/profile/host. Pencarian telepon juga dicoba sebagai username (username PPPoE sering berupa angka); akun hasil keduanya digabung per id dan lebih dari satu akun dijawab seragam. Tagihan yang dihitung mengikuti mesin isolir: masa tenggang (`grace_days`) tenant menggeser batas, dan pelanggan yang dikecualikan (exempt) dijawab seragam. Setiap jawaban 200 (seragam maupun ditemukan) dikirim paling cepat 300 ms setelah request dimulai agar waktu respons tidak membedakan kasus (429/500 tidak ditahan). Rate limit: per IP 120/menit, per query ternormalisasi (di-hash) 5/menit, per tenant 300/menit; lebih dari batas -> 429 `RATE_LIMITED` dengan body sama apa pun akunnya. Galat service/port -> satu body 500 `INTERNAL_ERROR`. Header `Cache-Control: no-store` dan `X-Robots-Tag: noindex` pada setiap respons."
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MikrotikPublicIsolirLookupRequest'}
+      responses:
+        '200':
+          description: "Success (termasuk jawaban seragam)"
+          headers:
+            Cache-Control: {schema: {type: string, example: no-store}}
+            X-Robots-Tag: {schema: {type: string, example: noindex}}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikPublicIsolirLookupEnvelope'}
+        '400':
+          description: "PUBLIC_ORGANIZATION_SELECTOR_FORBIDDEN"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '403':
+          description: "ORGANIZATION_NOT_ACTIVE (organisasi tenant tidak aktif; dari middleware RequireActiveTenant)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '404':
+          description: "PUBLIC_HOST_NOT_FOUND (host tidak terdaftar)"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '429':
+          description: "RATE_LIMITED"
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
+        '500':
+          description: "INTERNAL_ERROR (satu body generik untuk semua penyebab)"
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MikrotikErrorResponse'}
@@ -16881,6 +17291,94 @@ components:
         items: {type: array, items: {$ref: '#/components/schemas/ReceivableInvoiceItem'}, description: 'Empty in list responses'}
         last_send: {allOf: [{$ref: '#/components/schemas/ReceivableInvoiceSend'}], nullable: true}
         created_at: {type: string, format: date-time}
+        isolir_flag: {type: boolean, description: 'Arrears invoices only: the owner chose that it may trigger isolation'}
+        arrears_recording_id: {type: string, format: uuid, nullable: true, description: 'Set when created by an arrears recording'}
+    ReceivableArrearsRequest:
+      type: object
+      required: [account_id, contract_id, reason, rows]
+      properties:
+        account_id: {type: string, format: uuid}
+        contract_id: {type: string, format: uuid}
+        reason: {type: string, minLength: 1, maxLength: 500}
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 24
+          items:
+            type: object
+            required: [period_start, amount, due_date]
+            properties:
+              period_start: {type: string, format: date, description: 'A cycle start listed by the periods endpoint (at most 24 cycles before start_date, not after today, before the billing pointer)'}
+              amount: {type: string, description: 'Gross amount > 0, at most 2 decimals'}
+              due_date: {type: string, format: date, description: 'On or before today (WIB); kept as is'}
+              isolir_flag: {type: boolean, default: false}
+    ReceivableArrearsRecording:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        account_id: {type: string, format: uuid}
+        contract_id: {type: string, format: uuid}
+        reason: {type: string}
+        recorded_by: {type: string, format: uuid, nullable: true}
+        notify_status: {type: string, enum: [pending, sent, failed, skipped]}
+        notify_error: {type: string}
+        notified_at: {type: string, format: date-time, nullable: true}
+        created_at: {type: string, format: date-time}
+    ReceivableArrearsRecordingEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/ReceivableArrearsRecording'}
+    ReceivableArrearsResultEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data:
+          type: object
+          properties:
+            recording: {$ref: '#/components/schemas/ReceivableArrearsRecording'}
+            invoices: {type: array, items: {$ref: '#/components/schemas/ReceivableInvoice'}}
+            notify_status: {type: string, enum: [pending, sent, failed, skipped]}
+    ReceivableArrearsPeriodsEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data:
+          type: object
+          properties:
+            has_trigger_product: {type: boolean}
+            periods:
+              type: array
+              items:
+                type: object
+                properties:
+                  index: {type: integer}
+                  start: {type: string, format: date}
+                  end: {type: string, format: date}
+                  default_amount: {type: string}
+                  conflict: {type: string, description: 'Empty when the period can be recorded'}
+    ReceivableArrearsConflictResponse:
+      allOf:
+      - {$ref: '#/components/schemas/ErrorResponse'}
+      - type: object
+        properties:
+          data:
+            type: object
+            properties:
+              conflicts:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    row: {type: integer}
+                    period_start: {type: string, format: date}
+                    reason: {type: string}
     ReceivableInvoiceEnvelope:
       type: object
       required: [success, message, data]
@@ -17067,6 +17565,15 @@ components:
         isolir_ready_at: {type: string, format: date-time, nullable: true}
         isolir_profile_name: {type: string}
         isolir_redirect_url: {type: string}
+        setup:
+          type: object
+          nullable: true
+          description: "Isian setup terakhir yang berhasil diterapkan (tanpa host; allowlist diturunkan dari konfigurasi platform), atau null."
+          properties:
+            profile_name: {type: string}
+            pool_cidr: {type: string}
+            rate_limit: {type: string}
+            redirect_url: {type: string}
         last_check_at: {type: string, format: date-time, nullable: true}
         last_check_status: {type: string, enum: [ok, unreachable, auth_failed, tls_untrusted, host_not_allowed]}
         routeros_version: {type: string}
@@ -17079,6 +17586,60 @@ components:
         success: {type: boolean}
         message: {type: string}
         data: {$ref: '#/components/schemas/MikrotikRouter'}
+    MikrotikRouterSummary:
+      type: object
+      required: [secrets, tasks]
+      properties:
+        secrets:
+          type: object
+          required: [total, paired, unpaired, missing, need_original_profile, isolated]
+          properties:
+            total: {type: integer}
+            paired: {type: integer}
+            unpaired: {type: integer}
+            missing: {type: integer}
+            need_original_profile: {type: integer}
+            isolated: {type: integer}
+        tasks:
+          type: object
+          required: [pending, running, failed, done, cancelled]
+          properties:
+            pending: {type: integer}
+            running: {type: integer}
+            failed: {type: integer}
+            done: {type: integer}
+            cancelled: {type: integer}
+    MikrotikRouterSummaryEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/MikrotikRouterSummary'}
+    MikrotikRouterStats:
+      type: object
+      description: >-
+        Field string (identity, board_name, version, architecture, uptime) bisa kosong bila
+        perintah RouterOS terkait gagal; field angka bernilai null dalam kasus yang sama.
+      required: [identity, board_name, version, architecture, uptime, cpu_load, memory_total, memory_free, ppp_active, fetched_at]
+      properties:
+        identity: {type: string}
+        board_name: {type: string}
+        version: {type: string}
+        architecture: {type: string}
+        uptime: {type: string, description: "Format RouterOS, mis. 1d2h3m4s"}
+        cpu_load: {type: integer, nullable: true}
+        memory_total: {type: integer, format: int64, nullable: true, description: "Byte"}
+        memory_free: {type: integer, format: int64, nullable: true, description: "Byte"}
+        ppp_active: {type: integer, nullable: true}
+        fetched_at: {type: string, format: date-time}
+    MikrotikRouterStatsEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success: {type: boolean}
+        message: {type: string}
+        data: {$ref: '#/components/schemas/MikrotikRouterStats'}
     MikrotikRouterListEnvelope:
       type: object
       required: [success, message, data, meta]
@@ -17170,6 +17731,55 @@ components:
         code: {type: string}
         message: {type: string}
         data: {type: object, description: "Detail terstruktur opsional."}
+    MikrotikPublicIsolirLookupRequest:
+      type: object
+      properties:
+        query: {type: string, maxLength: 100, description: "Username PPPoE atau nomor telepon. Nilai tidak valid diperlakukan sebagai query kosong (jawaban seragam), bukan 4xx."}
+    MikrotikPublicIsolirTenant:
+      type: object
+      required: [name, phone, email]
+      properties:
+        name: {type: string}
+        phone: {type: string}
+        email: {type: string}
+    MikrotikPublicIsolirInfo:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: {type: boolean}
+        tenant: {$ref: '#/components/schemas/MikrotikPublicIsolirTenant'}
+    MikrotikPublicIsolirInfoEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, example: true}
+        message: {type: string, example: ok}
+        data: {$ref: '#/components/schemas/MikrotikPublicIsolirInfo'}
+    MikrotikPublicIsolirInvoice:
+      type: object
+      required: [number, due_date, balance, pay_url]
+      properties:
+        number: {type: string}
+        due_date: {type: string, format: date}
+        balance: {type: string, description: "Desimal sebagai string, mis. `150000.00`."}
+        pay_url: {type: string, description: "Kosong bila tenant tidak punya pembayaran online (`receivable.online_payment`) atau pengirim default (tautan bayar tidak bisa dibuat)."}
+    MikrotikPublicIsolirLookup:
+      type: object
+      required: [found, masked_name, isolated, invoices]
+      properties:
+        found: {type: boolean}
+        masked_name: {type: string, description: "Nama disamarkan, mis. `B*** S******`. Kosong pada jawaban seragam."}
+        isolated: {type: boolean}
+        invoices:
+          type: array
+          items: {$ref: '#/components/schemas/MikrotikPublicIsolirInvoice'}
+    MikrotikPublicIsolirLookupEnvelope:
+      type: object
+      required: [success, data]
+      properties:
+        success: {type: boolean, example: true}
+        message: {type: string, example: ok}
+        data: {$ref: '#/components/schemas/MikrotikPublicIsolirLookup'}
     MikrotikPPPSecret:
       type: object
       description: "Salinan cache secret `/ppp/secret`. Tidak pernah memuat password PPP atau kredensial."
@@ -17376,6 +17986,7 @@ components:
       required: [enabled]
       properties:
         enabled: {type: boolean}
+        effective_from: {type: string, format: date, description: 'Opsional, hanya bersama enabled=true. Invoice dengan jatuh tempo pada/sesudah tanggal ini bisa memicu isolir. Kosong = hari ini (WIB). Diabaikan bila produk sudah aktif. Format lain atau enabled=false → 422 VALIDATION_ERROR.'}
     MikrotikProductTrigger:
       type: object
       properties:

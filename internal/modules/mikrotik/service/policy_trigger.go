@@ -49,10 +49,21 @@ func (s *PolicyService) PreviewTrigger(ctx context.Context, scope coretenant.Sco
 // disable resets it to today (WIB). The repository does this in one atomic
 // upsert. There is no direct effect on any router.
 func (s *PolicyService) SetTrigger(ctx context.Context, scope coretenant.Scope, productID string, enabled bool, actor string) (domain.ProductTrigger, error) {
+	return s.SetTriggerFrom(ctx, scope, productID, enabled, nil, actor)
+}
+
+// SetTriggerFrom is SetTrigger with an explicit effective_from for a product being enabled
+// (nil = today WIB). An already enabled product keeps its date (same upsert rule).
+func (s *PolicyService) SetTriggerFrom(ctx context.Context, scope coretenant.Scope, productID string, enabled bool, effectiveFrom *time.Time, actor string) (domain.ProductTrigger, error) {
 	if _, err := s.products.Get(ctx, scope, productID); err != nil {
 		return domain.ProductTrigger{}, err
 	}
-	t, err := s.repo.UpsertProductTrigger(ctx, scope, productID, enabled, businesstime.DayOf(s.now()), actor)
+	from := businesstime.DayOf(s.now())
+	if effectiveFrom != nil {
+		y, m, d := effectiveFrom.Date()
+		from = time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	}
+	t, err := s.repo.UpsertProductTrigger(ctx, scope, productID, enabled, from, actor)
 	if err != nil {
 		return domain.ProductTrigger{}, err
 	}

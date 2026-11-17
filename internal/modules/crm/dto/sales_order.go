@@ -64,36 +64,37 @@ type DocumentRef struct {
 }
 
 type SalesOrderResponse struct {
-	ID                string                   `json:"id"`
-	SONumber          string                   `json:"so_number"`
-	QuotationID       string                   `json:"quotation_id"`
-	QuotationNumber   string                   `json:"quotation_number"`
-	DealID            *string                  `json:"deal_id"`
-	ContactID         *string                  `json:"contact_id"`
-	CompanyID         *string                  `json:"company_id"`
-	Status            string                   `json:"status"`
-	BillingStatus     string                   `json:"billing_status"`
-	BillingError      string                   `json:"billing_error"`
-	StartDate         *string                  `json:"start_date"`
-	BillToName        string                   `json:"bill_to_name"`
-	BillToCompany     string                   `json:"bill_to_company"`
-	BillToEmail       string                   `json:"bill_to_email"`
-	BillToPhone       string                   `json:"bill_to_phone"`
-	BillToAddress     string                   `json:"bill_to_address"`
-	Channels          []string                 `json:"channels"`
-	PICUserID         string                   `json:"pic_user_id"`
-	Currency          string                   `json:"currency"`
-	Subtotal          string                   `json:"subtotal"`
-	TaxTotal          string                   `json:"tax_total"`
-	GrandTotal        string                   `json:"grand_total"`
-	FirstInvoiceTotal string                   `json:"first_invoice_total"`
-	RecurringTotals   map[string]string        `json:"recurring_totals"`
-	InitialInvoice    *DocumentRef             `json:"initial_invoice"`
-	Contract          *DocumentRef             `json:"contract"`
-	Items             []SalesOrderItemResponse `json:"items"`
-	ConfirmedAt       *time.Time               `json:"confirmed_at"`
-	CreatedAt         time.Time                `json:"created_at"`
-	UpdatedAt         time.Time                `json:"updated_at"`
+	ID                 string                   `json:"id"`
+	SONumber           string                   `json:"so_number"`
+	QuotationID        string                   `json:"quotation_id"`
+	QuotationNumber    string                   `json:"quotation_number"`
+	DealID             *string                  `json:"deal_id"`
+	ContactID          *string                  `json:"contact_id"`
+	CompanyID          *string                  `json:"company_id"`
+	Status             string                   `json:"status"`
+	BillingStatus      string                   `json:"billing_status"`
+	BillingError       string                   `json:"billing_error"`
+	StartDate          *string                  `json:"start_date"`
+	BillToName         string                   `json:"bill_to_name"`
+	BillToCompany      string                   `json:"bill_to_company"`
+	BillToEmail        string                   `json:"bill_to_email"`
+	BillToPhone        string                   `json:"bill_to_phone"`
+	BillToAddress      string                   `json:"bill_to_address"`
+	Channels           []string                 `json:"channels"`
+	PICUserID          string                   `json:"pic_user_id"`
+	Currency           string                   `json:"currency"`
+	Subtotal           string                   `json:"subtotal"`
+	TaxTotal           string                   `json:"tax_total"`
+	GrandTotal         string                   `json:"grand_total"`
+	FirstInvoiceTotal  string                   `json:"first_invoice_total"`
+	RecurringTotals    map[string]string        `json:"recurring_totals"`
+	InitialInvoice     *DocumentRef             `json:"initial_invoice"`
+	SkipInitialInvoice bool                     `json:"skip_initial_invoice"`
+	Contract           *DocumentRef             `json:"contract"`
+	Items              []SalesOrderItemResponse `json:"items"`
+	ConfirmedAt        *time.Time               `json:"confirmed_at"`
+	CreatedAt          time.Time                `json:"created_at"`
+	UpdatedAt          time.Time                `json:"updated_at"`
 }
 
 // SalesOrderFromDomain: invoice/contract diisi pemanggil (handler) karena butuh pembacaan receivable.
@@ -138,7 +139,7 @@ func SalesOrderFromDomain(so domain.SalesOrder, invoice, contract *DocumentRef) 
 		BillToName: so.BillToName, BillToCompany: so.BillToCompany, BillToEmail: so.BillToEmail, BillToPhone: so.BillToPhone,
 		BillToAddress: so.BillToAddress, Channels: channels, PICUserID: so.PICUserID, Currency: so.Currency,
 		Subtotal: so.Subtotal, TaxTotal: so.TaxTotal, GrandTotal: so.GrandTotal, FirstInvoiceTotal: so.FirstInvoiceTotal,
-		RecurringTotals: totals, InitialInvoice: invoice, Contract: contract, Items: items,
+		RecurringTotals: totals, InitialInvoice: invoice, SkipInitialInvoice: so.SkipInitialInvoice, Contract: contract, Items: items,
 		ConfirmedAt: so.ConfirmedAt, CreatedAt: so.CreatedAt, UpdatedAt: so.UpdatedAt,
 	}
 }

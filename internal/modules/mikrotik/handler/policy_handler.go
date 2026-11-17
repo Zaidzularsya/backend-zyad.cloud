@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -20,7 +22,7 @@ type PolicyService interface {
 	SetExempt(ctx context.Context, scope coretenant.Scope, accountID string, exempt bool, reason string, until *time.Time, actor string) (domain.CustomerPolicy, error)
 	GetPolicy(ctx context.Context, scope coretenant.Scope, accountID string) (domain.CustomerPolicy, error)
 	PreviewTrigger(ctx context.Context, scope coretenant.Scope, productID string) (service.TriggerPreview, error)
-	SetTrigger(ctx context.Context, scope coretenant.Scope, productID string, enabled bool, actor string) (domain.ProductTrigger, error)
+	SetTriggerFrom(ctx context.Context, scope coretenant.Scope, productID string, enabled bool, effectiveFrom *time.Time, actor string) (domain.ProductTrigger, error)
 	UnmarkedProducts(ctx context.Context, scope coretenant.Scope) ([]service.ProductInfo, error)
 	ListTriggersWithProducts(ctx context.Context, scope coretenant.Scope) ([]service.TriggerItem, error)
 }
@@ -148,7 +150,16 @@ func (h *PolicyHandler) SetTrigger(c *gin.Context) {
 		failRouter(c, mikrotik.ErrProductNotFound)
 		return
 	}
-	t, err := h.svc.SetTrigger(c.Request.Context(), scope, id, *req.Enabled, permissionmiddleware.UserID(c))
+	var from *time.Time
+	if v := strings.TrimSpace(req.EffectiveFrom); v != "" {
+		d, err := time.Parse(time.DateOnly, v)
+		if err != nil || !*req.Enabled {
+			validationFail(c, errors.New("effective_from harus tanggal YYYY-MM-DD dan hanya dipakai saat mengaktifkan"))
+			return
+		}
+		from = &d
+	}
+	t, err := h.svc.SetTriggerFrom(c.Request.Context(), scope, id, *req.Enabled, from, permissionmiddleware.UserID(c))
 	if err != nil {
 		failRouter(c, err)
 		return

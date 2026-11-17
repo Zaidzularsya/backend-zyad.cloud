@@ -28,6 +28,23 @@ type fakeSecretRepo struct {
 
 	listFilter            repository.SecretFilter
 	listLimit, listOffset int
+	summaryRouter         string
+}
+
+func (f *fakeSecretRepo) CountByDisabled(_ context.Context, _ coretenant.Scope, routerID string) (int, int, error) {
+	f.summaryRouter = routerID
+	active, inactive := 0, 0
+	for _, r := range f.rows {
+		if !r.Present || (routerID != "" && r.RouterID != routerID) {
+			continue
+		}
+		if r.Disabled {
+			inactive++
+		} else {
+			active++
+		}
+	}
+	return active, inactive, nil
 }
 
 func newFakeSecretRepo() *fakeSecretRepo {
@@ -64,6 +81,10 @@ func (f *fakeSecretRepo) MarkMissing(_ context.Context, _ coretenant.Scope, rout
 		}
 	}
 	return n, nil
+}
+
+func (f *fakeSecretRepo) AccountIDsByName(context.Context, coretenant.Scope, string) ([]string, error) {
+	return nil, nil
 }
 
 func (f *fakeSecretRepo) FindByID(_ context.Context, scope coretenant.Scope, id string) (domain.PPPSecret, error) {

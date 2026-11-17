@@ -212,3 +212,26 @@ func TestListTriggersWithProducts(t *testing.T) {
 		t.Fatalf("items = %+v, %v", items, err)
 	}
 }
+
+func TestSetTriggerFrom_ExplicitEffectiveFrom(t *testing.T) {
+	e := newTriggerEnv(t)
+	from := day(2026, 8, 1)
+	tr, err := e.svc.SetTriggerFrom(context.Background(), e.scope, "p-1", true, &from, testActor)
+	if err != nil || !tr.EffectiveFrom.Equal(from) || e.rrepo.audits[0].Metadata["effective_from"] != "2026-08-01" {
+		t.Fatalf("trigger = %+v, %v", tr, err)
+	}
+	// Already enabled: the date is kept, exactly like the plain SetTrigger.
+	later := day(2026, 9, 1)
+	tr, err = e.svc.SetTriggerFrom(context.Background(), e.scope, "p-1", true, &later, testActor)
+	if err != nil || !tr.EffectiveFrom.Equal(from) {
+		t.Fatalf("re-enable = %+v, %v", tr, err)
+	}
+}
+
+func TestSetTriggerFrom_NilIsToday(t *testing.T) {
+	e := newTriggerEnv(t)
+	tr, err := e.svc.SetTriggerFrom(context.Background(), e.scope, "p-1", true, nil, testActor)
+	if err != nil || !tr.EffectiveFrom.Equal(day(2026, 11, 6)) {
+		t.Fatalf("trigger = %+v, %v", tr, err)
+	}
+}

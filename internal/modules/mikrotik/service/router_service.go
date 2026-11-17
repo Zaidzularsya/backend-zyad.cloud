@@ -8,6 +8,8 @@ import (
 	"net/netip"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	coretenant "zyad.cloud/internal/core/tenant"
 
@@ -89,6 +91,10 @@ type RouterService struct {
 	secret         string
 	allowedPrivate []netip.Prefix
 	validateHost   func(ctx context.Context, host string, allowed []netip.Prefix) ([]netip.Addr, bool, error)
+	now            func() time.Time // injectable clock for the stats cache
+
+	statsMu    sync.Mutex
+	statsCache map[string]statsCacheEntry
 }
 
 func NewRouterService(repo repository.RouterRepository, factory ClientFactory, secret string, allowedPrivate []netip.Prefix) *RouterService {
@@ -98,6 +104,8 @@ func NewRouterService(repo repository.RouterRepository, factory ClientFactory, s
 		secret:         secret,
 		allowedPrivate: allowedPrivate,
 		validateHost:   pmk.ValidateHost,
+		now:            time.Now,
+		statsCache:     map[string]statsCacheEntry{},
 	}
 }
 
@@ -304,6 +312,14 @@ func (s *RouterService) Get(ctx context.Context, scope coretenant.Scope, id stri
 	return s.repo.FindByID(ctx, scope, id)
 }
 
+// Summary returns the database-only secret and task counts of one router.
+func (s *RouterService) Summary(ctx context.Context, scope coretenant.Scope, id string) (domain.RouterSummary, error) {
+	if _, err := s.Get(ctx, scope, id); err != nil {
+		return domain.RouterSummary{}, err
+	}
+	return s.repo.Summary(ctx, scope, id)
+}
+
 func (s *RouterService) List(ctx context.Context, scope coretenant.Scope, limit, offset int) ([]domain.Router, int64, error) {
 	return s.repo.List(ctx, scope, limit, offset)
 }
@@ -459,6 +475,7 @@ func (s *RouterService) Update(ctx context.Context, scope coretenant.Scope, id s
 	if err != nil {
 		return domain.Router{}, storeError(err, newPassword, s.storedPassword(current), derefStr(params.PasswordEncrypted), current.PasswordEncrypted)
 	}
+	s.dropStats(scope, id)
 	if connectionChanged {
 		// Bookkeeping after a committed update (no shared transaction): log, do not fail.
 		if err := s.repo.RecordCheck(ctx, scope, id, CheckStatusOK, updated.RouterOSVersion); err != nil {
@@ -480,6 +497,7 @@ func (s *RouterService) Delete(ctx context.Context, scope coretenant.Scope, id, 
 	if err := s.repo.SoftDelete(ctx, scope, id, by); err != nil {
 		return err
 	}
+	s.dropStats(scope, id)
 	s.audit(ctx, scope, repository.AuditEntry{
 		Event: "router.deleted", ActorUserID: by, TargetID: id, Metadata: auditMetadata(router),
 	})

@@ -25,6 +25,7 @@ const invoiceSelect = `
 		i.subtotal::text, i.discount_total::text, i.tax_total::text, i.grand_total::text, i.amount_paid::text,
 		i.channels, COALESCE(i.pic_user_id::text, ''), i.pdf_asset_id::text, i.notes, i.paid_at, i.voided_at,
 		i.void_reason, COALESCE(i.created_by::text, ''), i.created_at, i.updated_at,
+		i.isolir_flag, COALESCE(i.arrears_recording_id::text, ''),
 		a.id, a.name, a.company_name, a.email, a.phone, a.address,
 		COALESCE(a.source_type, ''), COALESCE(a.source_id::text, ''), a.created_at, a.updated_at
 	FROM receivable_invoices i
@@ -39,6 +40,7 @@ func scanInvoice(row pgx.Row) (domain.Invoice, error) {
 		&inv.Subtotal, &inv.DiscountTotal, &inv.TaxTotal, &inv.GrandTotal, &inv.AmountPaid,
 		&inv.Channels, &inv.PICUserID, &inv.PDFAssetID, &inv.Notes, &inv.PaidAt, &inv.VoidedAt,
 		&inv.VoidReason, &inv.CreatedBy, &inv.CreatedAt, &inv.UpdatedAt,
+		&inv.IsolirFlag, &inv.ArrearsRecordingID,
 		&inv.Account.ID, &inv.Account.Name, &inv.Account.CompanyName, &inv.Account.Email, &inv.Account.Phone, &inv.Account.Address,
 		&inv.Account.SourceType, &inv.Account.SourceID, &inv.Account.CreatedAt, &inv.Account.UpdatedAt)
 	inv.Status, inv.SourceType = domain.InvoiceStatus(status), domain.SourceType(sourceType)
@@ -123,13 +125,14 @@ func (r *invoiceRepository) Create(ctx context.Context, scope coretenant.Scope, 
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO receivable_invoices (organization_id, account_id, source_type, source_id, contract_id, idempotency_key,
 				period_start, period_end, currency, subtotal, discount_total, tax_total, grand_total, channels,
-				pic_user_id, notes, created_by, updated_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $17)
+				pic_user_id, notes, created_by, updated_by, arrears_recording_id, isolir_flag)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $17, $18, $19)
 			RETURNING id`,
 			scope.OrganizationID(), p.AccountID, sourceType, nullableString(p.SourceID), nullableString(p.ContractID),
 			nullableString(p.IdempotencyKey), p.PeriodStart, p.PeriodEnd, currency,
 			p.Totals.Subtotal, p.Totals.DiscountTotal, p.Totals.TaxTotal, p.Totals.GrandTotal, channelsOrDefault(p.Channels),
-			nullableString(p.PICUserID), p.Notes, nullableString(p.CreatedBy)).Scan(&id); err != nil {
+			nullableString(p.PICUserID), p.Notes, nullableString(p.CreatedBy),
+			nullableString(p.ArrearsRecordingID), p.IsolirFlag).Scan(&id); err != nil {
 			return err
 		}
 		if err := insertItems(ctx, tx, scope.OrganizationID(), id, p.Items); err != nil {
@@ -141,6 +144,9 @@ func (r *invoiceRepository) Create(ctx context.Context, scope coretenant.Scope, 
 	})
 	if isUniqueViolation(err, "idx_receivable_invoices_source_idempotency") {
 		return domain.Invoice{}, ErrDuplicateSource
+	}
+	if isUniqueViolation(err, "idx_receivable_invoices_arrears_period") {
+		return domain.Invoice{}, ErrDuplicateArrearsPeriod
 	}
 	return out, err
 }

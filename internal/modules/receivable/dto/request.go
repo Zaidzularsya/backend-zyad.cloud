@@ -85,4 +85,6 @@ type SettingsRequest struct {
 	PaymentTermsDays    int      `json:"payment_terms_days"`
 	DefaultChannels     []string `json:"default_channels"`
 	DefaultSenderUserID string   `json:"default_sender_user_id"`
+	// DefaultBillingDay 1–31; null/absent clears it (the request replaces all settings).
+	DefaultBillingDay *int `json:"default_billing_day"`
 }

@@ -408,6 +408,7 @@ func billingRequest(so domain.SalesOrder, actor string, lines []receivableservic
 	req := receivableservice.OrderBillingRequest{
 		SourceType: receivabledomain.SourceSalesOrder, SourceID: so.ID, Account: acc, Channels: so.Channels,
 		PICUserID: so.PICUserID, Currency: so.Currency, ActorUserID: actor, Lines: lines,
+		SkipInitialInvoice: so.SkipInitialInvoice,
 	}
 	if so.StartDate != nil {
 		req.StartDate = *so.StartDate

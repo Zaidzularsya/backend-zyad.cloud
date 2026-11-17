@@ -56,8 +56,11 @@ type SalesOrder struct {
 	Subtotal, TaxTotal, GrandTotal, FirstInvoiceTotal                  string
 	RecurringTotals                                                    map[pricing.Frequency]string
 	ReceivableAccountID, InitialInvoiceID, ContractID                  string
-	Items                                                              []SalesOrderItem
-	ConfirmedAt, CancelledAt                                           *time.Time
-	ConfirmedBy, CreatedBy                                             string
-	CreatedAt, UpdatedAt                                               time.Time
+	// SkipInitialInvoice: confirm creates the contract but no initial invoice
+	// (onboarding an existing customer in the running cycle).
+	SkipInitialInvoice       bool
+	Items                    []SalesOrderItem
+	ConfirmedAt, CancelledAt *time.Time
+	ConfirmedBy, CreatedBy   string
+	CreatedAt, UpdatedAt     time.Time
 }

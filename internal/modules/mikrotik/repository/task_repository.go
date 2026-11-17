@@ -71,6 +71,9 @@ type TaskRepository interface {
 	// OldestPendingRestore returns the created_at of the longest-waiting
 	// pending restore, or nil when there is none.
 	OldestPendingRestore(ctx context.Context, scope coretenant.Scope) (*time.Time, error)
+	// LatestRestoreBySecret returns the newest restore task per given secret
+	// id; secrets without one are absent. Empty input does not query.
+	LatestRestoreBySecret(ctx context.Context, scope coretenant.Scope, secretIDs []string) (map[string]domain.IsolationTask, error)
 }
 
 type taskRepository struct {
@@ -424,4 +427,35 @@ func (r *taskRepository) OldestPendingRestore(ctx context.Context, scope coreten
 			scope.OrganizationID()).Scan(&oldest)
 	})
 	return oldest, err
+}
+
+func (r *taskRepository) LatestRestoreBySecret(ctx context.Context, scope coretenant.Scope, secretIDs []string) (map[string]domain.IsolationTask, error) {
+	out := map[string]domain.IsolationTask{}
+	if len(secretIDs) == 0 {
+		return out, nil
+	}
+	err := withScopedTx(ctx, r.db, scope, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+			SELECT DISTINCT ON (secret_id) `+taskColumns+`
+			FROM mikrotik_isolation_tasks
+			WHERE organization_id = $1 AND action = $2 AND secret_id = ANY($3::uuid[])
+			ORDER BY secret_id, created_at DESC`,
+			scope.OrganizationID(), domain.ActionRestore, secretIDs)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			t, err := scanTask(rows)
+			if err != nil {
+				return err
+			}
+			out[t.SecretID] = t
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
