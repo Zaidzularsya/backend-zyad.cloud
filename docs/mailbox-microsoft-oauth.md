@@ -81,11 +81,12 @@ terpisah).
      (harus sama persis dengan `MICROSOFT_OAUTH_REDIRECT_URL`).
 2. **Certificates & secrets → New client secret** → salin *Value* (hanya tampil sekali). Catat
    tanggal kedaluwarsanya; perbarui sebelum habis.
-3. **API permissions → Add a permission → APIs my organization uses** → cari
-   `Office 365 Exchange Online` → **Delegated**: `SMTP.Send`, `IMAP.AccessAsUser.All`.
-   Tambahkan juga Microsoft Graph delegated `openid`, `email`, `profile`, `offline_access`.
-   Admin consent tidak wajib (user memberi consent sendiri), kecuali tenant M365 pelanggan
-   membatasi user consent.
+3. **API permissions → Add a permission → Microsoft APIs → Microsoft Graph → Delegated**:
+   `IMAP.AccessAsUser.All`, `SMTP.Send`, `offline_access`, `openid`, `email`, `profile`.
+   (`Office 365 Exchange Online` di tab *APIs my organization uses* hanya muncul bila direktori
+   punya lisensi M365; izin Graph di atas setara.) Daftar ini hanya pra-deklarasi: scope
+   `https://outlook.office.com/...` tetap diminta saat login. Admin consent tidak wajib, kecuali
+   tenant M365 pelanggan membatasi user consent.
 4. **Overview** → salin *Application (client) ID*.
 5. Isi `.env` backend (jangan commit):
 
@@ -113,6 +114,8 @@ terpisah).
 | Gejala | Penyebab / tindakan |
 |---|---|
 | Tombol Microsoft tidak muncul | `MICROSOFT_OAUTH_CLIENT_ID` kosong atau API belum di-restart |
+| `AADSTS16000` saat membuka portal Entra dengan akun Outlook pribadi | Akun belum punya direktori → daftar Azure (free) untuk membuat *Default Directory*, atau pakai akun admin M365 |
+| `invalid_request` … `userAudience` … `Consumer` | App terdaftar "Personal Microsoft accounts only" → ubah *Supported account types* ke "any organizational directory and personal Microsoft accounts" (Manifest `signInAudience: AzureADandPersonalMicrosoftAccount`) |
 | `AADSTS50011` redirect URI mismatch | Redirect URI di Entra ≠ `MICROSOFT_OAUTH_REDIRECT_URL` |
 | `AADSTS65001` / consent required | Tenant M365 membatasi user consent → admin memberi consent |
 | `AADSTS7000215` invalid client secret | Secret salah/kedaluwarsa → buat secret baru |
