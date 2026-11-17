@@ -20,6 +20,25 @@ type MailboxRequest struct {
 	IMAPSecurity string `json:"imap_security"`
 }
 
+type MicrosoftOAuthStartRequest struct {
+	// MailboxID reconnects that mailbox; empty connects a new one.
+	MailboxID   string `json:"mailbox_id"`
+	DisplayName string `json:"display_name"`
+}
+
+type MicrosoftOAuthStartResponse struct {
+	AuthorizationURL string `json:"authorization_url"`
+}
+
+type MicrosoftOAuthCompleteRequest struct {
+	Code  string `json:"code" binding:"required"`
+	State string `json:"state" binding:"required"`
+}
+
+type OAuthProviderResponse struct {
+	Enabled bool `json:"enabled"`
+}
+
 type MessageListQuery struct {
 	Page              int    `form:"page"`
 	PerPage           int    `form:"per_page"`
@@ -36,6 +55,8 @@ type MailboxResponse struct {
 	EmailAddress string `json:"email_address"`
 	DisplayName  string `json:"display_name"`
 	Username     string `json:"username"`
+	// AuthMethod is "password" or "microsoft_oauth".
+	AuthMethod   string `json:"auth_method"`
 	SMTPHost     string `json:"smtp_host"`
 	SMTPPort     int    `json:"smtp_port"`
 	SMTPSecurity string `json:"smtp_security"`
@@ -54,7 +75,8 @@ type MailboxResponse struct {
 func MailboxFromDomain(m domain.Mailbox) MailboxResponse {
 	return MailboxResponse{
 		ID: m.ID, EmailAddress: m.EmailAddress, DisplayName: m.DisplayName, Username: m.Username,
-		SMTPHost: m.SMTPHost, SMTPPort: m.SMTPPort, SMTPSecurity: string(m.SMTPSecurity),
+		AuthMethod: string(m.AuthMethod),
+		SMTPHost:   m.SMTPHost, SMTPPort: m.SMTPPort, SMTPSecurity: string(m.SMTPSecurity),
 		IMAPHost: m.IMAPHost, IMAPPort: m.IMAPPort, IMAPSecurity: string(m.IMAPSecurity),
 		HasInboxSync: m.HasIMAP(), LastSyncedAt: m.LastSyncedAt,
 		Status: string(m.Status), LastError: m.LastError, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,

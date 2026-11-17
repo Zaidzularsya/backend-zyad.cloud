@@ -65,10 +65,14 @@ func newWorkerReceivableBuild(cfg config.Config, db *database.Pool, log *slog.Lo
 	mailboxRepo, messageRepo := mailboxrepo.NewMailboxRepository(db), mailboxrepo.NewMessageRepository(db)
 	mailboxSvc := mailboxservice.NewMailboxService(mailboxRepo, messageRepo, assetSvc, mailboxservice.MailboxServiceOptions{
 		SecretKey: cfg.App.Secret, AllowPrivateHosts: cfg.Mail.MailboxAllowPrivateHosts,
+		MicrosoftOAuth: NewMicrosoftMailOAuth(cfg),
 	})
 	messageSvc := mailboxservice.NewMessageService(mailboxRepo, messageRepo, assetSvc,
 		mailboxservice.NewCRMGateway(leadRepo, contactRepo, activityRepo),
-		mailboxservice.MessageServiceOptions{SecretKey: cfg.App.Secret, AllowPrivateHosts: cfg.Mail.MailboxAllowPrivateHosts, Log: log})
+		mailboxservice.MessageServiceOptions{
+			SecretKey: cfg.App.Secret, AllowPrivateHosts: cfg.Mail.MailboxAllowPrivateHosts,
+			MicrosoftOAuth: NewMicrosoftMailOAuth(cfg), Log: log,
+		})
 
 	entitlements := organizationservice.NewEntitlementService(organizationrepo.NewEntitlementRepository(db))
 	guard := organizationservice.NewEntitlementGuard(

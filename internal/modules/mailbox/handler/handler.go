@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"strings"
@@ -46,6 +47,9 @@ func (h *Handler) RegisterRoutes(mailboxes, emails *gin.RouterGroup, p permissio
 	send := permissionmiddleware.RequireOrganizationOrGlobal(p, "email.send")
 
 	mailboxes.GET("", read, h.ListMailboxes)
+	mailboxes.GET("/oauth/microsoft", read, h.MicrosoftOAuthStatus)
+	mailboxes.POST("/oauth/microsoft/start", send, h.StartMicrosoftOAuth)
+	mailboxes.POST("/oauth/microsoft/complete", send, h.CompleteMicrosoftOAuth)
 	mailboxes.POST("", send, h.CreateMailbox)
 	mailboxes.PATCH("/:id", send, h.UpdateMailbox)
 	mailboxes.DELETE("/:id", send, h.DeleteMailbox)
@@ -135,6 +139,59 @@ func (h *Handler) UpdateMailbox(c *gin.Context) {
 		return
 	}
 	corehttp.OK(c, "updated", dto.MailboxFromDomain(mailbox))
+}
+
+// MicrosoftOAuthStatus tells the UI whether to offer "Sign in with
+// Microsoft" (the server has an app registration configured).
+func (h *Handler) MicrosoftOAuthStatus(c *gin.Context) {
+	if _, _, ok := requireCaller(c); !ok {
+		return
+	}
+	corehttp.OK(c, "success", dto.OAuthProviderResponse{Enabled: h.mailboxes.MicrosoftOAuthEnabled()})
+}
+
+func (h *Handler) StartMicrosoftOAuth(c *gin.Context) {
+	scope, userID, ok := requireCaller(c)
+	if !ok {
+		return
+	}
+	var req dto.MicrosoftOAuthStartRequest
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		return
+	}
+	url, err := h.mailboxes.StartMicrosoftOAuth(c.Request.Context(), scope, userID, service.MicrosoftOAuthInput{
+		MailboxID: strings.TrimSpace(req.MailboxID), DisplayName: req.DisplayName,
+	})
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	corehttp.OK(c, "success", dto.MicrosoftOAuthStartResponse{AuthorizationURL: url})
+}
+
+// CompleteMicrosoftOAuth is called by the frontend callback page with the
+// code/state Microsoft redirected back with, under the user's own session.
+func (h *Handler) CompleteMicrosoftOAuth(c *gin.Context) {
+	scope, userID, ok := requireCaller(c)
+	if !ok {
+		return
+	}
+	var req dto.MicrosoftOAuthCompleteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		return
+	}
+	result, err := h.mailboxes.CompleteMicrosoftOAuth(c.Request.Context(), scope, userID, req.Code, req.State)
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	if result.Created {
+		corehttp.Created(c, "created", dto.MailboxFromDomain(result.Mailbox))
+		return
+	}
+	corehttp.OK(c, "updated", dto.MailboxFromDomain(result.Mailbox))
 }
 
 func (h *Handler) DeleteMailbox(c *gin.Context) {
