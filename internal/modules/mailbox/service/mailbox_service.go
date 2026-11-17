@@ -58,6 +58,9 @@ type MailboxServiceOptions struct {
 	// against a local mail catcher only).
 	AllowPrivateHosts bool
 	Verify            SMTPVerifier
+	// MicrosoftOAuth is nil when MICROSOFT_OAUTH_CLIENT_ID is not set.
+	MicrosoftOAuth MicrosoftOAuth
+	Now            func() time.Time
 }
 
 type MailboxService struct {
@@ -67,6 +70,9 @@ type MailboxService struct {
 	secretKey string
 	verify    SMTPVerifier
 	allowAny  bool
+	microsoft MicrosoftOAuth
+	creds     *credentialResolver
+	now       func() time.Time
 }
 
 func NewMailboxService(
@@ -79,6 +85,12 @@ func NewMailboxService(
 	if verify == nil {
 		verify = platformmail.VerifySMTP
 	}
+	now := options.Now
+	if now == nil {
+		now = time.Now
+	}
+	creds := newCredentialResolver(options.SecretKey, mailboxes, options.MicrosoftOAuth)
+	creds.now = now
 	return &MailboxService{
 		mailboxes: mailboxes,
 		messages:  messages,
@@ -86,6 +98,9 @@ func NewMailboxService(
 		secretKey: options.SecretKey,
 		verify:    verify,
 		allowAny:  options.AllowPrivateHosts,
+		microsoft: options.MicrosoftOAuth,
+		creds:     creds,
+		now:       now,
 	}
 }
 
@@ -103,7 +118,7 @@ func (s *MailboxService) Create(ctx context.Context, scope coretenant.Scope, use
 	if err := validateMailboxInput(input); err != nil {
 		return domain.Mailbox{}, err
 	}
-	if err := s.checkConnection(ctx, input, input.Password); err != nil {
+	if err := s.checkConnection(ctx, input, mailCredentials{Username: input.Username, Password: input.Password}); err != nil {
 		return domain.Mailbox{}, err
 	}
 	encrypted, err := corecrypto.EncryptSecret(s.secretKey, input.Password)
@@ -122,21 +137,32 @@ func (s *MailboxService) Update(ctx context.Context, scope coretenant.Scope, use
 	if err != nil {
 		return domain.Mailbox{}, err
 	}
+	keepSecret := strings.TrimSpace(input.Password) == ""
+	if keepSecret && current.AuthMethod.IsOAuth() {
+		// The OAuth grant is tied to one Microsoft account: only the
+		// display name and server settings can change without reconnecting.
+		input.EmailAddress, input.Username = current.EmailAddress, current.Username
+	}
 	input = normalizeMailboxInput(input)
 	if err := validateMailboxInput(input); err != nil {
 		return domain.Mailbox{}, err
 	}
 
-	password := input.Password
+	var creds mailCredentials
 	encrypted := ""
-	if strings.TrimSpace(password) == "" {
-		if password, err = corecrypto.DecryptSecret(s.secretKey, current.SecretEncrypted); err != nil {
+	if keepSecret {
+		resolved := current
+		resolved.Username = input.Username
+		if creds, err = s.creds.resolve(ctx, scope, resolved); err != nil {
+			return domain.Mailbox{}, mailboxmodule.ConnectionError(err.Error())
+		}
+	} else {
+		creds = mailCredentials{Username: input.Username, Password: input.Password}
+		if encrypted, err = corecrypto.EncryptSecret(s.secretKey, input.Password); err != nil {
 			return domain.Mailbox{}, err
 		}
-	} else if encrypted, err = corecrypto.EncryptSecret(s.secretKey, password); err != nil {
-		return domain.Mailbox{}, err
 	}
-	if err := s.checkConnection(ctx, input, password); err != nil {
+	if err := s.checkConnection(ctx, input, creds); err != nil {
 		return domain.Mailbox{}, err
 	}
 
@@ -156,11 +182,12 @@ func (s *MailboxService) Test(ctx context.Context, scope coretenant.Scope, userI
 	if err != nil {
 		return domain.Mailbox{}, err
 	}
-	password, err := corecrypto.DecryptSecret(s.secretKey, mailbox.SecretEncrypted)
-	if err != nil {
-		return domain.Mailbox{}, err
+	checkErr := error(nil)
+	if creds, err := s.creds.resolve(ctx, scope, mailbox); err != nil {
+		checkErr = mailboxmodule.ConnectionError(err.Error())
+	} else {
+		checkErr = s.checkConnection(ctx, inputFromMailbox(mailbox), creds)
 	}
-	checkErr := s.checkConnection(ctx, inputFromMailbox(mailbox), password)
 	status, lastError := domain.MailboxStatusActive, ""
 	if checkErr != nil {
 		status, lastError = domain.MailboxStatusError, checkErr.Error()
@@ -211,10 +238,10 @@ func (s *MailboxService) get(ctx context.Context, scope coretenant.Scope, userID
 	return mailbox, err
 }
 
-func (s *MailboxService) checkConnection(ctx context.Context, input MailboxInput, password string) error {
+func (s *MailboxService) checkConnection(ctx context.Context, input MailboxInput, creds mailCredentials) error {
 	ctx, cancel := context.WithTimeout(ctx, verifyTimeout)
 	defer cancel()
-	cfg := smtpConfig(input.EmailAddress, input.DisplayName, input.Username, password,
+	cfg := smtpConfig(input.EmailAddress, input.DisplayName, creds,
 		input.SMTPHost, input.SMTPPort, input.SMTPSecurity, s.allowAny)
 	if err := s.verify(ctx, cfg); err != nil {
 		if errors.Is(err, mailboxmodule.ErrHostNotAllowed) {
@@ -227,7 +254,7 @@ func (s *MailboxService) checkConnection(ctx context.Context, input MailboxInput
 
 // smtpConfig never allows plaintext: SSL is implicit TLS, STARTTLS is
 // required (RequireTLS) rather than best effort.
-func smtpConfig(email, displayName, username, password, host string, port int, security domain.Security, allowPrivate bool) platformmail.SMTPConfig {
+func smtpConfig(email, displayName string, creds mailCredentials, host string, port int, security domain.Security, allowPrivate bool) platformmail.SMTPConfig {
 	from := email
 	if displayName != "" {
 		from = (&netmail.Address{Name: displayName, Address: email}).String()
@@ -235,8 +262,9 @@ func smtpConfig(email, displayName, username, password, host string, port int, s
 	return platformmail.SMTPConfig{
 		Host:        host,
 		Port:        port,
-		User:        username,
-		Password:    password,
+		User:        creds.Username,
+		Password:    creds.Password,
+		OAuthToken:  creds.AccessToken,
 		From:        from,
 		Secure:      security == domain.SecuritySSL,
 		TLS:         security == domain.SecuritySTARTTLS,

@@ -27,6 +27,26 @@ var (
 	ErrSyncFailed = coreerrors.New("MAILBOX_SYNC_FAILED", "inbox sync failed, check the mailbox's connection status", http.StatusUnprocessableEntity)
 )
 
+var (
+	ErrOAuthNotConfigured = coreerrors.New("MAILBOX_OAUTH_NOT_CONFIGURED", "Microsoft sign-in is not configured on this server", http.StatusServiceUnavailable)
+	// ErrOAuthStateInvalid: the callback's state is expired, tampered, or
+	// was issued to another user/organization.
+	ErrOAuthStateInvalid = coreerrors.New("MAILBOX_OAUTH_STATE_INVALID", "the Microsoft sign-in link expired or is not yours; start again", http.StatusUnprocessableEntity)
+)
+
+// OAuthFailed reports a failed code exchange (Microsoft's error code and
+// description, e.g. AADSTS65001 consent required).
+func OAuthFailed(detail string) error {
+	return coreerrors.New("MAILBOX_OAUTH_FAILED", "Microsoft sign-in failed: "+detail, http.StatusUnprocessableEntity)
+}
+
+// OAuthAccountMismatch: a reconnect signed in with a different account.
+func OAuthAccountMismatch(expected, got string) error {
+	return coreerrors.New("MAILBOX_OAUTH_ACCOUNT_MISMATCH",
+		"signed in as "+got+", but this mailbox is "+expected+"; sign in with "+expected+" or connect it as a new mailbox",
+		http.StatusConflict)
+}
+
 // ConnectionError reports why SMTP verification failed. The provider
 // message is kept (e.g. "535 authentication failed") because the user has to
 // fix their own settings.

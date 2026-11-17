@@ -39,9 +39,12 @@ type SMTPConfig struct {
 	Port     int
 	User     string
 	Password string
-	From     string
-	Secure   bool
-	TLS      bool
+	// OAuthToken, when set, authenticates with SASL XOAUTH2 as User
+	// instead of a password.
+	OAuthToken string
+	From       string
+	Secure     bool
+	TLS        bool
 	// RequireTLS fails the connection when TLS is set but the server does
 	// not offer STARTTLS, instead of continuing in plaintext.
 	RequireTLS bool
@@ -105,11 +108,8 @@ func (m *SMTPMailer) Send(ctx context.Context, message Message) (Result, error) 
 	}
 	defer client.Close()
 
-	if cfg.User != "" {
-		auth := smtp.PlainAuth("", cfg.User, cfg.Password, host)
-		if err := client.Auth(auth); err != nil {
-			return Result{}, fmt.Errorf("smtp auth: %w", err)
-		}
+	if err := authenticate(client, cfg, host); err != nil {
+		return Result{}, err
 	}
 
 	if err := client.Mail(envelopeFrom); err != nil {

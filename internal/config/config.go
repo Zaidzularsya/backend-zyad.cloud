@@ -172,6 +172,16 @@ type MailConfig struct {
 	// MailSyncBatchLimit caps messages fetched per mailbox per sync pass, so
 	// one slow/huge mailbox cannot starve the others.
 	MailSyncBatchLimit int
+	// MicrosoftOAuth* is the Entra ID app registration used to connect
+	// Outlook.com / Microsoft 365 mailboxes (SMTP/IMAP over XOAUTH2).
+	// Empty client id disables "Sign in with Microsoft".
+	MicrosoftOAuthClientID     string
+	MicrosoftOAuthClientSecret string
+	// MicrosoftOAuthTenant: "common" (personal + work accounts) by default.
+	MicrosoftOAuthTenant string
+	// MicrosoftOAuthRedirectURL must match a Web redirect URI of the app
+	// registration exactly; defaults to the frontend callback page.
+	MicrosoftOAuthRedirectURL string
 }
 
 type NotificationConfig struct {

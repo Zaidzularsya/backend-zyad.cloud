@@ -70,11 +70,9 @@ func openSMTP(ctx context.Context, cfg SMTPConfig) (*smtp.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	if cfg.User != "" {
-		if err := client.Auth(smtp.PlainAuth("", cfg.User, cfg.Password, host)); err != nil {
-			_ = client.Close()
-			return nil, fmt.Errorf("smtp auth: %w", err)
-		}
+	if err := authenticate(client, cfg, host); err != nil {
+		_ = client.Close()
+		return nil, err
 	}
 	return client, nil
 }

@@ -9,7 +9,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	corecrypto "zyad.cloud/internal/core/crypto"
 	coretenant "zyad.cloud/internal/core/tenant"
 	assetdomain "zyad.cloud/internal/modules/asset/domain"
 	assetservice "zyad.cloud/internal/modules/asset/service"
@@ -41,6 +40,7 @@ type SyncServiceOptions struct {
 	SecretKey         string
 	AllowPrivateHosts bool
 	Dial              IMAPDialer
+	MicrosoftOAuth    MicrosoftOAuth
 	InitialSyncDays   int
 	BatchLimit        int
 	Log               *slog.Logger
@@ -56,9 +56,9 @@ type SyncService struct {
 	messages        repository.MessageRepository
 	storage         AttachmentStorage
 	resolver        SyncWorkerTenantResolver
-	secretKey       string
 	allowPrivate    bool
 	dial            IMAPDialer
+	creds           *credentialResolver
 	initialSyncDays int
 	batchLimit      int
 	log             *slog.Logger
@@ -95,7 +95,8 @@ func NewSyncService(
 	}
 	return &SyncService{
 		directory: directory, mailboxes: mailboxes, messages: messages, storage: storage, resolver: resolver,
-		secretKey: options.SecretKey, allowPrivate: options.AllowPrivateHosts, dial: dial,
+		allowPrivate: options.AllowPrivateHosts, dial: dial,
+		creds:           newCredentialResolver(options.SecretKey, mailboxes, options.MicrosoftOAuth),
 		initialSyncDays: initialSyncDays, batchLimit: batchLimit, log: log, now: now,
 	}
 }
@@ -181,14 +182,17 @@ func (s *SyncService) SyncMailbox(ctx context.Context, scope coretenant.Scope, u
 }
 
 func (s *SyncService) syncMailbox(ctx context.Context, scope coretenant.Scope, mailbox domain.Mailbox) (synced bool, err error) {
-	password, err := corecrypto.DecryptSecret(s.secretKey, mailbox.SecretEncrypted)
+	creds, err := s.creds.resolve(ctx, scope, mailbox)
 	if err != nil {
+		// e.g. a revoked Microsoft grant: show it on the mailbox so the
+		// owner knows to reconnect.
+		s.markError(ctx, scope, mailbox.ID, err)
 		return false, err
 	}
 
 	conn, err := s.dial(ctx, IMAPDialConfig{
 		Host: mailbox.IMAPHost, Port: mailbox.IMAPPort, Security: mailbox.IMAPSecurity,
-		Username: mailbox.Username, Password: password,
+		Username: creds.Username, Password: creds.Password, AccessToken: creds.AccessToken,
 	}, s.allowPrivate)
 	if err != nil {
 		s.markError(ctx, scope, mailbox.ID, err)
