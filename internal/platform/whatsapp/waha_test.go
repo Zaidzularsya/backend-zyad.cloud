@@ -321,6 +321,16 @@ func TestWAHAResolveLIDWithoutPhone(t *testing.T) {
 	}
 }
 
+// WAHA answers send/seen calls for an unknown session with 422 instead of 404.
+func TestWAHAUnknownSessionOn422IsSessionNotFound(t *testing.T) {
+	client, _ := newTestServer(t, http.StatusUnprocessableEntity,
+		`{"error":"Session \"zc_a_1\" does not exist","session":"zc_a_1"}`)
+	_, err := client.SendText(context.Background(), Message{Session: "zc_a_1", To: "628123", Text: "Halo"})
+	if !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("error = %v, want ErrSessionNotFound", err)
+	}
+}
+
 func TestWAHAErrorMapping(t *testing.T) {
 	tests := []struct {
 		status int
