@@ -502,3 +502,27 @@ func TestProviderActionsMapRemoteMissing(t *testing.T) {
 		t.Fatalf("QR() error = %v, want remote session missing", err)
 	}
 }
+
+// A session WAHA no longer knows must not keep showing WORKING: senders would
+// keep picking it and every message fails with "session does not exist".
+func TestReconcileMarksSessionFailedWhenRemoteMissing(t *testing.T) {
+	provider := &fakeProvider{info: platformwhatsapp.SessionInfo{Status: platformwhatsapp.SessionStatusWorking}}
+	svc := newTestService(newFakeSessionRepo(), provider, nil)
+	scope := testScope(t, testOrgID)
+	session := createdSession(t, svc, scope)
+	if _, err := svc.Reconcile(context.Background(), scope, session.ID); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+
+	provider.getErr = &platformwhatsapp.APIError{Operation: "get session", StatusCode: 404}
+	if _, err := svc.Reconcile(context.Background(), scope, session.ID); !errors.Is(err, platformwhatsapp.ErrSessionNotFound) {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	stored, err := svc.Get(context.Background(), scope, session.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if stored.Status != domain.SessionStatusFailed {
+		t.Fatalf("status = %s, want FAILED", stored.Status)
+	}
+}

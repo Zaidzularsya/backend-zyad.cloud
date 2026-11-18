@@ -17,7 +17,7 @@ func NewInvoiceSender(conversations *ConversationService, gate FeatureGate) *Inv
 }
 
 func (s *InvoiceSender) SendInvoiceWhatsApp(ctx context.Context, scope coretenant.Scope, in receivableservice.WhatsAppInput) (string, string, error) {
-	msg := documentMessage{UserID: in.SenderUserID, CanReadAll: true, ContactID: in.ContactID, Text: in.Text}
+	msg := documentMessage{UserID: in.SenderUserID, CanReadAll: true, ContactID: in.ContactID, Text: in.Text, TextFallback: in.FallbackToText}
 	if in.Attachment != nil {
 		msg.Attachment = &docAttachment{Filename: in.Attachment.Filename, MimeType: in.Attachment.MimeType, Content: in.Attachment.Content}
 	}

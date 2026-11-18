@@ -15,6 +15,7 @@ import (
 type composed struct {
 	subject, text, html string
 	attachment          *Attachment
+	hasLink             bool // text/html memuat link invoice
 }
 
 // compose menyiapkan isi pesan + lampiran PDF. failure berisi alasan aman bila PDF tidak tersedia.
@@ -38,7 +39,7 @@ func (s *sendService) compose(ctx context.Context, scope coretenant.Scope, inv d
 	canPay := onlinePaymentAllowed(ctx, s.Entitlements, s.ActivationInvoices, scope, inv.ID)
 	subject, text, body := buildInvoiceMessage(inv, tenantName, link, strings.TrimSpace(opening), canPay)
 	return composed{
-		subject: subject, text: text, html: body,
+		subject: subject, text: text, html: body, hasLink: link != "",
 		attachment: &Attachment{Filename: pdf.Filename, MimeType: "application/pdf", Content: pdf.Content},
 	}, ""
 }
