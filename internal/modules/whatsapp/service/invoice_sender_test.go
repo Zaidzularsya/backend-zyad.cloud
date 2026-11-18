@@ -59,3 +59,49 @@ func TestInvoiceSenderChannelErrors(t *testing.T) {
 		t.Fatalf("delivery failure must be a plain error, got %v", err)
 	}
 }
+
+// WAHA WEBJS kadang gagal mengirim file (500 dari WhatsApp Web). Bila teks memuat
+// link invoice (FallbackToText), pelanggan tetap menerima teks + link.
+func TestInvoiceSenderFallsBackToTextWhenDocumentFails(t *testing.T) {
+	h := newConversationHarness(t)
+	h.sender.fileErr = errors.New("waha send file failed (status 500)")
+	text := "Halo Sari, berikut invoice.\nLihat & bayar: https://zyad.online/i/abc"
+	id, recipient, err := NewInvoiceSender(h.svc, allowGate{}).SendInvoiceWhatsApp(ctxTest, h.scope, receivableservice.WhatsAppInput{
+		SenderUserID: "finance-1", ContactID: "contact", Text: text, FallbackToText: true,
+		Attachment: &receivableservice.Attachment{Filename: "INV-1.pdf", MimeType: "application/pdf", Content: []byte("%PDF")},
+	})
+	if err != nil || id != "true_waha_"+text || recipient != "6281277770000" {
+		t.Fatalf("id=%q recipient=%q err=%v", id, recipient, err)
+	}
+	if len(h.sender.sent) != 1 || h.sender.sent[0].Text != text {
+		t.Fatalf("sent=%+v", h.sender.sent)
+	}
+}
+
+func TestInvoiceSenderLongTextFallbackKeepsTextAlreadySent(t *testing.T) {
+	h := newConversationHarness(t)
+	h.sender.fileErr = errors.New("boom")
+	long := strings.Repeat("x", MaxDocumentCaption+1)
+	id, _, err := NewInvoiceSender(h.svc, allowGate{}).SendInvoiceWhatsApp(ctxTest, h.scope, receivableservice.WhatsAppInput{
+		SenderUserID: "finance-1", ContactID: "contact", Text: long, FallbackToText: true,
+		Attachment: &receivableservice.Attachment{Filename: "I.pdf", MimeType: "application/pdf", Content: []byte("%PDF")},
+	})
+	if err != nil || id != "true_waha_"+long {
+		t.Fatalf("id=%q err=%v", id, err)
+	}
+	if len(h.sender.sent) != 1 {
+		t.Fatalf("text must not be sent twice, sent=%d", len(h.sender.sent))
+	}
+}
+
+func TestInvoiceSenderWithoutFallbackStillFailsOnDocumentError(t *testing.T) {
+	h := newConversationHarness(t)
+	h.sender.fileErr = errors.New("boom")
+	_, _, err := NewInvoiceSender(h.svc, allowGate{}).SendInvoiceWhatsApp(ctxTest, h.scope, receivableservice.WhatsAppInput{
+		SenderUserID: "finance-1", ContactID: "contact", Text: "Halo",
+		Attachment: &receivableservice.Attachment{Filename: "I.pdf", MimeType: "application/pdf", Content: []byte("%PDF")},
+	})
+	if err == nil || len(h.sender.sent) != 0 {
+		t.Fatalf("err=%v sent=%d", err, len(h.sender.sent))
+	}
+}

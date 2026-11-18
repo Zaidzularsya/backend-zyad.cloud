@@ -3,6 +3,7 @@ package whatsapp
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 var (
@@ -32,6 +33,10 @@ func (e *APIError) Error() string {
 func (e *APIError) Unwrap() error {
 	switch {
 	case e.StatusCode == 404:
+		return ErrSessionNotFound
+	case e.StatusCode == 422 && strings.Contains(e.Body, "does not exist"):
+		// Send/seen endpoints report an unknown session as 422
+		// ({"error":"Session \"x\" does not exist"}) rather than 404.
 		return ErrSessionNotFound
 	case e.StatusCode == 401 || e.StatusCode == 403:
 		return ErrUnauthorized

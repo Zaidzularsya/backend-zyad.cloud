@@ -304,8 +304,8 @@ func (c *WAHAClient) SendText(ctx context.Context, message Message) (Result, err
 		"text":    message.Text,
 	}
 	var response struct {
-		ID        string  `json:"id"`
-		Timestamp float64 `json:"timestamp"`
+		ID        messageID `json:"id"`
+		Timestamp float64   `json:"timestamp"`
 	}
 	if err := c.do(ctx, "send text", http.MethodPost, "/api/sendText", body, &response); err != nil {
 		return Result{}, err
@@ -317,7 +317,7 @@ func (c *WAHAClient) SendText(ctx context.Context, message Message) (Result, err
 	}
 	return Result{
 		Provider:  ProviderWAHA,
-		MessageID: response.ID,
+		MessageID: string(response.ID),
 		Raw:       map[string]any{"session": session, "chat_id": chatID},
 		SentAt:    sentAt,
 	}, nil
@@ -490,8 +490,8 @@ func (c *WAHAClient) SendFile(ctx context.Context, m FileMessage) (Result, error
 		body["caption"] = m.Caption
 	}
 	var response struct {
-		ID        string  `json:"id"`
-		Timestamp float64 `json:"timestamp"`
+		ID        messageID `json:"id"`
+		Timestamp float64   `json:"timestamp"`
 	}
 	if err := c.do(ctx, "send file", http.MethodPost, "/api/sendFile", body, &response); err != nil {
 		return Result{}, err
@@ -500,5 +500,40 @@ func (c *WAHAClient) SendFile(ctx context.Context, m FileMessage) (Result, error
 	if response.Timestamp > 0 {
 		sentAt = time.Unix(int64(response.Timestamp), 0).UTC()
 	}
-	return Result{Provider: ProviderWAHA, MessageID: response.ID, Raw: map[string]any{"session": session, "chat_id": chatID}, SentAt: sentAt}, nil
+	return Result{Provider: ProviderWAHA, MessageID: string(response.ID), Raw: map[string]any{"session": session, "chat_id": chatID}, SentAt: sentAt}, nil
+}
+
+// messageID is the "id" of a WAHA send response. GOWS returns it as a string;
+// WEBJS returns the whatsapp-web.js id object ({"_serialized": "...", "id":
+// "..."}). Both are accepted so a delivered message is never reported as
+// failed just because of the engine's response shape.
+type messageID string
+
+func (m *messageID) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || bytes.Equal(data, []byte("null")) {
+		*m = ""
+		return nil
+	}
+	if data[0] == '"' {
+		var value string
+		if err := json.Unmarshal(data, &value); err != nil {
+			return err
+		}
+		*m = messageID(value)
+		return nil
+	}
+	var object struct {
+		Serialized string `json:"_serialized"`
+		ID         string `json:"id"`
+	}
+	if err := json.Unmarshal(data, &object); err != nil {
+		return err
+	}
+	if object.Serialized != "" {
+		*m = messageID(object.Serialized)
+	} else {
+		*m = messageID(object.ID)
+	}
+	return nil
 }

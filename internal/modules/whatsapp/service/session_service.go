@@ -397,6 +397,19 @@ func (s *SessionService) refresh(ctx context.Context, scope coretenant.Scope, id
 // change was not requested by the user), which may notify owners.
 func (s *SessionService) sync(ctx context.Context, scope coretenant.Scope, session domain.Session) (domain.Session, error) {
 	info, err := s.provider.GetSession(ctx, session.Name)
+	if errors.Is(err, platformwhatsapp.ErrSessionNotFound) {
+		// WAHA lost the session (deleted, server reinstalled). Store FAILED so
+		// the UI stops showing it as connected and owners are notified; the
+		// error is still returned so callers can ask the user to reconnect.
+		if session.Status != domain.SessionStatusFailed {
+			if _, applyErr := s.ApplyObservedStatus(ctx, scope, session, platformwhatsapp.SessionInfo{
+				Name: session.Name, Status: platformwhatsapp.SessionStatusFailed,
+			}); applyErr != nil {
+				s.log.Error("whatsapp: mark missing session failed", "session_id", session.ID, "error", applyErr)
+			}
+		}
+		return domain.Session{}, err
+	}
 	if err != nil {
 		return domain.Session{}, err
 	}
