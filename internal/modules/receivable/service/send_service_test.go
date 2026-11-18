@@ -420,3 +420,25 @@ func TestLatestByInvoicesReturnsNewestPerInvoice(t *testing.T) {
 		t.Fatalf("latest = %+v err=%v", got, err)
 	}
 }
+
+// Fallback teks hanya diizinkan bila teks memuat link invoice; tanpa link pelanggan
+// tidak akan menerima apa pun yang berguna kalau PDF gagal.
+func TestWhatsAppFallbackToTextOnlyWithLink(t *testing.T) {
+	h := newSendHarness(t)
+	h.invoice.Account.SourceType, h.invoice.Account.SourceID = "crm_contact", "contact-9"
+	h.rebuild(false)
+	if _, err := h.svc.Send(ctx, scope, "inv-1", SendInput{Channel: "whatsapp"}, "u-actor"); err != nil {
+		t.Fatal(err)
+	}
+	if !h.wa.calls[0].FallbackToText {
+		t.Fatal("FallbackToText must be set when the invoice link is in the text")
+	}
+
+	h.docs.linkErr = errors.New("links down")
+	if _, err := h.svc.Send(ctx, scope, "inv-1", SendInput{Channel: "whatsapp"}, "u-actor"); err != nil {
+		t.Fatal(err)
+	}
+	if h.wa.calls[1].FallbackToText {
+		t.Fatal("FallbackToText must stay off without an invoice link")
+	}
+}

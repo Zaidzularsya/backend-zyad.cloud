@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"unicode/utf8"
 
 	coretenant "zyad.cloud/internal/core/tenant"
@@ -27,6 +28,10 @@ type documentMessage struct {
 	ContactID  string
 	Text       string // "" = tanpa teks
 	Attachment *docAttachment
+	// TextFallback: bila dokumen ditolak provider (mis. bug sendFile WAHA WEBJS),
+	// pengiriman dianggap berhasil asal Text terkirim. Pemanggil hanya menyetelnya
+	// bila Text sudah memuat link ke dokumen.
+	TextFallback bool
 }
 
 // documentSender adalah logika bersama QuotationSender dan InvoiceSender. unavailable
@@ -86,6 +91,14 @@ func (d documentSender) send(ctx context.Context, scope coretenant.Scope, in doc
 			return mapStartError(err, unavailable)
 		}
 		if m.Status == domain.MessageStatusFailed {
+			if in.TextFallback && in.Text != "" {
+				slog.WarnContext(ctx, "whatsapp: document rejected by provider, falling back to text",
+					"conversation_id", conv.ID, "message_id", m.ID, "filename", in.Attachment.Filename, "text_already_sent", textAlreadySent)
+				if textAlreadySent {
+					return nil
+				}
+				return sendText(in.Text)
+			}
 			if textAlreadySent {
 				return errors.New("Teks terkirim, dokumen gagal dikirim: " + m.Error)
 			}

@@ -248,6 +248,7 @@ func (s *sendService) attemptWhatsApp(ctx context.Context, scope coretenant.Scop
 	}
 	id, recipient, err := s.WhatsApp.SendInvoiceWhatsApp(ctx, scope, WhatsAppInput{
 		SenderUserID: senderUserID, ContactID: inv.Account.ContactID(), Text: msg.text, Attachment: msg.attachment,
+		FallbackToText: msg.hasLink,
 	})
 	if recipient != "" {
 		res.recipient = recipient

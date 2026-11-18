@@ -35,6 +35,10 @@ type EmailInput struct {
 type WhatsAppInput struct {
 	SenderUserID, ContactID, Text string
 	Attachment                    *Attachment
+	// FallbackToText: bila lampiran gagal terkirim di provider, cukup kirim Text.
+	// Hanya diset bila Text memuat link invoice, supaya pelanggan tetap bisa
+	// melihat/membayar invoice walau PDF tidak sampai.
+	FallbackToText bool
 }
 
 type EmailSender interface {
