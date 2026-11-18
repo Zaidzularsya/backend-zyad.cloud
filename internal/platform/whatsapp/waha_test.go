@@ -226,6 +226,59 @@ func TestWAHASendText(t *testing.T) {
 	}
 }
 
+// WEBJS answers sendText/sendFile with the whatsapp-web.js message id object
+// instead of the string GOWS returns. Decoding it as a string used to turn a
+// delivered message into a reported failure.
+func TestWAHASendTextAcceptsWEBJSMessageIDObject(t *testing.T) {
+	client, _ := newTestServer(t, http.StatusCreated,
+		`{"id":{"fromMe":true,"remote":"628123456789@c.us","id":"3EB0AAAA","_serialized":"true_628123456789@c.us_3EB0AAAA"},"timestamp":1790000000}`)
+
+	result, err := client.SendText(context.Background(), Message{Session: "zc_a_1", To: "628123456789", Text: "Halo"})
+	if err != nil {
+		t.Fatalf("SendText() error = %v", err)
+	}
+	if result.MessageID != "true_628123456789@c.us_3EB0AAAA" {
+		t.Fatalf("MessageID = %q", result.MessageID)
+	}
+}
+
+func TestWAHASendFileAcceptsWEBJSMessageIDObject(t *testing.T) {
+	client, _ := newTestServer(t, http.StatusCreated,
+		`{"id":{"fromMe":true,"remote":"628123456789@c.us","id":"3EB0BBBB"},"timestamp":1790000000}`)
+
+	result, err := client.SendFile(context.Background(), FileMessage{Session: "zc_a_1", To: "628123456789",
+		Filename: "inv.pdf", MimeType: "application/pdf", Data: []byte("%PDF")})
+	if err != nil {
+		t.Fatalf("SendFile() error = %v", err)
+	}
+	if result.MessageID != "3EB0BBBB" {
+		t.Fatalf("MessageID = %q", result.MessageID)
+	}
+}
+
+func TestMessageIDUnmarshal(t *testing.T) {
+	cases := map[string]string{
+		`"true_1@c.us_A"`:                          "true_1@c.us_A",
+		`{"_serialized":"true_1@c.us_A","id":"A"}`: "true_1@c.us_A",
+		`{"id":"A"}`:                               "A",
+		`null`:                                     "",
+		`{}`:                                       "",
+	}
+	for raw, want := range cases {
+		var id messageID
+		if err := json.Unmarshal([]byte(raw), &id); err != nil {
+			t.Fatalf("Unmarshal(%s) error = %v", raw, err)
+		}
+		if string(id) != want {
+			t.Fatalf("Unmarshal(%s) = %q, want %q", raw, id, want)
+		}
+	}
+	var id messageID
+	if err := json.Unmarshal([]byte(`123`), &id); err == nil {
+		t.Fatal("Unmarshal(123) error = nil, want error")
+	}
+}
+
 func TestWAHASendTextUsesDefaultSession(t *testing.T) {
 	client, captured := newTestServer(t, http.StatusCreated, `{"id":"x"}`)
 	if _, err := client.SendText(context.Background(), Message{To: "628123@c.us", Text: "Hi"}); err != nil {
