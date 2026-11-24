@@ -83,7 +83,7 @@ func TestSettlementLedgerTotalsAndLockedInsert(t *testing.T) {
 	if _, err := repo.InsertPayment(e.ctx, repository.SettlementPaymentParams{BeneficiaryOrganizationID: orgA, InvoiceID: inv.ID, ProviderReference: ref, Amount: "150000.50", OccurredAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
-	okCheck := func(repository.SettlementTotals) error { return nil }
+	okCheck := func(repository.SettlementTotals, string) error { return nil }
 	in := func(kind, amount, note string) repository.SettlementManualEntry {
 		return repository.SettlementManualEntry{OrganizationID: orgA, Kind: kind, Amount: amount, Note: note, OccurredAt: time.Now().UTC()}
 	}
@@ -102,7 +102,7 @@ func TestSettlementLedgerTotalsAndLockedInsert(t *testing.T) {
 	}
 	// check yang gagal tidak menulis apa pun
 	boom := errors.New("boom")
-	if _, err := ledger.InsertManualLocked(e.ctx, in("settlement", "1.00", ""), func(repository.SettlementTotals) error { return boom }); !errors.Is(err, boom) {
+	if _, err := ledger.InsertManualLocked(e.ctx, in("settlement", "1.00", ""), func(repository.SettlementTotals, string) error { return boom }); !errors.Is(err, boom) {
 		t.Fatalf("err = %v", err)
 	}
 	if _, total, _ := ledger.ListEntries(e.ctx, orgA, 50, 0); total != 3 {
@@ -125,7 +125,7 @@ func TestSettlementLedgerTotalsAndLockedInsert(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := ledger.InsertManualLocked(e.ctx, in("settlement", remaining, ""), func(tt repository.SettlementTotals) error {
+			_, err := ledger.InsertManualLocked(e.ctx, in("settlement", remaining, ""), func(tt repository.SettlementTotals, _ string) error {
 				if tt.Settled != "50000.25" {
 					return errors.New("exceeds")
 				}

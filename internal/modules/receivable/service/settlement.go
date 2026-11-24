@@ -219,7 +219,8 @@ func (s *settlementService) Record(ctx context.Context, orgID string, in Settlem
 	if occurredAt.IsZero() {
 		occurredAt = s.now()
 	}
-	check := func(t repository.SettlementTotals) error {
+	// verifiedPayoutAccountID belum dipakai; aturan rekening wajib verified ditambahkan terpisah.
+	check := func(t repository.SettlementTotals, _ string) error {
 		bal, err := newBalance(t)
 		if err != nil {
 			return err

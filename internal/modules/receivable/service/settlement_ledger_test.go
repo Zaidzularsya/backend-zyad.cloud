@@ -27,6 +27,8 @@ type fakeLedgerRepo struct {
 	types   map[string]string
 	entries []repository.SettlementEntry
 	calls   []string
+	// verifiedPayoutID meniru id rekening verified yang dibaca repo di dalam kunci.
+	verifiedPayoutID string
 }
 
 func (f *fakeLedgerRepo) totals(orgID string) repository.SettlementTotals {
@@ -69,9 +71,9 @@ func (f *fakeLedgerRepo) ListEntries(_ context.Context, orgID string, _, _ int) 
 	return out, int64(len(out)), nil
 }
 
-func (f *fakeLedgerRepo) InsertManualLocked(_ context.Context, in repository.SettlementManualEntry, check func(repository.SettlementTotals) error) (repository.SettlementEntry, error) {
+func (f *fakeLedgerRepo) InsertManualLocked(_ context.Context, in repository.SettlementManualEntry, check func(repository.SettlementTotals, string) error) (repository.SettlementEntry, error) {
 	f.calls = append(f.calls, "lock", "totals-in-lock")
-	if err := check(f.totals(in.OrganizationID)); err != nil {
+	if err := check(f.totals(in.OrganizationID), f.verifiedPayoutID); err != nil {
 		return repository.SettlementEntry{}, err
 	}
 	f.calls = append(f.calls, "insert")
