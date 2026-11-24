@@ -90,6 +90,7 @@ var (
 	ErrAdjustmentNoteRequired        = errors.New("adjustment note is required")
 	ErrSettlementBeneficiaryNotFound = errors.New("settlement beneficiary not found")
 	ErrSettlementBeneficiaryInvalid  = errors.New("settlement beneficiary must be a customer organization")
+	ErrPayoutAccountNotVerified      = errors.New("organization has no verified payout account")
 )
 
 const (
@@ -219,8 +220,12 @@ func (s *settlementService) Record(ctx context.Context, orgID string, in Settlem
 	if occurredAt.IsZero() {
 		occurredAt = s.now()
 	}
-	// verifiedPayoutAccountID belum dipakai; aturan rekening wajib verified ditambahkan terpisah.
-	check := func(t repository.SettlementTotals, _ string) error {
+	// verifiedPayoutAccountID dibaca repository di dalam kunci yang sama, jadi rekening tidak bisa
+	// berubah antara pengecekan dan INSERT. Hanya setoran yang butuh rekening verified.
+	check := func(t repository.SettlementTotals, verifiedPayoutAccountID string) error {
+		if kind == settlementKindSettlement && verifiedPayoutAccountID == "" {
+			return ErrPayoutAccountNotVerified
+		}
 		bal, err := newBalance(t)
 		if err != nil {
 			return err
@@ -244,7 +249,11 @@ func (s *settlementService) Record(ctx context.Context, orgID string, in Settlem
 }
 
 func (s *settlementService) requireCustomerBeneficiary(ctx context.Context, orgID string) error {
-	t, err := s.repo.BeneficiaryType(ctx, orgID)
+	return requireCustomerOrg(ctx, s.repo, orgID)
+}
+
+func requireCustomerOrg(ctx context.Context, repo repository.SettlementLedgerRepository, orgID string) error {
+	t, err := repo.BeneficiaryType(ctx, orgID)
 	if errors.Is(err, repository.ErrOrganizationNotFound) {
 		return ErrSettlementBeneficiaryNotFound
 	}

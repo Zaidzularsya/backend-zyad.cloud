@@ -176,6 +176,10 @@ func (r *payoutAccountRepository) InsertPending(ctx context.Context, in NewPayou
 }
 
 func (r *payoutAccountRepository) Cancel(ctx context.Context, orgID, id string, at time.Time, a PayoutAudit) (PayoutAccount, error) {
+	// orgID kosong di transition berarti "tanpa batas org"; Cancel milik organisasi tidak boleh begitu.
+	if orgID == "" {
+		return PayoutAccount{}, ErrPayoutAccountNotFound
+	}
 	return r.transition(ctx, id, orgID, func(ctx context.Context, tx pgx.Tx, cur PayoutAccount) (PayoutAccount, string, error) {
 		p, err := scanPayoutAccount(tx.QueryRow(ctx, `
 			UPDATE organization_payout_accounts SET status = 'cancelled', updated_at = $2
@@ -329,7 +333,7 @@ func supersedeVerifiedTx(ctx context.Context, tx pgx.Tx, orgID string, at time.T
 func insertPayoutAuditTx(ctx context.Context, tx pgx.Tx, p PayoutAccount, event string, a PayoutAudit, at time.Time) error {
 	metadata, err := json.Marshal(map[string]string{
 		"bank_code":             p.BankCode,
-		"account_number_masked": maskAccountNumber(p.AccountNumber),
+		"account_number_masked": MaskAccountNumber(p.AccountNumber),
 	})
 	if err != nil {
 		return err
@@ -345,7 +349,7 @@ func insertPayoutAuditTx(ctx context.Context, tx pgx.Tx, p PayoutAccount, event 
 
 // maskAccountNumber: "••••" + 4 digit terakhir. Audit tidak boleh memuat nomor rekening penuh.
 // Sengaja duplikat kecil dari aturan masking service agar repository tidak mengimpor service.
-func maskAccountNumber(number string) string {
+func MaskAccountNumber(number string) string {
 	r := []rune(number)
 	if len(r) > 4 {
 		r = r[len(r)-4:]
