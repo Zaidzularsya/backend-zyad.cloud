@@ -93,6 +93,7 @@ type Dependencies struct {
 	ReceivableArrearsHandler         *receivablehandler.ArrearsHandler
 	ReceivableOverviewHandler        *receivablehandler.OverviewHandler
 	ReceivableSettlementHandler      *receivablehandler.SettlementHandler
+	ReceivablePayoutHandler          *receivablehandler.PayoutAccountHandler
 	ReceivableAccountHandler         *receivablehandler.AccountHandler
 	MikrotikRouterHandler            *mikrotikhandler.RouterHandler
 	MikrotikSetupHandler             *mikrotikhandler.SetupHandler

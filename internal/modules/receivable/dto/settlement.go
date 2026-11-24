@@ -19,6 +19,9 @@ type SettlementOrgBalanceResponse struct {
 	OrganizationID   string `json:"organization_id"`
 	OrganizationName string `json:"organization_name"`
 	SettlementBalanceResponse
+	// PayoutAccount: rekening verified (nil bila belum ada); HasPendingPayoutAccount: ada pengajuan menunggu.
+	PayoutAccount           *PayoutAccountResponse `json:"payout_account"`
+	HasPendingPayoutAccount bool                   `json:"has_pending_payout_account"`
 }
 
 type SettlementEntryResponse struct {
@@ -31,6 +34,8 @@ type SettlementEntryResponse struct {
 	Note              string    `json:"note"`
 	OccurredAt        time.Time `json:"occurred_at"`
 	CreatedAt         time.Time `json:"created_at"`
+	// PayoutAccount: rekening tujuan (nomor dimask) untuk settlement yang dicatat dengan rekening; selain itu null.
+	PayoutAccount *SettlementPayoutRef `json:"payout_account"`
 }
 
 // SettlementEntryRequest: occurred_at opsional (RFC 3339); kosong = sekarang.
@@ -56,6 +61,17 @@ func SettlementOrgBalanceFromService(b service.OrgBalance) SettlementOrgBalanceR
 }
 
 func SettlementEntryFromRepo(e repository.SettlementEntry) SettlementEntryResponse {
-	return SettlementEntryResponse{ID: e.ID, OrganizationID: e.OrganizationID, Kind: e.Kind, Amount: e.Amount, InvoiceID: e.InvoiceID,
+	var ref *SettlementPayoutRef
+	if e.PayoutAccountID != "" {
+		ref = &SettlementPayoutRef{BankName: e.PayoutBankName, AccountNumberMasked: service.MaskAccountNumber(e.PayoutAccountNumber)}
+	}
+	return SettlementEntryResponse{PayoutAccount: ref, ID: e.ID, OrganizationID: e.OrganizationID, Kind: e.Kind, Amount: e.Amount, InvoiceID: e.InvoiceID,
 		ProviderReference: e.ProviderReference, Note: e.Note, OccurredAt: e.OccurredAt, CreatedAt: e.CreatedAt}
+}
+
+// WithPayoutSummary mengisi rekening verified dan flag pending pada baris saldo.
+func (r SettlementOrgBalanceResponse) WithPayoutSummary(s repository.PayoutSummary) SettlementOrgBalanceResponse {
+	r.PayoutAccount = payoutAccountPtr(s.Verified)
+	r.HasPendingPayoutAccount = s.HasPending
+	return r
 }

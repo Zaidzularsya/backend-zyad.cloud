@@ -245,6 +245,11 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		deps.ReceivableSettlementHandler.RegisterPlatformRoutes(protected, deps.PermissionChecker)
 		deps.ReceivableSettlementHandler.RegisterOwnRoutes(protected, deps.PermissionChecker)
 	}
+	// Rekening pencairan (owner mengajukan, super admin memverifikasi) berbagi prefix dengan ledger di atas.
+	if deps.ReceivablePayoutHandler != nil {
+		deps.ReceivablePayoutHandler.RegisterPlatformRoutes(protected, deps.PermissionChecker)
+		deps.ReceivablePayoutHandler.RegisterOwnRoutes(protected, deps.PermissionChecker)
+	}
 	if deps.PlatformAssetHandler != nil {
 		deps.PlatformAssetHandler.RegisterRoutes(protected, deps.PermissionChecker)
 	}

@@ -69,6 +69,11 @@ func (f forbidding) Can(ctx context.Context, user string, perms []string) error 
 
 func settlementRouter(t *testing.T, svc *fakeSettlementSvc, orgID string, orgType coretenant.OrganizationType, perms ...string) *gin.Engine {
 	t.Helper()
+	return settlementRouterWith(t, NewSettlementHandler(svc), orgID, orgType, perms...)
+}
+
+func settlementRouterWith(t *testing.T, h *SettlementHandler, orgID string, orgType coretenant.OrganizationType, perms ...string) *gin.Engine {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	tc, err := coretenant.NewVerifiedContext(coretenant.VerifiedContextInput{
 		OrganizationID: orgID, OrganizationSlug: "x", OrganizationType: orgType,
@@ -84,7 +89,6 @@ func settlementRouter(t *testing.T, svc *fakeSettlementSvc, orgID string, orgTyp
 		permissionmiddleware.SetUserID(c, "user-1")
 		c.Next()
 	})
-	h := NewSettlementHandler(svc)
 	g := r.Group("")
 	h.RegisterPlatformRoutes(g, forbidding{grant(perms...)})
 	h.RegisterOwnRoutes(g, grant(perms...))

@@ -193,6 +193,7 @@ type receivableModule struct {
 	ContractHandler   *receivablehandler.ContractHandler
 	OverviewHandler   *receivablehandler.OverviewHandler
 	SettlementHandler *receivablehandler.SettlementHandler
+	PayoutHandler     *receivablehandler.PayoutAccountHandler
 	ArrearsHandler    *receivablehandler.ArrearsHandler
 
 	Invoices  receivableservice.InvoiceService
@@ -268,6 +269,14 @@ func buildReceivable(b receivableBuild) receivableModule {
 		// Ledger penyelesaian: hanya jalur notifikasi DOKU yang mengkredit (bukan pembayaran manual).
 		WithSettlementRecorder(receivableservice.NewSettlementRecorder(receivablerepo.NewSettlementRepository(db)))
 
+	// Rekening pencairan: email ke owner org lewat outbox notifikasi yang sama dengan modul lain.
+	payoutSvc := receivableservice.NewPayoutAccountService(
+		receivablerepo.NewPayoutAccountRepository(db), receivablerepo.NewSettlementLedgerRepository(db),
+		payoutNotifier{
+			owners: workspaceOwnerRepo{db: db}, orgs: organizationrepo.NewOrganizationRepository(db), publisher: b.Publisher,
+			appName: b.AppName, frontendURL: b.FrontendURL, locale: b.NotificationLocale,
+		})
+
 	return receivableModule{
 		AccountHandler:    receivablehandler.NewAccountHandler(accountSvc).WithManualCreation(b.ManualCreation),
 		InvoiceHandler:    receivablehandler.NewInvoiceHandler(invoiceSvc, sendSvc).WithManualCreation(b.ManualCreation),
@@ -278,7 +287,8 @@ func buildReceivable(b receivableBuild) receivableModule {
 		ContractHandler:   receivablehandler.NewContractHandler(contractSvc).WithUpcoming(overviewSvc),
 		OverviewHandler:   receivablehandler.NewOverviewHandler(overviewSvc),
 		ArrearsHandler:    receivablehandler.NewArrearsHandler(arrearsSvc),
-		SettlementHandler: receivablehandler.NewSettlementHandler(receivableservice.NewSettlementService(receivablerepo.NewSettlementLedgerRepository(db))),
+		SettlementHandler: receivablehandler.NewSettlementHandler(receivableservice.NewSettlementService(receivablerepo.NewSettlementLedgerRepository(db))).WithPayoutSummary(payoutSvc),
+		PayoutHandler:     receivablehandler.NewPayoutAccountHandler(payoutSvc),
 		Invoices:          invoiceSvc, Accounts: accountSvc, Payments: paymentSvc, Listeners: listeners,
 		Contracts: contractSvc, Billing: orderBilling,
 	}

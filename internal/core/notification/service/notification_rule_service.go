@@ -155,6 +155,30 @@ func defaultNotificationRules() map[string]NotificationRule {
 			Channel:      domain.ChannelEmail,
 			Locale:       defaultRuleLocale,
 		},
+		"receivable.payout_account_submitted": {
+			EventType:    "receivable.payout_account_submitted",
+			TemplateCode: "receivable.payout_account_submitted",
+			Channel:      domain.ChannelEmail,
+			Locale:       defaultRuleLocale,
+		},
+		"receivable.payout_account_verified": {
+			EventType:    "receivable.payout_account_verified",
+			TemplateCode: "receivable.payout_account_verified",
+			Channel:      domain.ChannelEmail,
+			Locale:       defaultRuleLocale,
+		},
+		"receivable.payout_account_rejected": {
+			EventType:    "receivable.payout_account_rejected",
+			TemplateCode: "receivable.payout_account_rejected",
+			Channel:      domain.ChannelEmail,
+			Locale:       defaultRuleLocale,
+		},
+		"receivable.payout_account_assigned": {
+			EventType:    "receivable.payout_account_assigned",
+			TemplateCode: "receivable.payout_account_assigned",
+			Channel:      domain.ChannelEmail,
+			Locale:       defaultRuleLocale,
+		},
 	}
 }
 
