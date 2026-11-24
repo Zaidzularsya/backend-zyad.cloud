@@ -135,6 +135,117 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/auth/me:
+    get:
+      summary: Get the authenticated user with permissions and current session
+      operationId: getAuthMe
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      description: Reads the bearer token directly (401 UNAUTHORIZED when missing). `current_organization` is null when the session has no resolvable active organization.
+      responses:
+        "200":
+          description: Current user retrieved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentUserEnvelope"
+        "401":
+          description: Bearer token missing or invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/auth/sessions:
+    get:
+      summary: List the authenticated user's active sessions
+      operationId: listMySessions
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Sessions retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionListEnvelope"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/auth/sessions/{id}:
+    delete:
+      summary: Revoke one of the authenticated user's sessions
+      operationId: revokeMySession
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Session revoked successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Session not found or already revoked (AUTH_SESSION_NOT_FOUND)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Invalid session id (VALIDATION_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/auth/logout-all:
+    post:
+      summary: Revoke all of the authenticated user's sessions
+      operationId: logoutAllSessions
+      tags:
+        - Auth
+      security:
+        - BearerAuth: []
+      description: The body is optional; a missing or malformed body is treated as `exclude_current=false`.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LogoutAllRequest"
+      responses:
+        "200":
+          description: Sessions revoked successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/users/me:
     get:
       summary: Get self profile
@@ -143,13 +254,14 @@ paths:
         - Users
       security:
         - BearerAuth: []
+      description: Full user detail plus account fields (`has_password`, `username_change_available_at`, `current_organization`). The extra fields are additive; existing fields are unchanged.
       responses:
         "200":
           description: User retrieved successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/UserDetailEnvelope"
+                $ref: "#/components/schemas/MeEnvelope"
         "401":
           description: Authentication required
           content:
@@ -218,6 +330,141 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "422":
           description: Invalid avatar url
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Upload self avatar image
+      operationId: uploadSelfAvatar
+      tags:
+        - Users
+      security:
+        - BearerAuth: []
+      description: Multipart upload. Accepts JPEG, PNG or WebP up to 2 MB (SVG is rejected). The stored file URL becomes `profile.avatar_url`.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        "200":
+          description: Avatar uploaded successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDetailEnvelope"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found (USER_NOT_FOUND)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: File larger than 2 MB (AVATAR_TOO_LARGE)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Missing or unreadable file (VALIDATION_ERROR), or not JPEG/PNG/WebP (AVATAR_INVALID_TYPE)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Avatar storage is not configured (AVATAR_STORAGE_UNAVAILABLE)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/users/me/username:
+    patch:
+      summary: Change own username
+      operationId: updateSelfUsername
+      tags:
+        - Users
+      security:
+        - BearerAuth: []
+      description: The value is trimmed and lower-cased. Pattern `^[a-z0-9][a-z0-9._-]{1,28}[a-z0-9]$`, no `..`, no `@`, not digits only, and not a reserved word. A change that only differs in letter case from the current username is a no-op (200). Otherwise one change is allowed per 30 days.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUsernameRequest"
+      responses:
+        "200":
+          description: Username updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserDetailEnvelope"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found (USER_NOT_FOUND)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Username already used by another active user (USER_USERNAME_ALREADY_EXISTS)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: USERNAME_INVALID, USERNAME_RESERVED or VALIDATION_ERROR (empty body)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Cooldown active (USERNAME_CHANGE_COOLDOWN); `data.available_at` is the RFC 3339 time the next change is allowed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDataResponse"
+  /api/v1/users/me/identities:
+    get:
+      summary: List external identities linked to the authenticated user
+      operationId: listSelfIdentities
+      tags:
+        - Users
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Identities retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentityListEnvelope"
+        "401":
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found (USER_NOT_FOUND)
           content:
             application/json:
               schema:
@@ -10102,7 +10349,7 @@ paths:
       tags: [Settlement]
       security:
       - BearerAuth: []
-      description: 'kind=settlement: amount > 0 and must not exceed the current balance (422 SETTLEMENT_EXCEEDS_BALANCE). kind=adjustment: non-zero amount (negative allowed), note required, must not drive the balance below zero (422 ADJUSTMENT_BELOW_ZERO). The balance check and insert run under a per-organization advisory lock in one transaction. The beneficiary must be an existing customer organization (404 / 422 BENEFICIARY_NOT_CUSTOMER). Amounts are decimal strings with at most 2 digits. Platform organization context and permission `settlement.manage` required.'
+      description: 'kind=settlement: amount > 0 and must not exceed the current balance (422 SETTLEMENT_EXCEEDS_BALANCE). kind=adjustment: non-zero amount (negative allowed), note required, must not drive the balance below zero (422 ADJUSTMENT_BELOW_ZERO). The balance check and insert run under a per-organization advisory lock in one transaction. The beneficiary must be an existing customer organization (404 / 422 BENEFICIARY_NOT_CUSTOMER). kind=settlement additionally requires the organization to have a verified payout account (422 PAYOUT_ACCOUNT_NOT_VERIFIED) and is recorded against it; adjustment does not. Amounts are decimal strings with at most 2 digits. Platform organization context and permission `settlement.manage` required.'
       parameters:
       - {name: orgId, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody:
@@ -10187,6 +10434,437 @@ paths:
                   meta: {type: object}
         '403':
           description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/settlement/payout-accounts:
+    get:
+      summary: Own payout account overview
+      operationId: getOwnPayoutOverview
+      tags: [Settlement]
+      security:
+      - BearerAuth: []
+      description: 'Customer organizations only; organization_id comes from the tenant context (never a parameter). Requires `settlement.read`. The account number is returned in full.'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  data: {$ref: '#/components/schemas/PayoutOverview'}
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (wrong tenant type or missing permission)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Submit a payout account for verification
+      operationId: submitOwnPayoutAccount
+      tags: [Settlement]
+      security:
+      - BearerAuth: []
+      description: 'Customer organizations only; organization_id comes from the tenant context (never a parameter). Requires `settlement.read` and `payout_account.manage`. Creates a pending account; a verified account stays active until the new one is verified. Number: digits only (spaces and hyphens are stripped), 5-34 digits; holder name 3-150 characters; bank_code must exist in the banks list. `note` is ignored.'
+      requestBody:
+        required: True
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayoutAccountRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  data: {$ref: '#/components/schemas/PayoutAccount'}
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (wrong tenant type or missing permission)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: PAYOUT_ACCOUNT_PENDING_EXISTS (a submission is already pending)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: VALIDATION_ERROR (unknown bank, invalid number or holder name)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/settlement/payout-accounts/{id}/cancel:
+    post:
+      summary: Cancel own pending payout account
+      operationId: cancelOwnPayoutAccount
+      tags: [Settlement]
+      security:
+      - BearerAuth: []
+      description: 'Customer organizations only; organization_id comes from the tenant context (never a parameter). Requires `settlement.read` and `payout_account.manage`. Only a pending account of the caller organization can be cancelled.'
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  data: {$ref: '#/components/schemas/PayoutAccount'}
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (wrong tenant type or missing permission)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: PAYOUT_ACCOUNT_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: PAYOUT_ACCOUNT_INVALID_STATE (account is not pending)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/app/settlement/banks:
+    get:
+      summary: List supported banks
+      operationId: listOwnSettlementBanks
+      tags: [Settlement]
+      security:
+      - BearerAuth: []
+      description: 'Customer organizations only; organization_id comes from the tenant context (never a parameter). Requires `settlement.read`.'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  data: {type: array, items: {$ref: '#/components/schemas/Bank'}}
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (wrong tenant type or missing permission)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/platform/settlements/banks:
+    get:
+      summary: List supported banks (platform)
+      operationId: listPlatformSettlementBanks
+      tags: [Settlement]
+      security:
+      - BearerAuth: []
+      description: 'Same list as /app/settlement/banks. Platform organization context and permission `settlement.manage` required.'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  data: {type: array, items: {$ref: '#/components/schemas/Bank'}}
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (wrong tenant type or missing permission)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/platform/settlements/payout-accounts:
+    get:
+      summary: Pending payout account verification queue
+      operationId: listPlatformPendingPayoutAccounts
+      tags: [Settlement]
+      security:
+      - BearerAuth: []
+      description: 'Across all organizations, with the full account number. Only `status=pending` is supported (other values: 422). Platform organization context and permission `settlement.manage` required.'
+      parameters:
+      - {name: status, in: query, schema: {type: string, enum: [pending]}}
+      - {name: page, in: query, schema: {type: integer}}
+      - {name: per_page, in: query, schema: {type: integer, maximum: 100}}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  data: {type: array, items: {$ref: '#/components/schemas/PendingPayoutAccount'}}
+                  meta: {$ref: '#/components/schemas/PaginationMeta'}
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (wrong tenant type or missing permission)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: VALIDATION_ERROR (unsupported status)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/platform/settlements/payout-accounts/{id}/verify:
+    post:
+      summary: Verify a pending payout account
+      operationId: verifyPlatformPayoutAccount
+      tags: [Settlement]
+      security:
+      - BearerAuth: []
+      description: 'The previously verified account becomes superseded. Optional body (note, max length enforced; empty body allowed). Platform organization context and permission `settlement.manage` required.'
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: False
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayoutReviewRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  data: {$ref: '#/components/schemas/PayoutAccount'}
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (wrong tenant type or missing permission)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: PAYOUT_ACCOUNT_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: PAYOUT_ACCOUNT_INVALID_STATE (account is not pending)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: VALIDATION_ERROR (malformed body or note too long)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/platform/settlements/payout-accounts/{id}/reject:
+    post:
+      summary: Reject a pending payout account
+      operationId: rejectPlatformPayoutAccount
+      tags: [Settlement]
+      security:
+      - BearerAuth: []
+      description: 'Note is required. Platform organization context and permission `settlement.manage` required.'
+      parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: True
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayoutReviewRequest'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  data: {$ref: '#/components/schemas/PayoutAccount'}
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (wrong tenant type or missing permission)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: PAYOUT_ACCOUNT_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: PAYOUT_ACCOUNT_INVALID_STATE (account is not pending)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: VALIDATION_ERROR (note missing or too long)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/platform/settlements/{orgId}/payout-accounts:
+    get:
+      summary: Payout account history of an organization
+      operationId: listPlatformOrganizationPayoutAccounts
+      tags: [Settlement]
+      security:
+      - BearerAuth: []
+      description: 'All statuses, with the full account number. Platform organization context and permission `settlement.manage` required.'
+      parameters:
+      - {name: orgId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  data: {type: array, items: {$ref: '#/components/schemas/PayoutAccount'}}
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (wrong tenant type or missing permission)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: ORGANIZATION_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Assign a verified payout account to an organization
+      operationId: assignPlatformPayoutAccount
+      tags: [Settlement]
+      security:
+      - BearerAuth: []
+      description: 'Creates the account directly as verified (any pending submission is cancelled, the previous verified one superseded). `note` is required. Beneficiary must be a customer organization. Platform organization context and permission `settlement.manage` required.'
+      parameters:
+      - {name: orgId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: True
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayoutAccountRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: {type: boolean}
+                  message: {type: string}
+                  data: {$ref: '#/components/schemas/PayoutAccount'}
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden (wrong tenant type or missing permission)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: ORGANIZATION_NOT_FOUND
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: VALIDATION_ERROR (note, bank, number or holder name invalid) or beneficiary is not a customer organization
           content:
             application/json:
               schema:
@@ -12703,6 +13381,8 @@ components:
         properties:
           organization_id: {type: string, format: uuid}
           organization_name: {type: string}
+          payout_account: {allOf: [{$ref: '#/components/schemas/PayoutAccount'}], nullable: true, description: Verified payout account; null when none}
+          has_pending_payout_account: {type: boolean}
     SettlementEntry:
       type: object
       properties:
@@ -12715,6 +13395,58 @@ components:
         note: {type: string}
         occurred_at: {type: string, format: date-time}
         created_at: {type: string, format: date-time}
+        payout_account:
+          nullable: true
+          description: Destination account for settlements recorded against a payout account; null otherwise. The number is always masked.
+          allOf:
+          - $ref: '#/components/schemas/SettlementPayoutRef'
+    SettlementPayoutRef:
+      type: object
+      properties:
+        bank_name: {type: string}
+        account_number_masked: {type: string, example: '••••1234'}
+    PayoutAccount:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        organization_id: {type: string, format: uuid}
+        bank_code: {type: string}
+        bank_name: {type: string}
+        account_number: {type: string, description: Full account number (digits)}
+        account_holder_name: {type: string}
+        status: {type: string, enum: [pending, verified, rejected, cancelled, superseded]}
+        submitted_at: {type: string, format: date-time}
+        reviewed_at: {type: string, format: date-time, nullable: true}
+        review_note: {type: string}
+    PendingPayoutAccount:
+      allOf:
+      - $ref: '#/components/schemas/PayoutAccount'
+      - type: object
+        properties:
+          organization_name: {type: string}
+    PayoutOverview:
+      type: object
+      properties:
+        verified: {allOf: [{$ref: '#/components/schemas/PayoutAccount'}], nullable: true}
+        pending: {allOf: [{$ref: '#/components/schemas/PayoutAccount'}], nullable: true}
+        history: {type: array, items: {$ref: '#/components/schemas/PayoutAccount'}}
+    Bank:
+      type: object
+      properties:
+        code: {type: string}
+        name: {type: string}
+    PayoutAccountRequest:
+      type: object
+      required: [bank_code, account_number, account_holder_name]
+      properties:
+        bank_code: {type: string, description: Code from the banks list}
+        account_number: {type: string, description: 'Digits only, 5-34 (spaces/hyphens stripped)'}
+        account_holder_name: {type: string, minLength: 3, maxLength: 150}
+        note: {type: string, description: Required when assigning as platform; ignored on owner submit}
+    PayoutReviewRequest:
+      type: object
+      properties:
+        note: {type: string, description: Required for reject; optional for verify}
     SettlementEntryRequest:
       type: object
       required: [kind, amount]
@@ -16085,6 +16817,194 @@ components:
         created_at:
           type: string
           format: date-time
+    UpdateUsernameRequest:
+      type: object
+      required:
+        - username
+      properties:
+        username:
+          type: string
+          example: budi.santoso
+    Me:
+      allOf:
+        - $ref: "#/components/schemas/UserDetail"
+        - type: object
+          required:
+            - has_password
+            - username_change_available_at
+            - current_organization
+          properties:
+            has_password:
+              type: boolean
+            username_change_available_at:
+              type: string
+              format: date-time
+              nullable: true
+              description: Earliest time the username may be changed again; null when a change is allowed now.
+            current_organization:
+              nullable: true
+              description: Active organization of the session; null when none is resolvable.
+              allOf:
+                - $ref: "#/components/schemas/UserOrganization"
+    MeEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: user retrieved successfully
+        data:
+          $ref: "#/components/schemas/Me"
+    Identity:
+      type: object
+      required: [provider, provider_email, linked_at]
+      properties:
+        provider:
+          type: string
+          example: google
+        provider_email:
+          type: string
+        linked_at:
+          type: string
+          format: date-time
+    IdentityListEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+          example: identities retrieved successfully
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Identity"
+    CurrentUser:
+      type: object
+      required: [id, name, email, status, profile, roles, permissions, active_organization_permissions, current_organization, session]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        username:
+          type: string
+        phone:
+          type: string
+        status:
+          type: string
+        email_verified_at:
+          type: string
+          format: date-time
+          nullable: true
+        phone_verified_at:
+          type: string
+          format: date-time
+          nullable: true
+        profile:
+          type: object
+          properties:
+            avatar_url: {type: string}
+            bio: {type: string}
+            job_title: {type: string}
+            department: {type: string}
+            company: {type: string}
+            address: {type: string}
+            timezone: {type: string}
+            language: {type: string}
+        roles:
+          type: array
+          items: {type: string}
+        permissions:
+          type: array
+          items: {type: string}
+        active_organization_permissions:
+          type: array
+          items: {type: string}
+          description: Organization-role permissions on the session's active organization.
+        current_organization:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/UserOrganization"
+        session:
+          type: object
+          required: [id, expires_at]
+          properties:
+            id: {type: string, format: uuid}
+            device_name: {type: string}
+            ip_address: {type: string}
+            last_used_at: {type: string, format: date-time}
+            expires_at: {type: string, format: date-time}
+    CurrentUserEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+          example: current user retrieved
+        data:
+          $ref: "#/components/schemas/CurrentUser"
+    Session:
+      type: object
+      required: [id, created_at, expires_at, is_current]
+      properties:
+        id: {type: string, format: uuid}
+        device_name: {type: string}
+        ip_address: {type: string}
+        user_agent: {type: string}
+        last_used_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        is_current: {type: boolean}
+    SessionListEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+          example: sessions retrieved successfully
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Session"
+    LogoutAllRequest:
+      type: object
+      properties:
+        exclude_current:
+          type: boolean
+          default: false
+          description: Keep the calling session alive.
+    ErrorDataResponse:
+      type: object
+      required: [success, message]
+      description: Error envelope with a machine-readable `code` and structured `data` (as emitted by AppError.Data).
+      properties:
+        success:
+          type: boolean
+          example: false
+        code:
+          type: string
+          example: USERNAME_CHANGE_COOLDOWN
+        message:
+          type: string
+        data:
+          type: object
+          properties:
+            available_at:
+              type: string
+              format: date-time
     ErrorResponse:
       type: object
       required:
