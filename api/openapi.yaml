@@ -212,8 +212,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-        "422":
-          description: Invalid session id (VALIDATION_ERROR)
+        "500":
+          description: Session could not be revoked, including a non-UUID id (AUTH_SESSION_REVOKE_FAILED)
           content:
             application/json:
               schema:
@@ -10477,7 +10477,7 @@ paths:
       - BearerAuth: []
       description: 'Customer organizations only; organization_id comes from the tenant context (never a parameter). Requires `settlement.read` and `payout_account.manage`. Creates a pending account; a verified account stays active until the new one is verified. Number: digits only (spaces and hyphens are stripped), 5-34 digits; holder name 3-150 characters; bank_code must exist in the banks list. `note` is ignored.'
       requestBody:
-        required: True
+        required: true
         content:
           application/json:
             schema:
@@ -10677,7 +10677,7 @@ paths:
       parameters:
       - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody:
-        required: False
+        required: false
         content:
           application/json:
             schema:
@@ -10734,7 +10734,7 @@ paths:
       parameters:
       - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody:
-        required: True
+        required: true
         content:
           application/json:
             schema:
@@ -10829,7 +10829,7 @@ paths:
       parameters:
       - {name: orgId, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody:
-        required: True
+        required: true
         content:
           application/json:
             schema:
