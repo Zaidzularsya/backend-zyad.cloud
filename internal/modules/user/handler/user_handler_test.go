@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	coreerrors "zyad.cloud/internal/core/errors"
+	"zyad.cloud/internal/core/middleware"
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	"zyad.cloud/internal/modules/user/dto"
 	"zyad.cloud/internal/modules/user/service"
@@ -331,6 +333,9 @@ type fakeUserListService struct {
 	meta            dto.PaginationMeta
 	err             error
 	getCalled       bool
+	sessionID       string
+	me              dto.MeResponse
+	identities      []dto.IdentityResponse
 	userID          string
 	includeDeleted  bool
 	detail          dto.UserDetailResponse
@@ -447,6 +452,18 @@ func seedUserContext(userID string) gin.HandlerFunc {
 	}
 }
 
+func (s *fakeUserListService) GetMe(_ context.Context, userID, sessionID string) (dto.MeResponse, error) {
+	s.getCalled = true
+	s.userID = userID
+	s.sessionID = sessionID
+	return s.me, s.detailErr
+}
+
+func (s *fakeUserListService) ListIdentities(_ context.Context, userID string) ([]dto.IdentityResponse, error) {
+	s.userID = userID
+	return s.identities, s.detailErr
+}
+
 func (s *fakeUserListService) GetSelfProfile(_ context.Context, userID string) (dto.UserDetailResponse, error) {
 	s.getCalled = true
 	s.userID = userID
@@ -521,4 +538,43 @@ func (s *fakeUserListService) ChangeSelfUsername(_ context.Context, userID strin
 	s.usernameRequest = req
 	s.updateMetadata = metadata
 	return s.updated, s.updateErr
+}
+
+func TestUserHandlerGetMeUsesSessionID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &fakeUserListService{me: dto.MeResponse{HasPassword: true}}
+	handler := NewUserHandler(svc, nil, &fakePermissionChecker{})
+	router := gin.New()
+	group := router.Group("")
+	group.Use(func(c *gin.Context) {
+		permissionmiddleware.SetUserID(c, "user-1")
+		c.Set(middleware.AuthenticatedUserContextKey, middleware.AuthenticatedUser{ID: "user-1", SessionID: "sess-9"})
+		c.Next()
+	})
+	handler.RegisterRoutes(group)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/users/me", nil))
+	if rec.Code != http.StatusOK || svc.userID != "user-1" || svc.sessionID != "sess-9" {
+		t.Fatalf("status=%d user=%q session=%q body=%s", rec.Code, svc.userID, svc.sessionID, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"has_password":true`) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+func TestUserHandlerListIdentities(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &fakeUserListService{identities: []dto.IdentityResponse{{Provider: "google", ProviderEmail: "a@b.c", LinkedAt: "2026-11-01T08:00:00Z"}}}
+	handler := NewUserHandler(svc, nil, &fakePermissionChecker{})
+	router := gin.New()
+	group := router.Group("")
+	group.Use(seedUserContext("user-1"))
+	handler.RegisterRoutes(group)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/users/me/identities", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"provider":"google"`) || !strings.Contains(rec.Body.String(), `"linked_at"`) {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
 }

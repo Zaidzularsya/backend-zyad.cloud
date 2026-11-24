@@ -351,7 +351,9 @@ func (h *AuthHandler) ListSessions(c *gin.Context) {
 			ID:         s.ID,
 			DeviceName: s.DeviceName,
 			IPAddress:  s.IPAddress,
+			UserAgent:  s.UserAgent,
 			LastUsedAt: lastUsedAtStr,
+			CreatedAt:  s.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 			ExpiresAt:  s.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z"),
 			IsCurrent:  s.ID == user.SessionID,
 		})

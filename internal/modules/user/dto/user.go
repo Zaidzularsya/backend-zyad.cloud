@@ -207,3 +207,20 @@ type UpdateProfileRequest struct {
 type UpdateAvatarRequest struct {
 	AvatarURL string `json:"avatar_url" binding:"required"`
 }
+
+// MeResponse is the GET /users/me payload: the full user detail plus account fields that
+// only matter to the signed-in user.
+type MeResponse struct {
+	UserDetailResponse
+	HasPassword               bool    `json:"has_password"`
+	UsernameChangeAvailableAt *string `json:"username_change_available_at"`
+	// CurrentOrganization reuses the organization module's UserOrganizationResponse shape
+	// (same as /users/me/organizations); it is any so the user module does not import it.
+	CurrentOrganization any `json:"current_organization"`
+}
+
+type IdentityResponse struct {
+	Provider      string `json:"provider"`
+	ProviderEmail string `json:"provider_email"`
+	LinkedAt      string `json:"linked_at"`
+}

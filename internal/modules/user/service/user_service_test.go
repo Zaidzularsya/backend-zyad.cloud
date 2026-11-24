@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -458,6 +459,7 @@ type fakeUserListRepository struct {
 	auditLogsTotal      int64
 	auditLogsErr        error
 	auditLogFilter      AuditLogFilter
+	identities          []IdentityRecord
 }
 
 func (r *fakeUserListRepository) DeleteUser(_ context.Context, userID string, _ UserLifecycleMetadata, deletedAt time.Time) error {
@@ -742,4 +744,107 @@ func TestAdminUpdateKeepsGrandfatheredUsername(t *testing.T) {
 	if _, err := svc.UpdateUser(context.Background(), userID, dto.UpdateUserRequest{Username: &same}, UpdateUserMetadata{}); err != nil {
 		t.Fatalf("error = %v", err)
 	}
+}
+
+type fakeCurrentOrganizationProvider struct {
+	value     any
+	err       error
+	userID    string
+	sessionID string
+}
+
+func (f *fakeCurrentOrganizationProvider) CurrentOrganization(_ context.Context, userID, sessionID string) (any, error) {
+	f.userID = userID
+	f.sessionID = sessionID
+	return f.value, f.err
+}
+
+func TestGetMeIncludesAccountFields(t *testing.T) {
+	userID := "7ea7b1cb-04eb-456a-a19f-e41d590d2a3b"
+	now := time.Date(2026, 11, 25, 10, 0, 0, 0, time.UTC)
+	changedAt := now.Add(-10 * 24 * time.Hour)
+	repo := &fakeUserListRepository{detail: UserDetailRecord{
+		UserListRecord:    UserListRecord{ID: userID, Username: "old.name"},
+		UsernameChangedAt: &changedAt,
+		HasPassword:       false,
+	}}
+	provider := &fakeCurrentOrganizationProvider{value: map[string]any{"is_current": true}}
+	svc := usernameTestService(repo, now)
+	svc.SetCurrentOrganizationProvider(provider)
+
+	me, err := svc.GetMe(context.Background(), userID, "session-1")
+	if err != nil {
+		t.Fatalf("GetMe() error = %v", err)
+	}
+	if me.HasPassword {
+		t.Fatal("has_password must be false for empty hash")
+	}
+	want := changedAt.Add(UsernameChangeCooldown).Format(time.RFC3339)
+	if me.UsernameChangeAvailableAt == nil || *me.UsernameChangeAvailableAt != want {
+		t.Fatalf("username_change_available_at = %v, want %s", me.UsernameChangeAvailableAt, want)
+	}
+	if m, ok := me.CurrentOrganization.(map[string]any); !ok || m["is_current"] != true {
+		t.Fatalf("current_organization = %#v", me.CurrentOrganization)
+	}
+	if provider.userID != userID || provider.sessionID != "session-1" {
+		t.Fatalf("provider args = %q %q", provider.userID, provider.sessionID)
+	}
+
+	// Cooldown sudah lewat -> null; belum pernah ganti -> null.
+	old := now.Add(-UsernameChangeCooldown - time.Hour)
+	repo.detail.UsernameChangedAt = &old
+	me, _ = svc.GetMe(context.Background(), userID, "session-1")
+	if me.UsernameChangeAvailableAt != nil {
+		t.Fatalf("expected nil after cooldown, got %v", *me.UsernameChangeAvailableAt)
+	}
+	repo.detail.UsernameChangedAt = nil
+	me, _ = svc.GetMe(context.Background(), userID, "session-1")
+	if me.UsernameChangeAvailableAt != nil {
+		t.Fatal("expected nil when never changed")
+	}
+}
+
+func TestGetMeWithoutOrganization(t *testing.T) {
+	userID := "7ea7b1cb-04eb-456a-a19f-e41d590d2a3b"
+	repo := &fakeUserListRepository{detail: UserDetailRecord{UserListRecord: UserListRecord{ID: userID}, HasPassword: true}}
+	svc := NewUserService(repo)
+	svc.SetCurrentOrganizationProvider(&fakeCurrentOrganizationProvider{})
+
+	me, err := svc.GetMe(context.Background(), userID, "s")
+	if err != nil {
+		t.Fatalf("GetMe() error = %v", err)
+	}
+	raw, _ := json.Marshal(me)
+	var out map[string]any
+	_ = json.Unmarshal(raw, &out)
+	if v, ok := out["current_organization"]; !ok || v != nil {
+		t.Fatalf("current_organization = %v (present=%v), want null", v, ok)
+	}
+	if out["has_password"] != true || out["username_change_available_at"] != nil {
+		t.Fatalf("json = %s", raw)
+	}
+	if out["id"] != userID {
+		t.Fatalf("embedded fields must stay flat: %s", raw)
+	}
+
+	// provider error tidak menggagalkan GetMe
+	svc.SetCurrentOrganizationProvider(&fakeCurrentOrganizationProvider{err: errors.New("boom")})
+	me, err = svc.GetMe(context.Background(), userID, "s")
+	if err != nil || me.CurrentOrganization != nil {
+		t.Fatalf("provider error must degrade to null, got %v / %v", err, me.CurrentOrganization)
+	}
+}
+
+func TestListIdentities(t *testing.T) {
+	linked := time.Date(2026, 11, 1, 8, 0, 0, 0, time.UTC)
+	repo := &fakeUserListRepository{identities: []IdentityRecord{{Provider: "google", ProviderEmail: "a@b.c", CreatedAt: linked}}}
+	svc := NewUserService(repo)
+	got, err := svc.ListIdentities(context.Background(), "7ea7b1cb-04eb-456a-a19f-e41d590d2a3b")
+	if err != nil || len(got) != 1 || got[0].Provider != "google" || got[0].ProviderEmail != "a@b.c" || got[0].LinkedAt != linked.Format(time.RFC3339) {
+		t.Fatalf("got %#v err %v", got, err)
+	}
+}
+
+func (r *fakeUserListRepository) ListIdentities(_ context.Context, _ string) ([]IdentityRecord, error) {
+	return r.identities, nil
 }

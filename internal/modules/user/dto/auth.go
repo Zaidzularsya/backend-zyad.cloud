@@ -125,6 +125,7 @@ type SessionResponse struct {
 	IPAddress  string  `json:"ip_address,omitempty"`
 	UserAgent  string  `json:"user_agent,omitempty"`
 	LastUsedAt *string `json:"last_used_at,omitempty"`
+	CreatedAt  string  `json:"created_at"`
 	ExpiresAt  string  `json:"expires_at"`
 	IsCurrent  bool    `json:"is_current"`
 }

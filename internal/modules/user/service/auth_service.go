@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -275,6 +276,7 @@ type CurrentSession struct {
 	IPAddress  string
 	UserAgent  string
 	LastUsedAt *time.Time
+	CreatedAt  time.Time
 	ExpiresAt  time.Time
 	RevokedAt  *time.Time
 }
@@ -302,6 +304,11 @@ type AuthService struct {
 	notificationLocale    string
 	notificationAttempts  int
 	now                   func() time.Time
+	currentOrganization   CurrentOrganizationProvider
+}
+
+func (s *AuthService) SetCurrentOrganizationProvider(provider CurrentOrganizationProvider) {
+	s.currentOrganization = provider
 }
 
 func NewAuthService(repo LoginRepository, cfg config.Config) (*AuthService, error) {
@@ -1079,7 +1086,17 @@ func (s *AuthService) CurrentUser(ctx context.Context, accessToken string) (dto.
 		return dto.CurrentUserResponse{}, err
 	}
 
-	return currentUserResponse(currentUser), nil
+	response := currentUserResponse(currentUser)
+	// A failing lookup must not break /auth/me: degrade to null and log.
+	if s.currentOrganization != nil {
+		current, err := s.currentOrganization.CurrentOrganization(ctx, currentUser.ID, currentUser.Session.ID)
+		if err != nil {
+			slog.Warn("resolve current organization failed", "user_id", currentUser.ID, "error", err)
+		} else {
+			response.CurrentOrganization = current
+		}
+	}
+	return response, nil
 }
 
 func (s *AuthService) AuthenticateAccessToken(ctx context.Context, accessToken string) (middleware.AuthenticatedUser, error) {

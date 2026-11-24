@@ -1568,3 +1568,68 @@ func TestAuthServiceResendVerificationEmailGenericSuccessForUnknownEmail(t *test
 		t.Fatal("unexpected notification published for unknown email")
 	}
 }
+
+func TestCurrentUserFillsCurrentOrganization(t *testing.T) {
+	repo := &fakeLoginRepository{
+		currentUser: CurrentUser{
+			ID:     "user-1",
+			Status: model.UserStatusActive,
+			Session: CurrentSession{
+				ID:        "session-1",
+				ExpiresAt: time.Date(2026, 6, 18, 10, 0, 0, 0, time.UTC),
+			},
+		},
+	}
+	svc := newTestAuthService(t, repo)
+	provider := &fakeCurrentOrganizationProvider{value: map[string]any{"is_current": true}}
+	svc.SetCurrentOrganizationProvider(provider)
+
+	accessToken, err := svc.accessTokenManager.Generate(coreauth.Claims{
+		UserID: "user-1", SessionID: "session-1", TokenType: coreauth.TokenTypeAccess,
+	}, time.Minute)
+	if err != nil {
+		t.Fatalf("generate access token: %v", err)
+	}
+	result, err := svc.CurrentUser(context.Background(), accessToken)
+	if err != nil {
+		t.Fatalf("current user: %v", err)
+	}
+	if m, ok := result.CurrentOrganization.(map[string]any); !ok || m["is_current"] != true {
+		t.Fatalf("current_organization = %#v", result.CurrentOrganization)
+	}
+	if provider.userID != "user-1" || provider.sessionID != "session-1" {
+		t.Fatalf("provider args = %q %q", provider.userID, provider.sessionID)
+	}
+
+	// Error provider tidak boleh menggagalkan /auth/me.
+	svc.SetCurrentOrganizationProvider(&fakeCurrentOrganizationProvider{err: errors.New("boom")})
+	result, err = svc.CurrentUser(context.Background(), accessToken)
+	if err != nil || result.CurrentOrganization != nil {
+		t.Fatalf("provider error must degrade to nil, got %v / %v", err, result.CurrentOrganization)
+	}
+}
+
+func TestResetPasswordSetsFirstPasswordForGoogleUser(t *testing.T) {
+	repo := &fakeLoginRepository{
+		completedPasswordResetUser: PasswordResetUser{
+			// Akun Google-only: users.password_hash masih kosong; reset token tidak
+			// pernah memeriksa hash lama, jadi ini menjadi password pertama.
+			ID:     "user-google",
+			Email:  "g@example.com",
+			Status: model.UserStatusActive,
+		},
+	}
+	svc := newTestAuthService(t, repo)
+
+	err := svc.ResetPassword(context.Background(), dto.ResetPasswordRequest{
+		Token:                "tok",
+		Password:             "first-password-1",
+		PasswordConfirmation: "first-password-1",
+	})
+	if err != nil {
+		t.Fatalf("reset password: %v", err)
+	}
+	if !coreauth.VerifyPassword("first-password-1", repo.completedPasswordHash) {
+		t.Fatal("repo did not receive a hash of the new password")
+	}
+}

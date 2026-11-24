@@ -167,6 +167,9 @@ func New(ctx context.Context) (*App, error) {
 	organizationSwitchService := organizationservice.NewSwitchService(
 		organizationrepo.NewSwitchRepository(db),
 	)
+	currentOrganizationProvider := userCurrentOrganizationProvider{organizations: organizationSwitchService}
+	authService.SetCurrentOrganizationProvider(currentOrganizationProvider)
+	userService.SetCurrentOrganizationProvider(currentOrganizationProvider)
 	organizationSwitchHandler := organizationhandler.NewSwitchHandler(
 		organizationSwitchService,
 	)

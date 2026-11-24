@@ -6,6 +6,7 @@ import (
 
 	coreerrors "zyad.cloud/internal/core/errors"
 	corehttp "zyad.cloud/internal/core/http"
+	"zyad.cloud/internal/core/middleware"
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	"zyad.cloud/internal/modules/user/dto"
 	"zyad.cloud/internal/modules/user/service"
@@ -24,6 +25,8 @@ type UserListService interface {
 	BulkAction(ctx context.Context, req dto.BulkUserActionRequest, metadata service.UserLifecycleMetadata) (dto.BulkUserActionResponse, error)
 	ChangeUserStatus(ctx context.Context, userID string, req dto.UpdateUserStatusRequest, metadata service.UserLifecycleMetadata) (dto.UserDetailResponse, error)
 	GetSelfProfile(ctx context.Context, userID string) (dto.UserDetailResponse, error)
+	GetMe(ctx context.Context, userID, sessionID string) (dto.MeResponse, error)
+	ListIdentities(ctx context.Context, userID string) ([]dto.IdentityResponse, error)
 	UpdateSelfProfile(ctx context.Context, userID string, req dto.UpdateProfileRequest, metadata service.UpdateUserMetadata) (dto.UserDetailResponse, error)
 	UpdateSelfAvatar(ctx context.Context, userID string, req dto.UpdateAvatarRequest, metadata service.UpdateUserMetadata) (dto.UserDetailResponse, error)
 	ChangeSelfUsername(ctx context.Context, userID string, req dto.UpdateUsernameRequest, metadata service.UpdateUserMetadata) (dto.UserDetailResponse, error)
@@ -65,7 +68,8 @@ func (h *UserHandler) RegisterRoutes(router *gin.RouterGroup) {
 
 	meGroup := router.Group("/users/me")
 
-	meGroup.GET("", h.GetSelfProfile)
+	meGroup.GET("", h.GetMe)
+	meGroup.GET("/identities", h.ListSelfIdentities)
 	meGroup.PATCH("/profile", h.UpdateSelfProfile)
 	meGroup.PATCH("/avatar", h.UpdateSelfAvatar)
 	meGroup.PATCH("/username", h.UpdateSelfUsername)
@@ -254,6 +258,29 @@ func (h *UserHandler) GetSelfProfile(c *gin.Context) {
 	corehttp.OK(c, "user retrieved successfully", user)
 }
 
+// GetMe serves GET /users/me: the profile plus account fields and the current organization.
+func (h *UserHandler) GetMe(c *gin.Context) {
+	sessionID := ""
+	if authUser, ok := middleware.AuthenticatedUserFromContext(c); ok {
+		sessionID = authUser.SessionID
+	}
+	me, err := h.service.GetMe(c.Request.Context(), permissionmiddleware.UserID(c), sessionID)
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	corehttp.OK(c, "user retrieved successfully", me)
+}
+
+func (h *UserHandler) ListSelfIdentities(c *gin.Context) {
+	identities, err := h.service.ListIdentities(c.Request.Context(), permissionmiddleware.UserID(c))
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	corehttp.OK(c, "identities retrieved successfully", identities)
+}
+
 func (h *UserHandler) UpdateSelfProfile(c *gin.Context) {
 	var req dto.UpdateProfileRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -348,6 +375,7 @@ func (h *UserHandler) ListUserSessions(c *gin.Context) {
 			IPAddress:  s.IPAddress,
 			UserAgent:  s.UserAgent,
 			LastUsedAt: lastUsedAtStr,
+			CreatedAt:  s.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 			ExpiresAt:  s.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z"),
 			IsCurrent:  false,
 		})

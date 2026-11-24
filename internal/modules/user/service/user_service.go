@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/mail"
 	"net/url"
@@ -34,6 +35,7 @@ const maxBulkUserActionItems = 100
 type UserListRepository interface {
 	ListUsers(ctx context.Context, filter UserListFilter) ([]UserListRecord, int64, error)
 	FindUserDetail(ctx context.Context, userID string, includeDeleted bool) (UserDetailRecord, error)
+	ListIdentities(ctx context.Context, userID string) ([]IdentityRecord, error)
 	CreateUser(ctx context.Context, user NewUser) (string, error)
 	UpdateUser(ctx context.Context, update UserUpdate) error
 	DeleteUser(ctx context.Context, userID string, metadata UserLifecycleMetadata, deletedAt time.Time) error
@@ -105,9 +107,24 @@ type UserListRecord struct {
 	DeletedAt       *time.Time
 }
 
+// IdentityRecord is one row of auth_identities (login provider linked to a user).
+type IdentityRecord struct {
+	Provider      string
+	ProviderEmail string
+	CreatedAt     time.Time
+}
+
+// CurrentOrganizationProvider resolves the organization of the user's current session.
+// It returns any so the user module does not import the organization module; the adapter
+// lives in internal/app. A nil value means "no current organization".
+type CurrentOrganizationProvider interface {
+	CurrentOrganization(ctx context.Context, userID, sessionID string) (any, error)
+}
+
 type UserDetailRecord struct {
 	UserListRecord
 	UsernameChangedAt *time.Time
+	HasPassword       bool
 	Profile           UserProfileRecord
 	Roles             []UserRoleRecord
 	Permissions       []UserPermissionRecord
@@ -240,6 +257,7 @@ type UserService struct {
 	notificationAttempts  int
 	now                   func() time.Time
 	reservedUsernames     []string
+	currentOrganization   CurrentOrganizationProvider
 }
 
 func NewUserService(repo UserListRepository) *UserService {
@@ -265,6 +283,10 @@ func (s *UserService) Configure(cfg config.Config) error {
 	s.notificationAttempts = cfg.Notification.MaxAttempts
 	s.reservedUsernames = cfg.MultiTenant.ReservedSubdomains
 	return nil
+}
+
+func (s *UserService) SetCurrentOrganizationProvider(provider CurrentOrganizationProvider) {
+	s.currentOrganization = provider
 }
 
 func (s *UserService) SetNotificationPublisher(publisher NotificationEventPublisher) {
@@ -322,12 +344,12 @@ func (s *UserService) GetUser(ctx context.Context, userID string, includeDeleted
 
 	user, err := s.repo.FindUserDetail(ctx, userID, includeDeleted)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return dto.UserDetailResponse{}, coreerrors.New("USER_NOT_FOUND", "user not found", http.StatusNotFound)
-		}
-		return dto.UserDetailResponse{}, coreerrors.Wrap("USER_DETAIL_FAILED", "failed to get user detail", http.StatusInternalServerError, err)
+		return dto.UserDetailResponse{}, mapUserLookupError(err)
 	}
+	return userDetailResponse(user), nil
+}
 
+func userDetailResponse(user UserDetailRecord) dto.UserDetailResponse {
 	roles := make([]dto.UserRoleDetail, 0, len(user.Roles))
 	for _, role := range user.Roles {
 		roles = append(roles, dto.UserRoleDetail{
@@ -389,7 +411,7 @@ func (s *UserService) GetUser(ctx context.Context, userID string, includeDeleted
 		CreatedAt: user.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt: user.UpdatedAt.UTC().Format(time.RFC3339),
 		DeletedAt: formatTimePtr(user.DeletedAt),
-	}, nil
+	}
 }
 
 func (s *UserService) CreateUser(ctx context.Context, req dto.CreateUserRequest, metadata CreateUserMetadata) (dto.UserDetailResponse, error) {
@@ -627,6 +649,60 @@ func (s *UserService) ChangeUserStatus(ctx context.Context, userID string, req d
 
 func (s *UserService) GetSelfProfile(ctx context.Context, userID string) (dto.UserDetailResponse, error) {
 	return s.GetUser(ctx, userID, false)
+}
+
+// GetMe builds the GET /users/me payload. A failing current-organization lookup is logged and
+// degraded to null so the profile still loads.
+func (s *UserService) GetMe(ctx context.Context, userID, sessionID string) (dto.MeResponse, error) {
+	userID = strings.TrimSpace(userID)
+	if !validUUID(userID) {
+		return dto.MeResponse{}, coreerrors.New("USER_NOT_FOUND", "user not found", http.StatusNotFound)
+	}
+	user, err := s.repo.FindUserDetail(ctx, userID, false)
+	if err != nil {
+		return dto.MeResponse{}, mapUserLookupError(err)
+	}
+
+	me := dto.MeResponse{
+		UserDetailResponse: userDetailResponse(user),
+		HasPassword:        user.HasPassword,
+	}
+	if user.UsernameChangedAt != nil {
+		availableAt := user.UsernameChangedAt.UTC().Add(UsernameChangeCooldown)
+		if s.now().UTC().Before(availableAt) {
+			formatted := availableAt.Format(time.RFC3339)
+			me.UsernameChangeAvailableAt = &formatted
+		}
+	}
+	if s.currentOrganization != nil {
+		current, err := s.currentOrganization.CurrentOrganization(ctx, userID, sessionID)
+		if err != nil {
+			slog.Warn("resolve current organization failed", "user_id", userID, "error", err)
+		} else {
+			me.CurrentOrganization = current
+		}
+	}
+	return me, nil
+}
+
+func (s *UserService) ListIdentities(ctx context.Context, userID string) ([]dto.IdentityResponse, error) {
+	userID = strings.TrimSpace(userID)
+	if !validUUID(userID) {
+		return nil, coreerrors.New("USER_NOT_FOUND", "user not found", http.StatusNotFound)
+	}
+	records, err := s.repo.ListIdentities(ctx, userID)
+	if err != nil {
+		return nil, coreerrors.Wrap("USER_IDENTITIES_FAILED", "failed to list identities", http.StatusInternalServerError, err)
+	}
+	items := make([]dto.IdentityResponse, 0, len(records))
+	for _, r := range records {
+		items = append(items, dto.IdentityResponse{
+			Provider:      r.Provider,
+			ProviderEmail: r.ProviderEmail,
+			LinkedAt:      r.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	return items, nil
 }
 
 func (s *UserService) UpdateSelfProfile(ctx context.Context, userID string, req dto.UpdateProfileRequest, metadata UpdateUserMetadata) (dto.UserDetailResponse, error) {

@@ -1040,7 +1040,7 @@ func scanStrings(rows pgx.Rows) ([]string, error) {
 
 func (r *AuthRepository) ListSessions(ctx context.Context, userID string) ([]service.CurrentSession, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id, device_name, COALESCE(ip_address::text, ''), COALESCE(user_agent, ''), last_used_at, expires_at, revoked_at
+		SELECT id, device_name, COALESCE(ip_address::text, ''), COALESCE(user_agent, ''), last_used_at, created_at, expires_at, revoked_at
 		FROM sessions
 		WHERE user_id = $1
 		ORDER BY last_used_at DESC NULLS LAST, created_at DESC
@@ -1061,6 +1061,7 @@ func (r *AuthRepository) ListSessions(ctx context.Context, userID string) ([]ser
 			&ipAddress,
 			&userAgent,
 			&lastUsedAt,
+			&s.CreatedAt,
 			&s.ExpiresAt,
 			&revokedAt,
 		); err != nil {

@@ -582,6 +582,7 @@ func (r *UserRepository) FindUserDetail(ctx context.Context, userID string, incl
 			u.updated_at,
 			u.deleted_at,
 			u.username_changed_at,
+			(u.password_hash IS NOT NULL AND u.password_hash <> ''),
 			COALESCE(p.avatar_url, ''),
 			COALESCE(p.bio, ''),
 			COALESCE(p.job_title, ''),
@@ -612,6 +613,7 @@ func (r *UserRepository) FindUserDetail(ctx context.Context, userID string, incl
 		&user.UpdatedAt,
 		&deletedAt,
 		&usernameChangedAt,
+		&user.HasPassword,
 		&user.Profile.AvatarURL,
 		&user.Profile.Bio,
 		&user.Profile.JobTitle,
@@ -652,6 +654,29 @@ func (r *UserRepository) FindUserDetail(ctx context.Context, userID string, incl
 	user.Sessions = sessions
 	user.Audit = audit
 	return user, nil
+}
+
+// ListIdentities returns the login providers linked to the user, oldest first.
+func (r *UserRepository) ListIdentities(ctx context.Context, userID string) ([]service.IdentityRecord, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT provider, COALESCE(provider_email, ''), created_at
+		FROM auth_identities
+		WHERE user_id = $1
+		ORDER BY created_at ASC, id ASC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]service.IdentityRecord, 0)
+	for rows.Next() {
+		var item service.IdentityRecord
+		if err := rows.Scan(&item.Provider, &item.ProviderEmail, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 func (r *UserRepository) userRoles(ctx context.Context, userID string) ([]service.UserRoleRecord, error) {
