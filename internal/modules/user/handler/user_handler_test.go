@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -323,6 +324,7 @@ func TestUserHandlerActivateUser(t *testing.T) {
 }
 
 type fakeUserListService struct {
+	usernameRequest dto.UpdateUsernameRequest
 	called          bool
 	query           dto.UserListQuery
 	users           []dto.UserListItem
@@ -471,4 +473,52 @@ func (s *fakeUserListService) ListLoginHistories(_ context.Context, _ dto.LoginH
 
 func (s *fakeUserListService) ListAuditLogs(_ context.Context, _ dto.AuditLogQuery) ([]dto.AuditLogResponse, dto.PaginationMeta, error) {
 	return nil, dto.PaginationMeta{}, nil
+}
+
+func TestUpdateSelfUsernameRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	run := func(svc *fakeUserListService) *httptest.ResponseRecorder {
+		handler := NewUserHandler(svc, nil, &fakePermissionChecker{})
+		router := gin.New()
+		group := router.Group("")
+		group.Use(seedUserContext("a73d7c06-96e9-4ab2-bb32-e025dde5660c"))
+		handler.RegisterRoutes(group)
+		req := httptest.NewRequest(http.MethodPatch, "/users/me/username", bytes.NewBufferString(`{"username":"new.name"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	ok := &fakeUserListService{updated: dto.UserDetailResponse{Username: "new.name"}}
+	if rec := run(ok); rec.Code != http.StatusOK || ok.usernameRequest.Username != "new.name" || ok.updateUserID != "a73d7c06-96e9-4ab2-bb32-e025dde5660c" {
+		t.Fatalf("status = %d, body = %s, req = %#v", rec.Code, rec.Body.String(), ok.usernameRequest)
+	}
+
+	appErr := coreerrors.New("USERNAME_CHANGE_COOLDOWN", "cooldown", http.StatusTooManyRequests)
+	appErr.Data = map[string]any{"available_at": "2026-12-05T10:00:00Z"}
+	cooldown := &fakeUserListService{updateErr: appErr}
+	rec := run(cooldown)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Code string `json:"code"`
+		Data struct {
+			AvailableAt string `json:"available_at"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Code != "USERNAME_CHANGE_COOLDOWN" || body.Data.AvailableAt != "2026-12-05T10:00:00Z" {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+func (s *fakeUserListService) ChangeSelfUsername(_ context.Context, userID string, req dto.UpdateUsernameRequest, metadata service.UpdateUserMetadata) (dto.UserDetailResponse, error) {
+	s.updateUserID = userID
+	s.usernameRequest = req
+	s.updateMetadata = metadata
+	return s.updated, s.updateErr
 }

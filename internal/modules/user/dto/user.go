@@ -188,6 +188,10 @@ type UserDetailResponse struct {
 	DeletedAt       *string                `json:"deleted_at"`
 }
 
+type UpdateUsernameRequest struct {
+	Username string `json:"username" binding:"required"`
+}
+
 type UpdateProfileRequest struct {
 	Name       *string `json:"name"`
 	Phone      *string `json:"phone"`

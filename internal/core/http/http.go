@@ -25,10 +25,14 @@ func NoContent(c *gin.Context) {
 func Fail(c *gin.Context, err error) {
 	var appErr *coreerrors.AppError
 	if errors.As(err, &appErr) {
+		if appErr.Data != nil {
+			response.ErrorWithData(c, appErr.Status, appErr.Code, appErr.Message, appErr.Data)
+			return
+		}
 		response.Error(c, appErr.Status, appErr.Code, appErr.Message)
 		return
 	}
-	
+
 	// Temporarily log the raw error so we can debug it
 	if err != nil {
 		c.Error(err)

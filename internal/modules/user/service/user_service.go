@@ -107,11 +107,12 @@ type UserListRecord struct {
 
 type UserDetailRecord struct {
 	UserListRecord
-	Profile     UserProfileRecord
-	Roles       []UserRoleRecord
-	Permissions []UserPermissionRecord
-	Sessions    UserSessionSummaryRecord
-	Audit       UserAuditSummaryRecord
+	UsernameChangedAt *time.Time
+	Profile           UserProfileRecord
+	Roles             []UserRoleRecord
+	Permissions       []UserPermissionRecord
+	Sessions          UserSessionSummaryRecord
+	Audit             UserAuditSummaryRecord
 }
 
 type UserProfileRecord struct {
@@ -192,22 +193,24 @@ type UpdateUserMetadata struct {
 }
 
 type UserUpdate struct {
-	UserID      string
-	Name        *string
-	Email       *string
-	Username    *string
-	Phone       *string
-	AvatarURL   *string
-	Bio         *string
-	JobTitle    *string
-	Department  *string
-	Company     *string
-	Address     *string
-	Timezone    *string
-	Language    *string
-	ActorUserID string
-	IPAddress   string
-	UserAgent   string
+	UserID   string
+	Name     *string
+	Email    *string
+	Username *string
+	// UsernameChangedAt diisi hanya saat user mengganti username sendiri (memulai cooldown).
+	UsernameChangedAt *time.Time
+	Phone             *string
+	AvatarURL         *string
+	Bio               *string
+	JobTitle          *string
+	Department        *string
+	Company           *string
+	Address           *string
+	Timezone          *string
+	Language          *string
+	ActorUserID       string
+	IPAddress         string
+	UserAgent         string
 }
 
 type UserLifecycleMetadata struct {
@@ -236,6 +239,7 @@ type UserService struct {
 	notificationLocale    string
 	notificationAttempts  int
 	now                   func() time.Time
+	reservedUsernames     []string
 }
 
 func NewUserService(repo UserListRepository) *UserService {
@@ -259,6 +263,7 @@ func (s *UserService) Configure(cfg config.Config) error {
 	s.frontendURL = cfg.App.FrontendURL
 	s.notificationLocale = cfg.Notification.DefaultLocale
 	s.notificationAttempts = cfg.Notification.MaxAttempts
+	s.reservedUsernames = cfg.MultiTenant.ReservedSubdomains
 	return nil
 }
 
@@ -434,27 +439,50 @@ func (s *UserService) UpdateUser(ctx context.Context, userID string, req dto.Upd
 	if err != nil {
 		return dto.UserDetailResponse{}, err
 	}
+	if update.Username != nil && *update.Username != "" {
+		// Admin tidak kena cooldown, tetapi nilai baru tetap divalidasi. Username lama yang
+		// tidak lolos pola (grandfathered) boleh dikirim ulang apa adanya.
+		current, err := s.repo.FindUserDetail(ctx, userID, false)
+		if err != nil {
+			return dto.UserDetailResponse{}, mapUserLookupError(err)
+		}
+		if !strings.EqualFold(*update.Username, current.Username) {
+			normalized, err := NormalizeUsername(*update.Username, s.reservedUsernames)
+			if err != nil {
+				return dto.UserDetailResponse{}, usernameAppError(err)
+			}
+			update.Username = &normalized
+		}
+	}
+	if err := s.saveUserUpdate(ctx, update); err != nil {
+		return dto.UserDetailResponse{}, err
+	}
+	return s.GetUser(ctx, userID, false)
+}
+
+// saveUserUpdate menyimpan update lewat repo dan memetakan error DB ke AppError.
+func (s *UserService) saveUserUpdate(ctx context.Context, update UserUpdate) error {
 	if err := s.repo.UpdateUser(ctx, update); err != nil {
 		if errors.Is(err, ErrUpdateUserNotFound) || errors.Is(err, pgx.ErrNoRows) {
-			return dto.UserDetailResponse{}, coreerrors.New("USER_NOT_FOUND", "user not found", http.StatusNotFound)
+			return coreerrors.New("USER_NOT_FOUND", "user not found", http.StatusNotFound)
 		}
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			switch pgErr.ConstraintName {
 			case "idx_users_username_active_unique":
-				return dto.UserDetailResponse{}, coreerrors.New("USER_USERNAME_ALREADY_EXISTS", "username already exists", http.StatusConflict)
+				return coreerrors.New("USER_USERNAME_ALREADY_EXISTS", "username already exists", http.StatusConflict)
 			case "auth_identities_provider_user_unique":
 				if update.Username != nil && *update.Username != "" {
-					return dto.UserDetailResponse{}, coreerrors.New("USER_USERNAME_ALREADY_EXISTS", "username already exists", http.StatusConflict)
+					return coreerrors.New("USER_USERNAME_ALREADY_EXISTS", "username already exists", http.StatusConflict)
 				}
-				return dto.UserDetailResponse{}, coreerrors.New("USER_EMAIL_ALREADY_EXISTS", "email already exists", http.StatusConflict)
+				return coreerrors.New("USER_EMAIL_ALREADY_EXISTS", "email already exists", http.StatusConflict)
 			default:
-				return dto.UserDetailResponse{}, coreerrors.New("USER_EMAIL_ALREADY_EXISTS", "email already exists", http.StatusConflict)
+				return coreerrors.New("USER_EMAIL_ALREADY_EXISTS", "email already exists", http.StatusConflict)
 			}
 		}
-		return dto.UserDetailResponse{}, coreerrors.Wrap("USER_UPDATE_FAILED", "failed to update user", http.StatusInternalServerError, err)
+		return coreerrors.Wrap("USER_UPDATE_FAILED", "failed to update user", http.StatusInternalServerError, err)
 	}
-	return s.GetUser(ctx, userID, false)
+	return nil
 }
 
 func (s *UserService) DeleteUser(ctx context.Context, userID string, metadata UserLifecycleMetadata) error {
@@ -613,6 +641,58 @@ func (s *UserService) UpdateSelfProfile(ctx context.Context, userID string, req 
 		Timezone:   req.Timezone,
 		Language:   req.Language,
 	}, metadata)
+}
+
+// ChangeSelfUsername mengganti username milik sendiri dengan validasi format, kata cadangan,
+// dan cooldown. Perubahan yang hanya beda huruf besar/kecil dianggap no-op.
+func (s *UserService) ChangeSelfUsername(ctx context.Context, userID string, req dto.UpdateUsernameRequest, metadata UpdateUserMetadata) (dto.UserDetailResponse, error) {
+	userID = strings.TrimSpace(userID)
+	if !validUUID(userID) {
+		return dto.UserDetailResponse{}, coreerrors.New("USER_NOT_FOUND", "user not found", http.StatusNotFound)
+	}
+	current, err := s.repo.FindUserDetail(ctx, userID, false)
+	if err != nil {
+		return dto.UserDetailResponse{}, mapUserLookupError(err)
+	}
+
+	raw := strings.TrimSpace(req.Username)
+	if raw != "" && strings.EqualFold(raw, current.Username) {
+		return s.GetUser(ctx, userID, false)
+	}
+	username, err := NormalizeUsername(raw, s.reservedUsernames)
+	if err != nil {
+		return dto.UserDetailResponse{}, usernameAppError(err)
+	}
+
+	now := s.now().UTC()
+	if current.UsernameChangedAt != nil {
+		availableAt := current.UsernameChangedAt.UTC().Add(UsernameChangeCooldown)
+		if now.Before(availableAt) {
+			appErr := coreerrors.New("USERNAME_CHANGE_COOLDOWN", "username can only be changed once every 30 days", http.StatusTooManyRequests)
+			appErr.Data = map[string]any{"available_at": availableAt.Format(time.RFC3339)}
+			return dto.UserDetailResponse{}, appErr
+		}
+	}
+
+	update := UserUpdate{
+		UserID:            userID,
+		Username:          &username,
+		UsernameChangedAt: &now,
+		ActorUserID:       strings.TrimSpace(metadata.ActorUserID),
+		IPAddress:         strings.TrimSpace(metadata.IPAddress),
+		UserAgent:         strings.TrimSpace(metadata.UserAgent),
+	}
+	if err := s.saveUserUpdate(ctx, update); err != nil {
+		return dto.UserDetailResponse{}, err
+	}
+	return s.GetUser(ctx, userID, false)
+}
+
+func mapUserLookupError(err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return coreerrors.New("USER_NOT_FOUND", "user not found", http.StatusNotFound)
+	}
+	return coreerrors.Wrap("USER_DETAIL_FAILED", "failed to get user detail", http.StatusInternalServerError, err)
 }
 
 func (s *UserService) UpdateSelfAvatar(ctx context.Context, userID string, req dto.UpdateAvatarRequest, metadata UpdateUserMetadata) (dto.UserDetailResponse, error) {

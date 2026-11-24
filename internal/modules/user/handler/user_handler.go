@@ -26,6 +26,7 @@ type UserListService interface {
 	GetSelfProfile(ctx context.Context, userID string) (dto.UserDetailResponse, error)
 	UpdateSelfProfile(ctx context.Context, userID string, req dto.UpdateProfileRequest, metadata service.UpdateUserMetadata) (dto.UserDetailResponse, error)
 	UpdateSelfAvatar(ctx context.Context, userID string, req dto.UpdateAvatarRequest, metadata service.UpdateUserMetadata) (dto.UserDetailResponse, error)
+	ChangeSelfUsername(ctx context.Context, userID string, req dto.UpdateUsernameRequest, metadata service.UpdateUserMetadata) (dto.UserDetailResponse, error)
 	ListLoginHistories(ctx context.Context, query dto.LoginHistoryQuery) ([]dto.LoginHistoryResponse, dto.PaginationMeta, error)
 	ListAuditLogs(ctx context.Context, query dto.AuditLogQuery) ([]dto.AuditLogResponse, dto.PaginationMeta, error)
 }
@@ -67,6 +68,7 @@ func (h *UserHandler) RegisterRoutes(router *gin.RouterGroup) {
 	meGroup.GET("", h.GetSelfProfile)
 	meGroup.PATCH("/profile", h.UpdateSelfProfile)
 	meGroup.PATCH("/avatar", h.UpdateSelfAvatar)
+	meGroup.PATCH("/username", h.UpdateSelfUsername)
 }
 
 func (h *UserHandler) ListUsers(c *gin.Context) {
@@ -271,6 +273,25 @@ func (h *UserHandler) UpdateSelfProfile(c *gin.Context) {
 	corehttp.OK(c, "user profile updated successfully", user)
 }
 
+func (h *UserHandler) UpdateSelfUsername(c *gin.Context) {
+	var req dto.UpdateUsernameRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		return
+	}
+
+	user, err := h.service.ChangeSelfUsername(c.Request.Context(), permissionmiddleware.UserID(c), req, service.UpdateUserMetadata{
+		ActorUserID: permissionmiddleware.UserID(c),
+		IPAddress:   c.ClientIP(),
+		UserAgent:   c.Request.UserAgent(),
+	})
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	corehttp.OK(c, "username updated successfully", user)
+}
+
 func (h *UserHandler) UpdateSelfAvatar(c *gin.Context) {
 	var req dto.UpdateAvatarRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -410,5 +431,3 @@ func (h *UserHandler) ListUserAuditLogs(c *gin.Context) {
 
 	response.JSON(c, http.StatusOK, "user audit logs retrieved successfully", logs, meta)
 }
-
-

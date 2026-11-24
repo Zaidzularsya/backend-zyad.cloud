@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	coreauth "zyad.cloud/internal/core/auth"
 	coreerrors "zyad.cloud/internal/core/errors"
@@ -590,4 +591,155 @@ func TestUserServiceListAuditLogs(t *testing.T) {
 	}
 }
 
+func usernameTestService(repo *fakeUserListRepository, now time.Time) *UserService {
+	svc := NewUserService(repo)
+	svc.now = func() time.Time { return now }
+	svc.reservedUsernames = []string{"www"}
+	return svc
+}
 
+func TestChangeSelfUsernameCooldown(t *testing.T) {
+	userID := "7ea7b1cb-04eb-456a-a19f-e41d590d2a3b"
+	now := time.Date(2026, 11, 25, 10, 0, 0, 0, time.UTC)
+	changedAt := now.Add(-10 * 24 * time.Hour)
+	repo := &fakeUserListRepository{detail: UserDetailRecord{
+		UserListRecord:    UserListRecord{ID: userID, Username: "old.name"},
+		UsernameChangedAt: &changedAt,
+	}}
+	svc := usernameTestService(repo, now)
+
+	_, err := svc.ChangeSelfUsername(context.Background(), userID, dto.UpdateUsernameRequest{Username: "new.name"}, UpdateUserMetadata{})
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "USERNAME_CHANGE_COOLDOWN" || appErr.Status != 429 {
+		t.Fatalf("error = %v, want USERNAME_CHANGE_COOLDOWN 429", err)
+	}
+	data, ok := appErr.Data.(map[string]any)
+	if !ok || data["available_at"] != changedAt.Add(UsernameChangeCooldown).Format(time.RFC3339) {
+		t.Fatalf("data = %#v", appErr.Data)
+	}
+	if repo.updateCalled {
+		t.Fatal("UpdateUser must not be called during cooldown")
+	}
+}
+
+func TestChangeSelfUsernameFirstChangeAllowed(t *testing.T) {
+	userID := "7ea7b1cb-04eb-456a-a19f-e41d590d2a3b"
+	now := time.Date(2026, 11, 25, 10, 0, 0, 0, time.UTC)
+	repo := &fakeUserListRepository{detail: UserDetailRecord{UserListRecord: UserListRecord{ID: userID, Username: "old.name"}}}
+	svc := usernameTestService(repo, now)
+
+	if _, err := svc.ChangeSelfUsername(context.Background(), userID, dto.UpdateUsernameRequest{Username: " New.Name "}, UpdateUserMetadata{ActorUserID: userID}); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if repo.updated.Username == nil || *repo.updated.Username != "new.name" {
+		t.Fatalf("updated = %#v", repo.updated)
+	}
+	if repo.updated.UsernameChangedAt == nil || !repo.updated.UsernameChangedAt.Equal(now) {
+		t.Fatalf("UsernameChangedAt = %v, want %v", repo.updated.UsernameChangedAt, now)
+	}
+}
+
+func TestChangeSelfUsernameAfterCooldownAllowed(t *testing.T) {
+	userID := "7ea7b1cb-04eb-456a-a19f-e41d590d2a3b"
+	now := time.Date(2026, 11, 25, 10, 0, 0, 0, time.UTC)
+	changedAt := now.Add(-UsernameChangeCooldown)
+	repo := &fakeUserListRepository{detail: UserDetailRecord{
+		UserListRecord:    UserListRecord{ID: userID, Username: "old.name"},
+		UsernameChangedAt: &changedAt,
+	}}
+	svc := usernameTestService(repo, now)
+	if _, err := svc.ChangeSelfUsername(context.Background(), userID, dto.UpdateUsernameRequest{Username: "new.name"}, UpdateUserMetadata{}); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if !repo.updateCalled {
+		t.Fatal("UpdateUser should be called")
+	}
+}
+
+func TestChangeSelfUsernameCaseOnlyIsNoop(t *testing.T) {
+	userID := "7ea7b1cb-04eb-456a-a19f-e41d590d2a3b"
+	now := time.Date(2026, 11, 25, 10, 0, 0, 0, time.UTC)
+	changedAt := now.Add(-time.Hour)
+	repo := &fakeUserListRepository{detail: UserDetailRecord{
+		UserListRecord:    UserListRecord{ID: userID, Username: "Budi"},
+		UsernameChangedAt: &changedAt,
+	}}
+	svc := usernameTestService(repo, now)
+
+	// "Budi" is grandfathered (too short for the new pattern) and still in cooldown: both must be skipped.
+	if _, err := svc.ChangeSelfUsername(context.Background(), userID, dto.UpdateUsernameRequest{Username: "budi"}, UpdateUserMetadata{}); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if repo.updateCalled {
+		t.Fatal("UpdateUser must not be called for a case-only change")
+	}
+}
+
+func TestChangeSelfUsernameRejectsInvalidAndReserved(t *testing.T) {
+	userID := "7ea7b1cb-04eb-456a-a19f-e41d590d2a3b"
+	repo := &fakeUserListRepository{detail: UserDetailRecord{UserListRecord: UserListRecord{ID: userID, Username: "old.name"}}}
+	svc := usernameTestService(repo, time.Now())
+	for raw, code := range map[string]string{"ab": "USERNAME_INVALID", "www": "USERNAME_RESERVED"} {
+		_, err := svc.ChangeSelfUsername(context.Background(), userID, dto.UpdateUsernameRequest{Username: raw}, UpdateUserMetadata{})
+		var appErr *coreerrors.AppError
+		if !errors.As(err, &appErr) || appErr.Code != code || appErr.Status != 422 {
+			t.Fatalf("%q: error = %v, want %s 422", raw, err, code)
+		}
+	}
+	if repo.updateCalled {
+		t.Fatal("UpdateUser must not be called")
+	}
+}
+
+func TestChangeSelfUsernameMapsUniqueViolation(t *testing.T) {
+	userID := "7ea7b1cb-04eb-456a-a19f-e41d590d2a3b"
+	repo := &fakeUserListRepository{
+		detail:    UserDetailRecord{UserListRecord: UserListRecord{ID: userID, Username: "old.name"}},
+		updateErr: &pgconn.PgError{Code: "23505", ConstraintName: "idx_users_username_active_unique"},
+	}
+	svc := usernameTestService(repo, time.Now())
+	_, err := svc.ChangeSelfUsername(context.Background(), userID, dto.UpdateUsernameRequest{Username: "taken.name"}, UpdateUserMetadata{})
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "USER_USERNAME_ALREADY_EXISTS" || appErr.Status != 409 {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestAdminUpdateUsernameValidatesButNoCooldown(t *testing.T) {
+	userID := "7ea7b1cb-04eb-456a-a19f-e41d590d2a3b"
+	now := time.Date(2026, 11, 25, 10, 0, 0, 0, time.UTC)
+	yesterday := now.Add(-24 * time.Hour)
+	repo := &fakeUserListRepository{detail: UserDetailRecord{
+		UserListRecord:    UserListRecord{ID: userID, Username: "old.name"},
+		UsernameChangedAt: &yesterday,
+	}}
+	svc := usernameTestService(repo, now)
+
+	good := "New.Name"
+	if _, err := svc.UpdateUser(context.Background(), userID, dto.UpdateUserRequest{Username: &good}, UpdateUserMetadata{}); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if repo.updated.Username == nil || *repo.updated.Username != "new.name" {
+		t.Fatalf("updated = %#v", repo.updated)
+	}
+	if repo.updated.UsernameChangedAt != nil {
+		t.Fatal("admin update must not touch username_changed_at")
+	}
+
+	bad := "ab"
+	_, err := svc.UpdateUser(context.Background(), userID, dto.UpdateUserRequest{Username: &bad}, UpdateUserMetadata{})
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "USERNAME_INVALID" {
+		t.Fatalf("error = %v, want USERNAME_INVALID", err)
+	}
+}
+
+func TestAdminUpdateKeepsGrandfatheredUsername(t *testing.T) {
+	userID := "7ea7b1cb-04eb-456a-a19f-e41d590d2a3b"
+	repo := &fakeUserListRepository{detail: UserDetailRecord{UserListRecord: UserListRecord{ID: userID, Username: "Bu"}}}
+	svc := usernameTestService(repo, time.Now())
+	same := "bu"
+	if _, err := svc.UpdateUser(context.Background(), userID, dto.UpdateUserRequest{Username: &same}, UpdateUserMetadata{}); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+}
