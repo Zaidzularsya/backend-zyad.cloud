@@ -118,7 +118,7 @@ func (r *payoutAccountRepository) ListByOrganization(ctx context.Context, orgID 
 		}
 		out = append(out, p)
 	}
-	return out, rows.Err()
+	return out, notFoundOr(rows.Err())
 }
 
 func (r *payoutAccountRepository) ListPending(ctx context.Context, limit, offset int) ([]PayoutAccountWithOrg, int64, error) {
