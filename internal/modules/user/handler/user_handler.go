@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 
 	coreerrors "zyad.cloud/internal/core/errors"
@@ -29,6 +31,7 @@ type UserListService interface {
 	ListIdentities(ctx context.Context, userID string) ([]dto.IdentityResponse, error)
 	UpdateSelfProfile(ctx context.Context, userID string, req dto.UpdateProfileRequest, metadata service.UpdateUserMetadata) (dto.UserDetailResponse, error)
 	UpdateSelfAvatar(ctx context.Context, userID string, req dto.UpdateAvatarRequest, metadata service.UpdateUserMetadata) (dto.UserDetailResponse, error)
+	UploadSelfAvatar(ctx context.Context, userID string, file io.Reader, size int64, metadata service.UpdateUserMetadata) (dto.UserDetailResponse, error)
 	ChangeSelfUsername(ctx context.Context, userID string, req dto.UpdateUsernameRequest, metadata service.UpdateUserMetadata) (dto.UserDetailResponse, error)
 	ListLoginHistories(ctx context.Context, query dto.LoginHistoryQuery) ([]dto.LoginHistoryResponse, dto.PaginationMeta, error)
 	ListAuditLogs(ctx context.Context, query dto.AuditLogQuery) ([]dto.AuditLogResponse, dto.PaginationMeta, error)
@@ -72,6 +75,7 @@ func (h *UserHandler) RegisterRoutes(router *gin.RouterGroup) {
 	meGroup.GET("/identities", h.ListSelfIdentities)
 	meGroup.PATCH("/profile", h.UpdateSelfProfile)
 	meGroup.PATCH("/avatar", h.UpdateSelfAvatar)
+	meGroup.POST("/avatar", h.UploadSelfAvatar)
 	meGroup.PATCH("/username", h.UpdateSelfUsername)
 }
 
@@ -458,4 +462,36 @@ func (h *UserHandler) ListUserAuditLogs(c *gin.Context) {
 	}
 
 	response.JSON(c, http.StatusOK, "user audit logs retrieved successfully", logs, meta)
+}
+
+func (h *UserHandler) UploadSelfAvatar(c *gin.Context) {
+	// Overhead kecil untuk boundary/header multipart di atas batas file 2 MB.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.MaxAvatarSizeBytes+64*1024)
+	header, err := c.FormFile("file")
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			corehttp.Fail(c, coreerrors.New("AVATAR_TOO_LARGE", "avatar must be at most 2 MB", http.StatusRequestEntityTooLarge))
+			return
+		}
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "file is required", http.StatusUnprocessableEntity))
+		return
+	}
+	file, err := header.Open()
+	if err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "file cannot be read", http.StatusUnprocessableEntity))
+		return
+	}
+	defer file.Close()
+
+	user, err := h.service.UploadSelfAvatar(c.Request.Context(), permissionmiddleware.UserID(c), file, header.Size, service.UpdateUserMetadata{
+		ActorUserID: permissionmiddleware.UserID(c),
+		IPAddress:   c.ClientIP(),
+		UserAgent:   c.Request.UserAgent(),
+	})
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	corehttp.OK(c, "user avatar uploaded successfully", user)
 }

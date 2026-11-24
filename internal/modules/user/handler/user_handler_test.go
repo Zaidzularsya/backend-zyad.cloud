@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -536,6 +537,12 @@ func TestUpdateSelfUsernameRoute(t *testing.T) {
 func (s *fakeUserListService) ChangeSelfUsername(_ context.Context, userID string, req dto.UpdateUsernameRequest, metadata service.UpdateUserMetadata) (dto.UserDetailResponse, error) {
 	s.updateUserID = userID
 	s.usernameRequest = req
+	s.updateMetadata = metadata
+	return s.updated, s.updateErr
+}
+
+func (s *fakeUserListService) UploadSelfAvatar(_ context.Context, userID string, _ io.Reader, _ int64, metadata service.UpdateUserMetadata) (dto.UserDetailResponse, error) {
+	s.updateUserID = userID
 	s.updateMetadata = metadata
 	return s.updated, s.updateErr
 }

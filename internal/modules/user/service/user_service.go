@@ -258,6 +258,8 @@ type UserService struct {
 	now                   func() time.Time
 	reservedUsernames     []string
 	currentOrganization   CurrentOrganizationProvider
+	avatarStorage         AvatarStorage
+	avatarPrefix          string
 }
 
 func NewUserService(repo UserListRepository) *UserService {
