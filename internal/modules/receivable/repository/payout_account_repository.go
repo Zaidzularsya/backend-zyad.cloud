@@ -107,7 +107,7 @@ func (r *payoutAccountRepository) ListByOrganization(ctx context.Context, orgID 
 		WHERE organization_id = $1
 		ORDER BY submitted_at DESC, created_at DESC, id DESC`, orgID)
 	if err != nil {
-		return nil, err
+		return nil, notFoundOr(err)
 	}
 	defer rows.Close()
 	out := []PayoutAccount{}
@@ -347,8 +347,8 @@ func insertPayoutAuditTx(ctx context.Context, tx pgx.Tx, p PayoutAccount, event 
 	return err
 }
 
-// maskAccountNumber: "••••" + 4 digit terakhir. Audit tidak boleh memuat nomor rekening penuh.
-// Sengaja duplikat kecil dari aturan masking service agar repository tidak mengimpor service.
+// MaskAccountNumber: "••••" + 4 digit terakhir. Aturan masking tunggal; service.MaskAccountNumber
+// mendelegasikan ke sini. Audit tidak boleh memuat nomor rekening penuh.
 func MaskAccountNumber(number string) string {
 	r := []rune(number)
 	if len(r) > 4 {

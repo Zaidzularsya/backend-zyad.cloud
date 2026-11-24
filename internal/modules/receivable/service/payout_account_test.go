@@ -237,3 +237,16 @@ func TestBanksCatalog(t *testing.T) {
 		t.Fatal("bank tak dikenal ditemukan")
 	}
 }
+
+func TestHolderNameLengthBoundary(t *testing.T) {
+	_, _, svc := newPayoutSvc()
+	in := validInput()
+	in.AccountHolderName = strings.Repeat("a", 150)
+	if _, err := svc.Submit(context.Background(), orgA, in, repository.PayoutAudit{}); err != nil {
+		t.Fatalf("150 karakter: %v", err)
+	}
+	in.AccountHolderName = strings.Repeat("a", 151)
+	if _, err := svc.Submit(context.Background(), orgA, in, repository.PayoutAudit{}); !errors.Is(err, ErrInvalidPayoutAccount) {
+		t.Fatalf("151 karakter: %v", err)
+	}
+}

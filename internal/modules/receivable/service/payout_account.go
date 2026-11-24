@@ -24,7 +24,7 @@ const (
 	payoutNumberMin = 5
 	payoutNumberMax = 34
 	payoutHolderMin = 3
-	payoutHolderMax = 100
+	payoutHolderMax = 150
 	payoutNoteMax   = 500
 )
 
@@ -71,22 +71,22 @@ func invalidPayout(detail string) error {
 }
 
 // normalizePayoutInput membuang spasi/tanda hubung dari nomor rekening lalu memvalidasi semua kolom.
-func normalizePayoutInput(in PayoutAccountInput) (PayoutAccountInput, repository.NewPayoutAccount, error) {
+func normalizePayoutInput(in PayoutAccountInput) (repository.NewPayoutAccount, error) {
 	var out repository.NewPayoutAccount
 	bank, ok := FindBank(strings.TrimSpace(in.BankCode))
 	if !ok {
-		return in, out, invalidPayout("Bank tidak dikenali.")
+		return out, invalidPayout("Bank tidak dikenali.")
 	}
 	number := strings.NewReplacer(" ", "", "-", "").Replace(strings.TrimSpace(in.AccountNumber))
 	if n := len(number); n < payoutNumberMin || n > payoutNumberMax || strings.Trim(number, "0123456789") != "" {
-		return in, out, invalidPayout("Nomor rekening harus 5 sampai 34 digit angka.")
+		return out, invalidPayout("Nomor rekening harus 5 sampai 34 digit angka.")
 	}
 	holder := strings.Join(strings.Fields(in.AccountHolderName), " ")
 	if n := utf8.RuneCountInString(holder); n < payoutHolderMin || n > payoutHolderMax {
-		return in, out, invalidPayout("Nama pemilik rekening harus 3 sampai 100 karakter.")
+		return out, invalidPayout("Nama pemilik rekening harus 3 sampai 150 karakter.")
 	}
 	out = repository.NewPayoutAccount{BankCode: bank.Code, BankName: bank.Name, AccountNumber: number, AccountHolderName: holder}
-	return in, out, nil
+	return out, nil
 }
 
 func (s *payoutAccountService) notify(ctx context.Context, event string, acc repository.PayoutAccount) {
@@ -118,7 +118,7 @@ func (s *payoutAccountService) Overview(ctx context.Context, orgID string) (Payo
 
 func (s *payoutAccountService) Submit(ctx context.Context, orgID string, in PayoutAccountInput, a repository.PayoutAudit) (repository.PayoutAccount, error) {
 	orgID = strings.TrimSpace(orgID)
-	_, n, err := normalizePayoutInput(in)
+	n, err := normalizePayoutInput(in)
 	if err != nil {
 		return repository.PayoutAccount{}, err
 	}
@@ -195,7 +195,7 @@ func (s *payoutAccountService) Assign(ctx context.Context, orgID string, in Payo
 	if err != nil {
 		return repository.PayoutAccount{}, err
 	}
-	_, n, err := normalizePayoutInput(in)
+	n, err := normalizePayoutInput(in)
 	if err != nil {
 		return repository.PayoutAccount{}, err
 	}
