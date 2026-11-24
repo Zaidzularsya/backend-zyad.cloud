@@ -15730,7 +15730,7 @@ components:
       properties:
         avatar_url:
           type: string
-          nullable: true
+          description: Avatar URL. Send an empty string to clear the avatar; the field itself is required.
     GoogleAuthRequest:
       type: object
       required:

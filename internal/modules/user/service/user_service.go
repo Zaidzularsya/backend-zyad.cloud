@@ -774,9 +774,30 @@ func mapUserLookupError(err error) error {
 }
 
 func (s *UserService) UpdateSelfAvatar(ctx context.Context, userID string, req dto.UpdateAvatarRequest, metadata UpdateUserMetadata) (dto.UserDetailResponse, error) {
-	return s.UpdateUser(ctx, userID, dto.UpdateUserRequest{
-		AvatarURL: &req.AvatarURL,
-	}, metadata)
+	if req.AvatarURL == nil {
+		return dto.UserDetailResponse{}, validationError("avatar_url is required")
+	}
+	avatarURL := strings.TrimSpace(*req.AvatarURL)
+
+	// Saat avatar dikosongkan, ingat avatar lama supaya object milik platform bisa dibersihkan.
+	var previous string
+	if avatarURL == "" && s.avatarStorage != nil {
+		if current, err := s.repo.FindUserDetail(ctx, strings.TrimSpace(userID), false); err == nil {
+			previous = current.Profile.AvatarURL
+		}
+	}
+
+	user, err := s.UpdateUser(ctx, userID, dto.UpdateUserRequest{AvatarURL: &avatarURL}, metadata)
+	if err != nil {
+		return dto.UserDetailResponse{}, err
+	}
+
+	if oldKey, ok := s.ownAvatarKey(previous); ok {
+		if err := s.avatarStorage.Delete(ctx, oldKey); err != nil {
+			slog.Warn("delete previous avatar failed", "key", oldKey, "error", err)
+		}
+	}
+	return user, nil
 }
 
 func normalizeStatusChange(rawStatus string, rawReason string) (model.UserStatus, string, error) {

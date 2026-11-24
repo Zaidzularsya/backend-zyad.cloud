@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	coreerrors "zyad.cloud/internal/core/errors"
+	"zyad.cloud/internal/modules/user/dto"
 )
 
 const (
@@ -122,5 +123,42 @@ func TestUploadAvatarDeletesPreviousOwnObject(t *testing.T) {
 		if len(store.deletedKeys) != 0 {
 			t.Fatalf("must not delete %q: %v", old, store.deletedKeys)
 		}
+	}
+}
+
+func TestUpdateSelfAvatarClearsWithEmptyString(t *testing.T) {
+	repo := &fakeUserListRepository{}
+	svc := avatarTestService(repo, &fakeAvatarStorage{})
+	empty := ""
+	if _, err := svc.UpdateSelfAvatar(context.Background(), avatarTestUserID, dto.UpdateAvatarRequest{AvatarURL: &empty}, UpdateUserMetadata{ActorUserID: avatarTestUserID}); err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if repo.updated.AvatarURL == nil || *repo.updated.AvatarURL != "" {
+		t.Fatalf("avatar_url = %v, want empty string", repo.updated.AvatarURL)
+	}
+}
+
+func TestUpdateSelfAvatarClearDeletesOwnObject(t *testing.T) {
+	prefix := "organizations/" + avatarTestPlatform + "/public/avatars/"
+	empty := ""
+	clear := func(old string, store *fakeAvatarStorage) {
+		repo := &fakeUserListRepository{}
+		repo.detail.Profile.AvatarURL = old
+		svc := avatarTestService(repo, store)
+		if _, err := svc.UpdateSelfAvatar(context.Background(), avatarTestUserID, dto.UpdateAvatarRequest{AvatarURL: &empty}, UpdateUserMetadata{ActorUserID: avatarTestUserID}); err != nil {
+			t.Fatalf("error = %v", err)
+		}
+	}
+
+	store := &fakeAvatarStorage{deleteErr: errors.New("boom")}
+	clear("/public/media/"+prefix+"old.png", store)
+	if len(store.deletedKeys) != 1 || store.deletedKeys[0] != prefix+"old.png" {
+		t.Fatalf("deleted = %v", store.deletedKeys)
+	}
+
+	store = &fakeAvatarStorage{}
+	clear("https://lh3.googleusercontent.com/a/x", store)
+	if len(store.deletedKeys) != 0 {
+		t.Fatalf("must not delete external URL: %v", store.deletedKeys)
 	}
 }

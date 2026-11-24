@@ -205,7 +205,8 @@ type UpdateProfileRequest struct {
 }
 
 type UpdateAvatarRequest struct {
-	AvatarURL string `json:"avatar_url" binding:"required"`
+	// AvatarURL wajib ada di body; string kosong berarti menghapus avatar.
+	AvatarURL *string `json:"avatar_url" binding:"required"`
 }
 
 // MeResponse is the GET /users/me payload: the full user detail plus account fields that

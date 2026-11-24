@@ -585,3 +585,27 @@ func TestUserHandlerListIdentities(t *testing.T) {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestUpdateSelfAvatarRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	run := func(body string) (*httptest.ResponseRecorder, *fakeUserListService) {
+		svc := &fakeUserListService{}
+		handler := NewUserHandler(svc, nil, &fakePermissionChecker{})
+		router := gin.New()
+		group := router.Group("")
+		group.Use(seedUserContext("a73d7c06-96e9-4ab2-bb32-e025dde5660c"))
+		handler.RegisterRoutes(group)
+		req := httptest.NewRequest(http.MethodPatch, "/users/me/avatar", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec, svc
+	}
+
+	if rec, svc := run(`{"avatar_url":""}`); rec.Code != http.StatusOK || !svc.updateCalled {
+		t.Fatalf("empty avatar_url: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if rec, svc := run(`{}`); rec.Code != http.StatusUnprocessableEntity || svc.updateCalled {
+		t.Fatalf("missing avatar_url: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+}
