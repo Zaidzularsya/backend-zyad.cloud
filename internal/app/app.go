@@ -316,7 +316,7 @@ func New(ctx context.Context) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init media storage: %w", err)
 	}
-	userService.SetAvatarStorage(mediaStorage, cfg.MultiTenant.PlatformOrganizationID)
+	userService.SetAvatarStorage(mediaStorage, cfg.MultiTenant.PlatformOrganizationID, cfg.App.URL)
 	landingMediaSvc := landingservice.NewMediaService(
 		landingMediaRepo,
 		landingservice.WithMediaObjectStorage(mediaStorage),

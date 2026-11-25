@@ -726,3 +726,34 @@ func insertDetailSession(
 		t.Fatalf("insert session: %v", err)
 	}
 }
+
+func TestUserRepositoryListIdentitiesExcludesLocalIntegration(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	repo := NewUserRepository(db)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	suffix := time.Now().UnixNano()
+	userID := insertListUser(t, ctx, db, fmt.Sprintf("identities-%d@example.test", suffix), "Identities User", model.UserStatusActive, nil)
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		if _, err := db.Exec(cleanupCtx, `DELETE FROM users WHERE id = $1`, userID); err != nil {
+			t.Errorf("cleanup users: %v", err)
+		}
+	})
+	if _, err := db.Exec(ctx, `
+		INSERT INTO auth_identities (user_id, provider, provider_user_id, provider_email)
+		VALUES ($1, 'local', $2, $3), ($1, 'google', $4, $3)
+	`, userID, fmt.Sprintf("local-%d", suffix), fmt.Sprintf("identities-%d@example.test", suffix), fmt.Sprintf("google-%d", suffix)); err != nil {
+		t.Fatalf("insert identities: %v", err)
+	}
+
+	items, err := repo.ListIdentities(ctx, userID)
+	if err != nil {
+		t.Fatalf("ListIdentities() error = %v", err)
+	}
+	if len(items) != 1 || items[0].Provider != "google" {
+		t.Fatalf("identities = %+v, want only google", items)
+	}
+}

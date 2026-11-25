@@ -39,11 +39,12 @@ func (n payoutNotifier) NotifyPayoutAccount(ctx context.Context, event string, a
 		slog.WarnContext(ctx, "receivable: payout notification has no owner with email", "event", event, "organization_id", acc.OrganizationID)
 		return
 	}
-	orgName := ""
+	// Template menandai organization_name wajib; pakai "-" bila lookup gagal atau nama kosong.
+	orgName := "-"
 	if org, err := n.orgs.FindByID(ctx, acc.OrganizationID); err != nil {
 		slog.WarnContext(ctx, "receivable: read organization for payout notification failed", "organization_id", acc.OrganizationID, "error", err)
-	} else {
-		orgName = org.Name
+	} else if name := strings.TrimSpace(org.Name); name != "" {
+		orgName = name
 	}
 	note := strings.TrimSpace(acc.ReviewNote)
 	if note == "" {

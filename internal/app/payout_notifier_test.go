@@ -72,3 +72,18 @@ func TestPayoutNotifierPublishFailureDoesNotPanic(t *testing.T) {
 		t.Fatalf("events = %d", len(pub.events))
 	}
 }
+
+type payoutOrgsFailingFake struct{}
+
+func (payoutOrgsFailingFake) FindByID(context.Context, string) (model.Organization, error) {
+	return model.Organization{}, errors.New("db down")
+}
+
+func TestPayoutNotifierFallsBackWhenOrganizationLookupFails(t *testing.T) {
+	pub := &payoutPublisherFake{}
+	n := payoutNotifier{owners: payoutOwnersFake{list: []crmdomain.OrganizationMember{{UserID: "u1", Email: "a@x.test"}}}, orgs: payoutOrgsFailingFake{}, publisher: pub}
+	n.NotifyPayoutAccount(context.Background(), "receivable.payout_account_verified", receivablerepo.PayoutAccount{OrganizationID: "o1"})
+	if len(pub.events) != 1 || pub.events[0].Payload["organization_name"] != "-" {
+		t.Fatalf("events = %+v, want organization_name \"-\"", pub.events)
+	}
+}

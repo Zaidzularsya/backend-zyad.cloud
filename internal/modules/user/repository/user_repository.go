@@ -656,12 +656,14 @@ func (r *UserRepository) FindUserDetail(ctx context.Context, userID string, incl
 	return user, nil
 }
 
-// ListIdentities returns the login providers linked to the user, oldest first.
+// ListIdentities returns the external login providers linked to the user, oldest first.
+// The internal 'local' (password) identity is not a linked account and is excluded.
 func (r *UserRepository) ListIdentities(ctx context.Context, userID string) ([]service.IdentityRecord, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT provider, COALESCE(provider_email, ''), created_at
 		FROM auth_identities
 		WHERE user_id = $1
+		  AND provider <> 'local'
 		ORDER BY created_at ASC, id ASC`, userID)
 	if err != nil {
 		return nil, err

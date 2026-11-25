@@ -260,6 +260,7 @@ type UserService struct {
 	currentOrganization   CurrentOrganizationProvider
 	avatarStorage         AvatarStorage
 	avatarPrefix          string
+	avatarPublicBaseURL   string
 }
 
 func NewUserService(repo UserListRepository) *UserService {
@@ -778,11 +779,20 @@ func (s *UserService) UpdateSelfAvatar(ctx context.Context, userID string, req d
 		return dto.UserDetailResponse{}, validationError("avatar_url is required")
 	}
 	avatarURL := strings.TrimSpace(*req.AvatarURL)
+	userID = strings.TrimSpace(userID)
+
+	// URL yang menunjuk ke object avatar platform hanya boleh milik caller sendiri; kalau tidak,
+	// avatar user lain bisa ikut terhapus saat caller mengganti/mengosongkan avatarnya.
+	if _, isPlatformAvatar := s.platformAvatarKey(avatarURL); isPlatformAvatar {
+		if _, own := s.ownAvatarKey(avatarURL, userID); !own {
+			return dto.UserDetailResponse{}, validationError("avatar_url must not reference another user's avatar")
+		}
+	}
 
 	// Saat avatar dikosongkan, ingat avatar lama supaya object milik platform bisa dibersihkan.
 	var previous string
 	if avatarURL == "" && s.avatarStorage != nil {
-		if current, err := s.repo.FindUserDetail(ctx, strings.TrimSpace(userID), false); err == nil {
+		if current, err := s.repo.FindUserDetail(ctx, userID, false); err == nil {
 			previous = current.Profile.AvatarURL
 		}
 	}
@@ -792,7 +802,7 @@ func (s *UserService) UpdateSelfAvatar(ctx context.Context, userID string, req d
 		return dto.UserDetailResponse{}, err
 	}
 
-	if oldKey, ok := s.ownAvatarKey(previous); ok {
+	if oldKey, ok := s.ownAvatarKey(previous, userID); ok {
 		if err := s.avatarStorage.Delete(ctx, oldKey); err != nil {
 			slog.Warn("delete previous avatar failed", "key", oldKey, "error", err)
 		}
