@@ -66,10 +66,11 @@ func (f *fakeInviteSender) SendClaimInvite(_ context.Context, msg ClaimInviteEma
 	return nil
 }
 
-type fakeEmailVerifier struct{ verified []string }
+type fakeEmailVerifier struct{ verified, emails []string }
 
-func (f *fakeEmailVerifier) MarkEmailVerified(_ context.Context, userID string, _ time.Time) error {
+func (f *fakeEmailVerifier) MarkEmailVerified(_ context.Context, userID, email string, _ time.Time) error {
 	f.verified = append(f.verified, userID)
+	f.emails = append(f.emails, email)
 	return nil
 }
 
@@ -269,6 +270,10 @@ func TestAcceptInviteVerifiesMatchingEmail(t *testing.T) {
 	}
 	if len(f.verifier.verified) != 1 || f.verifier.verified[0] != "user-budi" {
 		t.Fatalf("verified = %v, want [user-budi]", f.verifier.verified)
+	}
+	// The invited address is passed on so the repository binds verification to it.
+	if domain.NormalizeEmail(f.verifier.emails[0]) != "budi@x.test" {
+		t.Fatalf("verified email = %q, want the invite address", f.verifier.emails[0])
 	}
 
 	// Unverified account with a different email: link allowed, email stays unverified.

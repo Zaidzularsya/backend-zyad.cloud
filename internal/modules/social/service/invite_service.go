@@ -45,7 +45,8 @@ type ClaimInviteSender interface {
 
 // EmailVerifier marks a user's email verified (user module).
 type EmailVerifier interface {
-	MarkEmailVerified(ctx context.Context, userID string, at time.Time) error
+	// MarkEmailVerified verifies the user only while email is their current address.
+	MarkEmailVerified(ctx context.Context, userID, email string, at time.Time) error
 }
 
 // InviteService lets tenant staff invite a CRM contact to claim it (trigger B).
@@ -171,7 +172,7 @@ func (s *InviteService) Accept(ctx context.Context, user AuthUser, token string)
 	// The link is committed; marking the email verified is best-effort for the
 	// same reason as attribution: the claim itself succeeded.
 	if !user.EmailVerified && s.verifier != nil && domain.NormalizeEmail(user.Email) == domain.NormalizeEmail(invite.Email) {
-		if err := s.verifier.MarkEmailVerified(ctx, user.ID, now); err != nil {
+		if err := s.verifier.MarkEmailVerified(ctx, user.ID, invite.Email, now); err != nil {
 			s.log.WarnContext(ctx, "mark email verified from claim invite failed", "user_id", user.ID, "error", err)
 		}
 	}

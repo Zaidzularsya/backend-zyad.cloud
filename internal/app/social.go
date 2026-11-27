@@ -161,12 +161,12 @@ func (s socialInviteSender) SendClaimInvite(ctx context.Context, msg socialservi
 // socialEmailVerifier adapts the user auth repository (ruling R2).
 type socialEmailVerifier struct {
 	users interface {
-		MarkEmailVerified(ctx context.Context, userID string, at time.Time) error
+		MarkEmailVerified(ctx context.Context, userID, email string, at time.Time) error
 	}
 }
 
-func (v socialEmailVerifier) MarkEmailVerified(ctx context.Context, userID string, at time.Time) error {
-	return v.users.MarkEmailVerified(ctx, userID, at)
+func (v socialEmailVerifier) MarkEmailVerified(ctx context.Context, userID, email string, at time.Time) error {
+	return v.users.MarkEmailVerified(ctx, userID, email, at)
 }
 
 // socialSignupHooks implements user/service.SignupHooks. Attribution is

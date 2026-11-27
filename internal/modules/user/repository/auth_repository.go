@@ -1368,6 +1368,8 @@ func (r *AuthRepository) CompleteEmailVerification(
 		JOIN users u ON u.id = evt.user_id
 		WHERE evt.token_hash = $1
 			AND u.deleted_at IS NULL
+			-- A token issued for an earlier address must not verify the current one.
+			AND lower(btrim(evt.email)) = lower(btrim(u.email))
 		LIMIT 1
 		FOR UPDATE OF evt, u
 	`, tokenHash).Scan(
@@ -1427,15 +1429,18 @@ func (r *AuthRepository) CompleteEmailVerification(
 
 // MarkEmailVerified records proof of email ownership obtained outside the
 // verification-token flow (e.g. a social claim invite sent to that address).
+// email is the address that was proven; the user is verified only while it is
+// still their current email, so a changed email is never marked verified.
 // Already-verified users are left untouched; pending users become active.
-func (r *AuthRepository) MarkEmailVerified(ctx context.Context, userID string, at time.Time) error {
+func (r *AuthRepository) MarkEmailVerified(ctx context.Context, userID, email string, at time.Time) error {
 	_, err := r.db.Exec(ctx, `
 		UPDATE users
 		SET email_verified_at = $2,
 			status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
 			updated_at = $2
 		WHERE id = $1 AND email_verified_at IS NULL
-	`, userID, at.UTC())
+			AND lower(btrim(email)) = lower(btrim($3))
+	`, userID, at.UTC(), email)
 	return err
 }
 
