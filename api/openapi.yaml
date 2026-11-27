@@ -19,9 +19,11 @@ paths:
         Frontend sends a Google ID token from Google Identity Services. Backend
         verifies the token, links or registers the user based on policy, then
         returns internal access and refresh tokens. When a new Google user is
-        auto-registered, backend also provisions a default customer workspace,
-        assigns the user as organization owner, and stores it as the active
-        session organization.
+        auto-registered with `intent` `operator` (the default when omitted),
+        backend also provisions a default customer workspace, assigns the user
+        as organization owner, and stores it as the active session
+        organization. With `intent` `social` (mobile app) no workspace is
+        created.
       requestBody:
         required: true
         content:
@@ -65,6 +67,29 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/auth/google/callback:
+    post:
+      summary: Google Identity Services redirect target
+      operationId: googleAuthCallback
+      tags:
+        - Auth
+      description: >
+        `login_uri` target for the GIS redirect flow (form post with
+        `credential` and `g_csrf_token`). Always answers with a 302 redirect to
+        the frontend. The `intent` query parameter is preserved by GIS and has
+        the same meaning as in `/auth/google`; an invalid value redirects to
+        the login page with `google_error=1`.
+      parameters:
+        - name: intent
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [social, operator]
+            default: operator
+      responses:
+        "302":
+          description: Redirect to the frontend login or callback page
   /api/v1/auth/reset-password:
     post:
       summary: Reset password using a one-time token
@@ -15756,6 +15781,13 @@ components:
         invite_token:
           type: string
           description: Reserved for invitation-aware Google registration.
+        intent:
+          type: string
+          enum: [social, operator]
+          default: operator
+          description: >
+            Registration intent for new users. `operator` (default) provisions a
+            personal workspace; `social` does not. Other values yield 422.
     GoogleAuthEnvelope:
       type: object
       required:

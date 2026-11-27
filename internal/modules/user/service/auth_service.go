@@ -530,6 +530,10 @@ func (s *AuthService) verifyGoogleToken(ctx context.Context, idToken string, met
 }
 
 func (s *AuthService) GoogleAuth(ctx context.Context, req dto.GoogleAuthRequest, metadata LoginHistoryRecord) (dto.GoogleAuthResponse, error) {
+	intent, err := dto.NormalizeIntent(string(req.Intent))
+	if err != nil {
+		return dto.GoogleAuthResponse{}, err
+	}
 	claims, err := s.verifyGoogleToken(ctx, req.IDToken, metadata)
 	if err != nil {
 		return dto.GoogleAuthResponse{}, err
@@ -582,7 +586,7 @@ func (s *AuthService) GoogleAuth(ctx context.Context, req dto.GoogleAuthRequest,
 	if err != nil {
 		return dto.GoogleAuthResponse{}, err
 	}
-	if isNewUser && s.googleWorkspace != nil {
+	if isNewUser && intent == dto.IntentOperator && s.googleWorkspace != nil {
 		if err := s.googleWorkspace.ProvisionGoogleWorkspace(
 			ctx,
 			user.ID,

@@ -343,6 +343,65 @@ func TestAuthServiceGoogleAuthAutoRegistersAndProvisionsWorkspace(t *testing.T) 
 	}
 }
 
+func newGoogleIntentService(t *testing.T) (*AuthService, *fakeGoogleWorkspaceProvisioner) {
+	t.Helper()
+	repo := &fakeLoginRepository{
+		findGoogleSubjectErr: ErrGoogleIdentityNotFound,
+		findGoogleEmailErr:   ErrGoogleEmailUserNotFound,
+		createdGoogleUser: GoogleAuthUser{
+			ID: "user-new", Name: "New User", Email: "new@example.com", Username: "new",
+			Status: model.UserStatusActive, Roles: []string{"member"}, Permissions: []string{},
+		},
+		sessionID: "session-new",
+	}
+	svc, provisioner := newGoogleBuyerService(t, repo, coreauth.GoogleIDTokenClaims{
+		Subject: "google-sub-new", Email: "new@example.com", EmailVerified: true, Name: "New User",
+	})
+	return svc, provisioner
+}
+
+func TestGoogleAuthSocialIntentSkipsWorkspace(t *testing.T) {
+	svc, provisioner := newGoogleIntentService(t)
+
+	result, err := svc.GoogleAuth(context.Background(),
+		dto.GoogleAuthRequest{IDToken: "tok", Intent: dto.IntentSocial}, LoginHistoryRecord{})
+	if err != nil {
+		t.Fatalf("google auth: %v", err)
+	}
+	if !result.IsNewUser {
+		t.Fatal("is_new_user must be true")
+	}
+	if provisioner.userID != "" {
+		t.Fatalf("social intent must not provision a workspace, got user %q", provisioner.userID)
+	}
+}
+
+func TestGoogleAuthDefaultIntentProvisionsWorkspace(t *testing.T) {
+	svc, provisioner := newGoogleIntentService(t)
+
+	if _, err := svc.GoogleAuth(context.Background(),
+		dto.GoogleAuthRequest{IDToken: "tok"}, LoginHistoryRecord{}); err != nil {
+		t.Fatalf("google auth: %v", err)
+	}
+	if provisioner.userID != "user-new" {
+		t.Fatalf("default intent must provision a workspace, got user %q", provisioner.userID)
+	}
+}
+
+func TestGoogleAuthRejectsUnknownIntent(t *testing.T) {
+	svc, provisioner := newGoogleIntentService(t)
+
+	_, err := svc.GoogleAuth(context.Background(),
+		dto.GoogleAuthRequest{IDToken: "tok", Intent: "admin"}, LoginHistoryRecord{})
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "VALIDATION_ERROR" {
+		t.Fatalf("err = %v", err)
+	}
+	if provisioner.userID != "" {
+		t.Fatal("nothing may be provisioned")
+	}
+}
+
 func TestAuthServiceGoogleAuthRejectsDisabledConfig(t *testing.T) {
 	repo := &fakeLoginRepository{}
 	svc := newTestAuthService(t, repo)
