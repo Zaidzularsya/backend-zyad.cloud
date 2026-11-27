@@ -1141,11 +1141,13 @@ func (s *AuthService) AuthenticateAccessToken(ctx context.Context, accessToken s
 	}
 
 	return middleware.AuthenticatedUser{
-		ID:          currentUser.ID,
-		SessionID:   currentUser.Session.ID,
-		Status:      string(currentUser.Status),
-		Roles:       currentUser.Roles,
-		Permissions: currentUser.Permissions,
+		ID:            currentUser.ID,
+		SessionID:     currentUser.Session.ID,
+		Status:        string(currentUser.Status),
+		Roles:         currentUser.Roles,
+		Permissions:   currentUser.Permissions,
+		Email:         currentUser.Email,
+		EmailVerified: currentUser.EmailVerifiedAt != nil,
 	}, nil
 }
 

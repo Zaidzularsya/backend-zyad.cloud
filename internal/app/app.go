@@ -149,6 +149,9 @@ func New(ctx context.Context) (*App, error) {
 	}
 	authService.SetNotificationPublisher(notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts))
 	authHandler := userhandler.NewAuthHandler(authService, redisClient, cfg.App.FrontendURL)
+	// Social: referral attribution is fed by sign-ups through SignupHooks (best-effort).
+	socialMod := buildSocial(db, redisClient, cfg.Social.ShareURLBase)
+	authService.SetSignupHooks(socialSignupHooks{attribution: socialMod.Attribution, log: log})
 	userRepo := userrepo.NewUserRepository(db)
 	userService := userservice.NewUserService(userRepo)
 	if err := userService.Configure(cfg); err != nil {
@@ -789,6 +792,7 @@ func New(ctx context.Context) (*App, error) {
 		Authenticator:                    authService,
 		OrganizationResolver:             organizationResolver,
 		PublicHostResolver:               publicHostResolver,
+		SocialHandlers:                   socialMod.Handlers,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("configure trusted proxies: %w", err)

@@ -18,6 +18,9 @@ type AuthenticatedUser struct {
 	Status      string
 	Roles       []string
 	Permissions []string
+	// Email and EmailVerified let write endpoints require proof of email ownership.
+	Email         string
+	EmailVerified bool
 }
 
 type AccessTokenAuthenticator interface {

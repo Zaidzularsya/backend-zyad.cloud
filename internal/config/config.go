@@ -24,6 +24,7 @@ type Config struct {
 	Security     SecurityConfig
 	Storage      StorageConfig
 	SelfServe    SelfServeConfig
+	Social       SocialConfig
 }
 
 var loadEnvOnce sync.Once
@@ -33,8 +34,9 @@ func Load() Config {
 		_ = loadDefaultDotEnv()
 	})
 
+	app := LoadApp()
 	return Config{
-		App:          LoadApp(),
+		App:          app,
 		Database:     LoadDatabase(),
 		Redis:        LoadRedis(),
 		Auth:         LoadAuth(),
@@ -50,6 +52,7 @@ func Load() Config {
 		Security:     LoadSecurity(),
 		Storage:      LoadStorage(),
 		SelfServe:    LoadSelfServe(),
+		Social:       LoadSocial(app.FrontendURL),
 	}
 }
 
@@ -119,6 +122,12 @@ type SeedAdminConfig struct {
 	Password string
 	WhatsApp string
 	Role     string
+}
+
+// SocialConfig: social identity features (referral share links).
+type SocialConfig struct {
+	// ShareURLBase is the origin referral links point to: <base>/r/<code>.
+	ShareURLBase string
 }
 
 // SelfServeConfig: aktor otomatis checkout self-serve (modul CRM).

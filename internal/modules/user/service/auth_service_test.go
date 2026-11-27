@@ -671,6 +671,50 @@ func TestAuthServiceAuthenticateAccessTokenRejectsInactiveUser(t *testing.T) {
 	}
 }
 
+func TestAuthServiceAuthenticateAccessTokenCarriesEmailVerification(t *testing.T) {
+	verifiedAt := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name       string
+		verifiedAt *time.Time
+		want       bool
+	}{
+		{name: "verified", verifiedAt: &verifiedAt, want: true},
+		{name: "unverified", verifiedAt: nil, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &fakeLoginRepository{
+				currentUser: CurrentUser{
+					ID:              "user-1",
+					Email:           "jane@example.com",
+					Status:          model.UserStatusActive,
+					EmailVerifiedAt: tc.verifiedAt,
+					Session: CurrentSession{
+						ID:        "session-1",
+						ExpiresAt: time.Date(2026, 6, 18, 10, 0, 0, 0, time.UTC),
+					},
+				},
+			}
+			svc := newTestAuthService(t, repo)
+			accessToken, err := svc.accessTokenManager.Generate(coreauth.Claims{
+				UserID:    "user-1",
+				SessionID: "session-1",
+				TokenType: coreauth.TokenTypeAccess,
+			}, time.Minute)
+			if err != nil {
+				t.Fatalf("generate access token: %v", err)
+			}
+
+			user, err := svc.AuthenticateAccessToken(context.Background(), accessToken)
+			if err != nil {
+				t.Fatalf("AuthenticateAccessToken: %v", err)
+			}
+			if user.Email != "jane@example.com" || user.EmailVerified != tc.want {
+				t.Fatalf("user = %+v, want email verified %v", user, tc.want)
+			}
+		})
+	}
+}
+
 func TestAuthServiceForgotPasswordCreatesResetTokenAndPublishesNotification(t *testing.T) {
 	repo := &fakeLoginRepository{
 		passwordResetUser: PasswordResetUser{

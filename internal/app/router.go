@@ -9,6 +9,7 @@ import (
 
 	corehttp "zyad.cloud/internal/core/http"
 	"zyad.cloud/internal/core/middleware"
+	"zyad.cloud/internal/modules/social"
 	"zyad.cloud/internal/platform/storage"
 
 	"github.com/gin-gonic/gin"
@@ -163,6 +164,9 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.CRMSelfServeHandler != nil {
 		deps.CRMSelfServeHandler.RegisterRoutes(protected)
 	}
+	// Social: public referral endpoints on the plain api group (no auth, no tenant host);
+	// /social/me/* on protected without tenant middleware (data is keyed by user).
+	social.RegisterRoutes(api, protected, deps.SocialHandlers)
 	if deps.NotificationTemplateHandler != nil {
 		deps.NotificationTemplateHandler.RegisterRoutes(protected)
 	}

@@ -9745,6 +9745,142 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ErrorResponse'}
+  /api/v1/public/referrals/{code}:
+    get:
+      summary: Check whether a referral code exists
+      operationId: getPublicReferralCode
+      tags:
+        - Social
+      description: >
+        Public endpoint (no bearer token, no tenant host). Codes are matched
+        case-insensitively after trimming. Malformed and unknown codes both
+        return `valid: false`; the owner of a code is never returned.
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Validity of the code
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReferralValidityEnvelope"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/public/attribution/visits:
+    post:
+      summary: Record a visit through a referral link
+      operationId: recordAttributionVisit
+      tags:
+        - Social
+      description: >
+        Public endpoint (no bearer token, no tenant host). Stores a `visit`
+        attribution event for a known code; unknown or malformed codes are
+        ignored and get the same `204`. The client IP is stored only as a
+        SHA-256 hex digest; `channel` is lower-cased and cut to 20 characters,
+        `post_id` is kept only when it is a UUID, and the User-Agent header is
+        cut to 200 characters. Rate limited to 60 requests per minute per client IP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AttributionVisitRequest"
+      responses:
+        "204":
+          description: Accepted (also for unknown codes)
+        "422":
+          description: Validation failed (`VALIDATION_ERROR`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limited (`RATE_LIMITED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/social/me/attribution:
+    get:
+      summary: Own referral code, share link and totals
+      operationId: getMyAttribution
+      tags:
+        - Social
+      security:
+        - BearerAuth: []
+      description: >
+        Returns the signed-in user's referral code, assigning one on first
+        call (8 characters from `23456789ABCDEFGHJKLMNPQRSTUVWXYZ`, never
+        changes). `share_url` is `<SOCIAL_SHARE_URL_BASE>/r/<code>`. `visits`
+        and `signups` count attribution events credited to the user. No tenant
+        context is required.
+      responses:
+        "200":
+          description: Attribution summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttributionSummaryEnvelope"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/social/me/customer-relations:
+    get:
+      summary: Organizations the signed-in user is a customer of
+      operationId: listMyCustomerRelations
+      tags:
+        - Social
+      security:
+        - BearerAuth: []
+      description: >
+        Read model, no tenant context required. `checkout`: a customer
+        workspace the user actively owns is linked to a CRM company of the
+        organization (bought through its or the platform's checkout).
+        `claim`: an `active` customer link whose CRM contact is not deleted;
+        `customer_link_id` is set only for this source. The same organization
+        can appear once per source.
+      responses:
+        "200":
+          description: Customer relations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerRelationsEnvelope"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/public/invoices/{token}:
     get:
       summary: Public invoice view for a customer link
@@ -15848,7 +15984,11 @@ components:
           $ref: "#/components/schemas/AttributionInput"
     AttributionInput:
       type: object
-      description: First-touch referral context captured by the client before sign-up.
+      description: >
+        First-touch referral context captured by the client before sign-up.
+        Credited only to a new user, only when `first_seen_at` is at most 30
+        days old (empty = sign-up time), never for the user's own code, and
+        never replaces an existing referrer. Unknown codes are ignored.
       properties:
         code:
           type: string
@@ -15859,6 +15999,90 @@ components:
         first_seen_at:
           type: string
           format: date-time
+    ReferralValidityEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+        data:
+          type: object
+          required: [valid]
+          properties:
+            valid:
+              type: boolean
+    AttributionVisitRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          maxLength: 64
+        channel:
+          type: string
+          maxLength: 64
+        post_id:
+          type: string
+          maxLength: 64
+    AttributionSummaryEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+        data:
+          type: object
+          required: [code, share_url, visits, signups]
+          properties:
+            code:
+              type: string
+              example: ABCD2345
+            share_url:
+              type: string
+              example: https://zyad.cloud/r/ABCD2345
+            visits:
+              type: integer
+            signups:
+              type: integer
+    CustomerRelationsEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+        data:
+          type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/CustomerRelation"
+    CustomerRelation:
+      type: object
+      required: [organization_id, organization_name, source]
+      properties:
+        organization_id:
+          type: string
+          format: uuid
+        organization_name:
+          type: string
+        source:
+          type: string
+          enum: [checkout, claim]
+        customer_link_id:
+          type: string
+          format: uuid
+          description: Only for `source=claim`.
     RegisterRequest:
       type: object
       required:
