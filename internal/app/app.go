@@ -150,7 +150,15 @@ func New(ctx context.Context) (*App, error) {
 	authService.SetNotificationPublisher(notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts))
 	authHandler := userhandler.NewAuthHandler(authService, redisClient, cfg.App.FrontendURL)
 	// Social: referral attribution is fed by sign-ups through SignupHooks (best-effort).
-	socialMod := buildSocial(db, redisClient, cfg.Social.ShareURLBase)
+	socialMod := buildSocial(db, redisClient, socialConfig{
+		ShareURLBase: cfg.Social.ShareURLBase,
+		ClaimURLBase: cfg.Social.ClaimURLBase,
+		AppName:      cfg.App.Name,
+		Locale:       cfg.Notification.DefaultLocale,
+		MaxAttempts:  cfg.Notification.MaxAttempts,
+		Publisher:    notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts),
+		Verifier:     socialEmailVerifier{users: authRepo},
+	})
 	authService.SetSignupHooks(socialSignupHooks{attribution: socialMod.Attribution, log: log})
 	userRepo := userrepo.NewUserRepository(db)
 	userService := userservice.NewUserService(userRepo)

@@ -105,9 +105,12 @@ func LoadSeedAdmin() SeedAdminConfig {
 
 const defaultSelfServeGraceDays = 7
 
-// LoadSocial: SOCIAL_SHARE_URL_BASE defaults to the frontend URL.
+// LoadSocial: SOCIAL_SHARE_URL_BASE and SOCIAL_CLAIM_URL_BASE default to the frontend URL.
 func LoadSocial(frontendURL string) SocialConfig {
-	return SocialConfig{ShareURLBase: getEnv("SOCIAL_SHARE_URL_BASE", frontendURL)}
+	return SocialConfig{
+		ShareURLBase: getEnv("SOCIAL_SHARE_URL_BASE", frontendURL),
+		ClaimURLBase: getEnv("SOCIAL_CLAIM_URL_BASE", frontendURL),
+	}
 }
 
 func LoadSelfServe() SelfServeConfig {

@@ -7,8 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+
 	"zyad.cloud/internal/config"
 	"zyad.cloud/internal/core/middleware"
+	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/social"
 	socialdomain "zyad.cloud/internal/modules/social/domain"
@@ -65,6 +68,25 @@ func (f *fakeSocialClaims) Revoke(_ context.Context, actor, linkID string, bySta
 	return nil
 }
 
+type fakeSocialInvites struct {
+	gotUser  socialservice.AuthUser
+	gotToken string
+	sent     []string
+}
+
+func (f *fakeSocialInvites) Accept(_ context.Context, user socialservice.AuthUser, token string) (socialdomain.CustomerLink, error) {
+	f.gotUser, f.gotToken = user, token
+	if token != "good-token" {
+		return socialdomain.CustomerLink{}, socialdomain.ErrInviteInvalid
+	}
+	return socialdomain.CustomerLink{ID: "link-9", Status: socialdomain.LinkStatusActive, VerifiedVia: socialdomain.VerifiedViaInvite}, nil
+}
+
+func (f *fakeSocialInvites) Send(_ context.Context, scope coretenant.Scope, actor, contactID string) error {
+	f.sent = append(f.sent, scope.OrganizationID()+"/"+actor+"/"+contactID)
+	return nil
+}
+
 // fakeSocialAuthenticator: tokens starting with "v" belong to users with a verified email.
 type fakeSocialAuthenticator struct{}
 
@@ -86,6 +108,7 @@ func TestSocialRoutesAreMounted(t *testing.T) {
 	attribution := &fakeSocialAttribution{}
 	relations := &fakeSocialRelations{}
 	claims := &fakeSocialClaims{acceptErr: socialdomain.ErrCustomerLinkExists}
+	invites := &fakeSocialInvites{}
 	counter := &fakeMikrotikCounter{counts: map[string]int64{}}
 	router, err := newRouter(Dependencies{
 		Config:               config.Config{App: config.AppConfig{Env: "test"}},
@@ -93,7 +116,7 @@ func TestSocialRoutesAreMounted(t *testing.T) {
 		OrganizationResolver: noOrganizationResolver{},
 		SocialHandlers: social.Handlers{
 			Public: socialhandler.NewPublicHandler(attribution, counter),
-			Me:     socialhandler.NewMeHandler(attribution, relations, claims),
+			Me:     socialhandler.NewMeHandler(attribution, relations, claims, invites),
 		},
 	})
 	if err != nil {
@@ -171,5 +194,71 @@ func TestSocialRoutesAreMounted(t *testing.T) {
 	}
 	if w := do(http.MethodDelete, "/api/v1/social/me/customer-links/link-1", "", "v1"); w.Code != http.StatusNoContent || claims.revoked != "user-v1/link-1" || claims.byStaff {
 		t.Fatalf("revoke: %d %s (%q, byStaff %v)", w.Code, w.Body, claims.revoked, claims.byStaff)
+	}
+
+	// Invite acceptance is open to unverified accounts: the token proves the email.
+	w = do(http.MethodPost, "/api/v1/social/me/customer-invites/accept", `{"token":"good-token"}`, "1")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"verified_via":"invite"`) || invites.gotUser.EmailVerified || invites.gotUser.ID != "user-1" {
+		t.Fatalf("accept invite unverified: %d %s (user %+v)", w.Code, w.Body, invites.gotUser)
+	}
+	if w := do(http.MethodPost, "/api/v1/social/me/customer-invites/accept", `{"token":"bad"}`, "1"); w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "CLAIM_INVITE_INVALID") {
+		t.Fatalf("accept invalid invite: %d %s", w.Code, w.Body)
+	}
+	if w := do(http.MethodPost, "/api/v1/social/me/customer-invites/accept", `{}`, "1"); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("accept invite without token: %d %s", w.Code, w.Body)
+	}
+	if w := do(http.MethodPost, "/api/v1/social/me/customer-invites/accept", `{"token":"good-token"}`, ""); w.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous accept invite: %d", w.Code)
+	}
+}
+
+func TestSocialCustomerInviteRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tc, err := coretenant.NewVerifiedContext(coretenant.VerifiedContextInput{
+		OrganizationID: "0b6c3f0e-7a4e-4f3a-9a51-1f2d3c4b5a69", OrganizationSlug: "isp",
+		OrganizationType: coretenant.OrganizationTypeCustomer, OrganizationStatus: coretenant.OrganizationStatusActive,
+		ResolutionSource: coretenant.ResolutionSourceInternal, DataPlacement: coretenant.DataPlacementShared,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invites := &fakeSocialInvites{}
+	counter := &fakeMikrotikCounter{counts: map[string]int64{}}
+	engine := gin.New()
+	group := engine.Group("/app/social", func(c *gin.Context) {
+		c.Set(permissionmiddleware.UserIDContextKey, "staff-1")
+		c.Request = c.Request.WithContext(coretenant.WithContext(c.Request.Context(), tc))
+	})
+	socialhandler.NewTenantHandler(nil, invites, counter).RegisterRoutes(group, nil)
+	do := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/app/social/customer-invites", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		return w
+	}
+
+	if w := do(`{"contact_id":"not-a-uuid"}`); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("malformed contact_id: %d %s", w.Code, w.Body)
+	}
+	const body = `{"contact_id":"5a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"}`
+	if w := do(body); w.Code != http.StatusNoContent {
+		t.Fatalf("send: %d %s", w.Code, w.Body)
+	}
+	if want := tc.OrganizationID() + "/staff-1/5a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"; len(invites.sent) != 1 || invites.sent[0] != want {
+		t.Fatalf("sent = %v, want [%s]", invites.sent, want)
+	}
+	for i := 3; i <= 30; i++ {
+		if w := do(body); w.Code != http.StatusNoContent {
+			t.Fatalf("send %d: %d", i, w.Code)
+		}
+	}
+	if w := do(body); w.Code != http.StatusTooManyRequests {
+		t.Fatalf("send 31: %d, want 429", w.Code)
+	}
+	for k := range counter.counts {
+		if !strings.HasPrefix(k, "rl:social:invite:org:"+tc.OrganizationID()+":") {
+			t.Fatalf("rate limit key %q", k)
+		}
 	}
 }

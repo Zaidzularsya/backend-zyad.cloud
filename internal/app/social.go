@@ -6,9 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"zyad.cloud/internal/core/businesstime"
+	notificationdomain "zyad.cloud/internal/core/notification/domain"
+	notificationpublisher "zyad.cloud/internal/core/notification/publisher"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/organization/model"
 	organizationrepo "zyad.cloud/internal/modules/organization/repository"
@@ -27,11 +31,24 @@ type socialModule struct {
 	Attribution *socialservice.AttributionService
 	Relations   *socialservice.RelationsService
 	Claims      *socialservice.ClaimService
+	Invites     *socialservice.InviteService
 	Settings    *socialservice.SettingsService
 	Handlers    social.Handlers
 }
 
-func buildSocial(db *database.Pool, redisClient *redis.Client, shareURLBase string) socialModule {
+// socialConfig carries what the social module needs from config and other modules.
+type socialConfig struct {
+	ShareURLBase string
+	ClaimURLBase string
+	AppName      string
+	Locale       string
+	MaxAttempts  int
+	Publisher    notificationPublisher
+	Verifier     socialservice.EmailVerifier
+}
+
+func buildSocial(db *database.Pool, redisClient *redis.Client, cfg socialConfig) socialModule {
+	shareURLBase := cfg.ShareURLBase
 	attribution := socialservice.NewAttributionService(socialrepo.NewAttributionRepository(db), shareURLBase)
 	tenants := socialTenantScope{
 		orgs: organizationrepo.NewOrganizationRepository(db),
@@ -43,23 +60,88 @@ func buildSocial(db *database.Pool, redisClient *redis.Client, shareURLBase stri
 		socialContactStatus{tenants: tenants},
 	)
 	settings := socialservice.NewSettingsService(socialrepo.NewSettingsRepository(db))
-	claims := socialservice.NewClaimService(
-		socialContactDirectory{db: db, tenants: tenants},
-		socialrepo.NewCustomerLinkRepository(db),
-		settings,
+	contacts := socialContactDirectory{db: db, tenants: tenants}
+	links := socialrepo.NewCustomerLinkRepository(db)
+	claims := socialservice.NewClaimService(contacts, links, settings, attribution)
+	invites := socialservice.NewInviteService(
+		contacts,
+		links,
+		socialrepo.NewInviteRepository(db),
+		socialInviteSender{publisher: cfg.Publisher, appName: cfg.AppName, locale: cfg.Locale, maxAttempts: cfg.MaxAttempts},
+		cfg.Verifier,
 		attribution,
+		cfg.ClaimURLBase,
 	)
 	return socialModule{
 		Attribution: attribution,
 		Relations:   relations,
 		Claims:      claims,
+		Invites:     invites,
 		Settings:    settings,
 		Handlers: social.Handlers{
 			Public: socialhandler.NewPublicHandler(attribution, redisClient),
-			Me:     socialhandler.NewMeHandler(attribution, relations, claims),
-			Tenant: socialhandler.NewTenantHandler(settings),
+			Me:     socialhandler.NewMeHandler(attribution, relations, claims, invites),
+			Tenant: socialhandler.NewTenantHandler(settings, invites, redisClient),
 		},
 	}
+}
+
+// socialInviteSender queues the claim invite email through the notification
+// outbox. The recipient is an external address (the contact may have no account yet).
+type socialInviteSender struct {
+	publisher   notificationPublisher
+	appName     string
+	locale      string
+	maxAttempts int
+}
+
+const eventSocialCustomerClaimInvite = "social.customer_claim_invite"
+
+func (s socialInviteSender) SendClaimInvite(ctx context.Context, msg socialservice.ClaimInviteEmail) error {
+	if s.publisher == nil {
+		return errors.New("social: notification publisher is not configured")
+	}
+	orgName := strings.TrimSpace(msg.OrganizationName)
+	if orgName == "" {
+		orgName = "-"
+	}
+	appName := strings.TrimSpace(s.appName)
+	if appName == "" {
+		appName = "Zyad Cloud"
+	}
+	contactName := strings.TrimSpace(msg.ContactName)
+	if contactName == "" {
+		contactName = "Pelanggan"
+	}
+	_, err := s.publisher.Publish(ctx, notificationpublisher.Event{
+		Type:           eventSocialCustomerClaimInvite,
+		OrganizationID: msg.OrganizationID,
+		Recipient:      notificationdomain.NotificationRecipient{Type: "external", Name: contactName, Email: msg.Email},
+		Payload: map[string]any{
+			"app_name":          appName,
+			"organization_name": orgName,
+			"contact_name":      contactName,
+			"claim_url":         msg.ClaimURL,
+			"expired_at":        msg.ExpiresAt.In(businesstime.Location()).Format("02-01-2006 15:04") + " WIB",
+		},
+		Locale:      s.locale,
+		MaxAttempts: s.maxAttempts,
+	})
+	if err != nil {
+		return fmt.Errorf("publish claim invite email: %w", err)
+	}
+	return nil
+}
+
+// socialEmailVerifier adapts the user auth repository (ruling R2).
+type socialEmailVerifier struct {
+	users interface {
+		MarkEmailVerified(ctx context.Context, userID string, at time.Time) error
+	}
+}
+
+func (v socialEmailVerifier) MarkEmailVerified(ctx context.Context, userID string, at time.Time) error {
+	return v.users.MarkEmailVerified(ctx, userID, at)
 }
 
 // socialSignupHooks implements user/service.SignupHooks. Attribution is

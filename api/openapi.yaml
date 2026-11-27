@@ -10040,6 +10040,74 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/social/me/customer-invites/accept:
+    post:
+      summary: Accept a customer claim invite
+      operationId: acceptMyCustomerInvite
+      tags:
+        - Social
+      security:
+        - BearerAuth: []
+      description: >
+        Redeems the token from a staff-sent invite email and creates an
+        `active` link with `verified_via=invite`. Does NOT require a verified
+        email: the token proves ownership of the invited address. When the
+        user's email equals the invited address and is not verified yet, it
+        is marked verified. The token is single-use and expires 7 days after
+        sending; a resend invalidates the previous token. The contact must
+        still be a customer (billing account or confirmed/paired PPPoE
+        onboarding). Audited as `social.customer_link_activated`. If the
+        user was referred, the referrer is credited one `became_customer`
+        attribution event (best-effort).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerInviteAcceptRequest"
+      responses:
+        "200":
+          description: Active customer link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerLinkEnvelope"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Unknown, used or superseded token (`CLAIM_INVITE_INVALID`), or contact no longer claimable (`CLAIM_NOT_AVAILABLE`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The contact, or the user in that organization, already has a live link (`CUSTOMER_LINK_EXISTS`); the invite stays usable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "410":
+          description: Invite expired (`CLAIM_INVITE_EXPIRED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/social/me/customer-links/{id}:
     delete:
       summary: Revoke own customer link
@@ -10076,6 +10144,75 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: No live link of the user with that id (`CUSTOMER_LINK_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/app/social/customer-invites:
+    post:
+      summary: Send a customer claim invite to a CRM contact
+      operationId: sendSocialCustomerInvite
+      tags:
+        - Social
+      security:
+        - BearerAuth: []
+      description: >
+        Emails the contact (at its CRM email) a single-use link
+        `<SOCIAL_CLAIM_URL_BASE>/claim?token=<token>` valid for 7 days
+        (template `social.customer_claim_invite`). The contact must belong to
+        the current tenant, not be deleted, be a customer (billing account
+        or confirmed/paired PPPoE onboarding), have an email, and have no
+        live link. Sending again supersedes the previous invite. Audited as
+        `social.customer_claim_invite_sent`. Permission: `contact.update`.
+        Tenant: customer or platform organization. Rate limit: 30 per hour
+        per organization (`429 RATE_LIMITED`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerInviteRequest"
+      responses:
+        "204":
+          description: Invite stored and email queued
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden (missing permission or tenant)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Contact not found in this tenant or not a customer (`CLAIM_NOT_AVAILABLE`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The contact already has a live link (`CUSTOMER_LINK_EXISTS`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation error (e.g. `contact_id` not a UUID), or the contact has no email (`CONTACT_EMAIL_REQUIRED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limited (`RATE_LIMITED`)
           content:
             application/json:
               schema:
@@ -16422,6 +16559,20 @@ components:
         contact_id:
           type: string
           format: uuid
+    CustomerInviteRequest:
+      type: object
+      required: [contact_id]
+      properties:
+        contact_id:
+          type: string
+          format: uuid
+    CustomerInviteAcceptRequest:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          maxLength: 256
     CustomerLinkEnvelope:
       type: object
       required: [success, message, data]
@@ -16451,7 +16602,7 @@ components:
           enum: [active]
         verified_via:
           type: string
-          enum: [email, staff]
+          enum: [email, staff, invite]
         activated_at:
           type: string
           format: date-time

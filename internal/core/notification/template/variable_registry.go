@@ -121,6 +121,13 @@ func defaultVariables() map[string][]domain.NotificationVariable {
 			{Key: "reason", Description: "Failure reason (no provider internals)", Required: true, Example: "Belum ada pengirim."},
 			{Key: "invoice_url", Description: "Invoice page URL", Required: true, Example: "https://app.example.test/app/billing/invoices/1"},
 		},
+		"social.customer_claim_invite": {
+			{Key: "app_name", Description: "Application name", Required: true, Example: "Zyad Cloud"},
+			{Key: "organization_name", Description: "Organization (provider) name", Required: true, Example: "PT Contoh"},
+			{Key: "contact_name", Description: "Invited CRM contact name", Required: true, Example: "Budi Santoso"},
+			{Key: "claim_url", Description: "Claim invite link", Required: true, Example: "https://app.example.test/claim?token=abc"},
+			{Key: "expired_at", Description: "Invite expiry time", Required: true, Example: "04-12-2026 10:00 WIB"},
+		},
 		"receivable.payout_account_submitted": {
 			{Key: "app_name", Description: "Application name", Required: true, Example: "Zyad Cloud"},
 			{Key: "user_name", Description: "Recipient user name", Required: true, Example: "Sari"},

@@ -214,14 +214,20 @@ func (s *ClaimService) Accept(ctx context.Context, user AuthUser, organizationID
 		return domain.CustomerLink{}, err
 	}
 
-	// The link is committed; attribution is best-effort so a failure here
-	// does not turn a successful claim into an error the client would retry.
-	if s.attribution != nil {
-		if err := s.attribution.RecordBecameCustomer(ctx, user.ID); err != nil {
-			s.log.WarnContext(ctx, "record became_customer attribution failed", "user_id", user.ID, "error", err)
-		}
-	}
+	recordBecameCustomer(ctx, s.attribution, s.log, user.ID)
 	return link, nil
+}
+
+// recordBecameCustomer credits the referrer after a link was committed. It is
+// best-effort so a failure does not turn a successful claim into an error the
+// client would retry.
+func recordBecameCustomer(ctx context.Context, attribution CustomerAttribution, log *slog.Logger, userID string) {
+	if attribution == nil {
+		return
+	}
+	if err := attribution.RecordBecameCustomer(ctx, userID); err != nil {
+		log.WarnContext(ctx, "record became_customer attribution failed", "user_id", userID, "error", err)
+	}
 }
 
 // Decline hides an offer for good: a staff request becomes declined, an email

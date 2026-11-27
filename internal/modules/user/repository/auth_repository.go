@@ -1425,6 +1425,20 @@ func (r *AuthRepository) CompleteEmailVerification(
 	return user, nil
 }
 
+// MarkEmailVerified records proof of email ownership obtained outside the
+// verification-token flow (e.g. a social claim invite sent to that address).
+// Already-verified users are left untouched; pending users become active.
+func (r *AuthRepository) MarkEmailVerified(ctx context.Context, userID string, at time.Time) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE users
+		SET email_verified_at = $2,
+			status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
+			updated_at = $2
+		WHERE id = $1 AND email_verified_at IS NULL
+	`, userID, at.UTC())
+	return err
+}
+
 func (r *AuthRepository) FindEmailVerificationUserByEmail(ctx context.Context, email string) (service.EmailVerificationTargetUser, error) {
 	email = strings.TrimSpace(email)
 

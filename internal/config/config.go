@@ -128,6 +128,8 @@ type SeedAdminConfig struct {
 type SocialConfig struct {
 	// ShareURLBase is the origin referral links point to: <base>/r/<code>.
 	ShareURLBase string
+	// ClaimURLBase is the origin of claim invite links: <base>/claim?token=<token>.
+	ClaimURLBase string
 }
 
 // SelfServeConfig: aktor otomatis checkout self-serve (modul CRM).

@@ -29,16 +29,21 @@ type MeClaims interface {
 	Revoke(ctx context.Context, actorUserID, linkID string, byStaff bool) error
 }
 
+type MeInvites interface {
+	Accept(ctx context.Context, user service.AuthUser, token string) (domain.CustomerLink, error)
+}
+
 // MeHandler serves the signed-in user's own social data. It needs no tenant
 // context: everything is keyed by the authenticated user.
 type MeHandler struct {
 	attribution MeAttribution
 	relations   MeRelations
 	claims      MeClaims
+	invites     MeInvites
 }
 
-func NewMeHandler(attribution MeAttribution, relations MeRelations, claims MeClaims) *MeHandler {
-	return &MeHandler{attribution: attribution, relations: relations, claims: claims}
+func NewMeHandler(attribution MeAttribution, relations MeRelations, claims MeClaims, invites MeInvites) *MeHandler {
+	return &MeHandler{attribution: attribution, relations: relations, claims: claims, invites: invites}
 }
 
 // RegisterRoutes mounts on the protected group.
@@ -52,6 +57,11 @@ func (h *MeHandler) RegisterRoutes(protected *gin.RouterGroup) {
 		group.POST("/customer-claims/accept", verified, h.AcceptCustomerClaim)
 		group.POST("/customer-claims/decline", verified, h.DeclineCustomerClaim)
 		group.DELETE("/customer-links/:id", verified, h.RevokeCustomerLink)
+	}
+	if h.invites != nil {
+		// No RequireVerifiedEmail: the emailed token is itself the proof of
+		// email ownership and may verify the account.
+		group.POST("/customer-invites/accept", h.AcceptCustomerInvite)
 	}
 }
 
@@ -163,6 +173,31 @@ func (h *MeHandler) AcceptCustomerClaim(c *gin.Context) {
 	link, err := h.claims.Accept(c.Request.Context(), authUser(user), req.OrganizationID, req.ContactID)
 	if err != nil {
 		failSocial(c, "accept customer claim", err)
+		return
+	}
+	corehttp.OK(c, "success", customerLinkResponse{
+		ID: link.ID, OrganizationID: link.OrganizationID, ContactID: link.ContactID,
+		Status: link.Status, VerifiedVia: link.VerifiedVia, ActivatedAt: link.ActivatedAt,
+	})
+}
+
+type acceptCustomerInviteRequest struct {
+	Token string `json:"token" binding:"required,max=256"`
+}
+
+func (h *MeHandler) AcceptCustomerInvite(c *gin.Context) {
+	user, ok := requireUser(c)
+	if !ok {
+		return
+	}
+	var req acceptCustomerInviteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		return
+	}
+	link, err := h.invites.Accept(c.Request.Context(), authUser(user), req.Token)
+	if err != nil {
+		failSocial(c, "accept customer claim invite", err)
 		return
 	}
 	corehttp.OK(c, "success", customerLinkResponse{

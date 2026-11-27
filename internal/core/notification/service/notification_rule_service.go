@@ -173,6 +173,12 @@ func defaultNotificationRules() map[string]NotificationRule {
 			Channel:      domain.ChannelEmail,
 			Locale:       defaultRuleLocale,
 		},
+		"social.customer_claim_invite": {
+			EventType:    "social.customer_claim_invite",
+			TemplateCode: "social.customer_claim_invite",
+			Channel:      domain.ChannelEmail,
+			Locale:       defaultRuleLocale,
+		},
 		"receivable.payout_account_assigned": {
 			EventType:    "receivable.payout_account_assigned",
 			TemplateCode: "receivable.payout_account_assigned",

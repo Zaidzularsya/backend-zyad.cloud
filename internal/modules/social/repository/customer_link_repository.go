@@ -90,26 +90,32 @@ func (r *CustomerLinkRepository) HasLiveLinkForContact(ctx context.Context, orga
 // the loser gets domain.ErrCustomerLinkExists.
 func (r *CustomerLinkRepository) CreateActive(ctx context.Context, link domain.CustomerLink) (domain.CustomerLink, error) {
 	return r.inTx(ctx, func(tx pgx.Tx) (domain.CustomerLink, error) {
-		rows, err := tx.Query(ctx, `
-			INSERT INTO customer_links (user_id, organization_id, crm_contact_id, status, verified_via, activated_at)
-			VALUES ($1::uuid, $2::uuid, $3::uuid, 'active', $4, now())
-			RETURNING `+customerLinkColumns,
-			link.UserID, link.OrganizationID, link.ContactID, link.VerifiedVia)
-		if isLiveLinkConflict(err) {
-			return domain.CustomerLink{}, domain.ErrCustomerLinkExists
-		}
-		if err != nil {
-			return domain.CustomerLink{}, fmt.Errorf("insert customer link: %w", err)
-		}
-		created, err := pgx.CollectExactlyOneRow(rows, scanCustomerLink)
-		if isLiveLinkConflict(err) {
-			return domain.CustomerLink{}, domain.ErrCustomerLinkExists
-		}
-		if err != nil {
-			return domain.CustomerLink{}, fmt.Errorf("insert customer link: %w", err)
-		}
-		return created, insertLinkAudit(ctx, tx, auditEventLinkActivated, created.UserID, created, nil)
+		return insertActiveLink(ctx, tx, link, nil)
 	})
+}
+
+// insertActiveLink inserts an active link and its audit row inside tx. It is the
+// single path for new active links (email match and invite acceptance).
+func insertActiveLink(ctx context.Context, tx pgx.Tx, link domain.CustomerLink, auditExtra map[string]any) (domain.CustomerLink, error) {
+	rows, err := tx.Query(ctx, `
+		INSERT INTO customer_links (user_id, organization_id, crm_contact_id, status, verified_via, activated_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 'active', $4, now())
+		RETURNING `+customerLinkColumns,
+		link.UserID, link.OrganizationID, link.ContactID, link.VerifiedVia)
+	if isLiveLinkConflict(err) {
+		return domain.CustomerLink{}, domain.ErrCustomerLinkExists
+	}
+	if err != nil {
+		return domain.CustomerLink{}, fmt.Errorf("insert customer link: %w", err)
+	}
+	created, err := pgx.CollectExactlyOneRow(rows, scanCustomerLink)
+	if isLiveLinkConflict(err) {
+		return domain.CustomerLink{}, domain.ErrCustomerLinkExists
+	}
+	if err != nil {
+		return domain.CustomerLink{}, fmt.Errorf("insert customer link: %w", err)
+	}
+	return created, insertLinkAudit(ctx, tx, auditEventLinkActivated, created.UserID, created, auditExtra)
 }
 
 func (r *CustomerLinkRepository) ActivatePending(ctx context.Context, linkID, userID string) (domain.CustomerLink, error) {
