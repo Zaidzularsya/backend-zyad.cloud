@@ -41,6 +41,7 @@ type socialModule struct {
 type socialConfig struct {
 	ShareURLBase string
 	ClaimURLBase string
+	IPHashSecret string
 	AppName      string
 	Locale       string
 	MaxAttempts  int
@@ -50,7 +51,7 @@ type socialConfig struct {
 
 func buildSocial(db *database.Pool, redisClient *redis.Client, cfg socialConfig) socialModule {
 	shareURLBase := cfg.ShareURLBase
-	attribution := socialservice.NewAttributionService(socialrepo.NewAttributionRepository(db), shareURLBase)
+	attribution := socialservice.NewAttributionService(socialrepo.NewAttributionRepository(db), shareURLBase, cfg.IPHashSecret)
 	tenants := socialTenantScope{
 		orgs: organizationrepo.NewOrganizationRepository(db),
 		tx:   database.NewSharedTenantTransactor(db),
@@ -83,7 +84,7 @@ func buildSocial(db *database.Pool, redisClient *redis.Client, cfg socialConfig)
 		Settings:    settings,
 		Handlers: social.Handlers{
 			Public: socialhandler.NewPublicHandler(attribution, redisClient),
-			Me:     socialhandler.NewMeHandler(attribution, relations, claims, invites),
+			Me:     socialhandler.NewMeHandler(attribution, relations, claims, invites, redisClient),
 			Tenant: socialhandler.NewTenantHandler(settings, invites, staffLinks, redisClient),
 		},
 	}

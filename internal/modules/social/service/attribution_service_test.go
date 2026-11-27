@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"zyad.cloud/internal/modules/social/domain"
 )
@@ -78,10 +79,12 @@ func (f *fakeAttributionStore) RecordBecameCustomer(_ context.Context, userID st
 	return true, nil
 }
 
+const testIPHashSecret = "test-ip-hash-secret"
+
 var attributionNow = time.Date(2026, 11, 27, 10, 0, 0, 0, time.UTC)
 
 func newTestAttributionService(store *fakeAttributionStore) *AttributionService {
-	svc := NewAttributionService(store, "https://zyad.test/")
+	svc := NewAttributionService(store, "https://zyad.test/", testIPHashSecret)
 	svc.now = func() time.Time { return attributionNow }
 	return svc
 }
@@ -251,9 +254,8 @@ func TestRecordVisitHashesIPAndIgnoresUnknownCode(t *testing.T) {
 	if len(store.visits) != 1 {
 		t.Fatalf("visits = %d, want 1", len(store.visits))
 	}
-	sum := sha256.Sum256([]byte("203.0.113.9"))
 	got := store.visits[0]
-	if got.IPHash != hex.EncodeToString(sum[:]) {
+	if got.IPHash != hashIP([]byte(testIPHashSecret), "203.0.113.9") {
 		t.Fatalf("ip hash = %q", got.IPHash)
 	}
 	if got.ReferrerUserID != "referrer" || got.ReferralCode != "ABCD2345" || got.Channel != "instagram" {
@@ -291,5 +293,50 @@ func TestRecordBecameCustomerDelegatesForUser(t *testing.T) {
 	}
 	if len(store.customers) != 1 || store.customers[0] != "user-1" {
 		t.Fatalf("customers = %v", store.customers)
+	}
+}
+
+func TestHashIPIsKeyedHMAC(t *testing.T) {
+	const ip = "203.0.113.9"
+	a := hashIP([]byte("key-a"), ip)
+	if a != hashIP([]byte("key-a"), " "+ip+" ") {
+		t.Fatal("same IP and key must give the same hash")
+	}
+	if a == hashIP([]byte("key-b"), ip) {
+		t.Fatal("a different key must give a different hash")
+	}
+	if len(a) != 64 {
+		t.Fatalf("hash length = %d, want 64", len(a))
+	}
+	if _, err := hex.DecodeString(a); err != nil {
+		t.Fatalf("hash is not hex: %v", err)
+	}
+	plain := sha256.Sum256([]byte(ip))
+	if a == hex.EncodeToString(plain[:]) {
+		t.Fatal("hash must not be plain SHA-256")
+	}
+	if hashIP([]byte("key-a"), "  ") != "" {
+		t.Fatal("empty IP must hash to empty")
+	}
+}
+
+func TestRecordVisitStoresSanitizedText(t *testing.T) {
+	store := newFakeAttributionStore()
+	store.codes["referrer"] = "ABCD2345"
+	svc := newTestAttributionService(store)
+
+	if err := svc.RecordVisit(context.Background(), VisitInput{
+		Code: "ABCD2345", Channel: "w\u0000a", IP: "203.0.113.9", UserAgent: "Agent\xff\xfe/1.0\x00",
+	}); err != nil {
+		t.Fatalf("RecordVisit: %v", err)
+	}
+	got := store.visits[0]
+	if got.Channel != "wa" || got.UserAgent != "Agent/1.0" {
+		t.Fatalf("visit = %+v", got)
+	}
+	for _, v := range []string{got.Channel, got.UserAgent} {
+		if !utf8.ValidString(v) || strings.ContainsRune(v, 0) {
+			t.Fatalf("not storable text: %q", v)
+		}
 	}
 }

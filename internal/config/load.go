@@ -105,11 +105,13 @@ func LoadSeedAdmin() SeedAdminConfig {
 
 const defaultSelfServeGraceDays = 7
 
-// LoadSocial: SOCIAL_SHARE_URL_BASE and SOCIAL_CLAIM_URL_BASE default to the frontend URL.
-func LoadSocial(frontendURL string) SocialConfig {
+// LoadSocial: SOCIAL_SHARE_URL_BASE and SOCIAL_CLAIM_URL_BASE default to the
+// frontend URL; SOCIAL_IP_HASH_SECRET defaults to the JWT signing secret.
+func LoadSocial(frontendURL, jwtSecret string) SocialConfig {
 	return SocialConfig{
 		ShareURLBase: getEnv("SOCIAL_SHARE_URL_BASE", frontendURL),
 		ClaimURLBase: getEnv("SOCIAL_CLAIM_URL_BASE", frontendURL),
+		IPHashSecret: getEnv("SOCIAL_IP_HASH_SECRET", jwtSecret),
 	}
 }
 

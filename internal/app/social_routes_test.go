@@ -142,7 +142,7 @@ func TestSocialRoutesAreMounted(t *testing.T) {
 		OrganizationResolver: noOrganizationResolver{},
 		SocialHandlers: social.Handlers{
 			Public: socialhandler.NewPublicHandler(attribution, counter),
-			Me:     socialhandler.NewMeHandler(attribution, relations, claims, invites),
+			Me:     socialhandler.NewMeHandler(attribution, relations, claims, invites, counter),
 		},
 	})
 	if err != nil {
@@ -200,7 +200,6 @@ func TestSocialRoutesAreMounted(t *testing.T) {
 		{http.MethodGet, "/api/v1/social/me/customer-claims", ""},
 		{http.MethodPost, "/api/v1/social/me/customer-claims/accept", claimBody},
 		{http.MethodPost, "/api/v1/social/me/customer-claims/decline", claimBody},
-		{http.MethodDelete, "/api/v1/social/me/customer-links/" + linkID, ""},
 	} {
 		if w := do(r.method, r.path, r.body, "1"); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "EMAIL_NOT_VERIFIED") {
 			t.Fatalf("unverified %s %s: %d %s", r.method, r.path, w.Code, w.Body)
@@ -226,6 +225,10 @@ func TestSocialRoutesAreMounted(t *testing.T) {
 	if w := do(http.MethodDelete, "/api/v1/social/me/customer-links/not-a-uuid", "", "v1"); w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "CUSTOMER_LINK_NOT_FOUND") {
 		t.Fatalf("revoke malformed id: %d %s", w.Code, w.Body)
 	}
+	// A user can always undo their own link, verified email or not.
+	if w := do(http.MethodDelete, "/api/v1/social/me/customer-links/"+linkID, "", "1"); w.Code != http.StatusNoContent || claims.revoked != "user-1/"+linkID {
+		t.Fatalf("revoke unverified: %d %s (%q)", w.Code, w.Body, claims.revoked)
+	}
 
 	// Invite acceptance is open to unverified accounts: the token proves the email.
 	w = do(http.MethodPost, "/api/v1/social/me/customer-invites/accept", `{"token":"good-token"}`, "1")
@@ -240,6 +243,41 @@ func TestSocialRoutesAreMounted(t *testing.T) {
 	}
 	if w := do(http.MethodPost, "/api/v1/social/me/customer-invites/accept", `{"token":"good-token"}`, ""); w.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous accept invite: %d", w.Code)
+	}
+
+	// /social/me writes share one per-user bucket of 20 per minute; a fresh
+	// user ("v2") mixing write routes is cut off at the 21st.
+	writes := []struct{ method, path, body string }{
+		{http.MethodPost, "/api/v1/social/me/customer-claims/decline", claimBody},
+		{http.MethodDelete, "/api/v1/social/me/customer-links/" + linkID, ""},
+		{http.MethodPost, "/api/v1/social/me/customer-invites/accept", `{"token":"good-token"}`},
+		{http.MethodPost, "/api/v1/social/me/customer-claims/accept", claimBody},
+	}
+	for i := 1; i <= 20; i++ {
+		r := writes[i%len(writes)]
+		if w := do(r.method, r.path, r.body, "v2"); w.Code == http.StatusTooManyRequests {
+			t.Fatalf("me write %d (%s %s): 429 too early", i, r.method, r.path)
+		}
+	}
+	if w := do(http.MethodPost, "/api/v1/social/me/customer-claims/decline", claimBody, "v2"); w.Code != http.StatusTooManyRequests {
+		t.Fatalf("me write 21: %d, want 429", w.Code)
+	}
+	if w := do(http.MethodGet, "/api/v1/social/me/customer-claims", "", "v2"); w.Code != http.StatusOK {
+		t.Fatalf("reads are not rate limited: %d", w.Code)
+	}
+	var meKeys int
+	for k := range counter.counts {
+		if strings.HasPrefix(k, "rl:social:me:user:") {
+			meKeys++
+			if !strings.HasPrefix(k, "rl:social:me:user:user-1:") && !strings.HasPrefix(k, "rl:social:me:user:user-v1:") && !strings.HasPrefix(k, "rl:social:me:user:user-v2:") {
+				t.Fatalf("me rate limit key %q", k)
+			}
+		} else if !strings.HasPrefix(k, "rl:attr:visit:ip:") {
+			t.Fatalf("unexpected rate limit key %q", k)
+		}
+	}
+	if meKeys == 0 {
+		t.Fatal("no per-user rate limit keys recorded")
 	}
 }
 
@@ -305,12 +343,13 @@ func TestSocialStaffCustomerLinkRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	staff := &fakeSocialStaffLinks{}
+	counter := &fakeMikrotikCounter{counts: map[string]int64{}}
 	engine := gin.New()
 	group := engine.Group("/app/social", func(c *gin.Context) {
 		c.Set(permissionmiddleware.UserIDContextKey, "staff-1")
 		c.Request = c.Request.WithContext(coretenant.WithContext(c.Request.Context(), tc))
 	})
-	socialhandler.NewTenantHandler(nil, nil, staff, nil).RegisterRoutes(group, nil)
+	socialhandler.NewTenantHandler(nil, nil, staff, counter).RegisterRoutes(group, nil)
 	do := func(method, path, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -354,4 +393,84 @@ func TestSocialStaffCustomerLinkRoutes(t *testing.T) {
 	if w := do(http.MethodPost, "/app/social/customer-links", `{"contact_id":"`+contactID+`","user_email":"a@x.test"}`); w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "USER_NOT_FOUND") {
 		t.Fatalf("unknown user: %d %s", w.Code, w.Body)
 	}
+	staff.err = nil
+
+	// POST customer-links: 60 per organization per hour. 5 requests above
+	// (3 invalid bodies, 1 success, 1 unknown user) already count.
+	for i := 6; i <= 60; i++ {
+		if w := do(http.MethodPost, "/app/social/customer-links", `{"contact_id":"`+contactID+`","user_email":"a@x.test"}`); w.Code != http.StatusCreated {
+			t.Fatalf("request %d: %d %s", i, w.Code, w.Body)
+		}
+	}
+	if w := do(http.MethodPost, "/app/social/customer-links", `{"contact_id":"`+contactID+`","user_email":"a@x.test"}`); w.Code != http.StatusTooManyRequests {
+		t.Fatalf("request 61: %d, want 429", w.Code)
+	}
+	// Unlinking has its own bucket, so it still works.
+	if w := do(http.MethodDelete, "/app/social/customer-links/"+linkID, ""); w.Code != http.StatusNoContent {
+		t.Fatalf("revoke after link limit: %d %s", w.Code, w.Body)
+	}
+	org := tc.OrganizationID()
+	var linkKeys, unlinkKeys int
+	for k := range counter.counts {
+		switch {
+		case strings.HasPrefix(k, "rl:social:link:org:"+org+":"):
+			linkKeys++
+		case strings.HasPrefix(k, "rl:social:unlink:org:"+org+":"):
+			unlinkKeys++
+		default:
+			t.Fatalf("rate limit key %q", k)
+		}
+	}
+	if linkKeys == 0 || unlinkKeys == 0 {
+		t.Fatalf("link keys %d, unlink keys %d", linkKeys, unlinkKeys)
+	}
+}
+
+func TestSocialTenantSettingsRateLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tc, err := coretenant.NewVerifiedContext(coretenant.VerifiedContextInput{
+		OrganizationID: "0b6c3f0e-7a4e-4f3a-9a51-1f2d3c4b5a69", OrganizationSlug: "isp",
+		OrganizationType: coretenant.OrganizationTypeCustomer, OrganizationStatus: coretenant.OrganizationStatusActive,
+		ResolutionSource: coretenant.ResolutionSourceInternal, DataPlacement: coretenant.DataPlacementShared,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	counter := &fakeMikrotikCounter{counts: map[string]int64{}}
+	engine := gin.New()
+	group := engine.Group("/app/social", func(c *gin.Context) {
+		c.Set(permissionmiddleware.UserIDContextKey, "staff-1")
+		c.Request = c.Request.WithContext(coretenant.WithContext(c.Request.Context(), tc))
+	})
+	socialhandler.NewTenantHandler(fakeSocialSettings{}, nil, nil, counter).RegisterRoutes(group, nil)
+	do := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, "/app/social/settings", strings.NewReader(`{"customer_claim_auto_offer":false}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		return w
+	}
+	for i := 1; i <= 30; i++ {
+		if w := do(); w.Code != http.StatusOK {
+			t.Fatalf("update %d: %d %s", i, w.Code, w.Body)
+		}
+	}
+	if w := do(); w.Code != http.StatusTooManyRequests {
+		t.Fatalf("update 31: %d, want 429", w.Code)
+	}
+	for k := range counter.counts {
+		if !strings.HasPrefix(k, "rl:social:settings:org:"+tc.OrganizationID()+":") {
+			t.Fatalf("rate limit key %q", k)
+		}
+	}
+}
+
+type fakeSocialSettings struct{}
+
+func (fakeSocialSettings) Get(context.Context, string) (socialdomain.TenantSettings, error) {
+	return socialdomain.TenantSettings{CustomerClaimAutoOffer: true}, nil
+}
+
+func (fakeSocialSettings) SetAutoOffer(_ context.Context, _ string, autoOffer bool, _ string) (socialdomain.TenantSettings, error) {
+	return socialdomain.TenantSettings{CustomerClaimAutoOffer: autoOffer}, nil
 }

@@ -40,10 +40,17 @@ type MeHandler struct {
 	relations   MeRelations
 	claims      MeClaims
 	invites     MeInvites
+	counter     middleware.RateCounter
 }
 
-func NewMeHandler(attribution MeAttribution, relations MeRelations, claims MeClaims, invites MeInvites) *MeHandler {
-	return &MeHandler{attribution: attribution, relations: relations, claims: claims, invites: invites}
+// All /social/me writes share one per-user bucket (spec §6.12).
+const (
+	meWriteUserLimit  = 20
+	meWriteUserWindow = time.Minute
+)
+
+func NewMeHandler(attribution MeAttribution, relations MeRelations, claims MeClaims, invites MeInvites, counter middleware.RateCounter) *MeHandler {
+	return &MeHandler{attribution: attribution, relations: relations, claims: claims, invites: invites, counter: counter}
 }
 
 // RegisterRoutes mounts on the protected group.
@@ -51,17 +58,25 @@ func (h *MeHandler) RegisterRoutes(protected *gin.RouterGroup) {
 	group := protected.Group("/social/me")
 	group.GET("/attribution", h.Attribution)
 	group.GET("/customer-relations", h.CustomerRelations)
+	perUser := middleware.RateLimit(h.counter, "rl:social:me:user:", meWriteUserLimit, meWriteUserWindow,
+		func(c *gin.Context) string {
+			if user, ok := middleware.AuthenticatedUserFromContext(c); ok && user.ID != "" {
+				return user.ID
+			}
+			return "unknown"
+		})
 	if h.claims != nil {
 		verified := middleware.RequireVerifiedEmail()
 		group.GET("/customer-claims", verified, h.CustomerClaims)
-		group.POST("/customer-claims/accept", verified, h.AcceptCustomerClaim)
-		group.POST("/customer-claims/decline", verified, h.DeclineCustomerClaim)
-		group.DELETE("/customer-links/:id", verified, h.RevokeCustomerLink)
+		group.POST("/customer-claims/accept", perUser, verified, h.AcceptCustomerClaim)
+		group.POST("/customer-claims/decline", perUser, verified, h.DeclineCustomerClaim)
+		// No RequireVerifiedEmail: a user can always undo their own link.
+		group.DELETE("/customer-links/:id", perUser, h.RevokeCustomerLink)
 	}
 	if h.invites != nil {
 		// No RequireVerifiedEmail: the emailed token is itself the proof of
 		// email ownership and may verify the account.
-		group.POST("/customer-invites/accept", h.AcceptCustomerInvite)
+		group.POST("/customer-invites/accept", perUser, h.AcceptCustomerInvite)
 	}
 }
 

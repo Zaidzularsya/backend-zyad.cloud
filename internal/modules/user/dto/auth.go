@@ -63,10 +63,13 @@ type AttributionInput struct {
 	FirstSeenAt time.Time `json:"first_seen_at"`
 }
 
+// RegisterRequest limits mirror users.name varchar(150) and users.email
+// varchar(255). The password cap only bounds the payload; the service still
+// enforces bcrypt's 72-byte limit with AUTH_PASSWORD_POLICY_FAILED.
 type RegisterRequest struct {
-	Name       string `json:"name" binding:"required"`
-	Email      string `json:"email" binding:"required,email"`
-	Password   string `json:"password" binding:"required"`
+	Name       string `json:"name" binding:"required,max=150"`
+	Email      string `json:"email" binding:"required,email,max=255"`
+	Password   string `json:"password" binding:"required,max=256"`
 	DeviceName string `json:"device_name"`
 	RememberMe bool   `json:"remember_me"`
 	// Intent defaults to operator when empty; see NormalizeIntent.

@@ -35,11 +35,12 @@ func Load() Config {
 	})
 
 	app := LoadApp()
+	auth := LoadAuth()
 	return Config{
 		App:          app,
 		Database:     LoadDatabase(),
 		Redis:        LoadRedis(),
-		Auth:         LoadAuth(),
+		Auth:         auth,
 		SeedAdmin:    LoadSeedAdmin(),
 		Notification: LoadNotification(),
 		HTTP:         LoadHTTP(),
@@ -52,7 +53,7 @@ func Load() Config {
 		Security:     LoadSecurity(),
 		Storage:      LoadStorage(),
 		SelfServe:    LoadSelfServe(),
-		Social:       LoadSocial(app.FrontendURL),
+		Social:       LoadSocial(app.FrontendURL, auth.Secret),
 	}
 }
 
@@ -130,6 +131,8 @@ type SocialConfig struct {
 	ShareURLBase string
 	// ClaimURLBase is the origin of claim invite links: <base>/claim?token=<token>.
 	ClaimURLBase string
+	// IPHashSecret keys the HMAC-SHA256 of visitor IPs in attribution events.
+	IPHashSecret string
 }
 
 // SelfServeConfig: aktor otomatis checkout self-serve (modul CRM).

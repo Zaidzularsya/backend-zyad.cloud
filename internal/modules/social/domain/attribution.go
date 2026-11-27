@@ -61,7 +61,7 @@ type EventCounts struct {
 // NormalizeChannel trims and lower-cases a client-supplied channel and cuts it
 // to the column width; it is a free-form label, not a closed enum.
 func NormalizeChannel(channel string) string {
-	return truncateRunes(strings.ToLower(strings.TrimSpace(channel)), maxChannelLength)
+	return truncateRunes(strings.ToLower(strings.TrimSpace(sanitizeText(channel))), maxChannelLength)
 }
 
 // NormalizePostID keeps a post id only when it is a UUID (the column type);
@@ -78,7 +78,14 @@ var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 
 // NormalizeUserAgent cuts the user agent to the column width.
 func NormalizeUserAgent(userAgent string) string {
-	return truncateRunes(strings.TrimSpace(userAgent), maxUserAgentLength)
+	return truncateRunes(strings.TrimSpace(sanitizeText(userAgent)), maxUserAgentLength)
+}
+
+// sanitizeText makes client-supplied text storable in a Postgres text column:
+// invalid UTF-8 and NUL bytes are rejected by Postgres, so both are dropped
+// before any truncation.
+func sanitizeText(s string) string {
+	return strings.ReplaceAll(strings.ToValidUTF8(s, ""), "\x00", "")
 }
 
 func truncateRunes(s string, max int) string {

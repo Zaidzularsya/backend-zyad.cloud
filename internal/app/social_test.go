@@ -47,7 +47,7 @@ func TestSocialSignupHooksMapsAttributionAndSwallowsErrors(t *testing.T) {
 	store := &signupHookStore{}
 	var logs bytes.Buffer
 	hooks := socialSignupHooks{
-		attribution: socialservice.NewAttributionService(store, "https://zyad.test"),
+		attribution: socialservice.NewAttributionService(store, "https://zyad.test", "test-secret"),
 		log:         slog.New(slog.NewTextHandler(&logs, nil)),
 	}
 

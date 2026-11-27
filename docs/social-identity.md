@@ -27,8 +27,12 @@ pelanggan ke kontak CRM tenant, dan atribusi referral. Kontrak endpoint yang ber
 
 - Akun dengan `email_verified_at IS NULL` boleh login dan membaca.
 - Semua endpoint tulis sosial (Tahap 1: seluruh endpoint klaim milik user) menolak dengan
-  `403 EMAIL_NOT_VERIFIED`. Pengecualian: `POST /social/me/customer-invites/accept`, karena token undangan
-  membuktikan kepemilikan alamat email yang diundang.
+  `403 EMAIL_NOT_VERIFIED`. Pengecualian:
+  - `POST /social/me/customer-invites/accept`, karena token undangan membuktikan kepemilikan alamat email
+    yang diundang. Email ditandai terverifikasi hanya bila alamat undangan masih sama dengan email akun saat itu.
+  - `DELETE /social/me/customer-links/{id}`: user selalu bisa mencabut relasinya sendiri.
+- Token verifikasi email hanya berlaku untuk alamat tujuan token; bila user sudah mengganti email, token lama
+  dianggap tidak valid.
 - Login Google atas email yang sama dengan akun password **belum terverifikasi** tidak menautkan, tetapi
   mengambil alih akun (takeover): password dihapus, email ditandai terverifikasi, akun `pending` menjadi
   `active`, semua sesi dicabut, dan kejadian diaudit. Alasannya: pemilik email sebenarnya (terbukti lewat
@@ -75,7 +79,10 @@ sisi tenant (`DELETE /app/social/customer-links/{id}`). Semua perubahan relasi m
   yang ada).
 - Peristiwa tersimpan di `attribution_events` (`visit`, `signup`, `became_customer`). `became_customer`
   dikreditkan sekali, pada klaim relasi pertama user (best-effort). IP kunjungan hanya disimpan sebagai
-  hash SHA-256.
+  HMAC-SHA256 (hex) dengan kunci `SOCIAL_IP_HASH_SECRET`. Mengganti kunci membuat hash baru tidak bisa
+  dibandingkan dengan hash lama.
+- `channel` dan `user_agent` kunjungan dibersihkan dari UTF-8 tidak valid dan byte NUL sebelum dipotong ke
+  lebar kolom; `post_id` hanya disimpan bila UUID.
 
 ## Environment variable baru
 
@@ -84,11 +91,23 @@ sisi tenant (`DELETE /app/social/customer-links/{id}`). Semua perubahan relasi m
 | `AUTH_PASSWORD_REGISTER_ENABLED` | `false` | Mengaktifkan `POST /auth/register`; bila mati endpoint menjawab 403 `AUTH_REGISTRATION_DISABLED` |
 | `SOCIAL_SHARE_URL_BASE` | URL frontend | Basis `share_url` (`<base>/r/<kode>`) |
 | `SOCIAL_CLAIM_URL_BASE` | URL frontend | Basis tautan undangan klaim (`<base>/claim?token=...`) |
+| `SOCIAL_IP_HASH_SECRET` | `JWT_SECRET` | Kunci HMAC-SHA256 untuk hash IP kunjungan referral |
+
+**Catatan deploy:** dengan `AUTH_PASSWORD_REGISTER_ENABLED=false` (default), satu-satunya jalan mendaftar
+adalah Google. Pelanggan yang diundang tanpa akun Google tidak bisa membuat akun untuk menebus undangan
+klaim; aktifkan registrasi password bila undangan dipakai untuk pelanggan seperti itu.
 
 ## Endpoint
 
 Auth (lihat `api/openapi.yaml`): `POST /api/v1/auth/register`, `POST /api/v1/auth/google`,
 `POST /api/v1/auth/google/callback`.
+
+Publik (tanpa login, tanpa konteks tenant):
+
+| Method | Path | Fungsi |
+|---|---|---|
+| GET | `/api/v1/public/referrals/{code}` | Cek apakah kode referral dikenal (`valid`) |
+| POST | `/api/v1/public/attribution/visits` | Catat kunjungan lewat tautan referral; kode tidak dikenal diabaikan (tetap 204) |
 
 Sisi user (tanpa konteks tenant):
 
@@ -112,6 +131,20 @@ Sisi tenant (staff):
 | DELETE | `/api/v1/app/social/customer-links/{id}` | `contact.update` |
 | GET | `/api/v1/app/social/settings` | `lead.read` |
 | PUT | `/api/v1/app/social/settings` | `crm_settings.update` |
+
+### Rate limit
+
+Fixed window di Redis (`middleware.RateLimit`); bila Redis tidak tersedia, request tetap dilayani (fail open).
+Melewati batas menghasilkan `429 RATE_LIMITED`.
+
+| Endpoint | Kunci | Batas |
+|---|---|---|
+| `POST /public/attribution/visits` | IP klien (`rl:attr:visit:ip:`) | 60 / menit |
+| `POST /app/social/customer-invites` | organisasi (`rl:social:invite:org:`) | 30 / jam |
+| `POST /app/social/customer-links` | organisasi (`rl:social:link:org:`) | 60 / jam |
+| `DELETE /app/social/customer-links/{id}` | organisasi (`rl:social:unlink:org:`) | 120 / jam |
+| `PUT /app/social/settings` | organisasi (`rl:social:settings:org:`) | 30 / jam |
+| `POST /social/me/customer-claims/accept`, `POST /social/me/customer-claims/decline`, `DELETE /social/me/customer-links/{id}`, `POST /social/me/customer-invites/accept` | user (`rl:social:me:user:`), satu bucket bersama | 20 / menit |
 
 ## Migration
 

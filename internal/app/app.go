@@ -153,6 +153,7 @@ func New(ctx context.Context) (*App, error) {
 	socialMod := buildSocial(db, redisClient, socialConfig{
 		ShareURLBase: cfg.Social.ShareURLBase,
 		ClaimURLBase: cfg.Social.ClaimURLBase,
+		IPHashSecret: cfg.Social.IPHashSecret,
 		AppName:      cfg.App.Name,
 		Locale:       cfg.Notification.DefaultLocale,
 		MaxAttempts:  cfg.Notification.MaxAttempts,

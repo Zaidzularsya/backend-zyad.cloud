@@ -54,3 +54,24 @@ func TestRegisterHandlerRejectsInvalidEmail(t *testing.T) {
 		t.Fatalf("status = %d calls=%d", rec.Code, fake.calls)
 	}
 }
+
+func TestRegisterHandlerRejectsOverlongFields(t *testing.T) {
+	// 257 characters and otherwise a valid address, so only max=255 rejects it.
+	label := strings.Repeat("b", 47)
+	longEmail := strings.Repeat("a", 60) + "@" + label + "." + label + "." + label + "." + label + ".test"
+	for name, body := range map[string]string{
+		"name 151":     `{"name":"` + strings.Repeat("a", 151) + `","email":"budi@x.test","password":"secret-password"}`,
+		"email 256":    `{"name":"Budi","email":"` + longEmail + `","password":"secret-password"}`,
+		"password 257": `{"name":"Budi","email":"budi@x.test","password":"` + strings.Repeat("p", 257) + `"}`,
+	} {
+		fake := &fakeRegistrar{}
+		rec := postRegister(fake, body)
+		if rec.Code != http.StatusUnprocessableEntity || fake.calls != 0 {
+			t.Fatalf("%s: status = %d calls=%d", name, rec.Code, fake.calls)
+		}
+	}
+	fake := &fakeRegistrar{}
+	if rec := postRegister(fake, `{"name":"`+strings.Repeat("a", 150)+`","email":"budi@x.test","password":"secret-password"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("name 150: status = %d body=%s", rec.Code, rec.Body.String())
+	}
+}

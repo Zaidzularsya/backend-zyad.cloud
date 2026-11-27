@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -57,16 +58,19 @@ type Summary struct {
 type AttributionService struct {
 	store        AttributionStore
 	shareURLBase string
+	ipHashKey    []byte
 	random       io.Reader
 	now          func() time.Time
 }
 
 // NewAttributionService builds the service; shareURLBase is the origin share
-// links point to (ShareURL = <base>/r/<code>).
-func NewAttributionService(store AttributionStore, shareURLBase string) *AttributionService {
+// links point to (ShareURL = <base>/r/<code>) and ipHashSecret keys the
+// HMAC-SHA256 of visitor IPs.
+func NewAttributionService(store AttributionStore, shareURLBase, ipHashSecret string) *AttributionService {
 	return &AttributionService{
 		store:        store,
 		shareURLBase: strings.TrimRight(strings.TrimSpace(shareURLBase), "/"),
+		ipHashKey:    []byte(ipHashSecret),
 		random:       rand.Reader,
 		now:          time.Now,
 	}
@@ -107,7 +111,7 @@ func (s *AttributionService) IsKnownCode(ctx context.Context, code string) (bool
 
 // RecordVisit stores a visit for a known code. Unknown or malformed codes are
 // ignored without error so the public endpoint never reveals which codes exist
-// through its behaviour. The IP is stored only as a SHA-256 hex digest.
+// through its behaviour. The IP is stored only as a keyed HMAC-SHA256 hex digest.
 func (s *AttributionService) RecordVisit(ctx context.Context, in VisitInput) error {
 	referrerID, found, err := s.lookup(ctx, in.Code)
 	if err != nil || !found {
@@ -118,7 +122,7 @@ func (s *AttributionService) RecordVisit(ctx context.Context, in VisitInput) err
 		ReferrerUserID: referrerID,
 		Channel:        domain.NormalizeChannel(in.Channel),
 		PostID:         domain.NormalizePostID(in.PostID),
-		IPHash:         hashIP(in.IP),
+		IPHash:         hashIP(s.ipHashKey, in.IP),
 		UserAgent:      domain.NormalizeUserAgent(in.UserAgent),
 	})
 }
@@ -187,11 +191,14 @@ func (s *AttributionService) lookup(ctx context.Context, code string) (string, b
 	return s.store.ReferrerByCode(ctx, code)
 }
 
-func hashIP(ip string) string {
+// hashIP is keyed so the small IPv4 space cannot be brute-forced from the
+// stored digests without the secret.
+func hashIP(key []byte, ip string) string {
 	ip = strings.TrimSpace(ip)
 	if ip == "" {
 		return ""
 	}
-	sum := sha256.Sum256([]byte(ip))
-	return hex.EncodeToString(sum[:])
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(ip))
+	return hex.EncodeToString(mac.Sum(nil))
 }

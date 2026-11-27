@@ -32,10 +32,14 @@ type TenantStaffLinks interface {
 	Revoke(ctx context.Context, scope coretenant.Scope, actorUserID, linkID string) error
 }
 
-// Claim invites send email, so they are capped per organization.
+// Tenant write limits, per organization (spec §6.12). Claim invites send
+// email, so they are the tightest.
 const (
-	inviteOrgLimit  = 30
-	inviteOrgWindow = time.Hour
+	inviteOrgLimit   = 30
+	linkOrgLimit     = 60
+	unlinkOrgLimit   = 120
+	settingsOrgLimit = 30
+	tenantRateWindow = time.Hour
 )
 
 // TenantHandler serves the tenant's own social settings and claim invites. The
@@ -55,23 +59,28 @@ func NewTenantHandler(settings TenantSettings, invites TenantInvites, staff Tena
 // Reading uses lead.read, the same permission that reads CRM settings.
 func (h *TenantHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmiddleware.CombinedPermissionChecker) {
 	router.GET("/settings", permissionmiddleware.RequireOrganizationOrGlobal(p, "lead.read"), h.GetSettings)
-	router.PUT("/settings", permissionmiddleware.RequireOrganizationOrGlobal(p, "crm_settings.update"), h.UpdateSettings)
+	router.PUT("/settings", permissionmiddleware.RequireOrganizationOrGlobal(p, "crm_settings.update"),
+		h.perOrg("rl:social:settings:org:", settingsOrgLimit), h.UpdateSettings)
 	if h.invites != nil {
-		perOrg := middleware.RateLimit(h.counter, "rl:social:invite:org:", inviteOrgLimit, inviteOrgWindow,
-			func(c *gin.Context) string {
-				if tc, ok := coretenant.FromContext(c.Request.Context()); ok {
-					return tc.OrganizationID()
-				}
-				return "unknown"
-			})
-		router.POST("/customer-invites", permissionmiddleware.RequireOrganizationOrGlobal(p, "contact.update"), perOrg, h.SendCustomerInvite)
+		router.POST("/customer-invites", permissionmiddleware.RequireOrganizationOrGlobal(p, "contact.update"),
+			h.perOrg("rl:social:invite:org:", inviteOrgLimit), h.SendCustomerInvite)
 	}
 	if h.staff != nil {
 		update := permissionmiddleware.RequireOrganizationOrGlobal(p, "contact.update")
-		router.POST("/customer-links", update, h.RequestCustomerLink)
+		router.POST("/customer-links", update, h.perOrg("rl:social:link:org:", linkOrgLimit), h.RequestCustomerLink)
 		router.GET("/customer-links", update, h.ListCustomerLinks)
-		router.DELETE("/customer-links/:id", update, h.RevokeCustomerLink)
+		router.DELETE("/customer-links/:id", update, h.perOrg("rl:social:unlink:org:", unlinkOrgLimit), h.RevokeCustomerLink)
 	}
+}
+
+// perOrg rate limits a tenant write by the verified tenant organization.
+func (h *TenantHandler) perOrg(prefix string, limit int) gin.HandlerFunc {
+	return middleware.RateLimit(h.counter, prefix, limit, tenantRateWindow, func(c *gin.Context) string {
+		if tc, ok := coretenant.FromContext(c.Request.Context()); ok {
+			return tc.OrganizationID()
+		}
+		return "unknown"
+	})
 }
 
 type sendCustomerInviteRequest struct {
