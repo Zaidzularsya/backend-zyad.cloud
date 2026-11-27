@@ -21,7 +21,7 @@ func TestSocialIdentitySchema(t *testing.T) {
 	suffix := strings.ReplaceAll(testutil.UniqueCode("social"), ".", "_")
 	email := fmt.Sprintf("budi-%s@x.test", suffix)
 
-	var orgID, userID, otherUserID string
+	var orgID, otherOrgID, userID, otherUserID string
 	if err := db.QueryRow(ctx, `
 		INSERT INTO organizations (type, slug, name, status, data_placement)
 		VALUES ('customer', $1, $1, 'active', 'shared')
@@ -29,10 +29,17 @@ func TestSocialIdentitySchema(t *testing.T) {
 	`, "social-"+suffix).Scan(&orgID); err != nil {
 		t.Fatalf("insert organization: %v", err)
 	}
+	if err := db.QueryRow(ctx, `
+		INSERT INTO organizations (type, slug, name, status, data_placement)
+		VALUES ('customer', $1, $1, 'active', 'shared')
+		RETURNING id
+	`, "social-other-"+suffix).Scan(&otherOrgID); err != nil {
+		t.Fatalf("insert other organization: %v", err)
+	}
 	t.Cleanup(func() {
 		c, cc := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cc()
-		_, _ = db.Exec(c, `DELETE FROM organizations WHERE id = $1`, orgID)
+		_, _ = db.Exec(c, `DELETE FROM organizations WHERE id = ANY($1::uuid[])`, []string{orgID, otherOrgID})
 		_, _ = db.Exec(c, `DELETE FROM users WHERE id = ANY($1::uuid[])`, []string{userID, otherUserID})
 	})
 	for i, dst := range []*string{&userID, &otherUserID} {
@@ -83,6 +90,31 @@ func TestSocialIdentitySchema(t *testing.T) {
 		}
 		if _, err := db.Exec(ctx, `UPDATE users SET referred_by_user_id = id WHERE id = $1`, userID); err == nil {
 			t.Fatal("self referral must be rejected")
+		}
+	})
+
+	t.Run("empty lookup context never exposes blank-email contacts", func(t *testing.T) {
+		blankID := insertContact(t, ctx, db, orgID, "Kosong", false, "")
+		spaceID := insertContact(t, ctx, db, orgID, "Spasi", false, "   ")
+		for _, orgCtx := range []string{"", otherOrgID} {
+			tx, err := db.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tx.Exec(ctx, `SELECT set_config('app.organization_id', $1, true)`, orgCtx); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := tx.Exec(ctx, `SELECT set_config('app.crm_contact_email_lookup', '', true)`); err != nil {
+				t.Fatal(err)
+			}
+			var n int
+			if err := tx.QueryRow(ctx, `SELECT count(*) FROM crm_contacts WHERE id = ANY($1::uuid[])`, []string{blankID, spaceID}).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			tx.Rollback(context.Background())
+			if n != 0 {
+				t.Fatalf("org context %q with empty lookup sees %d blank-email contacts, want 0", orgCtx, n)
+			}
 		}
 	})
 

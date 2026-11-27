@@ -118,6 +118,8 @@ CREATE INDEX IF NOT EXISTS idx_attribution_events_referrer_event
 -- contacts whose lower(btrim(email)) equals it become readable (SELECT only). Writes stay strictly
 -- organization-scoped: the restrictive boundary keeps WITH CHECK strict and the only permissive
 -- policy covering UPDATE/DELETE/INSERT is still organization_tenant_access.
+-- An empty/unset GUC (PostgreSQL returns '' after it was set once on a pooled connection) and blank
+-- contact emails never match: both are excluded explicitly.
 -- Policy names are kept so remove_organization_rls('crm_contacts') keeps working.
 DROP POLICY IF EXISTS organization_isolation_boundary ON crm_contacts;
 CREATE POLICY organization_isolation_boundary ON crm_contacts
@@ -127,7 +129,8 @@ CREATE POLICY organization_isolation_boundary ON crm_contacts
 		OR (
 			deleted_at IS NULL
 			AND email IS NOT NULL
-			AND lower(btrim(email)) = current_setting('app.crm_contact_email_lookup', true)
+			AND btrim(email) <> ''
+			AND lower(btrim(email)) = NULLIF(current_setting('app.crm_contact_email_lookup', true), '')
 		)
 	)
 	WITH CHECK (app_organization_matches(organization_id));
@@ -138,9 +141,10 @@ CREATE POLICY crm_contacts_email_lookup ON crm_contacts
 	USING (
 		deleted_at IS NULL
 		AND email IS NOT NULL
-		AND lower(btrim(email)) = current_setting('app.crm_contact_email_lookup', true)
+		AND btrim(email) <> ''
+			AND lower(btrim(email)) = NULLIF(current_setting('app.crm_contact_email_lookup', true), '')
 	);
 
 CREATE INDEX IF NOT EXISTS idx_crm_contacts_email_lookup
 	ON crm_contacts (lower(btrim(email)))
-	WHERE deleted_at IS NULL AND email IS NOT NULL;
+	WHERE deleted_at IS NULL AND email IS NOT NULL AND btrim(email) <> '';
