@@ -68,6 +68,32 @@ func (f *fakeSocialClaims) Revoke(_ context.Context, actor, linkID string, bySta
 	return nil
 }
 
+type fakeSocialStaffLinks struct {
+	requested []string
+	revoked   []string
+	err       error
+}
+
+func (f *fakeSocialStaffLinks) Request(_ context.Context, scope coretenant.Scope, actor, contactID, email string) (socialdomain.CustomerLink, error) {
+	if f.err != nil {
+		return socialdomain.CustomerLink{}, f.err
+	}
+	f.requested = append(f.requested, scope.OrganizationID()+"/"+actor+"/"+contactID+"/"+email)
+	return socialdomain.CustomerLink{ID: "link-1", UserID: "user-1", ContactID: contactID, Status: socialdomain.LinkStatusPendingUser, VerifiedVia: socialdomain.VerifiedViaStaff}, nil
+}
+
+func (f *fakeSocialStaffLinks) ListForContact(_ context.Context, scope coretenant.Scope, contactID string) ([]socialdomain.CustomerLink, error) {
+	return []socialdomain.CustomerLink{{ID: "link-1", UserID: "user-1", ContactID: contactID, Status: socialdomain.LinkStatusActive, VerifiedVia: socialdomain.VerifiedViaStaff}}, nil
+}
+
+func (f *fakeSocialStaffLinks) Revoke(_ context.Context, scope coretenant.Scope, actor, linkID string) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.revoked = append(f.revoked, scope.OrganizationID()+"/"+actor+"/"+linkID)
+	return nil
+}
+
 type fakeSocialInvites struct {
 	gotUser  socialservice.AuthUser
 	gotToken string
@@ -168,12 +194,13 @@ func TestSocialRoutesAreMounted(t *testing.T) {
 		t.Fatalf("customer relations: %d %s (user %q)", w.Code, w.Body, relations.gotUser)
 	}
 
+	const linkID = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
 	const claimBody = `{"organization_id":"0b6c3f0e-7a4e-4f3a-9a51-1f2d3c4b5a69","contact_id":"5a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"}`
 	for _, r := range []struct{ method, path, body string }{
 		{http.MethodGet, "/api/v1/social/me/customer-claims", ""},
 		{http.MethodPost, "/api/v1/social/me/customer-claims/accept", claimBody},
 		{http.MethodPost, "/api/v1/social/me/customer-claims/decline", claimBody},
-		{http.MethodDelete, "/api/v1/social/me/customer-links/link-1", ""},
+		{http.MethodDelete, "/api/v1/social/me/customer-links/" + linkID, ""},
 	} {
 		if w := do(r.method, r.path, r.body, "1"); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "EMAIL_NOT_VERIFIED") {
 			t.Fatalf("unverified %s %s: %d %s", r.method, r.path, w.Code, w.Body)
@@ -192,8 +219,12 @@ func TestSocialRoutesAreMounted(t *testing.T) {
 	if w := do(http.MethodPost, "/api/v1/social/me/customer-claims/decline", claimBody, "v1"); w.Code != http.StatusNoContent {
 		t.Fatalf("decline: %d %s", w.Code, w.Body)
 	}
-	if w := do(http.MethodDelete, "/api/v1/social/me/customer-links/link-1", "", "v1"); w.Code != http.StatusNoContent || claims.revoked != "user-v1/link-1" || claims.byStaff {
+	if w := do(http.MethodDelete, "/api/v1/social/me/customer-links/"+linkID, "", "v1"); w.Code != http.StatusNoContent || claims.revoked != "user-v1/"+linkID || claims.byStaff {
 		t.Fatalf("revoke: %d %s (%q, byStaff %v)", w.Code, w.Body, claims.revoked, claims.byStaff)
+	}
+
+	if w := do(http.MethodDelete, "/api/v1/social/me/customer-links/not-a-uuid", "", "v1"); w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "CUSTOMER_LINK_NOT_FOUND") {
+		t.Fatalf("revoke malformed id: %d %s", w.Code, w.Body)
 	}
 
 	// Invite acceptance is open to unverified accounts: the token proves the email.
@@ -229,7 +260,7 @@ func TestSocialCustomerInviteRoute(t *testing.T) {
 		c.Set(permissionmiddleware.UserIDContextKey, "staff-1")
 		c.Request = c.Request.WithContext(coretenant.WithContext(c.Request.Context(), tc))
 	})
-	socialhandler.NewTenantHandler(nil, invites, counter).RegisterRoutes(group, nil)
+	socialhandler.NewTenantHandler(nil, invites, nil, counter).RegisterRoutes(group, nil)
 	do := func(body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/app/social/customer-invites", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -260,5 +291,67 @@ func TestSocialCustomerInviteRoute(t *testing.T) {
 		if !strings.HasPrefix(k, "rl:social:invite:org:"+tc.OrganizationID()+":") {
 			t.Fatalf("rate limit key %q", k)
 		}
+	}
+}
+
+func TestSocialStaffCustomerLinkRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tc, err := coretenant.NewVerifiedContext(coretenant.VerifiedContextInput{
+		OrganizationID: "0b6c3f0e-7a4e-4f3a-9a51-1f2d3c4b5a69", OrganizationSlug: "isp",
+		OrganizationType: coretenant.OrganizationTypeCustomer, OrganizationStatus: coretenant.OrganizationStatusActive,
+		ResolutionSource: coretenant.ResolutionSourceInternal, DataPlacement: coretenant.DataPlacementShared,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staff := &fakeSocialStaffLinks{}
+	engine := gin.New()
+	group := engine.Group("/app/social", func(c *gin.Context) {
+		c.Set(permissionmiddleware.UserIDContextKey, "staff-1")
+		c.Request = c.Request.WithContext(coretenant.WithContext(c.Request.Context(), tc))
+	})
+	socialhandler.NewTenantHandler(nil, nil, staff, nil).RegisterRoutes(group, nil)
+	do := func(method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		return w
+	}
+	const contactID = "5a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+	const linkID = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+
+	for _, body := range []string{`{"contact_id":"x","user_email":"a@x.test"}`, `{"contact_id":"` + contactID + `","user_email":"nope"}`, `{"contact_id":"` + contactID + `"}`} {
+		if w := do(http.MethodPost, "/app/social/customer-links", body); w.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("invalid body %s: %d %s", body, w.Code, w.Body)
+		}
+	}
+	w := do(http.MethodPost, "/app/social/customer-links", `{"contact_id":"`+contactID+`","user_email":"a@x.test"}`)
+	if w.Code != http.StatusCreated || !strings.Contains(w.Body.String(), `"status":"pending_user"`) ||
+		len(staff.requested) != 1 || staff.requested[0] != tc.OrganizationID()+"/staff-1/"+contactID+"/a@x.test" {
+		t.Fatalf("request: %d %s (%v)", w.Code, w.Body, staff.requested)
+	}
+
+	if w := do(http.MethodGet, "/app/social/customer-links?contact_id=bad", ""); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("list malformed contact_id: %d %s", w.Code, w.Body)
+	}
+	if w := do(http.MethodGet, "/app/social/customer-links", ""); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("list missing contact_id: %d %s", w.Code, w.Body)
+	}
+	if w := do(http.MethodGet, "/app/social/customer-links?contact_id="+contactID, ""); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"id":"link-1"`) {
+		t.Fatalf("list: %d %s", w.Code, w.Body)
+	}
+
+	if w := do(http.MethodDelete, "/app/social/customer-links/not-a-uuid", ""); w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "CUSTOMER_LINK_NOT_FOUND") {
+		t.Fatalf("revoke malformed id: %d %s", w.Code, w.Body)
+	}
+	if w := do(http.MethodDelete, "/app/social/customer-links/"+linkID, ""); w.Code != http.StatusNoContent ||
+		len(staff.revoked) != 1 || staff.revoked[0] != tc.OrganizationID()+"/staff-1/"+linkID {
+		t.Fatalf("revoke: %d %s (%v)", w.Code, w.Body, staff.revoked)
+	}
+
+	staff.err = socialdomain.ErrUserNotFound
+	if w := do(http.MethodPost, "/app/social/customer-links", `{"contact_id":"`+contactID+`","user_email":"a@x.test"}`); w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "USER_NOT_FOUND") {
+		t.Fatalf("unknown user: %d %s", w.Code, w.Body)
 	}
 }

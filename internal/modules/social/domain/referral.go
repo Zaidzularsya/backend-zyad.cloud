@@ -19,7 +19,8 @@ var (
 	ErrReferralCodeTaken = errors.New("referral code already taken")
 	// ErrReferralCodeExhausted: every retry collided; practically unreachable with 32^8 codes.
 	ErrReferralCodeExhausted = errors.New("could not allocate a unique referral code")
-	// ErrUserNotFound: the user to attach a code to does not exist.
+	// ErrUserNotFound: the user does not exist (referral code owner, or the email staff
+	// tried to link has no account; staff should send a claim invite instead).
 	ErrUserNotFound = errors.New("user not found")
 )
 

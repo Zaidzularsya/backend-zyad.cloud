@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"zyad.cloud/internal/modules/social/domain"
@@ -40,13 +41,14 @@ func (f *fakeDirectory) IsClaimable(_ context.Context, orgID, contactID string) 
 }
 
 type fakeLinkStore struct {
-	links     []domain.CustomerLink
-	createErr error
-	created   []domain.CustomerLink
-	activated []string
-	declined  []string
-	revoked   []string
-	nextID    int
+	links       []domain.CustomerLink
+	createErr   error
+	created     []domain.CustomerLink
+	activated   []string
+	declined    []string
+	revoked     []string
+	nextID      int
+	requestedBy []string
 }
 
 func (f *fakeLinkStore) ListByUser(_ context.Context, userID string) ([]domain.CustomerLink, error) {
@@ -85,6 +87,31 @@ func (f *fakeLinkStore) CreateActive(_ context.Context, link domain.CustomerLink
 	f.created = append(f.created, link)
 	f.links = append(f.links, link)
 	return link, nil
+}
+
+func (f *fakeLinkStore) CreatePending(_ context.Context, link domain.CustomerLink, requestedBy string) (domain.CustomerLink, error) {
+	for _, l := range f.links {
+		if l.OrganizationID == link.OrganizationID && l.IsLive() && (l.ContactID == link.ContactID || l.UserID == link.UserID) {
+			return domain.CustomerLink{}, domain.ErrCustomerLinkExists
+		}
+	}
+	f.nextID++
+	link.ID = fmt.Sprintf("pending-%d", f.nextID)
+	link.Status = domain.LinkStatusPendingUser
+	link.VerifiedVia = domain.VerifiedViaStaff
+	f.requestedBy = append(f.requestedBy, requestedBy)
+	f.links = append(f.links, link)
+	return link, nil
+}
+
+func (f *fakeLinkStore) ListLiveByContact(_ context.Context, orgID, contactID string) ([]domain.CustomerLink, error) {
+	var out []domain.CustomerLink
+	for _, l := range f.links {
+		if l.OrganizationID == orgID && l.ContactID == contactID && l.IsLive() {
+			out = append(out, l)
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeLinkStore) ActivatePending(_ context.Context, linkID, _ string) (domain.CustomerLink, error) {

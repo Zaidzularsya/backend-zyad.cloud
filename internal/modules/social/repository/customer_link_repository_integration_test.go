@@ -159,3 +159,74 @@ func TestSettingsRepositoryUpsert(t *testing.T) {
 		}
 	}
 }
+
+// A staff request is stored as pending_user with requested_by and verified_via=staff,
+// occupies the live slot, is audited, and is listed only for its own organization.
+func TestCreatePendingStaffRequest(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repo := NewCustomerLinkRepository(db)
+
+	suffix := testutil.UniqueCode("pending")
+	var orgID, otherOrgID string
+	for i, dst := range []*string{&orgID, &otherOrgID} {
+		if err := db.QueryRow(ctx, `
+			INSERT INTO organizations (type, slug, name, status, data_placement)
+			VALUES ('customer', $1, 'Pending Test ISP', 'active', 'shared') RETURNING id::text`,
+			fmt.Sprintf("pending%d-%d", i, time.Now().UnixNano())).Scan(dst); err != nil {
+			t.Fatalf("insert org: %v", err)
+		}
+	}
+	var staffID, userID string
+	for i, dst := range []*string{&staffID, &userID} {
+		if err := db.QueryRow(ctx, `
+			INSERT INTO users (name, email, status) VALUES ('Pending Test', $1, 'active') RETURNING id::text`,
+			fmt.Sprintf("pending%d-%s@x.test", i, suffix)).Scan(dst); err != nil {
+			t.Fatalf("insert user: %v", err)
+		}
+	}
+	var contactID string
+	if err := db.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&contactID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		c, cc := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cc()
+		_, _ = db.Exec(c, `DELETE FROM audit_logs WHERE organization_id = ANY($1::uuid[])`, []string{orgID, otherOrgID})
+		_, _ = db.Exec(c, `DELETE FROM customer_links WHERE organization_id = ANY($1::uuid[])`, []string{orgID, otherOrgID})
+		_, _ = db.Exec(c, `DELETE FROM users WHERE id = ANY($1::uuid[])`, []string{staffID, userID})
+		_, _ = db.Exec(c, `DELETE FROM organizations WHERE id = ANY($1::uuid[])`, []string{orgID, otherOrgID})
+	})
+
+	link, err := repo.CreatePending(ctx, domain.CustomerLink{UserID: userID, OrganizationID: orgID, ContactID: contactID}, staffID)
+	if err != nil {
+		t.Fatalf("CreatePending: %v", err)
+	}
+	if link.Status != domain.LinkStatusPendingUser || link.VerifiedVia != domain.VerifiedViaStaff || link.ActivatedAt != nil {
+		t.Fatalf("link = %+v", link)
+	}
+	var requestedBy string
+	if err := db.QueryRow(ctx, `SELECT requested_by::text FROM customer_links WHERE id = $1::uuid`, link.ID).Scan(&requestedBy); err != nil || requestedBy != staffID {
+		t.Fatalf("requested_by = %q, %v", requestedBy, err)
+	}
+	var audits int
+	if err := db.QueryRow(ctx, `
+		SELECT count(*) FROM audit_logs
+		WHERE module = 'social' AND event = 'customer_link_requested' AND target_id = $1::uuid AND actor_user_id = $2::uuid`,
+		link.ID, staffID).Scan(&audits); err != nil || audits != 1 {
+		t.Fatalf("audit rows = %d, %v", audits, err)
+	}
+
+	if _, err := repo.CreatePending(ctx, domain.CustomerLink{UserID: userID, OrganizationID: orgID, ContactID: contactID}, staffID); !errors.Is(err, domain.ErrCustomerLinkExists) {
+		t.Fatalf("second pending: err = %v, want ErrCustomerLinkExists", err)
+	}
+
+	got, err := repo.ListLiveByContact(ctx, orgID, contactID)
+	if err != nil || len(got) != 1 || got[0].ID != link.ID {
+		t.Fatalf("list own org = %+v, %v", got, err)
+	}
+	if got, err := repo.ListLiveByContact(ctx, otherOrgID, contactID); err != nil || len(got) != 0 {
+		t.Fatalf("list other org = %+v, %v; want none", got, err)
+	}
+}

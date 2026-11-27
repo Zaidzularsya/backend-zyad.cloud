@@ -10119,7 +10119,8 @@ paths:
       description: >
         Ends the user's own live (`pending_user` or `active`) link; it becomes
         `revoked` and the contact can be claimed again. Audited as
-        `social.customer_link_revoked`.
+        `social.customer_link_revoked`. A malformed id returns `404
+        CUSTOMER_LINK_NOT_FOUND`.
       parameters:
         - name: id
           in: path
@@ -10213,6 +10214,172 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "429":
           description: Rate limited (`RATE_LIMITED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/app/social/customer-links:
+    post:
+      summary: Request to link a CRM contact to a registered user
+      operationId: requestSocialCustomerLink
+      tags:
+        - Social
+      security:
+        - BearerAuth: []
+      description: >
+        Staff trigger C. Finds the user registered with `user_email`
+        (case-insensitive, trimmed) and creates a `pending_user` link
+        (`verified_via=staff`, `requested_by` = caller). The user sees it in
+        `GET /social/me/customer-claims` as `kind=staff_request` and the link
+        becomes `active` only when the user accepts. The contact must belong
+        to the current tenant, not be deleted, be a customer, and have no live
+        link. Unknown email returns `404 USER_NOT_FOUND`: use
+        `POST /app/social/customer-invites` instead. Audited as
+        `social.customer_link_requested`. Permission: `contact.update`.
+        Tenant: customer or platform organization.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StaffCustomerLinkRequest"
+      responses:
+        "201":
+          description: Pending link created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffCustomerLinkEnvelope"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden (missing permission or tenant)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No user with that email (`USER_NOT_FOUND`), or contact not found in this tenant / not a customer (`CLAIM_NOT_AVAILABLE`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The contact or the user already has a live link in this organization (`CUSTOMER_LINK_EXISTS`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation error (`contact_id` not a UUID, invalid `user_email`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    get:
+      summary: List live links of a CRM contact
+      operationId: listSocialCustomerLinks
+      tags:
+        - Social
+      security:
+        - BearerAuth: []
+      description: >
+        Returns the `pending_user` and `active` links of the contact within the
+        current tenant only. Exposes the linked user id and nothing about the
+        user's other organizations. Permission: `contact.update`.
+      parameters:
+        - name: contact_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Live links (possibly empty)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffCustomerLinkListEnvelope"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden (missing permission or tenant)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: "`contact_id` missing or not a UUID"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/app/social/customer-links/{id}:
+    delete:
+      summary: Revoke a customer link of this tenant
+      operationId: revokeSocialCustomerLink
+      tags:
+        - Social
+      security:
+        - BearerAuth: []
+      description: >
+        Ends a live (`pending_user` or `active`) link that belongs to the
+        current organization; it becomes `revoked` and the contact can be
+        linked again. A link of another organization, an unknown id and a
+        malformed id all return `404 CUSTOMER_LINK_NOT_FOUND`. Audited as
+        `social.customer_link_revoked` with `by_staff=true`. Permission:
+        `contact.update`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Revoked
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden (missing permission or tenant)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Link not found in this tenant (`CUSTOMER_LINK_NOT_FOUND`)
           content:
             application/json:
               schema:
@@ -16607,6 +16774,67 @@ components:
           type: string
           format: date-time
           nullable: true
+    StaffCustomerLinkRequest:
+      type: object
+      required: [contact_id, user_email]
+      properties:
+        contact_id:
+          type: string
+          format: uuid
+        user_email:
+          type: string
+          format: email
+          maxLength: 254
+    StaffCustomerLink:
+      type: object
+      required: [id, user_id, contact_id, status, verified_via, created_at, activated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        contact_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending_user, active]
+        verified_via:
+          type: string
+          enum: [email, staff, invite]
+        created_at:
+          type: string
+          format: date-time
+        activated_at:
+          type: string
+          format: date-time
+          nullable: true
+    StaffCustomerLinkEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/StaffCustomerLink"
+    StaffCustomerLinkListEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/StaffCustomerLink"
     SocialTenantSettingsEnvelope:
       type: object
       required: [success, message, data]

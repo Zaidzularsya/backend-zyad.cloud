@@ -25,6 +25,13 @@ type TenantInvites interface {
 	Send(ctx context.Context, scope coretenant.Scope, actorUserID, contactID string) error
 }
 
+// TenantStaffLinks lets staff link CRM contacts to users and manage those links.
+type TenantStaffLinks interface {
+	Request(ctx context.Context, scope coretenant.Scope, actorUserID, contactID, userEmail string) (domain.CustomerLink, error)
+	ListForContact(ctx context.Context, scope coretenant.Scope, contactID string) ([]domain.CustomerLink, error)
+	Revoke(ctx context.Context, scope coretenant.Scope, actorUserID, linkID string) error
+}
+
 // Claim invites send email, so they are capped per organization.
 const (
 	inviteOrgLimit  = 30
@@ -36,11 +43,12 @@ const (
 type TenantHandler struct {
 	settings TenantSettings
 	invites  TenantInvites
+	staff    TenantStaffLinks
 	counter  middleware.RateCounter
 }
 
-func NewTenantHandler(settings TenantSettings, invites TenantInvites, counter middleware.RateCounter) *TenantHandler {
-	return &TenantHandler{settings: settings, invites: invites, counter: counter}
+func NewTenantHandler(settings TenantSettings, invites TenantInvites, staff TenantStaffLinks, counter middleware.RateCounter) *TenantHandler {
+	return &TenantHandler{settings: settings, invites: invites, staff: staff, counter: counter}
 }
 
 // RegisterRoutes mounts on /app/social (tenant middleware applied by the router).
@@ -57,6 +65,12 @@ func (h *TenantHandler) RegisterRoutes(router *gin.RouterGroup, p permissionmidd
 				return "unknown"
 			})
 		router.POST("/customer-invites", permissionmiddleware.RequireOrganizationOrGlobal(p, "contact.update"), perOrg, h.SendCustomerInvite)
+	}
+	if h.staff != nil {
+		update := permissionmiddleware.RequireOrganizationOrGlobal(p, "contact.update")
+		router.POST("/customer-links", update, h.RequestCustomerLink)
+		router.GET("/customer-links", update, h.ListCustomerLinks)
+		router.DELETE("/customer-links/:id", update, h.RevokeCustomerLink)
 	}
 }
 
@@ -122,4 +136,88 @@ func (h *TenantHandler) UpdateSettings(c *gin.Context) {
 		return
 	}
 	corehttp.OK(c, "success", tenantSettingsResponse{CustomerClaimAutoOffer: s.CustomerClaimAutoOffer, UpdatedAt: s.UpdatedAt})
+}
+
+type requestCustomerLinkRequest struct {
+	ContactID string `json:"contact_id" binding:"required,uuid"`
+	UserEmail string `json:"user_email" binding:"required,email,max=254"`
+}
+
+// staffCustomerLinkResponse is a tenant-side view of one link. It carries the
+// user id only: the user's other tenant relations are never exposed.
+type staffCustomerLinkResponse struct {
+	ID          string     `json:"id"`
+	UserID      string     `json:"user_id"`
+	ContactID   string     `json:"contact_id"`
+	Status      string     `json:"status"`
+	VerifiedVia string     `json:"verified_via"`
+	CreatedAt   time.Time  `json:"created_at"`
+	ActivatedAt *time.Time `json:"activated_at"`
+}
+
+func toStaffCustomerLinkResponse(l domain.CustomerLink) staffCustomerLinkResponse {
+	return staffCustomerLinkResponse{
+		ID: l.ID, UserID: l.UserID, ContactID: l.ContactID, Status: l.Status,
+		VerifiedVia: l.VerifiedVia, CreatedAt: l.CreatedAt, ActivatedAt: l.ActivatedAt,
+	}
+}
+
+func (h *TenantHandler) RequestCustomerLink(c *gin.Context) {
+	scope, err := coretenant.RequireScope(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, coreerrors.New("UNAUTHORIZED", "missing scope", http.StatusUnauthorized))
+		return
+	}
+	var req requestCustomerLinkRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		return
+	}
+	link, err := h.staff.Request(c.Request.Context(), scope, permissionmiddleware.UserID(c), req.ContactID, req.UserEmail)
+	if err != nil {
+		failSocial(c, "request customer link", err)
+		return
+	}
+	corehttp.Created(c, "success", toStaffCustomerLinkResponse(link))
+}
+
+func (h *TenantHandler) ListCustomerLinks(c *gin.Context) {
+	scope, err := coretenant.RequireScope(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, coreerrors.New("UNAUTHORIZED", "missing scope", http.StatusUnauthorized))
+		return
+	}
+	contactID := c.Query("contact_id")
+	if !isUUID(contactID) {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "contact_id must be a UUID", http.StatusUnprocessableEntity))
+		return
+	}
+	links, err := h.staff.ListForContact(c.Request.Context(), scope, contactID)
+	if err != nil {
+		failSocial(c, "list customer links", err)
+		return
+	}
+	out := make([]staffCustomerLinkResponse, 0, len(links))
+	for _, l := range links {
+		out = append(out, toStaffCustomerLinkResponse(l))
+	}
+	corehttp.OK(c, "success", out)
+}
+
+func (h *TenantHandler) RevokeCustomerLink(c *gin.Context) {
+	scope, err := coretenant.RequireScope(c.Request.Context())
+	if err != nil {
+		corehttp.Fail(c, coreerrors.New("UNAUTHORIZED", "missing scope", http.StatusUnauthorized))
+		return
+	}
+	linkID := c.Param("id")
+	if !isUUID(linkID) {
+		failSocial(c, "revoke customer link", domain.ErrCustomerLinkNotFound)
+		return
+	}
+	if err := h.staff.Revoke(c.Request.Context(), scope, permissionmiddleware.UserID(c), linkID); err != nil {
+		failSocial(c, "revoke customer link", err)
+		return
+	}
+	corehttp.NoContent(c)
 }

@@ -32,6 +32,7 @@ type socialModule struct {
 	Relations   *socialservice.RelationsService
 	Claims      *socialservice.ClaimService
 	Invites     *socialservice.InviteService
+	StaffLinks  *socialservice.StaffLinkService
 	Settings    *socialservice.SettingsService
 	Handlers    social.Handlers
 }
@@ -72,18 +73,42 @@ func buildSocial(db *database.Pool, redisClient *redis.Client, cfg socialConfig)
 		attribution,
 		cfg.ClaimURLBase,
 	)
+	staffLinks := socialservice.NewStaffLinkService(contacts, links, socialUserDirectory{db: db}, claims)
 	return socialModule{
 		Attribution: attribution,
 		Relations:   relations,
 		Claims:      claims,
 		Invites:     invites,
+		StaffLinks:  staffLinks,
 		Settings:    settings,
 		Handlers: social.Handlers{
 			Public: socialhandler.NewPublicHandler(attribution, redisClient),
 			Me:     socialhandler.NewMeHandler(attribution, relations, claims, invites),
-			Tenant: socialhandler.NewTenantHandler(settings, invites, redisClient),
+			Tenant: socialhandler.NewTenantHandler(settings, invites, staffLinks, redisClient),
 		},
 	}
+}
+
+// socialUserDirectory looks users up by email for staff link requests, without
+// importing the user module.
+type socialUserDirectory struct {
+	db *database.Pool
+}
+
+func (d socialUserDirectory) FindUserIDByEmail(ctx context.Context, email string) (string, bool, error) {
+	var id string
+	err := d.db.QueryRow(ctx, `
+		SELECT id::text FROM users
+		WHERE lower(btrim(email)) = lower(btrim($1)) AND deleted_at IS NULL
+		ORDER BY created_at, id
+		LIMIT 1`, email).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("find user by email: %w", err)
+	}
+	return id, true, nil
 }
 
 // socialInviteSender queues the claim invite email through the notification

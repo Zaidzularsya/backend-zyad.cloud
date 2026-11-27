@@ -22,6 +22,7 @@ const (
 // Audit events of the social module (audit_logs.module = 'social').
 const (
 	auditEventLinkActivated = "customer_link_activated"
+	auditEventLinkRequested = "customer_link_requested"
 	auditEventLinkRevoked   = "customer_link_revoked"
 	auditEventLinkDeclined  = "customer_link_declined"
 )
@@ -97,11 +98,28 @@ func (r *CustomerLinkRepository) CreateActive(ctx context.Context, link domain.C
 // insertActiveLink inserts an active link and its audit row inside tx. It is the
 // single path for new active links (email match and invite acceptance).
 func insertActiveLink(ctx context.Context, tx pgx.Tx, link domain.CustomerLink, auditExtra map[string]any) (domain.CustomerLink, error) {
+	return insertLiveLink(ctx, tx, link, domain.LinkStatusActive, "", auditEventLinkActivated, auditExtra)
+}
+
+// CreatePending inserts the pending_user link of a staff request (verified_via=staff,
+// requested_by=actor). The same unique indexes as active links apply.
+func (r *CustomerLinkRepository) CreatePending(ctx context.Context, link domain.CustomerLink, requestedBy string) (domain.CustomerLink, error) {
+	return r.inTx(ctx, func(tx pgx.Tx) (domain.CustomerLink, error) {
+		link.VerifiedVia = domain.VerifiedViaStaff
+		return insertLiveLink(ctx, tx, link, domain.LinkStatusPendingUser, requestedBy, auditEventLinkRequested,
+			map[string]any{"requested_by": requestedBy})
+	})
+}
+
+// insertLiveLink inserts a pending_user or active link plus its audit row inside tx.
+// Only active links get activated_at; requestedBy may be empty.
+func insertLiveLink(ctx context.Context, tx pgx.Tx, link domain.CustomerLink, status, requestedBy, auditEvent string, auditExtra map[string]any) (domain.CustomerLink, error) {
 	rows, err := tx.Query(ctx, `
-		INSERT INTO customer_links (user_id, organization_id, crm_contact_id, status, verified_via, activated_at)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, 'active', $4, now())
+		INSERT INTO customer_links (user_id, organization_id, crm_contact_id, status, verified_via, requested_by, activated_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, $4::text, $5, NULLIF($6, '')::uuid,
+			CASE WHEN $4::text = 'active' THEN now() END)
 		RETURNING `+customerLinkColumns,
-		link.UserID, link.OrganizationID, link.ContactID, link.VerifiedVia)
+		link.UserID, link.OrganizationID, link.ContactID, status, link.VerifiedVia, requestedBy)
 	if isLiveLinkConflict(err) {
 		return domain.CustomerLink{}, domain.ErrCustomerLinkExists
 	}
@@ -115,7 +133,35 @@ func insertActiveLink(ctx context.Context, tx pgx.Tx, link domain.CustomerLink, 
 	if err != nil {
 		return domain.CustomerLink{}, fmt.Errorf("insert customer link: %w", err)
 	}
-	return created, insertLinkAudit(ctx, tx, auditEventLinkActivated, created.UserID, created, auditExtra)
+	return created, insertLinkAudit(ctx, tx, auditEvent, requestedByOrUser(requestedBy, created.UserID), created, auditExtra)
+}
+
+// requestedByOrUser: the actor of the audit row is the staff member for a request,
+// otherwise the user who claimed.
+func requestedByOrUser(requestedBy, userID string) string {
+	if requestedBy != "" {
+		return requestedBy
+	}
+	return userID
+}
+
+// ListLiveByContact returns the pending_user/active links of one contact. The
+// table has no RLS (ruling R4), so the organization is filtered explicitly.
+func (r *CustomerLinkRepository) ListLiveByContact(ctx context.Context, organizationID, contactID string) ([]domain.CustomerLink, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT `+customerLinkColumns+`
+		FROM customer_links
+		WHERE organization_id = $1::uuid AND crm_contact_id = $2::uuid
+			AND status IN ('pending_user', 'active')
+		ORDER BY created_at, id`, organizationID, contactID)
+	if err != nil {
+		return nil, fmt.Errorf("list contact customer links: %w", err)
+	}
+	links, err := pgx.CollectRows(rows, scanCustomerLink)
+	if err != nil {
+		return nil, fmt.Errorf("scan contact customer links: %w", err)
+	}
+	return links, nil
 }
 
 func (r *CustomerLinkRepository) ActivatePending(ctx context.Context, linkID, userID string) (domain.CustomerLink, error) {

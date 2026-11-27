@@ -227,7 +227,12 @@ func (h *MeHandler) RevokeCustomerLink(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.claims.Revoke(c.Request.Context(), user.ID, c.Param("id"), false); err != nil {
+	linkID := c.Param("id")
+	if !isUUID(linkID) {
+		failSocial(c, "revoke customer link", domain.ErrCustomerLinkNotFound)
+		return
+	}
+	if err := h.claims.Revoke(c.Request.Context(), user.ID, linkID, false); err != nil {
 		failSocial(c, "revoke customer link", err)
 		return
 	}
