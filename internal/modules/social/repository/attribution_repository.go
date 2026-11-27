@@ -121,6 +121,26 @@ func (r *AttributionRepository) RecordSignupReferral(ctx context.Context, ref do
 	return true, nil
 }
 
+// RecordBecameCustomer writes one became_customer event for a referred user the
+// first time they become a customer; later claims do not count again. It reports
+// whether an event was written (false: no referrer, or already credited).
+func (r *AttributionRepository) RecordBecameCustomer(ctx context.Context, userID string) (bool, error) {
+	tag, err := r.db.Exec(ctx, `
+		INSERT INTO attribution_events (event, referral_code, referrer_user_id, subject_user_id)
+		SELECT $2, ref.referral_code, ref.id, u.id
+		FROM users u
+		JOIN users ref ON ref.id = u.referred_by_user_id
+		WHERE u.id = $1::uuid AND ref.referral_code IS NOT NULL
+			AND NOT EXISTS (
+				SELECT 1 FROM attribution_events e
+				WHERE e.subject_user_id = u.id AND e.event = $2
+			)`, userID, domain.EventBecameCustomer)
+	if err != nil {
+		return false, fmt.Errorf("insert became_customer event: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 func (r *AttributionRepository) CountEvents(ctx context.Context, referrerUserID string) (domain.EventCounts, error) {
 	var counts domain.EventCounts
 	err := r.db.QueryRow(ctx, `

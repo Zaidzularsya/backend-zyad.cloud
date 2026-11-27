@@ -11,6 +11,7 @@ import (
 	"zyad.cloud/internal/core/middleware"
 	coretenant "zyad.cloud/internal/core/tenant"
 	"zyad.cloud/internal/modules/social"
+	socialdomain "zyad.cloud/internal/modules/social/domain"
 	socialhandler "zyad.cloud/internal/modules/social/handler"
 	socialservice "zyad.cloud/internal/modules/social/service"
 )
@@ -39,10 +40,39 @@ func (f *fakeSocialRelations) ForUser(_ context.Context, userID string) ([]socia
 	return []socialservice.CustomerRelation{{OrganizationID: "org-1", OrganizationName: "ISP", Source: "claim", CustomerLinkID: "link-1"}}, nil
 }
 
+type fakeSocialClaims struct {
+	gotUser   socialservice.AuthUser
+	revoked   string
+	byStaff   bool
+	acceptErr error
+}
+
+func (f *fakeSocialClaims) Offers(_ context.Context, user socialservice.AuthUser) ([]socialservice.ClaimOffer, error) {
+	f.gotUser = user
+	return []socialservice.ClaimOffer{{OrganizationID: "org-1", OrganizationName: "ISP", ContactID: "c-1", ContactName: "Budi", Kind: "email_match"}}, nil
+}
+
+func (f *fakeSocialClaims) Accept(_ context.Context, user socialservice.AuthUser, orgID, contactID string) (socialdomain.CustomerLink, error) {
+	return socialdomain.CustomerLink{}, f.acceptErr
+}
+
+func (f *fakeSocialClaims) Decline(context.Context, socialservice.AuthUser, string, string) error {
+	return nil
+}
+
+func (f *fakeSocialClaims) Revoke(_ context.Context, actor, linkID string, byStaff bool) error {
+	f.revoked, f.byStaff = actor+"/"+linkID, byStaff
+	return nil
+}
+
+// fakeSocialAuthenticator: tokens starting with "v" belong to users with a verified email.
 type fakeSocialAuthenticator struct{}
 
 func (fakeSocialAuthenticator) AuthenticateAccessToken(_ context.Context, token string) (middleware.AuthenticatedUser, error) {
-	return middleware.AuthenticatedUser{ID: "user-" + token, SessionID: "session-" + token}, nil
+	return middleware.AuthenticatedUser{
+		ID: "user-" + token, SessionID: "session-" + token,
+		Email: token + "@x.test", EmailVerified: strings.HasPrefix(token, "v"),
+	}, nil
 }
 
 // noOrganizationResolver: a social-only user has no workspace; /social/me must still work.
@@ -55,6 +85,7 @@ func (noOrganizationResolver) ResolveAuthenticatedOrganization(context.Context, 
 func TestSocialRoutesAreMounted(t *testing.T) {
 	attribution := &fakeSocialAttribution{}
 	relations := &fakeSocialRelations{}
+	claims := &fakeSocialClaims{acceptErr: socialdomain.ErrCustomerLinkExists}
 	counter := &fakeMikrotikCounter{counts: map[string]int64{}}
 	router, err := newRouter(Dependencies{
 		Config:               config.Config{App: config.AppConfig{Env: "test"}},
@@ -62,7 +93,7 @@ func TestSocialRoutesAreMounted(t *testing.T) {
 		OrganizationResolver: noOrganizationResolver{},
 		SocialHandlers: social.Handlers{
 			Public: socialhandler.NewPublicHandler(attribution, counter),
-			Me:     socialhandler.NewMeHandler(attribution, relations),
+			Me:     socialhandler.NewMeHandler(attribution, relations, claims),
 		},
 	})
 	if err != nil {
@@ -112,5 +143,33 @@ func TestSocialRoutesAreMounted(t *testing.T) {
 	w := do(http.MethodGet, "/api/v1/social/me/customer-relations", "", "1")
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"customer_link_id":"link-1"`) || relations.gotUser != "user-1" {
 		t.Fatalf("customer relations: %d %s (user %q)", w.Code, w.Body, relations.gotUser)
+	}
+
+	const claimBody = `{"organization_id":"0b6c3f0e-7a4e-4f3a-9a51-1f2d3c4b5a69","contact_id":"5a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"}`
+	for _, r := range []struct{ method, path, body string }{
+		{http.MethodGet, "/api/v1/social/me/customer-claims", ""},
+		{http.MethodPost, "/api/v1/social/me/customer-claims/accept", claimBody},
+		{http.MethodPost, "/api/v1/social/me/customer-claims/decline", claimBody},
+		{http.MethodDelete, "/api/v1/social/me/customer-links/link-1", ""},
+	} {
+		if w := do(r.method, r.path, r.body, "1"); w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "EMAIL_NOT_VERIFIED") {
+			t.Fatalf("unverified %s %s: %d %s", r.method, r.path, w.Code, w.Body)
+		}
+	}
+	w = do(http.MethodGet, "/api/v1/social/me/customer-claims", "", "v1")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"kind":"email_match"`) || claims.gotUser.Email != "v1@x.test" || !claims.gotUser.EmailVerified {
+		t.Fatalf("customer claims: %d %s (user %+v)", w.Code, w.Body, claims.gotUser)
+	}
+	if w := do(http.MethodPost, "/api/v1/social/me/customer-claims/accept", claimBody, "v1"); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "CUSTOMER_LINK_EXISTS") {
+		t.Fatalf("accept conflict: %d %s", w.Code, w.Body)
+	}
+	if w := do(http.MethodPost, "/api/v1/social/me/customer-claims/accept", `{"organization_id":"x"}`, "v1"); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("accept invalid body: %d %s", w.Code, w.Body)
+	}
+	if w := do(http.MethodPost, "/api/v1/social/me/customer-claims/decline", claimBody, "v1"); w.Code != http.StatusNoContent {
+		t.Fatalf("decline: %d %s", w.Code, w.Body)
+	}
+	if w := do(http.MethodDelete, "/api/v1/social/me/customer-links/link-1", "", "v1"); w.Code != http.StatusNoContent || claims.revoked != "user-v1/link-1" || claims.byStaff {
+		t.Fatalf("revoke: %d %s (%q, byStaff %v)", w.Code, w.Body, claims.revoked, claims.byStaff)
 	}
 }

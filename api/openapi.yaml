@@ -9881,6 +9881,297 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/social/me/customer-claims:
+    get:
+      summary: Customer claim offers for the signed-in user
+      operationId: listMyCustomerClaims
+      tags:
+        - Social
+      security:
+        - BearerAuth: []
+      description: >
+        No tenant context required; requires a verified email (`403
+        EMAIL_NOT_VERIFIED` otherwise). `email_match`: a non-deleted CRM
+        contact in an active organization whose `lower(btrim(email))` equals
+        the user's verified email and who is a customer there (has a billing
+        account, or a confirmed/paired PPPoE onboarding). Left out when the
+        tenant turned `customer_claim_auto_offer` off, the contact already has
+        a live link, the user already has a live link in that organization, or
+        the user declined that contact. `staff_request`: a `pending_user` link
+        created by tenant staff for this user (`link_id` set); still offered
+        when auto-offer is off.
+      responses:
+        "200":
+          description: Claim offers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerClaimOffersEnvelope"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Email not verified (`EMAIL_NOT_VERIFIED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/social/me/customer-claims/accept:
+    post:
+      summary: Accept a customer claim offer
+      operationId: acceptMyCustomerClaim
+      tags:
+        - Social
+      security:
+        - BearerAuth: []
+      description: >
+        Re-runs every check of the offer list. A staff request becomes
+        `active` with `verified_via=staff`; an email match creates an `active`
+        link with `verified_via=email`. Audited as
+        `social.customer_link_activated`. If the user was referred, the
+        referrer is credited one `became_customer` attribution event (first
+        claim only, best-effort).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerClaimRequest"
+      responses:
+        "200":
+          description: Active customer link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CustomerLinkEnvelope"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Email not verified (`EMAIL_NOT_VERIFIED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Offer no longer available (`CLAIM_NOT_AVAILABLE`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The contact, or the user in that organization, already has a live link (`CUSTOMER_LINK_EXISTS`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/social/me/customer-claims/decline:
+    post:
+      summary: Decline a customer claim offer
+      operationId: declineMyCustomerClaim
+      tags:
+        - Social
+      security:
+        - BearerAuth: []
+      description: >
+        A staff request becomes `declined`; an email match is remembered as
+        declined and never offered again. Idempotent for an already declined
+        contact. Audited as `social.customer_link_declined`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CustomerClaimRequest"
+      responses:
+        "204":
+          description: Declined
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Email not verified (`EMAIL_NOT_VERIFIED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Offer not available (`CLAIM_NOT_AVAILABLE`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/social/me/customer-links/{id}:
+    delete:
+      summary: Revoke own customer link
+      operationId: revokeMyCustomerLink
+      tags:
+        - Social
+      security:
+        - BearerAuth: []
+      description: >
+        Ends the user's own live (`pending_user` or `active`) link; it becomes
+        `revoked` and the contact can be claimed again. Audited as
+        `social.customer_link_revoked`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Revoked
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Email not verified (`EMAIL_NOT_VERIFIED`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No live link of the user with that id (`CUSTOMER_LINK_NOT_FOUND`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/app/social/settings:
+    get:
+      summary: Get social settings of the tenant
+      operationId: getSocialTenantSettings
+      tags:
+        - Social
+      security:
+        - BearerAuth: []
+      description: >
+        Defaults when never saved: `customer_claim_auto_offer=true`,
+        `updated_at=null`. Permission: `lead.read` (same as CRM settings).
+        Tenant: customer or platform organization; no entitlement required.
+      responses:
+        "200":
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SocialTenantSettingsEnvelope"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden (missing permission or tenant)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      summary: Update social settings of the tenant
+      operationId: updateSocialTenantSettings
+      tags:
+        - Social
+      security:
+        - BearerAuth: []
+      description: >
+        `customer_claim_auto_offer=false` stops offering this tenant's CRM
+        contacts to users by email match (staff requests are unaffected;
+        existing links stay). Permission: `crm_settings.update`. Tenant:
+        customer or platform organization; no entitlement required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SocialTenantSettingsRequest"
+      responses:
+        "200":
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SocialTenantSettingsEnvelope"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden (missing permission or tenant)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/public/invoices/{token}:
     get:
       summary: Public invoice view for a customer link
@@ -16083,6 +16374,115 @@ components:
           type: string
           format: uuid
           description: Only for `source=claim`.
+    CustomerClaimOffersEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+        data:
+          type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/CustomerClaimOffer"
+    CustomerClaimOffer:
+      type: object
+      required: [organization_id, organization_name, contact_id, contact_name, kind]
+      properties:
+        organization_id:
+          type: string
+          format: uuid
+        organization_name:
+          type: string
+        contact_id:
+          type: string
+          format: uuid
+        contact_name:
+          type: string
+        kind:
+          type: string
+          enum: [email_match, staff_request]
+        link_id:
+          type: string
+          format: uuid
+          description: Only for `kind=staff_request`.
+    CustomerClaimRequest:
+      type: object
+      required: [organization_id, contact_id]
+      properties:
+        organization_id:
+          type: string
+          format: uuid
+        contact_id:
+          type: string
+          format: uuid
+    CustomerLinkEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/CustomerLink"
+    CustomerLink:
+      type: object
+      required: [id, organization_id, contact_id, status, verified_via, activated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        organization_id:
+          type: string
+          format: uuid
+        contact_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [active]
+        verified_via:
+          type: string
+          enum: [email, staff]
+        activated_at:
+          type: string
+          format: date-time
+          nullable: true
+    SocialTenantSettingsEnvelope:
+      type: object
+      required: [success, message, data]
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+        data:
+          $ref: "#/components/schemas/SocialTenantSettings"
+    SocialTenantSettings:
+      type: object
+      required: [customer_claim_auto_offer, updated_at]
+      properties:
+        customer_claim_auto_offer:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+    SocialTenantSettingsRequest:
+      type: object
+      required: [customer_claim_auto_offer]
+      properties:
+        customer_claim_auto_offer:
+          type: boolean
     RegisterRequest:
       type: object
       required:

@@ -10,13 +10,33 @@ import (
 	coreerrors "zyad.cloud/internal/core/errors"
 	corehttp "zyad.cloud/internal/core/http"
 	"zyad.cloud/internal/core/middleware"
+	"zyad.cloud/internal/modules/social/domain"
 )
+
+// domainErrors maps social sentinel errors to their HTTP contract.
+var domainErrors = []struct {
+	err    error
+	code   string
+	msg    string
+	status int
+}{
+	{domain.ErrClaimNotAvailable, "CLAIM_NOT_AVAILABLE", "Klaim pelanggan tidak tersedia.", http.StatusNotFound},
+	{domain.ErrCustomerLinkExists, "CUSTOMER_LINK_EXISTS", "Kontak ini sudah tertaut ke akun.", http.StatusConflict},
+	{domain.ErrCustomerLinkNotFound, "CUSTOMER_LINK_NOT_FOUND", "Tautan pelanggan tidak ditemukan.", http.StatusNotFound},
+	{domain.ErrEmailNotVerified, "EMAIL_NOT_VERIFIED", "Verifikasi email Anda terlebih dahulu.", http.StatusForbidden},
+}
 
 func failSocial(c *gin.Context, op string, err error) {
 	var appErr *coreerrors.AppError
 	if errors.As(err, &appErr) {
 		corehttp.Fail(c, appErr)
 		return
+	}
+	for _, d := range domainErrors {
+		if errors.Is(err, d.err) {
+			corehttp.Fail(c, coreerrors.New(d.code, d.msg, d.status))
+			return
+		}
 	}
 	slog.ErrorContext(c.Request.Context(), "social request failed", "op", op, "error", err)
 	corehttp.Fail(c, coreerrors.New("INTERNAL_ERROR", "internal server error", http.StatusInternalServerError))

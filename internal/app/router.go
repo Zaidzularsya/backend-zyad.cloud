@@ -368,6 +368,17 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		}
 	}
 
+	// Social tenant settings: same tenant rules as CRM, no entitlement (the
+	// opt-out must stay reachable for every tenant whose contacts can be claimed).
+	if deps.SocialHandlers.Tenant != nil {
+		socialGroup := protected.Group("/app/social")
+		socialGroup.Use(
+			middleware.RequireActiveTenant(),
+			middleware.RequireCustomerOrPlatformTenant(),
+		)
+		deps.SocialHandlers.Tenant.RegisterRoutes(socialGroup, deps.PermissionChecker)
+	}
+
 	registerMikrotikRoutes(protected, deps)
 
 	// Katalog produk tenant (dipakai quotation CRM dan invoice receivable). Aturan tenant sama

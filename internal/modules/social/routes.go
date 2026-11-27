@@ -10,6 +10,8 @@ import (
 type Handlers struct {
 	Public *handler.PublicHandler
 	Me     *handler.MeHandler
+	// Tenant is mounted by the router on /app/social with tenant middleware.
+	Tenant *handler.TenantHandler
 }
 
 // RegisterRoutes mounts public routes on the plain api group and /social/me/* on

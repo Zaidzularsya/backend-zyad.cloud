@@ -32,6 +32,9 @@ type AttributionStore interface {
 	// whether the referrer was set.
 	RecordSignupReferral(ctx context.Context, referral domain.SignupReferral) (bool, error)
 	CountEvents(ctx context.Context, referrerUserID string) (domain.EventCounts, error)
+	// RecordBecameCustomer writes the became_customer event of a referred user
+	// once; it reports whether an event was written.
+	RecordBecameCustomer(ctx context.Context, userID string) (bool, error)
 }
 
 // VisitInput is a landing visit through a referral link.
@@ -145,6 +148,16 @@ func (s *AttributionService) RecordSignup(ctx context.Context, userID string, in
 		Channel:        domain.NormalizeChannel(in.Channel),
 		PostID:         domain.NormalizePostID(in.PostID),
 	})
+	return err
+}
+
+// RecordBecameCustomer credits the user's referrer (if any) the first time the
+// user becomes a customer of some organization.
+func (s *AttributionService) RecordBecameCustomer(ctx context.Context, userID string) error {
+	if strings.TrimSpace(userID) == "" {
+		return nil
+	}
+	_, err := s.store.RecordBecameCustomer(ctx, userID)
 	return err
 }
 

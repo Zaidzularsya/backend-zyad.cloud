@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -25,25 +26,38 @@ import (
 type socialModule struct {
 	Attribution *socialservice.AttributionService
 	Relations   *socialservice.RelationsService
+	Claims      *socialservice.ClaimService
+	Settings    *socialservice.SettingsService
 	Handlers    social.Handlers
 }
 
 func buildSocial(db *database.Pool, redisClient *redis.Client, shareURLBase string) socialModule {
 	attribution := socialservice.NewAttributionService(socialrepo.NewAttributionRepository(db), shareURLBase)
+	tenants := socialTenantScope{
+		orgs: organizationrepo.NewOrganizationRepository(db),
+		tx:   database.NewSharedTenantTransactor(db),
+	}
 	relations := socialservice.NewRelationsService(
 		socialCheckoutRelations{db: db},
 		socialClaimedLinks{db: db},
-		socialContactStatus{
-			orgs: organizationrepo.NewOrganizationRepository(db),
-			tx:   database.NewSharedTenantTransactor(db),
-		},
+		socialContactStatus{tenants: tenants},
+	)
+	settings := socialservice.NewSettingsService(socialrepo.NewSettingsRepository(db))
+	claims := socialservice.NewClaimService(
+		socialContactDirectory{db: db, tenants: tenants},
+		socialrepo.NewCustomerLinkRepository(db),
+		settings,
+		attribution,
 	)
 	return socialModule{
 		Attribution: attribution,
 		Relations:   relations,
+		Claims:      claims,
+		Settings:    settings,
 		Handlers: social.Handlers{
 			Public: socialhandler.NewPublicHandler(attribution, redisClient),
-			Me:     socialhandler.NewMeHandler(attribution, relations),
+			Me:     socialhandler.NewMeHandler(attribution, relations, claims),
+			Tenant: socialhandler.NewTenantHandler(settings),
 		},
 	}
 }
@@ -160,28 +174,43 @@ func (s socialClaimedLinks) ClaimedLinks(ctx context.Context, userID string) ([]
 	return links, nil
 }
 
-// socialContactStatus checks a CRM contact inside its own tenant transaction
-// (crm_contacts is FORCE RLS). The tenant context is internal: built from the
-// organization row, not from any request input.
-type socialContactStatus struct {
+// socialTenantScope opens a transaction inside one organization's RLS scope for
+// cross-tenant reads (crm_contacts, receivable_accounts and
+// mikrotik_secret_onboardings are FORCE RLS). The tenant context is internal:
+// built from the organization row, never from request input.
+type socialTenantScope struct {
 	orgs *organizationrepo.OrganizationRepository
 	tx   *database.TenantTransactor
 }
 
-func (s socialContactStatus) ContactActive(ctx context.Context, organizationID, contactID string) (bool, error) {
+// begin returns found=false when the organization does not exist (or is archived).
+func (s socialTenantScope) begin(ctx context.Context, organizationID string) (pgx.Tx, model.Organization, bool, error) {
 	org, err := s.orgs.FindByID(ctx, organizationID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
+		return nil, model.Organization{}, false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("load organization: %w", err)
+		return nil, model.Organization{}, false, fmt.Errorf("load organization: %w", err)
 	}
 	tc, err := internalTenantContext(org)
 	if err != nil {
-		return false, err
+		return nil, model.Organization{}, false, err
 	}
 	tx, err := s.tx.BeginForTenant(ctx, tc)
 	if err != nil {
+		return nil, model.Organization{}, false, err
+	}
+	return tx, org, true, nil
+}
+
+// socialContactStatus checks a CRM contact inside its own tenant transaction.
+type socialContactStatus struct {
+	tenants socialTenantScope
+}
+
+func (s socialContactStatus) ContactActive(ctx context.Context, organizationID, contactID string) (bool, error) {
+	tx, _, found, err := s.tenants.begin(ctx, organizationID)
+	if err != nil || !found {
 		return false, err
 	}
 	defer tx.Rollback(context.Background())
@@ -196,6 +225,113 @@ func (s socialContactStatus) ContactActive(ctx context.Context, organizationID, 
 		return false, fmt.Errorf("check crm contact: %w", err)
 	}
 	return active, nil
+}
+
+// socialContactDirectory implements socialservice.ContactDirectory.
+//
+// Candidates come from the narrow cross-org email lookup on crm_contacts
+// (app.crm_contact_email_lookup, migration 000189: SELECT only, non-deleted
+// contacts with exactly that normalized email). Each candidate is then
+// re-checked inside its own organization's tenant transaction, where the
+// customer evidence lives: an undeleted receivable account sourced from the
+// contact, or a MikroTik secret onboarding confirmed/paired to it.
+type socialContactDirectory struct {
+	db      *database.Pool
+	tenants socialTenantScope
+}
+
+type socialContactCandidate struct {
+	organizationID string
+	contactID      string
+}
+
+func (d socialContactDirectory) FindClaimableByEmail(ctx context.Context, email string) ([]socialservice.ClaimableContact, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return nil, nil
+	}
+	candidates, err := d.emailCandidates(ctx, email)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]socialservice.ClaimableContact, 0, len(candidates))
+	for _, cand := range candidates {
+		contact, ok, err := d.IsClaimable(ctx, cand.organizationID, cand.contactID)
+		if err != nil {
+			return nil, err
+		}
+		if ok && strings.ToLower(strings.TrimSpace(contact.Email)) == email {
+			out = append(out, contact)
+		}
+	}
+	return out, nil
+}
+
+func (d socialContactDirectory) emailCandidates(ctx context.Context, email string) ([]socialContactCandidate, error) {
+	tx, err := d.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(context.Background())
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.crm_contact_email_lookup', $1, true)", email); err != nil {
+		return nil, fmt.Errorf("set crm contact email lookup: %w", err)
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT c.organization_id::text, c.id::text
+		FROM crm_contacts c
+		JOIN organizations o ON o.id = c.organization_id AND o.deleted_at IS NULL AND o.status = 'active'
+		WHERE c.deleted_at IS NULL AND lower(btrim(c.email)) = $1
+		ORDER BY o.name, c.created_at, c.id`, email)
+	if err != nil {
+		return nil, fmt.Errorf("lookup crm contacts by email: %w", err)
+	}
+	candidates, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (socialContactCandidate, error) {
+		var c socialContactCandidate
+		err := row.Scan(&c.organizationID, &c.contactID)
+		return c, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("scan crm contact candidates: %w", err)
+	}
+	return candidates, nil
+}
+
+func (d socialContactDirectory) IsClaimable(ctx context.Context, organizationID, contactID string) (socialservice.ClaimableContact, bool, error) {
+	tx, org, found, err := d.tenants.begin(ctx, organizationID)
+	if err != nil || !found {
+		return socialservice.ClaimableContact{}, false, err
+	}
+	defer tx.Rollback(context.Background())
+	if org.Status != coretenant.OrganizationStatusActive {
+		return socialservice.ClaimableContact{}, false, nil
+	}
+
+	contact := socialservice.ClaimableContact{OrganizationID: org.ID, OrganizationName: org.Name, ContactID: contactID}
+	var customer bool
+	err = tx.QueryRow(ctx, `
+		SELECT btrim(c.first_name || ' ' || COALESCE(c.last_name, '')), COALESCE(c.email, ''),
+			EXISTS (
+				SELECT 1 FROM receivable_accounts a
+				WHERE a.organization_id = c.organization_id AND a.source_type = 'crm_contact'
+					AND a.source_id = c.id AND a.deleted_at IS NULL
+			) OR EXISTS (
+				SELECT 1 FROM mikrotik_secret_onboardings m
+				WHERE m.organization_id = c.organization_id AND m.contact_id = c.id
+					AND m.stage IN ('confirmed', 'paired')
+			)
+		FROM crm_contacts c
+		WHERE c.id = $1::uuid AND c.organization_id = $2::uuid AND c.deleted_at IS NULL`,
+		contactID, organizationID).Scan(&contact.ContactName, &contact.Email, &customer)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return socialservice.ClaimableContact{}, false, nil
+	}
+	if err != nil {
+		return socialservice.ClaimableContact{}, false, fmt.Errorf("check claimable crm contact: %w", err)
+	}
+	if !customer {
+		return socialservice.ClaimableContact{}, false, nil
+	}
+	return contact, true, nil
 }
 
 func internalTenantContext(org model.Organization) (coretenant.Context, error) {

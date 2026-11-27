@@ -2,10 +2,15 @@ package handler
 
 import (
 	"context"
+	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
+	coreerrors "zyad.cloud/internal/core/errors"
 	corehttp "zyad.cloud/internal/core/http"
+	"zyad.cloud/internal/core/middleware"
+	"zyad.cloud/internal/modules/social/domain"
 	"zyad.cloud/internal/modules/social/service"
 )
 
@@ -17,15 +22,23 @@ type MeRelations interface {
 	ForUser(ctx context.Context, userID string) ([]service.CustomerRelation, error)
 }
 
+type MeClaims interface {
+	Offers(ctx context.Context, user service.AuthUser) ([]service.ClaimOffer, error)
+	Accept(ctx context.Context, user service.AuthUser, organizationID, contactID string) (domain.CustomerLink, error)
+	Decline(ctx context.Context, user service.AuthUser, organizationID, contactID string) error
+	Revoke(ctx context.Context, actorUserID, linkID string, byStaff bool) error
+}
+
 // MeHandler serves the signed-in user's own social data. It needs no tenant
 // context: everything is keyed by the authenticated user.
 type MeHandler struct {
 	attribution MeAttribution
 	relations   MeRelations
+	claims      MeClaims
 }
 
-func NewMeHandler(attribution MeAttribution, relations MeRelations) *MeHandler {
-	return &MeHandler{attribution: attribution, relations: relations}
+func NewMeHandler(attribution MeAttribution, relations MeRelations, claims MeClaims) *MeHandler {
+	return &MeHandler{attribution: attribution, relations: relations, claims: claims}
 }
 
 // RegisterRoutes mounts on the protected group.
@@ -33,6 +46,13 @@ func (h *MeHandler) RegisterRoutes(protected *gin.RouterGroup) {
 	group := protected.Group("/social/me")
 	group.GET("/attribution", h.Attribution)
 	group.GET("/customer-relations", h.CustomerRelations)
+	if h.claims != nil {
+		verified := middleware.RequireVerifiedEmail()
+		group.GET("/customer-claims", verified, h.CustomerClaims)
+		group.POST("/customer-claims/accept", verified, h.AcceptCustomerClaim)
+		group.POST("/customer-claims/decline", verified, h.DeclineCustomerClaim)
+		group.DELETE("/customer-links/:id", verified, h.RevokeCustomerLink)
+	}
 }
 
 type attributionSummaryResponse struct {
@@ -82,4 +102,108 @@ func (h *MeHandler) CustomerRelations(c *gin.Context) {
 		})
 	}
 	corehttp.OK(c, "success", gin.H{"items": out})
+}
+
+type customerClaimOfferResponse struct {
+	OrganizationID   string `json:"organization_id"`
+	OrganizationName string `json:"organization_name"`
+	ContactID        string `json:"contact_id"`
+	ContactName      string `json:"contact_name"`
+	Kind             string `json:"kind"`
+	LinkID           string `json:"link_id,omitempty"`
+}
+
+type customerClaimRequest struct {
+	OrganizationID string `json:"organization_id" binding:"required,uuid"`
+	ContactID      string `json:"contact_id" binding:"required,uuid"`
+}
+
+type customerLinkResponse struct {
+	ID             string     `json:"id"`
+	OrganizationID string     `json:"organization_id"`
+	ContactID      string     `json:"contact_id"`
+	Status         string     `json:"status"`
+	VerifiedVia    string     `json:"verified_via"`
+	ActivatedAt    *time.Time `json:"activated_at"`
+}
+
+func authUser(user middleware.AuthenticatedUser) service.AuthUser {
+	return service.AuthUser{ID: user.ID, Email: user.Email, EmailVerified: user.EmailVerified}
+}
+
+func (h *MeHandler) CustomerClaims(c *gin.Context) {
+	user, ok := requireUser(c)
+	if !ok {
+		return
+	}
+	offers, err := h.claims.Offers(c.Request.Context(), authUser(user))
+	if err != nil {
+		failSocial(c, "customer claim offers", err)
+		return
+	}
+	out := make([]customerClaimOfferResponse, 0, len(offers))
+	for _, o := range offers {
+		out = append(out, customerClaimOfferResponse{
+			OrganizationID: o.OrganizationID, OrganizationName: o.OrganizationName,
+			ContactID: o.ContactID, ContactName: o.ContactName, Kind: o.Kind, LinkID: o.LinkID,
+		})
+	}
+	corehttp.OK(c, "success", gin.H{"items": out})
+}
+
+func (h *MeHandler) AcceptCustomerClaim(c *gin.Context) {
+	user, ok := requireUser(c)
+	if !ok {
+		return
+	}
+	req, ok := bindClaimRequest(c)
+	if !ok {
+		return
+	}
+	link, err := h.claims.Accept(c.Request.Context(), authUser(user), req.OrganizationID, req.ContactID)
+	if err != nil {
+		failSocial(c, "accept customer claim", err)
+		return
+	}
+	corehttp.OK(c, "success", customerLinkResponse{
+		ID: link.ID, OrganizationID: link.OrganizationID, ContactID: link.ContactID,
+		Status: link.Status, VerifiedVia: link.VerifiedVia, ActivatedAt: link.ActivatedAt,
+	})
+}
+
+func (h *MeHandler) DeclineCustomerClaim(c *gin.Context) {
+	user, ok := requireUser(c)
+	if !ok {
+		return
+	}
+	req, ok := bindClaimRequest(c)
+	if !ok {
+		return
+	}
+	if err := h.claims.Decline(c.Request.Context(), authUser(user), req.OrganizationID, req.ContactID); err != nil {
+		failSocial(c, "decline customer claim", err)
+		return
+	}
+	corehttp.NoContent(c)
+}
+
+func (h *MeHandler) RevokeCustomerLink(c *gin.Context) {
+	user, ok := requireUser(c)
+	if !ok {
+		return
+	}
+	if err := h.claims.Revoke(c.Request.Context(), user.ID, c.Param("id"), false); err != nil {
+		failSocial(c, "revoke customer link", err)
+		return
+	}
+	corehttp.NoContent(c)
+}
+
+func bindClaimRequest(c *gin.Context) (customerClaimRequest, bool) {
+	var req customerClaimRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		return customerClaimRequest{}, false
+	}
+	return req, true
 }

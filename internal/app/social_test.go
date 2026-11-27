@@ -39,6 +39,10 @@ func (s *signupHookStore) CountEvents(context.Context, string) (socialdomain.Eve
 	return socialdomain.EventCounts{}, nil
 }
 
+func (s *signupHookStore) RecordBecameCustomer(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 func TestSocialSignupHooksMapsAttributionAndSwallowsErrors(t *testing.T) {
 	store := &signupHookStore{}
 	var logs bytes.Buffer

@@ -19,6 +19,7 @@ type fakeAttributionStore struct {
 	visits     []domain.VisitEvent
 	signups    []domain.SignupReferral
 	counts     domain.EventCounts
+	customers  []string // subjects credited with became_customer
 }
 
 func newFakeAttributionStore() *fakeAttributionStore {
@@ -70,6 +71,11 @@ func (f *fakeAttributionStore) RecordSignupReferral(_ context.Context, r domain.
 
 func (f *fakeAttributionStore) CountEvents(_ context.Context, _ string) (domain.EventCounts, error) {
 	return f.counts, nil
+}
+
+func (f *fakeAttributionStore) RecordBecameCustomer(_ context.Context, userID string) (bool, error) {
+	f.customers = append(f.customers, userID)
+	return true, nil
 }
 
 var attributionNow = time.Date(2026, 11, 27, 10, 0, 0, 0, time.UTC)
@@ -271,5 +277,19 @@ func TestSummaryBuildsShareURL(t *testing.T) {
 	want := Summary{Code: "ABCD2345", ShareURL: "https://zyad.test/r/ABCD2345", Visits: 7, Signups: 2}
 	if got != want {
 		t.Fatalf("Summary = %+v, want %+v", got, want)
+	}
+}
+
+func TestRecordBecameCustomerDelegatesForUser(t *testing.T) {
+	store := newFakeAttributionStore()
+	svc := newTestAttributionService(store)
+	if err := svc.RecordBecameCustomer(context.Background(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.RecordBecameCustomer(context.Background(), "user-1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.customers) != 1 || store.customers[0] != "user-1" {
+		t.Fatalf("customers = %v", store.customers)
 	}
 }
