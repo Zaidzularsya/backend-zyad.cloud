@@ -3,6 +3,7 @@ package dto
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	coreerrors "zyad.cloud/internal/core/errors"
 )
@@ -50,6 +51,27 @@ type GoogleAuthRequest struct {
 	InviteToken string `json:"invite_token,omitempty"`
 	// Intent defaults to operator when empty; see NormalizeIntent.
 	Intent RegistrationIntent `json:"intent"`
+	// Attribution is the first-touch referral captured by the client; only used for new users.
+	Attribution *AttributionInput `json:"attribution,omitempty"`
+}
+
+// AttributionInput is the first-touch referral context a client sends at sign-up.
+type AttributionInput struct {
+	Code        string    `json:"code"`
+	Channel     string    `json:"channel"`
+	PostID      string    `json:"post_id"`
+	FirstSeenAt time.Time `json:"first_seen_at"`
+}
+
+type RegisterRequest struct {
+	Name       string `json:"name" binding:"required"`
+	Email      string `json:"email" binding:"required,email"`
+	Password   string `json:"password" binding:"required"`
+	DeviceName string `json:"device_name"`
+	RememberMe bool   `json:"remember_me"`
+	// Intent defaults to operator when empty; see NormalizeIntent.
+	Intent      string            `json:"intent"`
+	Attribution *AttributionInput `json:"attribution,omitempty"`
 }
 
 type GoogleExchangeRequest struct {

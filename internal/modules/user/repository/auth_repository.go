@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"zyad.cloud/internal/modules/user/model"
 	"zyad.cloud/internal/modules/user/service"
@@ -416,6 +417,97 @@ func (r *AuthRepository) CreateGoogleUser(ctx context.Context, registration serv
 	}
 	if err := r.fillGoogleUserAccess(ctx, &user); err != nil {
 		return service.GoogleAuthUser{}, err
+	}
+	return user, nil
+}
+
+// CreatePasswordUser inserts an active user whose email is not yet verified.
+// The partial unique index on lower(email) is the source of truth for
+// ErrEmailTaken, so concurrent registrations cannot both succeed.
+func (r *AuthRepository) CreatePasswordUser(ctx context.Context, registration service.PasswordUserRegistration) (service.LoginUser, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return service.LoginUser{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var roleID string
+	if err := tx.QueryRow(ctx, `
+		SELECT id
+		FROM roles
+		WHERE lower(COALESCE(NULLIF(slug, ''), role_name)) = lower($1)
+		LIMIT 1
+	`, registration.RoleSlug).Scan(&roleID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return service.LoginUser{}, service.ErrGoogleDefaultRoleNotFound
+		}
+		return service.LoginUser{}, err
+	}
+
+	username, err := r.nextAvailableUsername(ctx, tx, registration.UsernameBase)
+	if err != nil {
+		return service.LoginUser{}, err
+	}
+
+	var user service.LoginUser
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO users (name, email, username, password_hash, status, created_at, updated_at)
+		VALUES ($1, $2, NULLIF($3, ''), $4, 'active', $5, $5)
+		RETURNING id, name, email, COALESCE(username, ''), status
+	`, registration.Name, registration.Email, username, registration.PasswordHash, registration.CreatedAt).Scan(
+		&user.ID,
+		&user.Name,
+		&user.Email,
+		&user.Username,
+		&user.Status,
+	); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "idx_users_email_active_unique" {
+			return service.LoginUser{}, service.ErrEmailTaken
+		}
+		return service.LoginUser{}, err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO user_profiles (user_id, created_at, updated_at)
+		VALUES ($1, $2, $2)
+	`, user.ID, registration.CreatedAt); err != nil {
+		return service.LoginUser{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO user_roles (user_id, role_id)
+		VALUES ($1, $2)
+	`, user.ID, roleID); err != nil {
+		return service.LoginUser{}, err
+	}
+
+	metadata, err := json.Marshal(map[string]any{
+		"provider":     "password",
+		"default_role": registration.RoleSlug,
+	})
+	if err != nil {
+		return service.LoginUser{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO audit_logs (
+			module, event, target_user_id, target_type, target_id, metadata, ip_address, user_agent, created_at
+		)
+		VALUES (
+			'user', 'password_user_registered', $1, 'user', $1, $2, NULLIF($3, '')::inet, NULLIF($4, ''), $5
+		)
+	`, user.ID, metadata, registration.IPAddress, registration.UserAgent, registration.CreatedAt); err != nil {
+		return service.LoginUser{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return service.LoginUser{}, err
+	}
+
+	if user.Roles, err = r.roleSlugs(ctx, user.ID); err != nil {
+		return service.LoginUser{}, err
+	}
+	if user.Permissions, err = r.permissionSlugs(ctx, user.ID); err != nil {
+		return service.LoginUser{}, err
 	}
 	return user, nil
 }

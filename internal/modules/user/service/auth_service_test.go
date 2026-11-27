@@ -1076,6 +1076,9 @@ type fakeLoginRepository struct {
 	googleTakeOverCalled            bool
 	googleLinkCalled                bool
 	googleRegistration              GoogleUserRegistration
+	passwordRegistration            PasswordUserRegistration
+	createdPasswordUser             LoginUser
+	createPasswordErr               error
 	passwordResetUser               PasswordResetUser
 	findPasswordResetErr            error
 	passwordResetTokenFound         PasswordResetToken

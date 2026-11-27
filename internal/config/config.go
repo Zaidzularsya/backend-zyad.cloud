@@ -97,6 +97,7 @@ type AuthConfig struct {
 	OTPExpiresIn               string
 	OTPMaxAttempts             int
 	PasswordMinLength          int
+	PasswordRegisterEnabled    bool
 	CookieSecret               string
 	CookieExpiresIn            string
 	Google                     GoogleAuthConfig

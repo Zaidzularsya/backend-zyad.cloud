@@ -27,19 +27,26 @@ type googleAuthenticator interface {
 	GoogleAuth(ctx context.Context, req dto.GoogleAuthRequest, metadata service.LoginHistoryRecord) (dto.GoogleAuthResponse, error)
 }
 
+// passwordRegistrar is the slice of AuthService the register endpoint uses.
+type passwordRegistrar interface {
+	Register(ctx context.Context, req dto.RegisterRequest, metadata service.LoginHistoryRecord) (dto.GoogleAuthResponse, error)
+}
+
 type AuthHandler struct {
 	service     *service.AuthService
 	googleAuth  googleAuthenticator
+	registrar   passwordRegistrar
 	redis       *redisplatform.Client
 	frontendURL string
 }
 
 func NewAuthHandler(authService *service.AuthService, redisClient *redisplatform.Client, frontendURL string) *AuthHandler {
-	return &AuthHandler{service: authService, googleAuth: authService, redis: redisClient, frontendURL: strings.TrimRight(frontendURL, "/")}
+	return &AuthHandler{service: authService, googleAuth: authService, registrar: authService, redis: redisClient, frontendURL: strings.TrimRight(frontendURL, "/")}
 }
 
 func (h *AuthHandler) RegisterRoutes(router gin.IRoutes) {
 	router.POST("/auth/login", h.Login)
+	router.POST("/auth/register", h.registerRateLimit(), h.Register)
 	router.POST("/auth/google", h.GoogleAuth)
 	router.POST("/auth/google/callback", h.GoogleAuthCallback)
 	router.POST("/auth/google/exchange", h.GoogleAuthExchange)
@@ -78,6 +85,38 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	corehttp.OK(c, "login successful", result)
+}
+
+// registerRateLimit caps sign-ups per client IP (5 per 10 minutes). A nil Redis
+// client disables the limit instead of panicking on a typed-nil interface.
+func (h *AuthHandler) registerRateLimit() gin.HandlerFunc {
+	var counter middleware.RateCounter
+	if h.redis != nil {
+		counter = h.redis
+	}
+	return middleware.RateLimit(counter, "rl:register:ip:", 5, 10*time.Minute, func(c *gin.Context) string {
+		return c.ClientIP()
+	})
+}
+
+func (h *AuthHandler) Register(c *gin.Context) {
+	var req dto.RegisterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		return
+	}
+
+	result, err := h.registrar.Register(c.Request.Context(), req, service.LoginHistoryRecord{
+		IPAddress:  c.ClientIP(),
+		UserAgent:  c.Request.UserAgent(),
+		DeviceName: req.DeviceName,
+	})
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+
+	corehttp.Created(c, "registration successful", result)
 }
 
 func (h *AuthHandler) GoogleAuth(c *gin.Context) {

@@ -643,3 +643,48 @@ func TestAuthRepositoryActiveOrganizationPermissionSlugsFallbackIntegration(t *t
 		}
 	})
 }
+
+func TestCreatePasswordUserDuplicateEmail(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	repo := NewAuthRepository(db)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	suffix := time.Now().UnixNano()
+	email := fmt.Sprintf("register-%d@example.test", suffix)
+	registration := service.PasswordUserRegistration{
+		Name:         "Register Test",
+		Email:        email,
+		PasswordHash: "hash",
+		UsernameBase: fmt.Sprintf("register-%d", suffix),
+		RoleSlug:     "member",
+		CreatedAt:    time.Now().UTC(),
+	}
+
+	user, err := repo.CreatePasswordUser(ctx, registration)
+	if err != nil {
+		t.Fatalf("create password user: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		if _, err := db.Exec(cleanupCtx, `DELETE FROM users WHERE id = $1`, user.ID); err != nil {
+			t.Errorf("cleanup user: %v", err)
+		}
+	})
+
+	var status string
+	var verifiedAt sql.NullTime
+	if err := db.QueryRow(ctx, `SELECT status, email_verified_at FROM users WHERE id = $1`, user.ID).Scan(&status, &verifiedAt); err != nil {
+		t.Fatalf("read user: %v", err)
+	}
+	if status != "active" || verifiedAt.Valid {
+		t.Fatalf("status=%q verified=%v, want active/unverified", status, verifiedAt.Valid)
+	}
+
+	registration.Email = email
+	registration.UsernameBase = fmt.Sprintf("register-other-%d", suffix)
+	if _, err := repo.CreatePasswordUser(ctx, registration); !errors.Is(err, service.ErrEmailTaken) {
+		t.Fatalf("duplicate email error = %v, want ErrEmailTaken", err)
+	}
+}

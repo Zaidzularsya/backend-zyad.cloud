@@ -9,6 +9,62 @@ paths:
       responses:
         "200":
           description: Healthy response
+  /api/v1/auth/register:
+    post:
+      summary: Register with email and password
+      operationId: registerWithPassword
+      tags:
+        - Auth
+      description: >
+        Creates an active account with an unverified email, queues a
+        verification email, and signs the user in. Disabled unless
+        `AUTH_PASSWORD_REGISTER_ENABLED=true` (403 `AUTH_REGISTRATION_DISABLED`).
+        `intent` `operator` (default) provisions a personal workspace; `social`
+        does not. An optional `attribution` is passed to sign-up hooks on a
+        best-effort basis. Rate limited to 5 requests per 10 minutes per client IP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Registration successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoogleAuthEnvelope"
+        "403":
+          description: Password registration is disabled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Email is already registered (`AUTH_EMAIL_TAKEN`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: Validation failed, password policy failed, or invalid intent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Too many registration attempts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/auth/google:
     post:
       summary: Login or register using a Google account
@@ -15788,6 +15844,50 @@ components:
           description: >
             Registration intent for new users. `operator` (default) provisions a
             personal workspace; `social` does not. Other values yield 422.
+        attribution:
+          $ref: "#/components/schemas/AttributionInput"
+    AttributionInput:
+      type: object
+      description: First-touch referral context captured by the client before sign-up.
+      properties:
+        code:
+          type: string
+        channel:
+          type: string
+        post_id:
+          type: string
+        first_seen_at:
+          type: string
+          format: date-time
+    RegisterRequest:
+      type: object
+      required:
+        - name
+        - email
+        - password
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+          maxLength: 72
+          description: Minimum length follows AUTH_PASSWORD_MIN_LENGTH; maximum 72 bytes.
+        intent:
+          type: string
+          enum: [social, operator]
+          default: operator
+        device_name:
+          type: string
+          maxLength: 150
+        remember_me:
+          type: boolean
+          default: false
+        attribution:
+          $ref: "#/components/schemas/AttributionInput"
     GoogleAuthEnvelope:
       type: object
       required:

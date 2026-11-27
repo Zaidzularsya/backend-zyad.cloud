@@ -31,6 +31,7 @@ var ErrEmailVerificationTokenNotFound = errors.New("email verification token not
 var ErrEmailAlreadyVerified = errors.New("email already verified")
 var ErrGoogleIdentityNotFound = errors.New("google identity not found")
 var ErrGoogleEmailUserNotFound = errors.New("google email user not found")
+var ErrEmailTaken = errors.New("email already registered")
 var ErrGoogleDefaultRoleNotFound = errors.New("google default role not found")
 
 const passwordResetRequestedEvent = "auth.password_reset_requested"
@@ -46,6 +47,8 @@ type LoginRepository interface {
 	// the password is cleared and all sessions are revoked so a pre-registrant cannot keep access.
 	TakeOverUnverifiedForGoogle(ctx context.Context, link GoogleIdentityLink) (GoogleAuthUser, error)
 	CreateGoogleUser(ctx context.Context, registration GoogleUserRegistration) (GoogleAuthUser, error)
+	// CreatePasswordUser inserts an active user with email_verified_at NULL; a taken email returns ErrEmailTaken.
+	CreatePasswordUser(ctx context.Context, registration PasswordUserRegistration) (LoginUser, error)
 	FindPasswordResetUserByEmail(ctx context.Context, email string) (PasswordResetUser, error)
 	FindPasswordResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error)
 	FindPasswordChangeUser(ctx context.Context, userID string) (PasswordChangeUser, error)
@@ -130,6 +133,17 @@ type GoogleUserRegistration struct {
 	VerifiedAt   time.Time
 	IPAddress    string
 	UserAgent    string
+}
+
+type PasswordUserRegistration struct {
+	Name         string
+	Email        string
+	PasswordHash string
+	UsernameBase string
+	RoleSlug     string
+	IPAddress    string
+	UserAgent    string
+	CreatedAt    time.Time
 }
 
 type NewSession struct {
@@ -297,6 +311,8 @@ type AuthService struct {
 	resetTokenTTL         time.Duration
 	verificationTokenTTL  time.Duration
 	passwordMinLength     int
+	passwordRegisterOn    bool
+	signupHooks           SignupHooks
 	googleEnabled         bool
 	googleAutoRegister    bool
 	googleAutoLinkEmail   bool
@@ -355,6 +371,7 @@ func NewAuthService(repo LoginRepository, cfg config.Config) (*AuthService, erro
 		resetTokenTTL:        resetTokenTTL,
 		verificationTokenTTL: verificationTokenTTL,
 		passwordMinLength:    cfg.Auth.PasswordMinLength,
+		passwordRegisterOn:   cfg.Auth.PasswordRegisterEnabled,
 		googleEnabled:        cfg.Auth.Google.Enabled,
 		googleAutoRegister:   cfg.Auth.Google.AutoRegister,
 		googleAutoLinkEmail:  cfg.Auth.Google.AutoLinkVerifiedEmail,
@@ -585,6 +602,9 @@ func (s *AuthService) GoogleAuth(ctx context.Context, req dto.GoogleAuthRequest,
 	}, refreshTTL, firstNonEmpty(req.DeviceName, metadata.DeviceName), metadata, now)
 	if err != nil {
 		return dto.GoogleAuthResponse{}, err
+	}
+	if isNewUser {
+		s.notifyUserRegistered(ctx, user.ID, req.Attribution)
 	}
 	if isNewUser && intent == dto.IntentOperator && s.googleWorkspace != nil {
 		if err := s.googleWorkspace.ProvisionGoogleWorkspace(
@@ -1405,6 +1425,11 @@ func (s *AuthService) ResendVerificationEmail(ctx context.Context, req dto.Resen
 		return nil
 	}
 
+	return s.issueEmailVerification(ctx, user.ID, user.Name, user.Email)
+}
+
+// issueEmailVerification stores a fresh verification token and queues the email.
+func (s *AuthService) issueEmailVerification(ctx context.Context, userID string, name string, email string) error {
 	token, err := coreauth.NewRandomToken(32)
 	if err != nil {
 		return coreerrors.Wrap("AUTH_VERIFY_TOKEN_CREATE_FAILED", "failed to create verification token", http.StatusInternalServerError, err)
@@ -1414,8 +1439,8 @@ func (s *AuthService) ResendVerificationEmail(ctx context.Context, req dto.Resen
 	expiresAt := s.now().UTC().Add(s.verificationTokenTTL)
 
 	if err := s.repo.CreateEmailVerificationToken(ctx, NewEmailVerificationToken{
-		UserID:    user.ID,
-		Email:     user.Email,
+		UserID:    userID,
+		Email:     email,
 		TokenHash: tokenHash,
 		ExpiresAt: expiresAt,
 	}); err != nil {
@@ -1428,19 +1453,19 @@ func (s *AuthService) ResendVerificationEmail(ctx context.Context, req dto.Resen
 
 	_, err = s.notificationPublisher.Publish(ctx, notificationpublisher.Event{
 		Type:   emailVerificationRequestedEvent,
-		UserID: user.ID,
+		UserID: userID,
 		Recipient: notificationdomain.NotificationRecipient{
 			Type:   "user",
-			UserID: user.ID,
-			Name:   user.Name,
-			Email:  user.Email,
+			UserID: userID,
+			Name:   name,
+			Email:  email,
 		},
 		Payload: map[string]any{
 			"app_name":         firstNonEmpty(s.appName, "Zyad Cloud"),
-			"user_id":          user.ID,
-			"user_name":        user.Name,
-			"user_email":       user.Email,
-			"email":            user.Email,
+			"user_id":          userID,
+			"user_name":        name,
+			"user_email":       email,
+			"email":            email,
 			"verification_url": s.emailVerificationURL(token),
 			"expired_at":       expiresAt.Format(time.RFC3339),
 		},

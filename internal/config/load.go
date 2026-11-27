@@ -78,6 +78,7 @@ func LoadAuth() AuthConfig {
 		OTPExpiresIn:               getEnv("AUTH_OTP_EXPIRES_IN", "5m"),
 		OTPMaxAttempts:             getEnvInt("AUTH_OTP_MAX_ATTEMPTS", 5),
 		PasswordMinLength:          getEnvInt("AUTH_PASSWORD_MIN_LENGTH", 8),
+		PasswordRegisterEnabled:    getEnvBool("AUTH_PASSWORD_REGISTER_ENABLED", false),
 		CookieSecret:               getEnv("COOKIE_SECRET", ""),
 		CookieExpiresIn:            getEnv("COOKIE_EXPIRES_IN", "24h"),
 		Google: GoogleAuthConfig{
