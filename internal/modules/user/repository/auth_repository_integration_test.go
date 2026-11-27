@@ -424,6 +424,96 @@ func TestAuthRepositoryEmailVerificationIntegration(t *testing.T) {
 	}
 }
 
+func TestTakeOverUnverifiedForGoogleRevokesSessionsAndPassword(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	repo := NewAuthRepository(db)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	suffix := time.Now().UnixNano()
+	email := fmt.Sprintf("takeover-%d@example.test", suffix)
+	username := fmt.Sprintf("takeover-%d", suffix)
+	subject := fmt.Sprintf("google-sub-takeover-%d", suffix)
+
+	var userID string
+	if err := db.QueryRow(ctx, `
+		INSERT INTO users (name, email, username, password_hash, status)
+		VALUES ('Squatted', $1, $2, 'attacker-password-hash', 'active')
+		RETURNING id
+	`, email, username).Scan(&userID); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		_, _ = db.Exec(cleanupCtx, `DELETE FROM users WHERE id = $1`, userID)
+	})
+	for i := 0; i < 2; i++ {
+		if _, err := db.Exec(ctx, `
+			INSERT INTO sessions (user_id, refresh_token_hash, expires_at)
+			VALUES ($1, $2, now() + interval '1 day')
+		`, userID, fmt.Sprintf("takeover-refresh-%d-%d", suffix, i)); err != nil {
+			t.Fatalf("insert session: %v", err)
+		}
+	}
+
+	verifiedAt := time.Now().UTC().Truncate(time.Second)
+	user, err := repo.TakeOverUnverifiedForGoogle(ctx, service.GoogleIdentityLink{
+		UserID:         userID,
+		ProviderUserID: subject,
+		ProviderEmail:  email,
+		VerifiedAt:     verifiedAt,
+	})
+	if err != nil {
+		t.Fatalf("TakeOverUnverifiedForGoogle: %v", err)
+	}
+	if user.ID != userID || user.EmailVerifiedAt == nil {
+		t.Fatalf("unexpected user: %+v", user)
+	}
+
+	var passwordIsNull bool
+	var emailVerifiedAt sql.NullTime
+	if err := db.QueryRow(ctx, `
+		SELECT password_hash IS NULL, email_verified_at FROM users WHERE id = $1
+	`, userID).Scan(&passwordIsNull, &emailVerifiedAt); err != nil {
+		t.Fatalf("query user: %v", err)
+	}
+	if !passwordIsNull {
+		t.Fatal("expected password_hash to be NULL after takeover")
+	}
+	if !emailVerifiedAt.Valid {
+		t.Fatal("expected email_verified_at to be set after takeover")
+	}
+
+	var activeSessions int
+	if err := db.QueryRow(ctx, `
+		SELECT count(*) FROM sessions WHERE user_id = $1 AND revoked_at IS NULL
+	`, userID).Scan(&activeSessions); err != nil {
+		t.Fatalf("count sessions: %v", err)
+	}
+	if activeSessions != 0 {
+		t.Fatalf("expected all sessions revoked, %d still active", activeSessions)
+	}
+
+	var identityCount, auditCount int
+	if err := db.QueryRow(ctx, `
+		SELECT count(*) FROM auth_identities WHERE user_id = $1 AND provider = 'google' AND provider_user_id = $2
+	`, userID, subject).Scan(&identityCount); err != nil {
+		t.Fatalf("count identities: %v", err)
+	}
+	if identityCount != 1 {
+		t.Fatalf("expected 1 google identity, got %d", identityCount)
+	}
+	if err := db.QueryRow(ctx, `
+		SELECT count(*) FROM audit_logs WHERE target_user_id = $1 AND event = 'google_unverified_takeover'
+	`, userID).Scan(&auditCount); err != nil {
+		t.Fatalf("count audit: %v", err)
+	}
+	if auditCount != 1 {
+		t.Fatalf("expected 1 takeover audit row, got %d", auditCount)
+	}
+}
+
 // /auth/me harus memakai org efektif yang sama dengan resolver request: bila
 // sessions.active_organization_id kosong dan user punya tepat satu membership aktif,
 // permission role org tetap dikembalikan (FE memakainya untuk can()).

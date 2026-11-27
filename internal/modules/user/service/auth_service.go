@@ -42,6 +42,9 @@ type LoginRepository interface {
 	FindGoogleUserBySubject(ctx context.Context, subject string) (GoogleAuthUser, error)
 	FindGoogleUserByEmail(ctx context.Context, email string) (GoogleAuthUser, error)
 	LinkGoogleIdentity(ctx context.Context, link GoogleIdentityLink) (GoogleAuthUser, error)
+	// TakeOverUnverifiedForGoogle claims an account whose email was never verified:
+	// the password is cleared and all sessions are revoked so a pre-registrant cannot keep access.
+	TakeOverUnverifiedForGoogle(ctx context.Context, link GoogleIdentityLink) (GoogleAuthUser, error)
 	CreateGoogleUser(ctx context.Context, registration GoogleUserRegistration) (GoogleAuthUser, error)
 	FindPasswordResetUserByEmail(ctx context.Context, email string) (PasswordResetUser, error)
 	FindPasswordResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error)
@@ -647,14 +650,22 @@ func (s *AuthService) resolveGoogleUser(
 			})
 			return GoogleAuthUser{}, false, coreerrors.New("AUTH_GOOGLE_EMAIL_CONFLICT", "google email is already used", http.StatusConflict)
 		}
-		linkedUser, err := s.repo.LinkGoogleIdentity(ctx, GoogleIdentityLink{
+		link := GoogleIdentityLink{
 			UserID:         user.ID,
 			ProviderUserID: subject,
 			ProviderEmail:  email,
 			VerifiedAt:     now,
 			IPAddress:      metadata.IPAddress,
 			UserAgent:      metadata.UserAgent,
-		})
+		}
+		// An account whose email was never verified may have been pre-registered by someone
+		// else with a password; linking would let that person keep access after the real
+		// owner signs in with Google, so the account is taken over instead.
+		linkFn := s.repo.LinkGoogleIdentity
+		if user.EmailVerifiedAt == nil {
+			linkFn = s.repo.TakeOverUnverifiedForGoogle
+		}
+		linkedUser, err := linkFn(ctx, link)
 		if err != nil {
 			return GoogleAuthUser{}, false, coreerrors.Wrap("AUTH_GOOGLE_LINK_FAILED", "failed to link google identity", http.StatusInternalServerError, err)
 		}
@@ -1381,7 +1392,7 @@ func (s *AuthService) ResendVerificationEmail(ctx context.Context, req dto.Resen
 		return coreerrors.Wrap("AUTH_RESEND_VERIFICATION_FAILED", "failed to resend verification email", http.StatusInternalServerError, err)
 	}
 
-	if user.EmailVerifiedAt != nil || user.Status == model.UserStatusActive {
+	if user.EmailVerifiedAt != nil {
 		return coreerrors.New("AUTH_EMAIL_ALREADY_VERIFIED", "email is already verified", http.StatusConflict)
 	}
 

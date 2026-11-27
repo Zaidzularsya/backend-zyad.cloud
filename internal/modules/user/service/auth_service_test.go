@@ -175,6 +175,77 @@ func TestAuthServiceGoogleAuthExistingIdentitySuccess(t *testing.T) {
 	}
 }
 
+func newGoogleAutoLinkTestService(t *testing.T, repo *fakeLoginRepository) *AuthService {
+	t.Helper()
+	svc := newTestAuthService(t, repo)
+	svc.googleEnabled = true
+	svc.googleAutoLinkEmail = true
+	svc.googleVerifier = &fakeGoogleVerifier{claims: coreauth.GoogleIDTokenClaims{
+		Subject:       "google-sub-victim",
+		Email:         "Victim@Example.com",
+		EmailVerified: true,
+		Name:          "Victim",
+	}}
+	return svc
+}
+
+func TestGoogleAuthTakesOverUnverifiedPasswordAccount(t *testing.T) {
+	repo := &fakeLoginRepository{
+		findGoogleSubjectErr: ErrGoogleIdentityNotFound,
+		googleUserByEmail: GoogleAuthUser{
+			ID:       "user-attacker-registered",
+			Email:    "victim@example.com",
+			Username: "victim",
+			Status:   model.UserStatusActive,
+		},
+		sessionID: "session-1",
+	}
+	svc := newGoogleAutoLinkTestService(t, repo)
+
+	result, err := svc.GoogleAuth(context.Background(), dto.GoogleAuthRequest{IDToken: "valid-google-token"}, LoginHistoryRecord{})
+	if err != nil {
+		t.Fatalf("google auth: %v", err)
+	}
+	if !repo.googleTakeOverCalled {
+		t.Fatal("expected TakeOverUnverifiedForGoogle to be called")
+	}
+	if repo.googleLinkCalled {
+		t.Fatal("LinkGoogleIdentity must not be called for an unverified account")
+	}
+	if repo.googleTakeOver.UserID != "user-attacker-registered" || repo.googleTakeOver.ProviderUserID != "google-sub-victim" || repo.googleTakeOver.ProviderEmail != "victim@example.com" {
+		t.Fatalf("unexpected takeover link: %+v", repo.googleTakeOver)
+	}
+	if result.User.ID != "user-attacker-registered" {
+		t.Fatalf("response user id = %q", result.User.ID)
+	}
+}
+
+func TestGoogleAuthLinksVerifiedAccountAsBefore(t *testing.T) {
+	verifiedAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	repo := &fakeLoginRepository{
+		findGoogleSubjectErr: ErrGoogleIdentityNotFound,
+		googleUserByEmail: GoogleAuthUser{
+			ID:              "user-verified",
+			Email:           "victim@example.com",
+			Username:        "victim",
+			Status:          model.UserStatusActive,
+			EmailVerifiedAt: &verifiedAt,
+		},
+		sessionID: "session-1",
+	}
+	svc := newGoogleAutoLinkTestService(t, repo)
+
+	if _, err := svc.GoogleAuth(context.Background(), dto.GoogleAuthRequest{IDToken: "valid-google-token"}, LoginHistoryRecord{}); err != nil {
+		t.Fatalf("google auth: %v", err)
+	}
+	if !repo.googleLinkCalled {
+		t.Fatal("expected LinkGoogleIdentity to be called")
+	}
+	if repo.googleTakeOverCalled {
+		t.Fatal("TakeOverUnverifiedForGoogle must not be called for a verified account")
+	}
+}
+
 func TestAuthServiceGoogleAuthAutoRegistersActiveUser(t *testing.T) {
 	repo := &fakeLoginRepository{
 		findGoogleSubjectErr: ErrGoogleIdentityNotFound,
@@ -942,6 +1013,9 @@ type fakeLoginRepository struct {
 	googleSubjectLookup             string
 	googleEmailLookup               string
 	googleLink                      GoogleIdentityLink
+	googleTakeOver                  GoogleIdentityLink
+	googleTakeOverCalled            bool
+	googleLinkCalled                bool
 	googleRegistration              GoogleUserRegistration
 	passwordResetUser               PasswordResetUser
 	findPasswordResetErr            error
@@ -1047,6 +1121,7 @@ func (r *fakeLoginRepository) FindGoogleUserByEmail(_ context.Context, email str
 
 func (r *fakeLoginRepository) LinkGoogleIdentity(_ context.Context, link GoogleIdentityLink) (GoogleAuthUser, error) {
 	r.googleLink = link
+	r.googleLinkCalled = true
 	if r.linkGoogleErr != nil {
 		return GoogleAuthUser{}, r.linkGoogleErr
 	}
@@ -1059,6 +1134,17 @@ func (r *fakeLoginRepository) LinkGoogleIdentity(_ context.Context, link GoogleI
 			Username: "linked",
 		}
 	}
+	return user, nil
+}
+
+func (r *fakeLoginRepository) TakeOverUnverifiedForGoogle(_ context.Context, link GoogleIdentityLink) (GoogleAuthUser, error) {
+	r.googleTakeOver = link
+	r.googleTakeOverCalled = true
+	if r.linkGoogleErr != nil {
+		return GoogleAuthUser{}, r.linkGoogleErr
+	}
+	user := r.googleUserByEmail
+	user.EmailVerifiedAt = &link.VerifiedAt
 	return user, nil
 }
 
@@ -1474,6 +1560,30 @@ func TestAuthServiceResendVerificationEmailSuccess(t *testing.T) {
 	}
 	if publisher.event.Type != emailVerificationRequestedEvent {
 		t.Fatalf("expected event type %s, got %s", emailVerificationRequestedEvent, publisher.event.Type)
+	}
+}
+
+func TestResendVerificationAllowedForActiveUnverified(t *testing.T) {
+	repo := &fakeLoginRepository{
+		emailVerificationUser: EmailVerificationTargetUser{
+			ID:     "user-1",
+			Name:   "Unverified Active",
+			Email:  "unverified@example.com",
+			Status: model.UserStatusActive,
+		},
+	}
+	publisher := &fakeNotificationPublisher{}
+	svc := newTestAuthService(t, repo)
+	svc.SetNotificationPublisher(publisher)
+
+	if err := svc.ResendVerificationEmail(context.Background(), dto.ResendVerificationEmailRequest{Email: "unverified@example.com"}); err != nil {
+		t.Fatalf("ResendVerificationEmail: %v", err)
+	}
+	if repo.emailVerificationToken.UserID != "user-1" || repo.emailVerificationToken.TokenHash == "" {
+		t.Fatalf("expected verification token stored, got %+v", repo.emailVerificationToken)
+	}
+	if !publisher.called || publisher.event.Type != emailVerificationRequestedEvent {
+		t.Fatal("expected email verification notification published")
 	}
 }
 

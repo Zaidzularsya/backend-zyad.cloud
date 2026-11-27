@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"zyad.cloud/internal/modules/user/model"
 	"zyad.cloud/internal/modules/user/service"
 	"zyad.cloud/internal/platform/database"
 )
@@ -217,6 +218,108 @@ func (r *AuthRepository) LinkGoogleIdentity(ctx context.Context, link service.Go
 
 	if err := tx.Commit(ctx); err != nil {
 		return service.GoogleAuthUser{}, err
+	}
+	if err := r.fillGoogleUserAccess(ctx, &user); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	return user, nil
+}
+
+// TakeOverUnverifiedForGoogle links a Google identity to a user whose email was never
+// verified. Everything happens in one transaction: the password is cleared, the email is
+// marked verified, a pending account becomes active, all sessions are revoked and the
+// takeover is audited.
+func (r *AuthRepository) TakeOverUnverifiedForGoogle(ctx context.Context, link service.GoogleIdentityLink) (service.GoogleAuthUser, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var user service.GoogleAuthUser
+	var deletedAt sql.NullTime
+	var emailVerifiedAt sql.NullTime
+	if err := tx.QueryRow(ctx, `
+		SELECT id, name, email, COALESCE(username, ''), status, deleted_at, email_verified_at
+		FROM users
+		WHERE id = $1
+			AND deleted_at IS NULL
+		FOR UPDATE
+	`, link.UserID).Scan(
+		&user.ID,
+		&user.Name,
+		&user.Email,
+		&user.Username,
+		&user.Status,
+		&deletedAt,
+		&emailVerifiedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return service.GoogleAuthUser{}, service.ErrGoogleEmailUserNotFound
+		}
+		return service.GoogleAuthUser{}, err
+	}
+	// The row lock serialises this against a concurrent email verification; if the owner
+	// verified in the meantime the account is no longer eligible for takeover.
+	if emailVerifiedAt.Valid {
+		return service.GoogleAuthUser{}, service.ErrGoogleEmailUserNotFound
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE users
+		SET password_hash = NULL,
+			email_verified_at = $2,
+			status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
+			updated_at = $2
+		WHERE id = $1
+	`, link.UserID, link.VerifiedAt); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	if user.Status == model.UserStatusPending {
+		user.Status = model.UserStatusActive
+	}
+	user.EmailVerifiedAt = &link.VerifiedAt
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE sessions
+		SET revoked_at = $2
+		WHERE user_id = $1 AND revoked_at IS NULL
+	`, link.UserID, link.VerifiedAt); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO auth_identities (user_id, provider, provider_user_id, provider_email, created_at, updated_at)
+		VALUES ($1, 'google', $2, $3, $4, $4)
+		ON CONFLICT (provider, provider_user_id)
+		DO UPDATE SET provider_email = EXCLUDED.provider_email, updated_at = EXCLUDED.updated_at
+	`, link.UserID, link.ProviderUserID, link.ProviderEmail, link.VerifiedAt); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+
+	metadata, err := json.Marshal(map[string]any{
+		"provider":       "google",
+		"provider_email": link.ProviderEmail,
+	})
+	if err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO audit_logs (
+			module, event, target_user_id, target_type, target_id, metadata, ip_address, user_agent, created_at
+		)
+		VALUES (
+			'user', 'google_unverified_takeover', $1, 'user', $1, $2, NULLIF($3, '')::inet, NULLIF($4, ''), $5
+		)
+	`, link.UserID, metadata, link.IPAddress, link.UserAgent, link.VerifiedAt); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	if deletedAt.Valid {
+		user.DeletedAt = &deletedAt.Time
 	}
 	if err := r.fillGoogleUserAccess(ctx, &user); err != nil {
 		return service.GoogleAuthUser{}, err
