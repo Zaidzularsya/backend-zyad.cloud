@@ -18,7 +18,7 @@ func TestSocialIdentitySchema(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	suffix := strings.ReplaceAll(testutil.UniqueCode("social"), ".", "_")
+	suffix := strings.ReplaceAll(testutil.UniqueCode("social"), ".", "-")
 	email := fmt.Sprintf("budi-%s@x.test", suffix)
 
 	var orgID, otherOrgID, userID, otherUserID string
