@@ -165,6 +165,7 @@ func (r *UserRepository) UpdateUser(ctx context.Context, update service.UserUpda
 			name = CASE WHEN $2 THEN $3 ELSE name END,
 			email = CASE WHEN $4 THEN $5 ELSE email END,
 			username = CASE WHEN $6 THEN NULLIF($7, '') ELSE username END,
+			username_changed_at = CASE WHEN $10 THEN $11 ELSE username_changed_at END,
 			phone = CASE WHEN $8 THEN NULLIF($9, '') ELSE phone END,
 			email_verified_at = CASE
 				WHEN $4 AND lower(email) IS DISTINCT FROM lower($5) THEN NULL
@@ -181,6 +182,7 @@ func (r *UserRepository) UpdateUser(ctx context.Context, update service.UserUpda
 		update.Email != nil, email,
 		update.Username != nil, username,
 		update.Phone != nil, phone,
+		update.UsernameChangedAt != nil, usernameChangedAtUTC(update.UsernameChangedAt),
 	); err != nil {
 		return err
 	}
@@ -563,6 +565,7 @@ func (r *UserRepository) FindUserDetail(ctx context.Context, userID string, incl
 	var phoneVerifiedAt sql.NullTime
 	var lastLoginAt sql.NullTime
 	var deletedAt sql.NullTime
+	var usernameChangedAt sql.NullTime
 
 	query := `
 		SELECT
@@ -578,6 +581,8 @@ func (r *UserRepository) FindUserDetail(ctx context.Context, userID string, incl
 			u.created_at,
 			u.updated_at,
 			u.deleted_at,
+			u.username_changed_at,
+			(u.password_hash IS NOT NULL AND u.password_hash <> ''),
 			COALESCE(p.avatar_url, ''),
 			COALESCE(p.bio, ''),
 			COALESCE(p.job_title, ''),
@@ -607,6 +612,8 @@ func (r *UserRepository) FindUserDetail(ctx context.Context, userID string, incl
 		&user.CreatedAt,
 		&user.UpdatedAt,
 		&deletedAt,
+		&usernameChangedAt,
+		&user.HasPassword,
 		&user.Profile.AvatarURL,
 		&user.Profile.Bio,
 		&user.Profile.JobTitle,
@@ -623,6 +630,7 @@ func (r *UserRepository) FindUserDetail(ctx context.Context, userID string, incl
 	user.PhoneVerifiedAt = nullTimePtr(phoneVerifiedAt)
 	user.LastLoginAt = nullTimePtr(lastLoginAt)
 	user.DeletedAt = nullTimePtr(deletedAt)
+	user.UsernameChangedAt = nullTimePtr(usernameChangedAt)
 
 	roles, err := r.userRoles(ctx, userID)
 	if err != nil {
@@ -646,6 +654,31 @@ func (r *UserRepository) FindUserDetail(ctx context.Context, userID string, incl
 	user.Sessions = sessions
 	user.Audit = audit
 	return user, nil
+}
+
+// ListIdentities returns the external login providers linked to the user, oldest first.
+// The internal 'local' (password) identity is not a linked account and is excluded.
+func (r *UserRepository) ListIdentities(ctx context.Context, userID string) ([]service.IdentityRecord, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT provider, COALESCE(provider_email, ''), created_at
+		FROM auth_identities
+		WHERE user_id = $1
+		  AND provider <> 'local'
+		ORDER BY created_at ASC, id ASC`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]service.IdentityRecord, 0)
+	for rows.Next() {
+		var item service.IdentityRecord
+		if err := rows.Scan(&item.Provider, &item.ProviderEmail, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 func (r *UserRepository) userRoles(ctx context.Context, userID string) ([]service.UserRoleRecord, error) {
@@ -1068,4 +1101,12 @@ func auditLogWhere(filter service.AuditLogFilter) (string, []any) {
 	}
 
 	return query.String(), args
+}
+
+// usernameChangedAtUTC: kolom bertipe timestamp tanpa zona, jadi selalu simpan UTC.
+func usernameChangedAtUTC(value *time.Time) any {
+	if value == nil {
+		return nil
+	}
+	return value.UTC()
 }

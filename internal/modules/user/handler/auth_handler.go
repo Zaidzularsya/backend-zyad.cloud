@@ -22,18 +22,31 @@ import (
 
 const googleAuthCodeTTL = 60 * time.Second
 
+// googleAuthenticator is the slice of AuthService the Google endpoints use.
+type googleAuthenticator interface {
+	GoogleAuth(ctx context.Context, req dto.GoogleAuthRequest, metadata service.LoginHistoryRecord) (dto.GoogleAuthResponse, error)
+}
+
+// passwordRegistrar is the slice of AuthService the register endpoint uses.
+type passwordRegistrar interface {
+	Register(ctx context.Context, req dto.RegisterRequest, metadata service.LoginHistoryRecord) (dto.GoogleAuthResponse, error)
+}
+
 type AuthHandler struct {
 	service     *service.AuthService
+	googleAuth  googleAuthenticator
+	registrar   passwordRegistrar
 	redis       *redisplatform.Client
 	frontendURL string
 }
 
 func NewAuthHandler(authService *service.AuthService, redisClient *redisplatform.Client, frontendURL string) *AuthHandler {
-	return &AuthHandler{service: authService, redis: redisClient, frontendURL: strings.TrimRight(frontendURL, "/")}
+	return &AuthHandler{service: authService, googleAuth: authService, registrar: authService, redis: redisClient, frontendURL: strings.TrimRight(frontendURL, "/")}
 }
 
 func (h *AuthHandler) RegisterRoutes(router gin.IRoutes) {
 	router.POST("/auth/login", h.Login)
+	router.POST("/auth/register", h.registerRateLimit(), h.Register)
 	router.POST("/auth/google", h.GoogleAuth)
 	router.POST("/auth/google/callback", h.GoogleAuthCallback)
 	router.POST("/auth/google/exchange", h.GoogleAuthExchange)
@@ -74,14 +87,52 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	corehttp.OK(c, "login successful", result)
 }
 
+// registerRateLimit caps sign-ups per client IP (5 per 10 minutes). A nil Redis
+// client disables the limit instead of panicking on a typed-nil interface.
+func (h *AuthHandler) registerRateLimit() gin.HandlerFunc {
+	var counter middleware.RateCounter
+	if h.redis != nil {
+		counter = h.redis
+	}
+	return middleware.RateLimit(counter, "rl:register:ip:", 5, 10*time.Minute, func(c *gin.Context) string {
+		return c.ClientIP()
+	})
+}
+
+func (h *AuthHandler) Register(c *gin.Context) {
+	var req dto.RegisterRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		return
+	}
+
+	result, err := h.registrar.Register(c.Request.Context(), req, service.LoginHistoryRecord{
+		IPAddress:  c.ClientIP(),
+		UserAgent:  c.Request.UserAgent(),
+		DeviceName: req.DeviceName,
+	})
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+
+	corehttp.Created(c, "registration successful", result)
+}
+
 func (h *AuthHandler) GoogleAuth(c *gin.Context) {
 	var req dto.GoogleAuthRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
 		return
 	}
+	intent, err := dto.NormalizeIntent(string(req.Intent))
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	req.Intent = intent
 
-	result, err := h.service.GoogleAuth(c.Request.Context(), req, service.LoginHistoryRecord{
+	result, err := h.googleAuth.GoogleAuth(c.Request.Context(), req, service.LoginHistoryRecord{
 		IPAddress:  c.ClientIP(),
 		UserAgent:  c.Request.UserAgent(),
 		DeviceName: req.DeviceName,
@@ -118,13 +169,22 @@ func (h *AuthHandler) GoogleAuthCallback(c *gin.Context) {
 	// keeps the post-login destination in sessionStorage across the round
 	// trip instead, so the session here always uses the persistent (remember
 	// me) TTL, matching common "sign in with Google" UX.
+	// GIS keeps the query string of login_uri, so the client selects the
+	// registration intent there (the POST body is Google-controlled).
+	intent, err := dto.NormalizeIntent(c.Query("intent"))
+	if err != nil {
+		slog.Error("google auth callback: invalid intent", "error", err)
+		c.Redirect(http.StatusFound, h.frontendURL+"/auth/login?google_error=1")
+		return
+	}
 	req := dto.GoogleAuthRequest{
 		IDToken:    credential,
 		RememberMe: true,
 		DeviceName: "Web Browser",
+		Intent:     intent,
 	}
 
-	result, err := h.service.GoogleAuth(c.Request.Context(), req, service.LoginHistoryRecord{
+	result, err := h.googleAuth.GoogleAuth(c.Request.Context(), req, service.LoginHistoryRecord{
 		IPAddress:  c.ClientIP(),
 		UserAgent:  c.Request.UserAgent(),
 		DeviceName: req.DeviceName,
@@ -351,7 +411,9 @@ func (h *AuthHandler) ListSessions(c *gin.Context) {
 			ID:         s.ID,
 			DeviceName: s.DeviceName,
 			IPAddress:  s.IPAddress,
+			UserAgent:  s.UserAgent,
 			LastUsedAt: lastUsedAtStr,
+			CreatedAt:  s.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 			ExpiresAt:  s.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z"),
 			IsCurrent:  s.ID == user.SessionID,
 		})

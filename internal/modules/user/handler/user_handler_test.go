@@ -3,11 +3,15 @@ package handler
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	coreerrors "zyad.cloud/internal/core/errors"
+	"zyad.cloud/internal/core/middleware"
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	"zyad.cloud/internal/modules/user/dto"
 	"zyad.cloud/internal/modules/user/service"
@@ -323,12 +327,16 @@ func TestUserHandlerActivateUser(t *testing.T) {
 }
 
 type fakeUserListService struct {
+	usernameRequest dto.UpdateUsernameRequest
 	called          bool
 	query           dto.UserListQuery
 	users           []dto.UserListItem
 	meta            dto.PaginationMeta
 	err             error
 	getCalled       bool
+	sessionID       string
+	me              dto.MeResponse
+	identities      []dto.IdentityResponse
 	userID          string
 	includeDeleted  bool
 	detail          dto.UserDetailResponse
@@ -445,6 +453,18 @@ func seedUserContext(userID string) gin.HandlerFunc {
 	}
 }
 
+func (s *fakeUserListService) GetMe(_ context.Context, userID, sessionID string) (dto.MeResponse, error) {
+	s.getCalled = true
+	s.userID = userID
+	s.sessionID = sessionID
+	return s.me, s.detailErr
+}
+
+func (s *fakeUserListService) ListIdentities(_ context.Context, userID string) ([]dto.IdentityResponse, error) {
+	s.userID = userID
+	return s.identities, s.detailErr
+}
+
 func (s *fakeUserListService) GetSelfProfile(_ context.Context, userID string) (dto.UserDetailResponse, error) {
 	s.getCalled = true
 	s.userID = userID
@@ -471,4 +491,121 @@ func (s *fakeUserListService) ListLoginHistories(_ context.Context, _ dto.LoginH
 
 func (s *fakeUserListService) ListAuditLogs(_ context.Context, _ dto.AuditLogQuery) ([]dto.AuditLogResponse, dto.PaginationMeta, error) {
 	return nil, dto.PaginationMeta{}, nil
+}
+
+func TestUpdateSelfUsernameRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	run := func(svc *fakeUserListService) *httptest.ResponseRecorder {
+		handler := NewUserHandler(svc, nil, &fakePermissionChecker{})
+		router := gin.New()
+		group := router.Group("")
+		group.Use(seedUserContext("a73d7c06-96e9-4ab2-bb32-e025dde5660c"))
+		handler.RegisterRoutes(group)
+		req := httptest.NewRequest(http.MethodPatch, "/users/me/username", bytes.NewBufferString(`{"username":"new.name"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+
+	ok := &fakeUserListService{updated: dto.UserDetailResponse{Username: "new.name"}}
+	if rec := run(ok); rec.Code != http.StatusOK || ok.usernameRequest.Username != "new.name" || ok.updateUserID != "a73d7c06-96e9-4ab2-bb32-e025dde5660c" {
+		t.Fatalf("status = %d, body = %s, req = %#v", rec.Code, rec.Body.String(), ok.usernameRequest)
+	}
+
+	appErr := coreerrors.New("USERNAME_CHANGE_COOLDOWN", "cooldown", http.StatusTooManyRequests)
+	appErr.Data = map[string]any{"available_at": "2026-12-05T10:00:00Z"}
+	cooldown := &fakeUserListService{updateErr: appErr}
+	rec := run(cooldown)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Code string `json:"code"`
+		Data struct {
+			AvailableAt string `json:"available_at"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Code != "USERNAME_CHANGE_COOLDOWN" || body.Data.AvailableAt != "2026-12-05T10:00:00Z" {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+func (s *fakeUserListService) ChangeSelfUsername(_ context.Context, userID string, req dto.UpdateUsernameRequest, metadata service.UpdateUserMetadata) (dto.UserDetailResponse, error) {
+	s.updateUserID = userID
+	s.usernameRequest = req
+	s.updateMetadata = metadata
+	return s.updated, s.updateErr
+}
+
+func (s *fakeUserListService) UploadSelfAvatar(_ context.Context, userID string, _ io.Reader, _ int64, metadata service.UpdateUserMetadata) (dto.UserDetailResponse, error) {
+	s.updateUserID = userID
+	s.updateMetadata = metadata
+	return s.updated, s.updateErr
+}
+
+func TestUserHandlerGetMeUsesSessionID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &fakeUserListService{me: dto.MeResponse{HasPassword: true}}
+	handler := NewUserHandler(svc, nil, &fakePermissionChecker{})
+	router := gin.New()
+	group := router.Group("")
+	group.Use(func(c *gin.Context) {
+		permissionmiddleware.SetUserID(c, "user-1")
+		c.Set(middleware.AuthenticatedUserContextKey, middleware.AuthenticatedUser{ID: "user-1", SessionID: "sess-9"})
+		c.Next()
+	})
+	handler.RegisterRoutes(group)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/users/me", nil))
+	if rec.Code != http.StatusOK || svc.userID != "user-1" || svc.sessionID != "sess-9" {
+		t.Fatalf("status=%d user=%q session=%q body=%s", rec.Code, svc.userID, svc.sessionID, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"has_password":true`) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+func TestUserHandlerListIdentities(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	svc := &fakeUserListService{identities: []dto.IdentityResponse{{Provider: "google", ProviderEmail: "a@b.c", LinkedAt: "2026-11-01T08:00:00Z"}}}
+	handler := NewUserHandler(svc, nil, &fakePermissionChecker{})
+	router := gin.New()
+	group := router.Group("")
+	group.Use(seedUserContext("user-1"))
+	handler.RegisterRoutes(group)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/users/me/identities", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"provider":"google"`) || !strings.Contains(rec.Body.String(), `"linked_at"`) {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUpdateSelfAvatarRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	run := func(body string) (*httptest.ResponseRecorder, *fakeUserListService) {
+		svc := &fakeUserListService{}
+		handler := NewUserHandler(svc, nil, &fakePermissionChecker{})
+		router := gin.New()
+		group := router.Group("")
+		group.Use(seedUserContext("a73d7c06-96e9-4ab2-bb32-e025dde5660c"))
+		handler.RegisterRoutes(group)
+		req := httptest.NewRequest(http.MethodPatch, "/users/me/avatar", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec, svc
+	}
+
+	if rec, svc := run(`{"avatar_url":""}`); rec.Code != http.StatusOK || !svc.updateCalled {
+		t.Fatalf("empty avatar_url: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if rec, svc := run(`{}`); rec.Code != http.StatusUnprocessableEntity || svc.updateCalled {
+		t.Fatalf("missing avatar_url: status = %d, body = %s", rec.Code, rec.Body.String())
+	}
 }

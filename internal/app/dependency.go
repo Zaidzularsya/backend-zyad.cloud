@@ -18,6 +18,7 @@ import (
 	organizationhandler "zyad.cloud/internal/modules/organization/handler"
 	producthandler "zyad.cloud/internal/modules/product/handler"
 	receivablehandler "zyad.cloud/internal/modules/receivable/handler"
+	"zyad.cloud/internal/modules/social"
 	userhandler "zyad.cloud/internal/modules/user/handler"
 	whatsapphandler "zyad.cloud/internal/modules/whatsapp/handler"
 	pgdatabase "zyad.cloud/internal/platform/database"
@@ -93,6 +94,7 @@ type Dependencies struct {
 	ReceivableArrearsHandler         *receivablehandler.ArrearsHandler
 	ReceivableOverviewHandler        *receivablehandler.OverviewHandler
 	ReceivableSettlementHandler      *receivablehandler.SettlementHandler
+	ReceivablePayoutHandler          *receivablehandler.PayoutAccountHandler
 	ReceivableAccountHandler         *receivablehandler.AccountHandler
 	MikrotikRouterHandler            *mikrotikhandler.RouterHandler
 	MikrotikSetupHandler             *mikrotikhandler.SetupHandler
@@ -132,4 +134,6 @@ type Dependencies struct {
 	Authenticator                    middleware.AccessTokenAuthenticator
 	OrganizationResolver             middleware.AuthenticatedOrganizationResolver
 	PublicHostResolver               middleware.PublicHostResolver
+	// SocialHandlers: /public/referrals, /public/attribution/visits and /social/me/*.
+	SocialHandlers social.Handlers
 }

@@ -1,5 +1,34 @@
 package dto
 
+import (
+	"net/http"
+	"strings"
+	"time"
+
+	coreerrors "zyad.cloud/internal/core/errors"
+)
+
+// RegistrationIntent says what a new sign-up is for. Operators get a personal
+// workspace provisioned; social (mobile) users do not.
+type RegistrationIntent string
+
+const (
+	IntentSocial   RegistrationIntent = "social"
+	IntentOperator RegistrationIntent = "operator"
+)
+
+// NormalizeIntent maps the raw request value to a RegistrationIntent. Empty
+// defaults to operator so existing web clients keep working unchanged.
+func NormalizeIntent(raw string) (RegistrationIntent, error) {
+	switch RegistrationIntent(strings.ToLower(strings.TrimSpace(raw))) {
+	case "", IntentOperator:
+		return IntentOperator, nil
+	case IntentSocial:
+		return IntentSocial, nil
+	}
+	return "", coreerrors.New("VALIDATION_ERROR", "intent must be 'social' or 'operator'", http.StatusUnprocessableEntity)
+}
+
 type LoginRequest struct {
 	Identifier string `json:"identifier" binding:"required"`
 	Password   string `json:"password" binding:"required"`
@@ -20,6 +49,32 @@ type GoogleAuthRequest struct {
 	RememberMe  bool   `json:"remember_me"`
 	DeviceName  string `json:"device_name"`
 	InviteToken string `json:"invite_token,omitempty"`
+	// Intent defaults to operator when empty; see NormalizeIntent.
+	Intent RegistrationIntent `json:"intent"`
+	// Attribution is the first-touch referral captured by the client; only used for new users.
+	Attribution *AttributionInput `json:"attribution,omitempty"`
+}
+
+// AttributionInput is the first-touch referral context a client sends at sign-up.
+type AttributionInput struct {
+	Code        string    `json:"code"`
+	Channel     string    `json:"channel"`
+	PostID      string    `json:"post_id"`
+	FirstSeenAt time.Time `json:"first_seen_at"`
+}
+
+// RegisterRequest limits mirror users.name varchar(150) and users.email
+// varchar(255). The password cap only bounds the payload; the service still
+// enforces bcrypt's 72-byte limit with AUTH_PASSWORD_POLICY_FAILED.
+type RegisterRequest struct {
+	Name       string `json:"name" binding:"required,max=150"`
+	Email      string `json:"email" binding:"required,email,max=255"`
+	Password   string `json:"password" binding:"required,max=256"`
+	DeviceName string `json:"device_name"`
+	RememberMe bool   `json:"remember_me"`
+	// Intent defaults to operator when empty; see NormalizeIntent.
+	Intent      string            `json:"intent"`
+	Attribution *AttributionInput `json:"attribution,omitempty"`
 }
 
 type GoogleExchangeRequest struct {
@@ -125,6 +180,7 @@ type SessionResponse struct {
 	IPAddress  string  `json:"ip_address,omitempty"`
 	UserAgent  string  `json:"user_agent,omitempty"`
 	LastUsedAt *string `json:"last_used_at,omitempty"`
+	CreatedAt  string  `json:"created_at"`
 	ExpiresAt  string  `json:"expires_at"`
 	IsCurrent  bool    `json:"is_current"`
 }

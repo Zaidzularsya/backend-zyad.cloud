@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -11,6 +12,7 @@ import (
 	"zyad.cloud/internal/core/middleware"
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	"zyad.cloud/internal/modules/receivable/dto"
+	"zyad.cloud/internal/modules/receivable/repository"
 	"zyad.cloud/internal/modules/receivable/service"
 	"zyad.cloud/internal/shared/response"
 )
@@ -19,7 +21,21 @@ import (
 //   - /platform/settlements*: hanya org platform + izin settlement.manage (super admin).
 //   - /app/settlement*: hanya-baca untuk org customer pemanggil; organization_id SELALU dari
 //     konteks tenant, tidak pernah dari path/query/body.
-type SettlementHandler struct{ svc service.SettlementService }
+type SettlementHandler struct {
+	svc     service.SettlementService
+	payouts payoutSummarizer
+}
+
+// payoutSummarizer: ringkasan rekening per org untuk daftar saldo platform (opsional).
+type payoutSummarizer interface {
+	Summary(ctx context.Context, orgIDs []string) (map[string]repository.PayoutSummary, error)
+}
+
+// WithPayoutSummary menambah rekening verified dan flag pending pada GET /platform/settlements.
+func (h *SettlementHandler) WithPayoutSummary(p payoutSummarizer) *SettlementHandler {
+	h.payouts = p
+	return h
+}
 
 func NewSettlementHandler(svc service.SettlementService) *SettlementHandler {
 	return &SettlementHandler{svc: svc}
@@ -52,9 +68,20 @@ func (h *SettlementHandler) ListBalances(c *gin.Context) {
 		failSettlement(c, err)
 		return
 	}
+	var summary map[string]repository.PayoutSummary
+	if h.payouts != nil && len(rows) > 0 {
+		ids := make([]string, 0, len(rows))
+		for _, r := range rows {
+			ids = append(ids, r.OrganizationID)
+		}
+		if summary, err = h.payouts.Summary(c.Request.Context(), ids); err != nil {
+			failSettlement(c, err)
+			return
+		}
+	}
 	out := make([]dto.SettlementOrgBalanceResponse, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, dto.SettlementOrgBalanceFromService(r))
+		out = append(out, dto.SettlementOrgBalanceFromService(r).WithPayoutSummary(summary[r.OrganizationID]))
 	}
 	response.JSON(c, http.StatusOK, "success", out, dto.BuildMeta(page, perPage, total))
 }
@@ -158,6 +185,8 @@ func failSettlement(c *gin.Context, err error) {
 		validationFail(c, "Catatan wajib diisi untuk penyesuaian.")
 	case errors.Is(err, service.ErrInvalidSettlementEntry):
 		validationFail(c, "Jenis harus settlement/adjustment, jumlah desimal maksimal 2 digit (tidak nol; negatif hanya untuk adjustment), catatan maksimal 500 karakter.")
+	case errors.Is(err, service.ErrPayoutAccountNotVerified):
+		corehttp.Fail(c, coreerrors.New("PAYOUT_ACCOUNT_NOT_VERIFIED", "Organisasi belum memiliki rekening pencairan terverifikasi.", http.StatusUnprocessableEntity))
 	case errors.Is(err, service.ErrSettlementBeneficiaryNotFound):
 		corehttp.Fail(c, coreerrors.New("ORGANIZATION_NOT_FOUND", "Organisasi tidak ditemukan.", http.StatusNotFound))
 	case errors.Is(err, service.ErrSettlementBeneficiaryInvalid):

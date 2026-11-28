@@ -78,6 +78,7 @@ func LoadAuth() AuthConfig {
 		OTPExpiresIn:               getEnv("AUTH_OTP_EXPIRES_IN", "5m"),
 		OTPMaxAttempts:             getEnvInt("AUTH_OTP_MAX_ATTEMPTS", 5),
 		PasswordMinLength:          getEnvInt("AUTH_PASSWORD_MIN_LENGTH", 8),
+		PasswordRegisterEnabled:    getEnvBool("AUTH_PASSWORD_REGISTER_ENABLED", false),
 		CookieSecret:               getEnv("COOKIE_SECRET", ""),
 		CookieExpiresIn:            getEnv("COOKIE_EXPIRES_IN", "24h"),
 		Google: GoogleAuthConfig{
@@ -103,6 +104,16 @@ func LoadSeedAdmin() SeedAdminConfig {
 }
 
 const defaultSelfServeGraceDays = 7
+
+// LoadSocial: SOCIAL_SHARE_URL_BASE and SOCIAL_CLAIM_URL_BASE default to the
+// frontend URL; SOCIAL_IP_HASH_SECRET defaults to the JWT signing secret.
+func LoadSocial(frontendURL, jwtSecret string) SocialConfig {
+	return SocialConfig{
+		ShareURLBase: getEnv("SOCIAL_SHARE_URL_BASE", frontendURL),
+		ClaimURLBase: getEnv("SOCIAL_CLAIM_URL_BASE", frontendURL),
+		IPHashSecret: getEnv("SOCIAL_IP_HASH_SECRET", jwtSecret),
+	}
+}
 
 func LoadSelfServe() SelfServeConfig {
 	grace, invalid := parseGraceDays(os.Getenv("SELF_SERVE_GRACE_DAYS"))

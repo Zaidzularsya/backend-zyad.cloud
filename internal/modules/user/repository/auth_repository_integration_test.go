@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -424,6 +425,96 @@ func TestAuthRepositoryEmailVerificationIntegration(t *testing.T) {
 	}
 }
 
+func TestTakeOverUnverifiedForGoogleRevokesSessionsAndPassword(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	repo := NewAuthRepository(db)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	suffix := time.Now().UnixNano()
+	email := fmt.Sprintf("takeover-%d@example.test", suffix)
+	username := fmt.Sprintf("takeover-%d", suffix)
+	subject := fmt.Sprintf("google-sub-takeover-%d", suffix)
+
+	var userID string
+	if err := db.QueryRow(ctx, `
+		INSERT INTO users (name, email, username, password_hash, status)
+		VALUES ('Squatted', $1, $2, 'attacker-password-hash', 'active')
+		RETURNING id
+	`, email, username).Scan(&userID); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		_, _ = db.Exec(cleanupCtx, `DELETE FROM users WHERE id = $1`, userID)
+	})
+	for i := 0; i < 2; i++ {
+		if _, err := db.Exec(ctx, `
+			INSERT INTO sessions (user_id, refresh_token_hash, expires_at)
+			VALUES ($1, $2, now() + interval '1 day')
+		`, userID, fmt.Sprintf("takeover-refresh-%d-%d", suffix, i)); err != nil {
+			t.Fatalf("insert session: %v", err)
+		}
+	}
+
+	verifiedAt := time.Now().UTC().Truncate(time.Second)
+	user, err := repo.TakeOverUnverifiedForGoogle(ctx, service.GoogleIdentityLink{
+		UserID:         userID,
+		ProviderUserID: subject,
+		ProviderEmail:  email,
+		VerifiedAt:     verifiedAt,
+	})
+	if err != nil {
+		t.Fatalf("TakeOverUnverifiedForGoogle: %v", err)
+	}
+	if user.ID != userID || user.EmailVerifiedAt == nil {
+		t.Fatalf("unexpected user: %+v", user)
+	}
+
+	var passwordIsNull bool
+	var emailVerifiedAt sql.NullTime
+	if err := db.QueryRow(ctx, `
+		SELECT password_hash IS NULL, email_verified_at FROM users WHERE id = $1
+	`, userID).Scan(&passwordIsNull, &emailVerifiedAt); err != nil {
+		t.Fatalf("query user: %v", err)
+	}
+	if !passwordIsNull {
+		t.Fatal("expected password_hash to be NULL after takeover")
+	}
+	if !emailVerifiedAt.Valid {
+		t.Fatal("expected email_verified_at to be set after takeover")
+	}
+
+	var activeSessions int
+	if err := db.QueryRow(ctx, `
+		SELECT count(*) FROM sessions WHERE user_id = $1 AND revoked_at IS NULL
+	`, userID).Scan(&activeSessions); err != nil {
+		t.Fatalf("count sessions: %v", err)
+	}
+	if activeSessions != 0 {
+		t.Fatalf("expected all sessions revoked, %d still active", activeSessions)
+	}
+
+	var identityCount, auditCount int
+	if err := db.QueryRow(ctx, `
+		SELECT count(*) FROM auth_identities WHERE user_id = $1 AND provider = 'google' AND provider_user_id = $2
+	`, userID, subject).Scan(&identityCount); err != nil {
+		t.Fatalf("count identities: %v", err)
+	}
+	if identityCount != 1 {
+		t.Fatalf("expected 1 google identity, got %d", identityCount)
+	}
+	if err := db.QueryRow(ctx, `
+		SELECT count(*) FROM audit_logs WHERE target_user_id = $1 AND event = 'google_unverified_takeover'
+	`, userID).Scan(&auditCount); err != nil {
+		t.Fatalf("count audit: %v", err)
+	}
+	if auditCount != 1 {
+		t.Fatalf("expected 1 takeover audit row, got %d", auditCount)
+	}
+}
+
 // /auth/me harus memakai org efektif yang sama dengan resolver request: bila
 // sessions.active_organization_id kosong dan user punya tepat satu membership aktif,
 // permission role org tetap dikembalikan (FE memakainya untuk can()).
@@ -552,4 +643,151 @@ func TestAuthRepositoryActiveOrganizationPermissionSlugsFallbackIntegration(t *t
 			t.Fatalf("got %#v, want [%s]", got, slug)
 		}
 	})
+}
+
+func TestCreatePasswordUserDuplicateEmail(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	repo := NewAuthRepository(db)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	suffix := time.Now().UnixNano()
+	email := fmt.Sprintf("register-%d@example.test", suffix)
+	registration := service.PasswordUserRegistration{
+		Name:         "Register Test",
+		Email:        email,
+		PasswordHash: "hash",
+		UsernameBase: fmt.Sprintf("register-%d", suffix),
+		RoleSlug:     "member",
+		CreatedAt:    time.Now().UTC(),
+	}
+
+	user, err := repo.CreatePasswordUser(ctx, registration)
+	if err != nil {
+		t.Fatalf("create password user: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		if _, err := db.Exec(cleanupCtx, `DELETE FROM users WHERE id = $1`, user.ID); err != nil {
+			t.Errorf("cleanup user: %v", err)
+		}
+	})
+
+	var status string
+	var verifiedAt sql.NullTime
+	if err := db.QueryRow(ctx, `SELECT status, email_verified_at FROM users WHERE id = $1`, user.ID).Scan(&status, &verifiedAt); err != nil {
+		t.Fatalf("read user: %v", err)
+	}
+	if status != "active" || verifiedAt.Valid {
+		t.Fatalf("status=%q verified=%v, want active/unverified", status, verifiedAt.Valid)
+	}
+
+	registration.Email = email
+	registration.UsernameBase = fmt.Sprintf("register-other-%d", suffix)
+	if _, err := repo.CreatePasswordUser(ctx, registration); !errors.Is(err, service.ErrEmailTaken) {
+		t.Fatalf("duplicate email error = %v, want ErrEmailTaken", err)
+	}
+}
+
+func TestAuthRepositoryCompleteEmailVerificationRejectsStaleEmailIntegration(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	repo := NewAuthRepository(db)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	suffix := time.Now().UnixNano()
+	oldEmail := fmt.Sprintf("stale-old-%d@example.test", suffix)
+	newEmail := fmt.Sprintf("stale-new-%d@example.test", suffix)
+	userID := insertUnverifiedUser(ctx, t, db, oldEmail, fmt.Sprintf("stale-%d", suffix))
+
+	tokenHash := fmt.Sprintf("stale-token-hash-%d", suffix)
+	if err := repo.CreateEmailVerificationToken(ctx, service.NewEmailVerificationToken{
+		UserID: userID, Email: oldEmail, TokenHash: tokenHash, ExpiresAt: time.Now().UTC().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("CreateEmailVerificationToken: %v", err)
+	}
+	// The user changes their email after the token was sent to the old address.
+	if _, err := db.Exec(ctx, `UPDATE users SET email = $2 WHERE id = $1`, userID, newEmail); err != nil {
+		t.Fatalf("change email: %v", err)
+	}
+
+	_, err := repo.CompleteEmailVerification(ctx, tokenHash, time.Now().UTC())
+	if !errors.Is(err, service.ErrEmailVerificationTokenNotFound) {
+		t.Fatalf("CompleteEmailVerification with stale email: err = %v, want ErrEmailVerificationTokenNotFound", err)
+	}
+	if verifiedAt := emailVerifiedAt(ctx, t, db, userID); verifiedAt.Valid {
+		t.Fatal("stale token must not verify the current email")
+	}
+}
+
+func TestAuthRepositoryMarkEmailVerifiedBindsEmailIntegration(t *testing.T) {
+	db := testutil.OpenTestDatabase(t)
+	repo := NewAuthRepository(db)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	suffix := time.Now().UnixNano()
+	email := fmt.Sprintf("mark-%d@example.test", suffix)
+	userID := insertUnverifiedUser(ctx, t, db, email, fmt.Sprintf("mark-%d", suffix))
+
+	// A different address leaves the user unverified.
+	if err := repo.MarkEmailVerified(ctx, userID, "someone-else@example.test", time.Now().UTC()); err != nil {
+		t.Fatalf("MarkEmailVerified other email: %v", err)
+	}
+	if emailVerifiedAt(ctx, t, db, userID).Valid {
+		t.Fatal("a different email must not verify the user")
+	}
+
+	// The current address (case and spaces ignored) verifies and activates.
+	first := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	if err := repo.MarkEmailVerified(ctx, userID, "  "+strings.ToUpper(email)+" ", first); err != nil {
+		t.Fatalf("MarkEmailVerified: %v", err)
+	}
+	got := emailVerifiedAt(ctx, t, db, userID)
+	if !got.Valid || !got.Time.Equal(first) {
+		t.Fatalf("email_verified_at = %v, want %v", got, first)
+	}
+	var status string
+	if err := db.QueryRow(ctx, `SELECT status FROM users WHERE id = $1`, userID).Scan(&status); err != nil {
+		t.Fatalf("query status: %v", err)
+	}
+	if status != "active" {
+		t.Fatalf("status = %q, want active", status)
+	}
+
+	// Already verified: untouched.
+	if err := repo.MarkEmailVerified(ctx, userID, email, time.Now().UTC()); err != nil {
+		t.Fatalf("MarkEmailVerified again: %v", err)
+	}
+	if again := emailVerifiedAt(ctx, t, db, userID); !again.Time.Equal(first) {
+		t.Fatalf("email_verified_at changed to %v, want %v", again.Time, first)
+	}
+}
+
+func insertUnverifiedUser(ctx context.Context, t *testing.T, db *database.Pool, email, username string) string {
+	t.Helper()
+	var userID string
+	if err := db.QueryRow(ctx, `
+		INSERT INTO users (name, email, username, status)
+		VALUES ('Pending User', $1, $2, 'pending')
+		RETURNING id
+	`, email, username).Scan(&userID); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		_, _ = db.Exec(cleanupCtx, `DELETE FROM users WHERE id = $1`, userID)
+	})
+	return userID
+}
+
+func emailVerifiedAt(ctx context.Context, t *testing.T, db *database.Pool, userID string) sql.NullTime {
+	t.Helper()
+	var at sql.NullTime
+	if err := db.QueryRow(ctx, `SELECT email_verified_at FROM users WHERE id = $1`, userID).Scan(&at); err != nil {
+		t.Fatalf("query email_verified_at: %v", err)
+	}
+	return at
 }

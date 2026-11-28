@@ -27,6 +27,8 @@ type fakeLedgerRepo struct {
 	types   map[string]string
 	entries []repository.SettlementEntry
 	calls   []string
+	// verifiedPayoutID meniru id rekening verified yang dibaca repo di dalam kunci.
+	verifiedPayoutID string
 }
 
 func (f *fakeLedgerRepo) totals(orgID string) repository.SettlementTotals {
@@ -69,9 +71,9 @@ func (f *fakeLedgerRepo) ListEntries(_ context.Context, orgID string, _, _ int) 
 	return out, int64(len(out)), nil
 }
 
-func (f *fakeLedgerRepo) InsertManualLocked(_ context.Context, in repository.SettlementManualEntry, check func(repository.SettlementTotals) error) (repository.SettlementEntry, error) {
+func (f *fakeLedgerRepo) InsertManualLocked(_ context.Context, in repository.SettlementManualEntry, check func(repository.SettlementTotals, string) error) (repository.SettlementEntry, error) {
 	f.calls = append(f.calls, "lock", "totals-in-lock")
-	if err := check(f.totals(in.OrganizationID)); err != nil {
+	if err := check(f.totals(in.OrganizationID), f.verifiedPayoutID); err != nil {
 		return repository.SettlementEntry{}, err
 	}
 	f.calls = append(f.calls, "insert")
@@ -85,7 +87,7 @@ func (f *fakeLedgerRepo) add(org, kind, amount string) {
 }
 
 func newLedger() (*fakeLedgerRepo, SettlementService) {
-	f := &fakeLedgerRepo{types: map[string]string{orgA: "customer", orgB: "customer", orgPlat: "platform"}}
+	f := &fakeLedgerRepo{types: map[string]string{orgA: "customer", orgB: "customer", orgPlat: "platform"}, verifiedPayoutID: "payout-1"}
 	return f, NewSettlementService(f)
 }
 
@@ -218,5 +220,27 @@ func TestSettlementListBalancesAndEntries(t *testing.T) {
 	entries, _, err := svc.ListEntries(context.Background(), orgA, 50, 0)
 	if err != nil || len(entries) != 1 || entries[0].OrganizationID != orgA {
 		t.Fatalf("entries=%+v err=%v", entries, err)
+	}
+}
+
+func TestRecordSettlementRequiresVerifiedPayout(t *testing.T) {
+	f, svc := newLedger()
+	f.verifiedPayoutID = ""
+	f.add(orgA, "payment", "100.00")
+	_, err := svc.Record(context.Background(), orgA, SettlementEntryInput{Kind: "settlement", Amount: "10.00"}, actorID)
+	if !errors.Is(err, ErrPayoutAccountNotVerified) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(f.entries) != 1 {
+		t.Fatalf("entri ditulis tanpa rekening verified: %d", len(f.entries))
+	}
+}
+
+func TestRecordAdjustmentWithoutPayoutAllowed(t *testing.T) {
+	f, svc := newLedger()
+	f.verifiedPayoutID = ""
+	f.add(orgA, "payment", "100.00")
+	if _, err := svc.Record(context.Background(), orgA, SettlementEntryInput{Kind: "adjustment", Amount: "5.00", Note: "koreksi"}, actorID); err != nil {
+		t.Fatalf("err = %v", err)
 	}
 }

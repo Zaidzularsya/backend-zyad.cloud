@@ -67,7 +67,7 @@ docs/
 
 | Status | Modul |
 |---|---|
-| Aktif | `user`, `organization`, `landing`, `crm`, `catalog`, `receivable`, `mikrotik`, `whatsapp`, `mailbox`, `finance`, `asset` (storage tenant + kuota), `product` (hanya registry `product_features`) |
+| Aktif | `user`, `organization`, `landing`, `crm`, `catalog`, `receivable`, `mikrotik`, `whatsapp`, `mailbox`, `finance`, `asset` (storage tenant + kuota), `product` (hanya registry `product_features`), `social` (identitas warga: klaim relasi pelanggan ke kontak CRM + atribusi referral; `docs/social-identity.md`) |
 | Stub (scaffold kosong) | `account`, `contract`, `dashboard`, `newsaggregator`, `order`, `payment`, `provisioning`, `radius`, `resource` |
 | Dihapus (R4-S5, migration 000154) | `billing`, `subscription` — digantikan `receivable` (invoice/DOKU), contract + `organization_entitlements` |
 

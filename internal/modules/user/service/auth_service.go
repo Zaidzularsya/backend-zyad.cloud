@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -30,6 +31,7 @@ var ErrEmailVerificationTokenNotFound = errors.New("email verification token not
 var ErrEmailAlreadyVerified = errors.New("email already verified")
 var ErrGoogleIdentityNotFound = errors.New("google identity not found")
 var ErrGoogleEmailUserNotFound = errors.New("google email user not found")
+var ErrEmailTaken = errors.New("email already registered")
 var ErrGoogleDefaultRoleNotFound = errors.New("google default role not found")
 
 const passwordResetRequestedEvent = "auth.password_reset_requested"
@@ -41,7 +43,12 @@ type LoginRepository interface {
 	FindGoogleUserBySubject(ctx context.Context, subject string) (GoogleAuthUser, error)
 	FindGoogleUserByEmail(ctx context.Context, email string) (GoogleAuthUser, error)
 	LinkGoogleIdentity(ctx context.Context, link GoogleIdentityLink) (GoogleAuthUser, error)
+	// TakeOverUnverifiedForGoogle claims an account whose email was never verified:
+	// the password is cleared and all sessions are revoked so a pre-registrant cannot keep access.
+	TakeOverUnverifiedForGoogle(ctx context.Context, link GoogleIdentityLink) (GoogleAuthUser, error)
 	CreateGoogleUser(ctx context.Context, registration GoogleUserRegistration) (GoogleAuthUser, error)
+	// CreatePasswordUser inserts an active user with email_verified_at NULL; a taken email returns ErrEmailTaken.
+	CreatePasswordUser(ctx context.Context, registration PasswordUserRegistration) (LoginUser, error)
 	FindPasswordResetUserByEmail(ctx context.Context, email string) (PasswordResetUser, error)
 	FindPasswordResetTokenByHash(ctx context.Context, tokenHash string) (PasswordResetToken, error)
 	FindPasswordChangeUser(ctx context.Context, userID string) (PasswordChangeUser, error)
@@ -126,6 +133,17 @@ type GoogleUserRegistration struct {
 	VerifiedAt   time.Time
 	IPAddress    string
 	UserAgent    string
+}
+
+type PasswordUserRegistration struct {
+	Name         string
+	Email        string
+	PasswordHash string
+	UsernameBase string
+	RoleSlug     string
+	IPAddress    string
+	UserAgent    string
+	CreatedAt    time.Time
 }
 
 type NewSession struct {
@@ -275,6 +293,7 @@ type CurrentSession struct {
 	IPAddress  string
 	UserAgent  string
 	LastUsedAt *time.Time
+	CreatedAt  time.Time
 	ExpiresAt  time.Time
 	RevokedAt  *time.Time
 }
@@ -292,6 +311,8 @@ type AuthService struct {
 	resetTokenTTL         time.Duration
 	verificationTokenTTL  time.Duration
 	passwordMinLength     int
+	passwordRegisterOn    bool
+	signupHooks           SignupHooks
 	googleEnabled         bool
 	googleAutoRegister    bool
 	googleAutoLinkEmail   bool
@@ -302,6 +323,11 @@ type AuthService struct {
 	notificationLocale    string
 	notificationAttempts  int
 	now                   func() time.Time
+	currentOrganization   CurrentOrganizationProvider
+}
+
+func (s *AuthService) SetCurrentOrganizationProvider(provider CurrentOrganizationProvider) {
+	s.currentOrganization = provider
 }
 
 func NewAuthService(repo LoginRepository, cfg config.Config) (*AuthService, error) {
@@ -345,6 +371,7 @@ func NewAuthService(repo LoginRepository, cfg config.Config) (*AuthService, erro
 		resetTokenTTL:        resetTokenTTL,
 		verificationTokenTTL: verificationTokenTTL,
 		passwordMinLength:    cfg.Auth.PasswordMinLength,
+		passwordRegisterOn:   cfg.Auth.PasswordRegisterEnabled,
 		googleEnabled:        cfg.Auth.Google.Enabled,
 		googleAutoRegister:   cfg.Auth.Google.AutoRegister,
 		googleAutoLinkEmail:  cfg.Auth.Google.AutoLinkVerifiedEmail,
@@ -520,6 +547,10 @@ func (s *AuthService) verifyGoogleToken(ctx context.Context, idToken string, met
 }
 
 func (s *AuthService) GoogleAuth(ctx context.Context, req dto.GoogleAuthRequest, metadata LoginHistoryRecord) (dto.GoogleAuthResponse, error) {
+	intent, err := dto.NormalizeIntent(string(req.Intent))
+	if err != nil {
+		return dto.GoogleAuthResponse{}, err
+	}
 	claims, err := s.verifyGoogleToken(ctx, req.IDToken, metadata)
 	if err != nil {
 		return dto.GoogleAuthResponse{}, err
@@ -572,7 +603,10 @@ func (s *AuthService) GoogleAuth(ctx context.Context, req dto.GoogleAuthRequest,
 	if err != nil {
 		return dto.GoogleAuthResponse{}, err
 	}
-	if isNewUser && s.googleWorkspace != nil {
+	if isNewUser {
+		s.notifyUserRegistered(ctx, user.ID, req.Attribution)
+	}
+	if isNewUser && intent == dto.IntentOperator && s.googleWorkspace != nil {
 		if err := s.googleWorkspace.ProvisionGoogleWorkspace(
 			ctx,
 			user.ID,
@@ -640,14 +674,22 @@ func (s *AuthService) resolveGoogleUser(
 			})
 			return GoogleAuthUser{}, false, coreerrors.New("AUTH_GOOGLE_EMAIL_CONFLICT", "google email is already used", http.StatusConflict)
 		}
-		linkedUser, err := s.repo.LinkGoogleIdentity(ctx, GoogleIdentityLink{
+		link := GoogleIdentityLink{
 			UserID:         user.ID,
 			ProviderUserID: subject,
 			ProviderEmail:  email,
 			VerifiedAt:     now,
 			IPAddress:      metadata.IPAddress,
 			UserAgent:      metadata.UserAgent,
-		})
+		}
+		// An account whose email was never verified may have been pre-registered by someone
+		// else with a password; linking would let that person keep access after the real
+		// owner signs in with Google, so the account is taken over instead.
+		linkFn := s.repo.LinkGoogleIdentity
+		if user.EmailVerifiedAt == nil {
+			linkFn = s.repo.TakeOverUnverifiedForGoogle
+		}
+		linkedUser, err := linkFn(ctx, link)
 		if err != nil {
 			return GoogleAuthUser{}, false, coreerrors.Wrap("AUTH_GOOGLE_LINK_FAILED", "failed to link google identity", http.StatusInternalServerError, err)
 		}
@@ -1079,7 +1121,17 @@ func (s *AuthService) CurrentUser(ctx context.Context, accessToken string) (dto.
 		return dto.CurrentUserResponse{}, err
 	}
 
-	return currentUserResponse(currentUser), nil
+	response := currentUserResponse(currentUser)
+	// A failing lookup must not break /auth/me: degrade to null and log.
+	if s.currentOrganization != nil {
+		current, err := s.currentOrganization.CurrentOrganization(ctx, currentUser.ID, currentUser.Session.ID)
+		if err != nil {
+			slog.Warn("resolve current organization failed", "user_id", currentUser.ID, "error", err)
+		} else {
+			response.CurrentOrganization = current
+		}
+	}
+	return response, nil
 }
 
 func (s *AuthService) AuthenticateAccessToken(ctx context.Context, accessToken string) (middleware.AuthenticatedUser, error) {
@@ -1089,11 +1141,13 @@ func (s *AuthService) AuthenticateAccessToken(ctx context.Context, accessToken s
 	}
 
 	return middleware.AuthenticatedUser{
-		ID:          currentUser.ID,
-		SessionID:   currentUser.Session.ID,
-		Status:      string(currentUser.Status),
-		Roles:       currentUser.Roles,
-		Permissions: currentUser.Permissions,
+		ID:            currentUser.ID,
+		SessionID:     currentUser.Session.ID,
+		Status:        string(currentUser.Status),
+		Roles:         currentUser.Roles,
+		Permissions:   currentUser.Permissions,
+		Email:         currentUser.Email,
+		EmailVerified: currentUser.EmailVerifiedAt != nil,
 	}, nil
 }
 
@@ -1364,7 +1418,7 @@ func (s *AuthService) ResendVerificationEmail(ctx context.Context, req dto.Resen
 		return coreerrors.Wrap("AUTH_RESEND_VERIFICATION_FAILED", "failed to resend verification email", http.StatusInternalServerError, err)
 	}
 
-	if user.EmailVerifiedAt != nil || user.Status == model.UserStatusActive {
+	if user.EmailVerifiedAt != nil {
 		return coreerrors.New("AUTH_EMAIL_ALREADY_VERIFIED", "email is already verified", http.StatusConflict)
 	}
 
@@ -1373,6 +1427,11 @@ func (s *AuthService) ResendVerificationEmail(ctx context.Context, req dto.Resen
 		return nil
 	}
 
+	return s.issueEmailVerification(ctx, user.ID, user.Name, user.Email)
+}
+
+// issueEmailVerification stores a fresh verification token and queues the email.
+func (s *AuthService) issueEmailVerification(ctx context.Context, userID string, name string, email string) error {
 	token, err := coreauth.NewRandomToken(32)
 	if err != nil {
 		return coreerrors.Wrap("AUTH_VERIFY_TOKEN_CREATE_FAILED", "failed to create verification token", http.StatusInternalServerError, err)
@@ -1382,8 +1441,8 @@ func (s *AuthService) ResendVerificationEmail(ctx context.Context, req dto.Resen
 	expiresAt := s.now().UTC().Add(s.verificationTokenTTL)
 
 	if err := s.repo.CreateEmailVerificationToken(ctx, NewEmailVerificationToken{
-		UserID:    user.ID,
-		Email:     user.Email,
+		UserID:    userID,
+		Email:     email,
 		TokenHash: tokenHash,
 		ExpiresAt: expiresAt,
 	}); err != nil {
@@ -1396,19 +1455,19 @@ func (s *AuthService) ResendVerificationEmail(ctx context.Context, req dto.Resen
 
 	_, err = s.notificationPublisher.Publish(ctx, notificationpublisher.Event{
 		Type:   emailVerificationRequestedEvent,
-		UserID: user.ID,
+		UserID: userID,
 		Recipient: notificationdomain.NotificationRecipient{
 			Type:   "user",
-			UserID: user.ID,
-			Name:   user.Name,
-			Email:  user.Email,
+			UserID: userID,
+			Name:   name,
+			Email:  email,
 		},
 		Payload: map[string]any{
 			"app_name":         firstNonEmpty(s.appName, "Zyad Cloud"),
-			"user_id":          user.ID,
-			"user_name":        user.Name,
-			"user_email":       user.Email,
-			"email":            user.Email,
+			"user_id":          userID,
+			"user_name":        name,
+			"user_email":       email,
+			"email":            email,
 			"verification_url": s.emailVerificationURL(token),
 			"expired_at":       expiresAt.Format(time.RFC3339),
 		},

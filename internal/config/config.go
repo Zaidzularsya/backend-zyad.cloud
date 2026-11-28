@@ -24,6 +24,7 @@ type Config struct {
 	Security     SecurityConfig
 	Storage      StorageConfig
 	SelfServe    SelfServeConfig
+	Social       SocialConfig
 }
 
 var loadEnvOnce sync.Once
@@ -33,11 +34,13 @@ func Load() Config {
 		_ = loadDefaultDotEnv()
 	})
 
+	app := LoadApp()
+	auth := LoadAuth()
 	return Config{
-		App:          LoadApp(),
+		App:          app,
 		Database:     LoadDatabase(),
 		Redis:        LoadRedis(),
-		Auth:         LoadAuth(),
+		Auth:         auth,
 		SeedAdmin:    LoadSeedAdmin(),
 		Notification: LoadNotification(),
 		HTTP:         LoadHTTP(),
@@ -50,6 +53,7 @@ func Load() Config {
 		Security:     LoadSecurity(),
 		Storage:      LoadStorage(),
 		SelfServe:    LoadSelfServe(),
+		Social:       LoadSocial(app.FrontendURL, auth.Secret),
 	}
 }
 
@@ -97,6 +101,7 @@ type AuthConfig struct {
 	OTPExpiresIn               string
 	OTPMaxAttempts             int
 	PasswordMinLength          int
+	PasswordRegisterEnabled    bool
 	CookieSecret               string
 	CookieExpiresIn            string
 	Google                     GoogleAuthConfig
@@ -118,6 +123,16 @@ type SeedAdminConfig struct {
 	Password string
 	WhatsApp string
 	Role     string
+}
+
+// SocialConfig: social identity features (referral share links).
+type SocialConfig struct {
+	// ShareURLBase is the origin referral links point to: <base>/r/<code>.
+	ShareURLBase string
+	// ClaimURLBase is the origin of claim invite links: <base>/claim?token=<token>.
+	ClaimURLBase string
+	// IPHashSecret keys the HMAC-SHA256 of visitor IPs in attribution events.
+	IPHashSecret string
 }
 
 // SelfServeConfig: aktor otomatis checkout self-serve (modul CRM).

@@ -9,6 +9,7 @@ import (
 
 	corehttp "zyad.cloud/internal/core/http"
 	"zyad.cloud/internal/core/middleware"
+	"zyad.cloud/internal/modules/social"
 	"zyad.cloud/internal/platform/storage"
 
 	"github.com/gin-gonic/gin"
@@ -163,6 +164,9 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.CRMSelfServeHandler != nil {
 		deps.CRMSelfServeHandler.RegisterRoutes(protected)
 	}
+	// Social: public referral endpoints on the plain api group (no auth, no tenant host);
+	// /social/me/* on protected without tenant middleware (data is keyed by user).
+	social.RegisterRoutes(api, protected, deps.SocialHandlers)
 	if deps.NotificationTemplateHandler != nil {
 		deps.NotificationTemplateHandler.RegisterRoutes(protected)
 	}
@@ -244,6 +248,11 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 	if deps.ReceivableSettlementHandler != nil {
 		deps.ReceivableSettlementHandler.RegisterPlatformRoutes(protected, deps.PermissionChecker)
 		deps.ReceivableSettlementHandler.RegisterOwnRoutes(protected, deps.PermissionChecker)
+	}
+	// Rekening pencairan (owner mengajukan, super admin memverifikasi) berbagi prefix dengan ledger di atas.
+	if deps.ReceivablePayoutHandler != nil {
+		deps.ReceivablePayoutHandler.RegisterPlatformRoutes(protected, deps.PermissionChecker)
+		deps.ReceivablePayoutHandler.RegisterOwnRoutes(protected, deps.PermissionChecker)
 	}
 	if deps.PlatformAssetHandler != nil {
 		deps.PlatformAssetHandler.RegisterRoutes(protected, deps.PermissionChecker)
@@ -357,6 +366,17 @@ func newRouter(deps Dependencies) (*gin.Engine, error) {
 		if deps.ReceivableArrearsHandler != nil {
 			deps.ReceivableArrearsHandler.RegisterRoutes(receivableGroup, deps.PermissionChecker)
 		}
+	}
+
+	// Social tenant settings: same tenant rules as CRM, no entitlement (the
+	// opt-out must stay reachable for every tenant whose contacts can be claimed).
+	if deps.SocialHandlers.Tenant != nil {
+		socialGroup := protected.Group("/app/social")
+		socialGroup.Use(
+			middleware.RequireActiveTenant(),
+			middleware.RequireCustomerOrPlatformTenant(),
+		)
+		deps.SocialHandlers.Tenant.RegisterRoutes(socialGroup, deps.PermissionChecker)
 	}
 
 	registerMikrotikRoutes(protected, deps)

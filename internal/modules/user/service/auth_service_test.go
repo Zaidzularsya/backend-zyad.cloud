@@ -175,6 +175,77 @@ func TestAuthServiceGoogleAuthExistingIdentitySuccess(t *testing.T) {
 	}
 }
 
+func newGoogleAutoLinkTestService(t *testing.T, repo *fakeLoginRepository) *AuthService {
+	t.Helper()
+	svc := newTestAuthService(t, repo)
+	svc.googleEnabled = true
+	svc.googleAutoLinkEmail = true
+	svc.googleVerifier = &fakeGoogleVerifier{claims: coreauth.GoogleIDTokenClaims{
+		Subject:       "google-sub-victim",
+		Email:         "Victim@Example.com",
+		EmailVerified: true,
+		Name:          "Victim",
+	}}
+	return svc
+}
+
+func TestGoogleAuthTakesOverUnverifiedPasswordAccount(t *testing.T) {
+	repo := &fakeLoginRepository{
+		findGoogleSubjectErr: ErrGoogleIdentityNotFound,
+		googleUserByEmail: GoogleAuthUser{
+			ID:       "user-attacker-registered",
+			Email:    "victim@example.com",
+			Username: "victim",
+			Status:   model.UserStatusActive,
+		},
+		sessionID: "session-1",
+	}
+	svc := newGoogleAutoLinkTestService(t, repo)
+
+	result, err := svc.GoogleAuth(context.Background(), dto.GoogleAuthRequest{IDToken: "valid-google-token"}, LoginHistoryRecord{})
+	if err != nil {
+		t.Fatalf("google auth: %v", err)
+	}
+	if !repo.googleTakeOverCalled {
+		t.Fatal("expected TakeOverUnverifiedForGoogle to be called")
+	}
+	if repo.googleLinkCalled {
+		t.Fatal("LinkGoogleIdentity must not be called for an unverified account")
+	}
+	if repo.googleTakeOver.UserID != "user-attacker-registered" || repo.googleTakeOver.ProviderUserID != "google-sub-victim" || repo.googleTakeOver.ProviderEmail != "victim@example.com" {
+		t.Fatalf("unexpected takeover link: %+v", repo.googleTakeOver)
+	}
+	if result.User.ID != "user-attacker-registered" {
+		t.Fatalf("response user id = %q", result.User.ID)
+	}
+}
+
+func TestGoogleAuthLinksVerifiedAccountAsBefore(t *testing.T) {
+	verifiedAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	repo := &fakeLoginRepository{
+		findGoogleSubjectErr: ErrGoogleIdentityNotFound,
+		googleUserByEmail: GoogleAuthUser{
+			ID:              "user-verified",
+			Email:           "victim@example.com",
+			Username:        "victim",
+			Status:          model.UserStatusActive,
+			EmailVerifiedAt: &verifiedAt,
+		},
+		sessionID: "session-1",
+	}
+	svc := newGoogleAutoLinkTestService(t, repo)
+
+	if _, err := svc.GoogleAuth(context.Background(), dto.GoogleAuthRequest{IDToken: "valid-google-token"}, LoginHistoryRecord{}); err != nil {
+		t.Fatalf("google auth: %v", err)
+	}
+	if !repo.googleLinkCalled {
+		t.Fatal("expected LinkGoogleIdentity to be called")
+	}
+	if repo.googleTakeOverCalled {
+		t.Fatal("TakeOverUnverifiedForGoogle must not be called for a verified account")
+	}
+}
+
 func TestAuthServiceGoogleAuthAutoRegistersActiveUser(t *testing.T) {
 	repo := &fakeLoginRepository{
 		findGoogleSubjectErr: ErrGoogleIdentityNotFound,
@@ -269,6 +340,65 @@ func TestAuthServiceGoogleAuthAutoRegistersAndProvisionsWorkspace(t *testing.T) 
 		provisioner.workspaceName != "New Workspace Owner" ||
 		provisioner.metadata.IPAddress != "127.0.0.1" {
 		t.Fatalf("provisioner = %#v", provisioner)
+	}
+}
+
+func newGoogleIntentService(t *testing.T) (*AuthService, *fakeGoogleWorkspaceProvisioner) {
+	t.Helper()
+	repo := &fakeLoginRepository{
+		findGoogleSubjectErr: ErrGoogleIdentityNotFound,
+		findGoogleEmailErr:   ErrGoogleEmailUserNotFound,
+		createdGoogleUser: GoogleAuthUser{
+			ID: "user-new", Name: "New User", Email: "new@example.com", Username: "new",
+			Status: model.UserStatusActive, Roles: []string{"member"}, Permissions: []string{},
+		},
+		sessionID: "session-new",
+	}
+	svc, provisioner := newGoogleBuyerService(t, repo, coreauth.GoogleIDTokenClaims{
+		Subject: "google-sub-new", Email: "new@example.com", EmailVerified: true, Name: "New User",
+	})
+	return svc, provisioner
+}
+
+func TestGoogleAuthSocialIntentSkipsWorkspace(t *testing.T) {
+	svc, provisioner := newGoogleIntentService(t)
+
+	result, err := svc.GoogleAuth(context.Background(),
+		dto.GoogleAuthRequest{IDToken: "tok", Intent: dto.IntentSocial}, LoginHistoryRecord{})
+	if err != nil {
+		t.Fatalf("google auth: %v", err)
+	}
+	if !result.IsNewUser {
+		t.Fatal("is_new_user must be true")
+	}
+	if provisioner.userID != "" {
+		t.Fatalf("social intent must not provision a workspace, got user %q", provisioner.userID)
+	}
+}
+
+func TestGoogleAuthDefaultIntentProvisionsWorkspace(t *testing.T) {
+	svc, provisioner := newGoogleIntentService(t)
+
+	if _, err := svc.GoogleAuth(context.Background(),
+		dto.GoogleAuthRequest{IDToken: "tok"}, LoginHistoryRecord{}); err != nil {
+		t.Fatalf("google auth: %v", err)
+	}
+	if provisioner.userID != "user-new" {
+		t.Fatalf("default intent must provision a workspace, got user %q", provisioner.userID)
+	}
+}
+
+func TestGoogleAuthRejectsUnknownIntent(t *testing.T) {
+	svc, provisioner := newGoogleIntentService(t)
+
+	_, err := svc.GoogleAuth(context.Background(),
+		dto.GoogleAuthRequest{IDToken: "tok", Intent: "admin"}, LoginHistoryRecord{})
+	var appErr *coreerrors.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "VALIDATION_ERROR" {
+		t.Fatalf("err = %v", err)
+	}
+	if provisioner.userID != "" {
+		t.Fatal("nothing may be provisioned")
 	}
 }
 
@@ -538,6 +668,50 @@ func TestAuthServiceAuthenticateAccessTokenRejectsInactiveUser(t *testing.T) {
 	var appErr *coreerrors.AppError
 	if !errors.As(err, &appErr) || appErr.Code != "AUTH_ACCOUNT_INACTIVE" {
 		t.Fatalf("expected AUTH_ACCOUNT_INACTIVE, got %v", err)
+	}
+}
+
+func TestAuthServiceAuthenticateAccessTokenCarriesEmailVerification(t *testing.T) {
+	verifiedAt := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name       string
+		verifiedAt *time.Time
+		want       bool
+	}{
+		{name: "verified", verifiedAt: &verifiedAt, want: true},
+		{name: "unverified", verifiedAt: nil, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &fakeLoginRepository{
+				currentUser: CurrentUser{
+					ID:              "user-1",
+					Email:           "jane@example.com",
+					Status:          model.UserStatusActive,
+					EmailVerifiedAt: tc.verifiedAt,
+					Session: CurrentSession{
+						ID:        "session-1",
+						ExpiresAt: time.Date(2026, 6, 18, 10, 0, 0, 0, time.UTC),
+					},
+				},
+			}
+			svc := newTestAuthService(t, repo)
+			accessToken, err := svc.accessTokenManager.Generate(coreauth.Claims{
+				UserID:    "user-1",
+				SessionID: "session-1",
+				TokenType: coreauth.TokenTypeAccess,
+			}, time.Minute)
+			if err != nil {
+				t.Fatalf("generate access token: %v", err)
+			}
+
+			user, err := svc.AuthenticateAccessToken(context.Background(), accessToken)
+			if err != nil {
+				t.Fatalf("AuthenticateAccessToken: %v", err)
+			}
+			if user.Email != "jane@example.com" || user.EmailVerified != tc.want {
+				t.Fatalf("user = %+v, want email verified %v", user, tc.want)
+			}
+		})
 	}
 }
 
@@ -942,7 +1116,13 @@ type fakeLoginRepository struct {
 	googleSubjectLookup             string
 	googleEmailLookup               string
 	googleLink                      GoogleIdentityLink
+	googleTakeOver                  GoogleIdentityLink
+	googleTakeOverCalled            bool
+	googleLinkCalled                bool
 	googleRegistration              GoogleUserRegistration
+	passwordRegistration            PasswordUserRegistration
+	createdPasswordUser             LoginUser
+	createPasswordErr               error
 	passwordResetUser               PasswordResetUser
 	findPasswordResetErr            error
 	passwordResetTokenFound         PasswordResetToken
@@ -1047,6 +1227,7 @@ func (r *fakeLoginRepository) FindGoogleUserByEmail(_ context.Context, email str
 
 func (r *fakeLoginRepository) LinkGoogleIdentity(_ context.Context, link GoogleIdentityLink) (GoogleAuthUser, error) {
 	r.googleLink = link
+	r.googleLinkCalled = true
 	if r.linkGoogleErr != nil {
 		return GoogleAuthUser{}, r.linkGoogleErr
 	}
@@ -1059,6 +1240,17 @@ func (r *fakeLoginRepository) LinkGoogleIdentity(_ context.Context, link GoogleI
 			Username: "linked",
 		}
 	}
+	return user, nil
+}
+
+func (r *fakeLoginRepository) TakeOverUnverifiedForGoogle(_ context.Context, link GoogleIdentityLink) (GoogleAuthUser, error) {
+	r.googleTakeOver = link
+	r.googleTakeOverCalled = true
+	if r.linkGoogleErr != nil {
+		return GoogleAuthUser{}, r.linkGoogleErr
+	}
+	user := r.googleUserByEmail
+	user.EmailVerifiedAt = &link.VerifiedAt
 	return user, nil
 }
 
@@ -1477,6 +1669,30 @@ func TestAuthServiceResendVerificationEmailSuccess(t *testing.T) {
 	}
 }
 
+func TestResendVerificationAllowedForActiveUnverified(t *testing.T) {
+	repo := &fakeLoginRepository{
+		emailVerificationUser: EmailVerificationTargetUser{
+			ID:     "user-1",
+			Name:   "Unverified Active",
+			Email:  "unverified@example.com",
+			Status: model.UserStatusActive,
+		},
+	}
+	publisher := &fakeNotificationPublisher{}
+	svc := newTestAuthService(t, repo)
+	svc.SetNotificationPublisher(publisher)
+
+	if err := svc.ResendVerificationEmail(context.Background(), dto.ResendVerificationEmailRequest{Email: "unverified@example.com"}); err != nil {
+		t.Fatalf("ResendVerificationEmail: %v", err)
+	}
+	if repo.emailVerificationToken.UserID != "user-1" || repo.emailVerificationToken.TokenHash == "" {
+		t.Fatalf("expected verification token stored, got %+v", repo.emailVerificationToken)
+	}
+	if !publisher.called || publisher.event.Type != emailVerificationRequestedEvent {
+		t.Fatal("expected email verification notification published")
+	}
+}
+
 func TestAuthServiceResendVerificationEmailValidationError(t *testing.T) {
 	repo := &fakeLoginRepository{}
 	svc := newTestAuthService(t, repo)
@@ -1566,5 +1782,70 @@ func TestAuthServiceResendVerificationEmailGenericSuccessForUnknownEmail(t *test
 	}
 	if publisher.called {
 		t.Fatal("unexpected notification published for unknown email")
+	}
+}
+
+func TestCurrentUserFillsCurrentOrganization(t *testing.T) {
+	repo := &fakeLoginRepository{
+		currentUser: CurrentUser{
+			ID:     "user-1",
+			Status: model.UserStatusActive,
+			Session: CurrentSession{
+				ID:        "session-1",
+				ExpiresAt: time.Date(2026, 6, 18, 10, 0, 0, 0, time.UTC),
+			},
+		},
+	}
+	svc := newTestAuthService(t, repo)
+	provider := &fakeCurrentOrganizationProvider{value: map[string]any{"is_current": true}}
+	svc.SetCurrentOrganizationProvider(provider)
+
+	accessToken, err := svc.accessTokenManager.Generate(coreauth.Claims{
+		UserID: "user-1", SessionID: "session-1", TokenType: coreauth.TokenTypeAccess,
+	}, time.Minute)
+	if err != nil {
+		t.Fatalf("generate access token: %v", err)
+	}
+	result, err := svc.CurrentUser(context.Background(), accessToken)
+	if err != nil {
+		t.Fatalf("current user: %v", err)
+	}
+	if m, ok := result.CurrentOrganization.(map[string]any); !ok || m["is_current"] != true {
+		t.Fatalf("current_organization = %#v", result.CurrentOrganization)
+	}
+	if provider.userID != "user-1" || provider.sessionID != "session-1" {
+		t.Fatalf("provider args = %q %q", provider.userID, provider.sessionID)
+	}
+
+	// Error provider tidak boleh menggagalkan /auth/me.
+	svc.SetCurrentOrganizationProvider(&fakeCurrentOrganizationProvider{err: errors.New("boom")})
+	result, err = svc.CurrentUser(context.Background(), accessToken)
+	if err != nil || result.CurrentOrganization != nil {
+		t.Fatalf("provider error must degrade to nil, got %v / %v", err, result.CurrentOrganization)
+	}
+}
+
+func TestResetPasswordSetsFirstPasswordForGoogleUser(t *testing.T) {
+	repo := &fakeLoginRepository{
+		completedPasswordResetUser: PasswordResetUser{
+			// Akun Google-only: users.password_hash masih kosong; reset token tidak
+			// pernah memeriksa hash lama, jadi ini menjadi password pertama.
+			ID:     "user-google",
+			Email:  "g@example.com",
+			Status: model.UserStatusActive,
+		},
+	}
+	svc := newTestAuthService(t, repo)
+
+	err := svc.ResetPassword(context.Background(), dto.ResetPasswordRequest{
+		Token:                "tok",
+		Password:             "first-password-1",
+		PasswordConfirmation: "first-password-1",
+	})
+	if err != nil {
+		t.Fatalf("reset password: %v", err)
+	}
+	if !coreauth.VerifyPassword("first-password-1", repo.completedPasswordHash) {
+		t.Fatal("repo did not receive a hash of the new password")
 	}
 }

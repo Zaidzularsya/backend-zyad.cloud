@@ -2,10 +2,13 @@ package handler
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 
 	coreerrors "zyad.cloud/internal/core/errors"
 	corehttp "zyad.cloud/internal/core/http"
+	"zyad.cloud/internal/core/middleware"
 	permissionmiddleware "zyad.cloud/internal/core/permission/middleware"
 	"zyad.cloud/internal/modules/user/dto"
 	"zyad.cloud/internal/modules/user/service"
@@ -24,8 +27,12 @@ type UserListService interface {
 	BulkAction(ctx context.Context, req dto.BulkUserActionRequest, metadata service.UserLifecycleMetadata) (dto.BulkUserActionResponse, error)
 	ChangeUserStatus(ctx context.Context, userID string, req dto.UpdateUserStatusRequest, metadata service.UserLifecycleMetadata) (dto.UserDetailResponse, error)
 	GetSelfProfile(ctx context.Context, userID string) (dto.UserDetailResponse, error)
+	GetMe(ctx context.Context, userID, sessionID string) (dto.MeResponse, error)
+	ListIdentities(ctx context.Context, userID string) ([]dto.IdentityResponse, error)
 	UpdateSelfProfile(ctx context.Context, userID string, req dto.UpdateProfileRequest, metadata service.UpdateUserMetadata) (dto.UserDetailResponse, error)
 	UpdateSelfAvatar(ctx context.Context, userID string, req dto.UpdateAvatarRequest, metadata service.UpdateUserMetadata) (dto.UserDetailResponse, error)
+	UploadSelfAvatar(ctx context.Context, userID string, file io.Reader, size int64, metadata service.UpdateUserMetadata) (dto.UserDetailResponse, error)
+	ChangeSelfUsername(ctx context.Context, userID string, req dto.UpdateUsernameRequest, metadata service.UpdateUserMetadata) (dto.UserDetailResponse, error)
 	ListLoginHistories(ctx context.Context, query dto.LoginHistoryQuery) ([]dto.LoginHistoryResponse, dto.PaginationMeta, error)
 	ListAuditLogs(ctx context.Context, query dto.AuditLogQuery) ([]dto.AuditLogResponse, dto.PaginationMeta, error)
 }
@@ -64,9 +71,12 @@ func (h *UserHandler) RegisterRoutes(router *gin.RouterGroup) {
 
 	meGroup := router.Group("/users/me")
 
-	meGroup.GET("", h.GetSelfProfile)
+	meGroup.GET("", h.GetMe)
+	meGroup.GET("/identities", h.ListSelfIdentities)
 	meGroup.PATCH("/profile", h.UpdateSelfProfile)
 	meGroup.PATCH("/avatar", h.UpdateSelfAvatar)
+	meGroup.POST("/avatar", h.UploadSelfAvatar)
+	meGroup.PATCH("/username", h.UpdateSelfUsername)
 }
 
 func (h *UserHandler) ListUsers(c *gin.Context) {
@@ -252,6 +262,29 @@ func (h *UserHandler) GetSelfProfile(c *gin.Context) {
 	corehttp.OK(c, "user retrieved successfully", user)
 }
 
+// GetMe serves GET /users/me: the profile plus account fields and the current organization.
+func (h *UserHandler) GetMe(c *gin.Context) {
+	sessionID := ""
+	if authUser, ok := middleware.AuthenticatedUserFromContext(c); ok {
+		sessionID = authUser.SessionID
+	}
+	me, err := h.service.GetMe(c.Request.Context(), permissionmiddleware.UserID(c), sessionID)
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	corehttp.OK(c, "user retrieved successfully", me)
+}
+
+func (h *UserHandler) ListSelfIdentities(c *gin.Context) {
+	identities, err := h.service.ListIdentities(c.Request.Context(), permissionmiddleware.UserID(c))
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	corehttp.OK(c, "identities retrieved successfully", identities)
+}
+
 func (h *UserHandler) UpdateSelfProfile(c *gin.Context) {
 	var req dto.UpdateProfileRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -269,6 +302,25 @@ func (h *UserHandler) UpdateSelfProfile(c *gin.Context) {
 		return
 	}
 	corehttp.OK(c, "user profile updated successfully", user)
+}
+
+func (h *UserHandler) UpdateSelfUsername(c *gin.Context) {
+	var req dto.UpdateUsernameRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", err.Error(), http.StatusUnprocessableEntity))
+		return
+	}
+
+	user, err := h.service.ChangeSelfUsername(c.Request.Context(), permissionmiddleware.UserID(c), req, service.UpdateUserMetadata{
+		ActorUserID: permissionmiddleware.UserID(c),
+		IPAddress:   c.ClientIP(),
+		UserAgent:   c.Request.UserAgent(),
+	})
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	corehttp.OK(c, "username updated successfully", user)
 }
 
 func (h *UserHandler) UpdateSelfAvatar(c *gin.Context) {
@@ -327,6 +379,7 @@ func (h *UserHandler) ListUserSessions(c *gin.Context) {
 			IPAddress:  s.IPAddress,
 			UserAgent:  s.UserAgent,
 			LastUsedAt: lastUsedAtStr,
+			CreatedAt:  s.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 			ExpiresAt:  s.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z"),
 			IsCurrent:  false,
 		})
@@ -411,4 +464,34 @@ func (h *UserHandler) ListUserAuditLogs(c *gin.Context) {
 	response.JSON(c, http.StatusOK, "user audit logs retrieved successfully", logs, meta)
 }
 
+func (h *UserHandler) UploadSelfAvatar(c *gin.Context) {
+	// Overhead kecil untuk boundary/header multipart di atas batas file 2 MB.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.MaxAvatarSizeBytes+64*1024)
+	header, err := c.FormFile("file")
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			corehttp.Fail(c, coreerrors.New("AVATAR_TOO_LARGE", "avatar must be at most 2 MB", http.StatusRequestEntityTooLarge))
+			return
+		}
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "file is required", http.StatusUnprocessableEntity))
+		return
+	}
+	file, err := header.Open()
+	if err != nil {
+		corehttp.Fail(c, coreerrors.New("VALIDATION_ERROR", "file cannot be read", http.StatusUnprocessableEntity))
+		return
+	}
+	defer file.Close()
 
+	user, err := h.service.UploadSelfAvatar(c.Request.Context(), permissionmiddleware.UserID(c), file, header.Size, service.UpdateUserMetadata{
+		ActorUserID: permissionmiddleware.UserID(c),
+		IPAddress:   c.ClientIP(),
+		UserAgent:   c.Request.UserAgent(),
+	})
+	if err != nil {
+		corehttp.Fail(c, err)
+		return
+	}
+	corehttp.OK(c, "user avatar uploaded successfully", user)
+}

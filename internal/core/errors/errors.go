@@ -7,6 +7,8 @@ type AppError struct {
 	Message string
 	Status  int
 	Err     error
+	// Data memuat detail terstruktur opsional yang ikut dikirim di envelope error (mis. {"available_at": ...}).
+	Data any
 }
 
 func (e *AppError) Error() string {

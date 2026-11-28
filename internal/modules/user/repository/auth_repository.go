@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
+	"zyad.cloud/internal/modules/user/model"
 	"zyad.cloud/internal/modules/user/service"
 	"zyad.cloud/internal/platform/database"
 )
@@ -224,6 +226,108 @@ func (r *AuthRepository) LinkGoogleIdentity(ctx context.Context, link service.Go
 	return user, nil
 }
 
+// TakeOverUnverifiedForGoogle links a Google identity to a user whose email was never
+// verified. Everything happens in one transaction: the password is cleared, the email is
+// marked verified, a pending account becomes active, all sessions are revoked and the
+// takeover is audited.
+func (r *AuthRepository) TakeOverUnverifiedForGoogle(ctx context.Context, link service.GoogleIdentityLink) (service.GoogleAuthUser, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var user service.GoogleAuthUser
+	var deletedAt sql.NullTime
+	var emailVerifiedAt sql.NullTime
+	if err := tx.QueryRow(ctx, `
+		SELECT id, name, email, COALESCE(username, ''), status, deleted_at, email_verified_at
+		FROM users
+		WHERE id = $1
+			AND deleted_at IS NULL
+		FOR UPDATE
+	`, link.UserID).Scan(
+		&user.ID,
+		&user.Name,
+		&user.Email,
+		&user.Username,
+		&user.Status,
+		&deletedAt,
+		&emailVerifiedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return service.GoogleAuthUser{}, service.ErrGoogleEmailUserNotFound
+		}
+		return service.GoogleAuthUser{}, err
+	}
+	// The row lock serialises this against a concurrent email verification; if the owner
+	// verified in the meantime the account is no longer eligible for takeover.
+	if emailVerifiedAt.Valid {
+		return service.GoogleAuthUser{}, service.ErrGoogleEmailUserNotFound
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE users
+		SET password_hash = NULL,
+			email_verified_at = $2,
+			status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
+			updated_at = $2
+		WHERE id = $1
+	`, link.UserID, link.VerifiedAt); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	if user.Status == model.UserStatusPending {
+		user.Status = model.UserStatusActive
+	}
+	user.EmailVerifiedAt = &link.VerifiedAt
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE sessions
+		SET revoked_at = $2
+		WHERE user_id = $1 AND revoked_at IS NULL
+	`, link.UserID, link.VerifiedAt); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO auth_identities (user_id, provider, provider_user_id, provider_email, created_at, updated_at)
+		VALUES ($1, 'google', $2, $3, $4, $4)
+		ON CONFLICT (provider, provider_user_id)
+		DO UPDATE SET provider_email = EXCLUDED.provider_email, updated_at = EXCLUDED.updated_at
+	`, link.UserID, link.ProviderUserID, link.ProviderEmail, link.VerifiedAt); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+
+	metadata, err := json.Marshal(map[string]any{
+		"provider":       "google",
+		"provider_email": link.ProviderEmail,
+	})
+	if err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO audit_logs (
+			module, event, target_user_id, target_type, target_id, metadata, ip_address, user_agent, created_at
+		)
+		VALUES (
+			'user', 'google_unverified_takeover', $1, 'user', $1, $2, NULLIF($3, '')::inet, NULLIF($4, ''), $5
+		)
+	`, link.UserID, metadata, link.IPAddress, link.UserAgent, link.VerifiedAt); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	if deletedAt.Valid {
+		user.DeletedAt = &deletedAt.Time
+	}
+	if err := r.fillGoogleUserAccess(ctx, &user); err != nil {
+		return service.GoogleAuthUser{}, err
+	}
+	return user, nil
+}
+
 func (r *AuthRepository) CreateGoogleUser(ctx context.Context, registration service.GoogleUserRegistration) (service.GoogleAuthUser, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -313,6 +417,97 @@ func (r *AuthRepository) CreateGoogleUser(ctx context.Context, registration serv
 	}
 	if err := r.fillGoogleUserAccess(ctx, &user); err != nil {
 		return service.GoogleAuthUser{}, err
+	}
+	return user, nil
+}
+
+// CreatePasswordUser inserts an active user whose email is not yet verified.
+// The partial unique index on lower(email) is the source of truth for
+// ErrEmailTaken, so concurrent registrations cannot both succeed.
+func (r *AuthRepository) CreatePasswordUser(ctx context.Context, registration service.PasswordUserRegistration) (service.LoginUser, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return service.LoginUser{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	var roleID string
+	if err := tx.QueryRow(ctx, `
+		SELECT id
+		FROM roles
+		WHERE lower(COALESCE(NULLIF(slug, ''), role_name)) = lower($1)
+		LIMIT 1
+	`, registration.RoleSlug).Scan(&roleID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return service.LoginUser{}, service.ErrGoogleDefaultRoleNotFound
+		}
+		return service.LoginUser{}, err
+	}
+
+	username, err := r.nextAvailableUsername(ctx, tx, registration.UsernameBase)
+	if err != nil {
+		return service.LoginUser{}, err
+	}
+
+	var user service.LoginUser
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO users (name, email, username, password_hash, status, created_at, updated_at)
+		VALUES ($1, $2, NULLIF($3, ''), $4, 'active', $5, $5)
+		RETURNING id, name, email, COALESCE(username, ''), status
+	`, registration.Name, registration.Email, username, registration.PasswordHash, registration.CreatedAt).Scan(
+		&user.ID,
+		&user.Name,
+		&user.Email,
+		&user.Username,
+		&user.Status,
+	); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "idx_users_email_active_unique" {
+			return service.LoginUser{}, service.ErrEmailTaken
+		}
+		return service.LoginUser{}, err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO user_profiles (user_id, created_at, updated_at)
+		VALUES ($1, $2, $2)
+	`, user.ID, registration.CreatedAt); err != nil {
+		return service.LoginUser{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO user_roles (user_id, role_id)
+		VALUES ($1, $2)
+	`, user.ID, roleID); err != nil {
+		return service.LoginUser{}, err
+	}
+
+	metadata, err := json.Marshal(map[string]any{
+		"provider":     "password",
+		"default_role": registration.RoleSlug,
+	})
+	if err != nil {
+		return service.LoginUser{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO audit_logs (
+			module, event, target_user_id, target_type, target_id, metadata, ip_address, user_agent, created_at
+		)
+		VALUES (
+			'user', 'password_user_registered', $1, 'user', $1, $2, NULLIF($3, '')::inet, NULLIF($4, ''), $5
+		)
+	`, user.ID, metadata, registration.IPAddress, registration.UserAgent, registration.CreatedAt); err != nil {
+		return service.LoginUser{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return service.LoginUser{}, err
+	}
+
+	if user.Roles, err = r.roleSlugs(ctx, user.ID); err != nil {
+		return service.LoginUser{}, err
+	}
+	if user.Permissions, err = r.permissionSlugs(ctx, user.ID); err != nil {
+		return service.LoginUser{}, err
 	}
 	return user, nil
 }
@@ -1040,7 +1235,7 @@ func scanStrings(rows pgx.Rows) ([]string, error) {
 
 func (r *AuthRepository) ListSessions(ctx context.Context, userID string) ([]service.CurrentSession, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id, device_name, COALESCE(ip_address::text, ''), COALESCE(user_agent, ''), last_used_at, expires_at, revoked_at
+		SELECT id, device_name, COALESCE(ip_address::text, ''), COALESCE(user_agent, ''), last_used_at, created_at, expires_at, revoked_at
 		FROM sessions
 		WHERE user_id = $1
 		ORDER BY last_used_at DESC NULLS LAST, created_at DESC
@@ -1061,6 +1256,7 @@ func (r *AuthRepository) ListSessions(ctx context.Context, userID string) ([]ser
 			&ipAddress,
 			&userAgent,
 			&lastUsedAt,
+			&s.CreatedAt,
 			&s.ExpiresAt,
 			&revokedAt,
 		); err != nil {
@@ -1172,6 +1368,8 @@ func (r *AuthRepository) CompleteEmailVerification(
 		JOIN users u ON u.id = evt.user_id
 		WHERE evt.token_hash = $1
 			AND u.deleted_at IS NULL
+			-- A token issued for an earlier address must not verify the current one.
+			AND lower(btrim(evt.email)) = lower(btrim(u.email))
 		LIMIT 1
 		FOR UPDATE OF evt, u
 	`, tokenHash).Scan(
@@ -1227,6 +1425,23 @@ func (r *AuthRepository) CompleteEmailVerification(
 	}
 
 	return user, nil
+}
+
+// MarkEmailVerified records proof of email ownership obtained outside the
+// verification-token flow (e.g. a social claim invite sent to that address).
+// email is the address that was proven; the user is verified only while it is
+// still their current email, so a changed email is never marked verified.
+// Already-verified users are left untouched; pending users become active.
+func (r *AuthRepository) MarkEmailVerified(ctx context.Context, userID, email string, at time.Time) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE users
+		SET email_verified_at = $2,
+			status = CASE WHEN status = 'pending' THEN 'active' ELSE status END,
+			updated_at = $2
+		WHERE id = $1 AND email_verified_at IS NULL
+			AND lower(btrim(email)) = lower(btrim($3))
+	`, userID, at.UTC(), email)
+	return err
 }
 
 func (r *AuthRepository) FindEmailVerificationUserByEmail(ctx context.Context, email string) (service.EmailVerificationTargetUser, error) {

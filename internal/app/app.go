@@ -149,6 +149,18 @@ func New(ctx context.Context) (*App, error) {
 	}
 	authService.SetNotificationPublisher(notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts))
 	authHandler := userhandler.NewAuthHandler(authService, redisClient, cfg.App.FrontendURL)
+	// Social: referral attribution is fed by sign-ups through SignupHooks (best-effort).
+	socialMod := buildSocial(db, redisClient, socialConfig{
+		ShareURLBase: cfg.Social.ShareURLBase,
+		ClaimURLBase: cfg.Social.ClaimURLBase,
+		IPHashSecret: cfg.Social.IPHashSecret,
+		AppName:      cfg.App.Name,
+		Locale:       cfg.Notification.DefaultLocale,
+		MaxAttempts:  cfg.Notification.MaxAttempts,
+		Publisher:    notificationpublisher.NewOutboxPublisher(outboxRepo, cfg.Notification.MaxAttempts),
+		Verifier:     socialEmailVerifier{users: authRepo},
+	})
+	authService.SetSignupHooks(socialSignupHooks{attribution: socialMod.Attribution, log: log})
 	userRepo := userrepo.NewUserRepository(db)
 	userService := userservice.NewUserService(userRepo)
 	if err := userService.Configure(cfg); err != nil {
@@ -167,6 +179,9 @@ func New(ctx context.Context) (*App, error) {
 	organizationSwitchService := organizationservice.NewSwitchService(
 		organizationrepo.NewSwitchRepository(db),
 	)
+	currentOrganizationProvider := userCurrentOrganizationProvider{organizations: organizationSwitchService}
+	authService.SetCurrentOrganizationProvider(currentOrganizationProvider)
+	userService.SetCurrentOrganizationProvider(currentOrganizationProvider)
 	organizationSwitchHandler := organizationhandler.NewSwitchHandler(
 		organizationSwitchService,
 	)
@@ -313,6 +328,7 @@ func New(ctx context.Context) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init media storage: %w", err)
 	}
+	userService.SetAvatarStorage(mediaStorage, cfg.MultiTenant.PlatformOrganizationID, cfg.App.URL)
 	landingMediaSvc := landingservice.NewMediaService(
 		landingMediaRepo,
 		landingservice.WithMediaObjectStorage(mediaStorage),
@@ -746,6 +762,7 @@ func New(ctx context.Context) (*App, error) {
 		ReceivableArrearsHandler:         receivableModule.ArrearsHandler,
 		ReceivableOverviewHandler:        receivableModule.OverviewHandler,
 		ReceivableSettlementHandler:      receivableModule.SettlementHandler,
+		ReceivablePayoutHandler:          receivableModule.PayoutHandler,
 		CRMPublicQuotationHandler:        crmPublicQuotationHandler,
 		CRMSelfServeHandler:              crmSelfServeHandler,
 		CRMTenantCheckoutHandler:         crmTenantCheckoutHandler,
@@ -784,6 +801,7 @@ func New(ctx context.Context) (*App, error) {
 		Authenticator:                    authService,
 		OrganizationResolver:             organizationResolver,
 		PublicHostResolver:               publicHostResolver,
+		SocialHandlers:                   socialMod.Handlers,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("configure trusted proxies: %w", err)
